@@ -1,9 +1,9 @@
 {
   "schema": "clpeak/run",
   "format_version": 3,
-  "clpeak_version": "2.1.4-237-gb9c1eb0",
-  "generated_at": "2026-09-24T09:52:37Z",
-  "duration_s": 341.0284,
+  "clpeak_version": "3.0.0-34-g24eeec1",
+  "generated_at": "2026-10-01T15:23:16Z",
+  "duration_s": 342.4181,
   "build": {
     "backends": [
       "CUDA",
@@ -22,7 +22,7 @@
     "arch": "x86_64",
     "cpu": "AMD Ryzen Threadripper PRO 3955WX 16-Cores",
     "logical_cores": 32,
-    "memory_bytes": 197875224576
+    "memory_bytes": 197875220480
   },
   "invocation": {
     "argv": [
@@ -56,7 +56,7 @@
       "platform": "CUDA",
       "name": "NVIDIA GeForce RTX 5060",
       "driver": "13.3",
-      "type": "unknown",
+      "type": "gpu",
       "device_index": 0,
       "properties": [
         {
@@ -87,11 +87,11 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed of the GPU's shader cores on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.",
-          "duration_s": 0.5252454,
+          "duration_s": 0.521241,
           "metrics": [
             {
               "id": "float",
-              "value": 2.11273e+13
+              "value": 2.111093e+13
             }
           ]
         },
@@ -105,16 +105,16 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on. NVIDIA shader cores reach full speed only on the packed form that does two at a time.",
-          "duration_s": 1.033382,
+          "duration_s": 1.027172,
           "metrics": [
             {
               "id": "half",
-              "value": 2.114482e+13,
+              "value": 2.114226e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "half2",
-              "value": 2.117772e+13,
+              "value": 2.117293e+13,
               "description": "Two values per thread at a time, packed into one instruction."
             }
           ]
@@ -129,11 +129,11 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific computing relies on. Consumer GeForce cards run these dozens of times slower than 32-bit; the datacenter parts do not.",
-          "duration_s": 1.641695,
+          "duration_s": 1.646771,
           "metrics": [
             {
               "id": "double",
-              "value": 3.351882e+11
+              "value": 3.339279e+11
             }
           ]
         },
@@ -147,11 +147,11 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed when the GPU multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses. This is the shader cores, not the tensor cores.",
-          "duration_s": 0.5186705,
+          "duration_s": 0.5191863,
           "metrics": [
             {
               "id": "mp",
-              "value": 2.070572e+13
+              "value": 2.069234e+13
             }
           ]
         },
@@ -165,11 +165,11 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the number range of a full float. Again the shader cores, with the tensor-core figure in the WMMA rows.",
-          "duration_s": 0.5201173,
+          "duration_s": 0.5151126,
           "metrics": [
             {
               "id": "bf16",
-              "value": 2.037165e+13
+              "value": 2.030584e+13
             }
           ]
         },
@@ -183,11 +183,11 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, addressing and bit manipulation, which shaders do alongside their fractional maths.",
-          "duration_s": 0.5306316,
+          "duration_s": 0.5325086,
           "metrics": [
             {
               "id": "int",
-              "value": 1.063169e+13
+              "value": 1.059583e+13
             }
           ]
         },
@@ -201,26 +201,26 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed of the 8-bit dot-product instruction, which multiplies four pairs of small whole numbers and sums them in one step -- the shader-core path for quantized (compressed) neural networks.",
-          "duration_s": 2.063649,
+          "duration_s": 2.072627,
           "metrics": [
             {
               "id": "int8_dp",
-              "value": 4.227947e+13,
+              "value": 4.213951e+13,
               "description": "One chain of dot products, each waiting on the one before it."
             },
             {
               "id": "int8_dp2",
-              "value": 4.220894e+13,
+              "value": 4.207719e+13,
               "description": "Two independent chains, so the GPU has a second dot product to get on with while the first is still finishing."
             },
             {
               "id": "int8_dp4",
-              "value": 4.201892e+13,
+              "value": 4.197611e+13,
               "description": "Four independent chains."
             },
             {
               "id": "int8_dp8",
-              "value": 4.191962e+13,
+              "value": 4.152016e+13,
               "description": "Eight independent chains. Where this stops improving on four, the hardware itself is the limit, not the waiting."
             }
           ]
@@ -235,86 +235,86 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed of the tensor cores -- dedicated units that multiply whole blocks of numbers in one step rather than one value at a time. Each reading is a different input format, and several are one format run a second way: with the running total kept narrower, or with half the values skipped as known zeros. Which of them exist at all, and how much faster the narrow ones go, is most of what separates one generation of NVIDIA hardware from the next.",
-          "duration_s": 44.63168,
+          "duration_s": 44.68955,
           "metrics": [
             {
               "id": "fp16",
-              "value": 4.257176e+13,
+              "value": 4.256185e+13,
               "description": "16-bit inputs with a 32-bit running total -- the everyday precision of AI work. Uses the portable WMMA 16x16x16 tile."
             },
             {
               "id": "fp16 f16acc",
-              "value": 8.344054e+13,
+              "value": 8.342244e+13,
               "description": "The same 16-bit maths, keeping the running total in 16 bits too. On GeForce cards the 32-bit- total form is deliberately capped at half rate, so this is where the full tensor-core speed shows up. mma.sync m16n8k16."
             },
             {
               "id": "bf16",
-              "value": 4.256961e+13,
+              "value": 4.256943e+13,
               "description": "bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the number range of a full float, which makes training far more forgiving. WMMA 16x16x16."
             },
             {
               "id": "tf32",
-              "value": 2.129996e+13,
+              "value": 2.129723e+13,
               "description": "NVIDIA's trimmed-down stand-in for 32-bit float: the full number range, with accuracy dropped to fit the tensor cores. mma.sync m16n8k8."
             },
             {
               "id": "fp64",
-              "value": 2.931437e+11,
+              "value": 2.931029e+11,
               "description": "Full 64-bit numbers, for scientific computing rather than AI. Only the datacenter parts carry this hardware. WMMA 8x8x4."
             },
             {
               "id": "fp8_e4m3",
-              "value": 8.515737e+13,
+              "value": 8.511638e+13,
               "description": "8-bit floats spending their bits on accuracy rather than range. Half the data of 16-bit per value, so roughly twice the rate. mma.sync m16n8k32."
             },
             {
               "id": "fp8_e5m2",
-              "value": 8.517107e+13,
+              "value": 8.513001e+13,
               "description": "The other 8-bit float, spending its bits on range rather than accuracy -- the one that copes with very large and very small values. mma.sync m16n8k32."
             },
             {
               "id": "fp8_e4m3 f16acc",
-              "value": 1.668563e+14,
+              "value": 1.668391e+14,
               "description": "8-bit inputs with the running total kept in 16 bits rather than 32. As with fp16, GeForce caps the 32-bit-total form at half rate, so this is where the full 8-bit speed shows up. mma.sync m16n8k32."
             },
             {
               "id": "fp8_e4m3 2:4",
-              "value": 1.697151e+14,
+              "value": 1.697242e+14,
               "description": "8-bit floats with structured sparsity: half the values in each group of four are known to be zero and are skipped, so the hardware does twice the useful work per step. mma.sp m16n8k64."
             },
             {
               "id": "fp8_e4m3 2:4 f16acc",
-              "value": 3.261733e+14,
+              "value": 3.261649e+14,
               "description": "Both tricks at once -- zeros skipped and the running total kept at 16 bits. The fastest arrangement these tensor cores offer for 8 bits. mma.sp m16n8k64."
             },
             {
               "id": "fp4_e2m1",
-              "value": 8.515572e+13,
+              "value": 8.515417e+13,
               "description": "4-bit floats with no shared scale factor. Read it against the mxf4 and nvf4 rows below, which are the same width with a scale: where those are faster, the hardware only accelerates 4-bit arithmetic when it carries one. Blackwell and newer only. mma.sync m16n8k32."
             },
             {
               "id": "mxf4_e2m1",
-              "value": 3.260006e+14,
+              "value": 3.259536e+14,
               "description": "4-bit floats with a scale factor shared by each block of 32 values, the open MX format. The scale is what makes 4 bits usable for real models rather than a curiosity. mma.sync m16n8k64."
             },
             {
               "id": "nvf4_e2m1",
-              "value": 3.284427e+14,
+              "value": 3.283437e+14,
               "description": "NVIDIA's own 4-bit block format, with a finer scale shared by every 16 values instead of every 32 -- more accurate than MX at the same width. mma.sync m16n8k64."
             },
             {
               "id": "mxf4_e2m1 2:4",
-              "value": 6.30839e+14,
+              "value": 6.330086e+14,
               "description": "The MX 4-bit path with zeros skipped as well, two per group of four. mma.sp m16n8k128."
             },
             {
               "id": "nvf4_e2m1 2:4",
-              "value": 6.30898e+14,
+              "value": 6.331215e+14,
               "description": "NVIDIA's 4-bit block format with zeros skipped too -- the fastest arrangement these tensor cores offer. mma.sp m16n8k128."
             },
             {
               "id": "int8",
-              "value": 8.473007e+13,
+              "value": 8.471488e+13,
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
@@ -322,7 +322,7 @@
             },
             {
               "id": "int8 k32",
-              "value": 1.654649e+14,
+              "value": 1.654279e+14,
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
@@ -330,7 +330,7 @@
             },
             {
               "id": "int8 2:4",
-              "value": 3.286352e+14,
+              "value": 3.285291e+14,
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
@@ -357,41 +357,41 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Matrix-multiply speed through NVIDIA's own tuned library, on a large square problem. Where the tensor-core rows show what the hardware can do in principle, this shows what shipping code reaches on the operation most AI work is built from. Each reading is a different input format.",
-          "duration_s": 61.01396,
+          "duration_s": 60.85852,
           "metrics": [
             {
               "id": "fp32",
-              "value": 1.485166e+13,
+              "value": 1.486862e+13,
               "description": "Full 32-bit precision, on the ordinary shader cores rather than the tensor cores."
             },
             {
               "id": "fp64",
-              "value": 2.9215e+11,
+              "value": 2.92133e+11,
               "description": "Full 64-bit precision, for scientific computing. Consumer cards run this far slower than the datacenter parts."
             },
             {
               "id": "tf32",
-              "value": 2.080382e+13,
+              "value": 2.080138e+13,
               "description": "32-bit numbers in and out, but rounded internally to a shorter form so the tensor cores can take them."
             },
             {
               "id": "fp16",
-              "value": 7.914333e+13,
+              "value": 7.907426e+13,
               "description": "16-bit inputs and totals -- the everyday precision of AI inference, and usually the fastest row here."
             },
             {
               "id": "bf16",
-              "value": 4.085869e+13,
+              "value": 4.194358e+13,
               "description": "bfloat16 inputs with 32-bit totals -- 16 bits arranged for AI work, trading digits of accuracy for the number range of a full float."
             },
             {
               "id": "fp8_e4m3",
-              "value": 1.531457e+14,
+              "value": 1.530873e+14,
               "description": "8-bit inputs, in the variant that spends its bits on accuracy rather than range."
             },
             {
               "id": "fp8_e5m2",
-              "value": 1.583524e+14,
+              "value": 1.583821e+14,
               "description": "8-bit inputs including the variant that spends its bits on range rather than accuracy -- the usual choice for inference."
             },
             {
@@ -402,12 +402,12 @@
             },
             {
               "id": "nvf4_e2m1",
-              "value": 3.005013e+14,
+              "value": 3.004222e+14,
               "description": "NVIDIA's own 4-bit block format, with a finer scale shared by every 16 values instead of every 32 -- more accurate than MX at the same width."
             },
             {
               "id": "int8",
-              "value": 1.331534e+14,
+              "value": 1.331882e+14,
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
@@ -434,21 +434,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the GPU can stream out of its own memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.",
-          "duration_s": 1.985502,
+          "duration_s": 2.003874,
           "metrics": [
             {
               "id": "float",
-              "value": 3.934114e+11,
+              "value": 3.933397e+11,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 4.119486e+11,
+              "value": 4.113358e+11,
               "description": "Two values per thread at a time, packed into one instruction."
             },
             {
               "id": "float4",
-              "value": 4.196046e+11,
+              "value": 4.196408e+11,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -463,21 +463,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the GPU moves through shared memory -- the small on-chip scratchpad a block of threads passes data through, which never goes out to the card's main memory.",
-          "duration_s": 1.540336,
+          "duration_s": 1.545253,
           "metrics": [
             {
               "id": "float",
-              "value": 4.42829e+12,
+              "value": 4.427418e+12,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 8.128332e+12,
+              "value": 8.09067e+12,
               "description": "Two values per thread at a time, packed into one instruction."
             },
             {
               "id": "float4",
-              "value": 9.139565e+12,
+              "value": 9.095881e+12,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -491,11 +491,11 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the GPU reads through its texture units, which take a different path to memory than plain buffer reads. Each pixel of the image is read exactly once, so caching cannot flatter the number.",
-          "duration_s": 1.249776,
+          "duration_s": 1.241274,
           "metrics": [
             {
               "id": "float4",
-              "value": 4.189847e+11,
+              "value": 4.190212e+11,
               "description": "Each fetch returns one whole pixel -- four 32-bit colour values, 16 bytes."
             }
           ]
@@ -510,16 +510,16 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast data crosses between the computer's own memory and the card's, over the PCIe link. That link is far narrower than either side's own memory, which is what makes moving data to the GPU worth avoiding. Both readings use pinned host memory, the fast path.",
-          "duration_s": 1.795047,
+          "duration_s": 1.85704,
           "metrics": [
             {
               "id": "h2d_pinned",
-              "value": 1.391724e+10,
+              "value": 1.392055e+10,
               "description": "Host to device: sending data up to the card."
             },
             {
               "id": "d2h_pinned",
-              "value": 1.430675e+10,
+              "value": 1.430616e+10,
               "description": "Device to host: reading results back down. Often a little slower than the other direction."
             }
           ]
@@ -533,7 +533,7 @@
           "quantity": "seconds",
           "unit": "s",
           "description": "The overhead of asking the GPU to do anything at all, measured with a kernel that does no work. It is what small, frequent GPU jobs pay before any of their own work begins.",
-          "duration_s": 0.0135753,
+          "duration_s": 0.01402913,
           "metrics": [
             {
               "id": "dispatch",
@@ -543,7 +543,7 @@
             },
             {
               "id": "roundtrip",
-              "value": 6.678365e-06,
+              "value": 6.888489e-06,
               "description": "The full round trip -- submit, run, and hear back that it finished. This is what the host waits for if it has nothing else to get on with."
             }
           ]
@@ -555,7 +555,7 @@
       "platform": "Vulkan",
       "name": "NVIDIA GeForce RTX 5060",
       "driver": "610.228.256",
-      "type": "unknown",
+      "type": "gpu",
       "device_index": 0,
       "properties": [
         {
@@ -582,21 +582,21 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed of the device's compute units on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.",
-          "duration_s": 2.898744,
+          "duration_s": 2.925729,
           "metrics": [
             {
               "id": "float",
-              "value": 2.08349e+13,
+              "value": 2.078323e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 2.093418e+13,
+              "value": 2.083607e+13,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 2.102697e+13,
+              "value": 2.094296e+13,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -611,21 +611,21 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on. Both the inputs and the running total stay 16-bit here.",
-          "duration_s": 2.909989,
+          "duration_s": 2.8711,
           "metrics": [
             {
               "id": "half",
-              "value": 2.093834e+13,
+              "value": 2.092489e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "half2",
-              "value": 2.109427e+13,
+              "value": 2.111188e+13,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "half4",
-              "value": 2.111414e+13,
+              "value": 2.104068e+13,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -640,21 +640,21 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific computing relies on. Consumer graphics parts deliberately run these many times slower than 32-bit.",
-          "duration_s": 3.849437,
+          "duration_s": 3.844741,
           "metrics": [
             {
               "id": "double",
-              "value": 3.30541e+11,
+              "value": 3.305113e+11,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "double2",
-              "value": 3.275857e+11,
+              "value": 3.274553e+11,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "double4",
-              "value": 3.211631e+11,
+              "value": 3.210984e+11,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -669,21 +669,21 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed when the device multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses.",
-          "duration_s": 2.964067,
+          "duration_s": 2.888799,
           "metrics": [
             {
               "id": "mp",
-              "value": 2.048817e+13,
+              "value": 2.048029e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "mp2",
-              "value": 2.022687e+13,
+              "value": 2.013945e+13,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "mp4",
-              "value": 2.044775e+13,
+              "value": 2.041839e+13,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -698,21 +698,21 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the same number range as a full float. The running total is kept in 32 bits.",
-          "duration_s": 2.932818,
+          "duration_s": 2.90036,
           "metrics": [
             {
               "id": "bf16",
-              "value": 1.957226e+13,
+              "value": 1.956165e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "bf16_2",
-              "value": 1.806157e+13,
+              "value": 1.799346e+13,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "bf16_4",
-              "value": 1.921199e+13,
+              "value": 1.911417e+13,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -727,21 +727,21 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, addressing and bit manipulation, which kernels do alongside their fractional maths.",
-          "duration_s": 2.91979,
+          "duration_s": 2.91135,
           "metrics": [
             {
               "id": "int",
-              "value": 1.053958e+13,
+              "value": 1.0501e+13,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "int2",
-              "value": 1.040071e+13,
+              "value": 1.051836e+13,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "int4",
-              "value": 1.036656e+13,
+              "value": 1.036851e+13,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -756,21 +756,21 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed of the 8-bit dot-product instruction, which multiplies four pairs of small whole numbers and sums them in one step -- the workhorse of quantized (compressed) neural networks.",
-          "duration_s": 1.498874,
+          "duration_s": 1.498489,
           "metrics": [
             {
               "id": "int8_dp",
-              "value": 3.331768e+13,
+              "value": 3.32223e+13,
               "description": "One chain of dot products, each waiting on the one before it."
             },
             {
               "id": "int8_dp2",
-              "value": 2.982826e+13,
+              "value": 2.967169e+13,
               "description": "Two independent chains, so the device has a second dot product to get on with while the first is still finishing."
             },
             {
               "id": "int8_dp4",
-              "value": 3.191026e+13,
+              "value": 3.17354e+13,
               "description": "Four independent chains -- usually enough to keep the dot-product hardware busy with no waiting at all."
             }
           ]
@@ -785,7 +785,7 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "The device's matrix engine -- its tensor cores -- which multiplies whole small blocks of numbers in one step instead of one value at a time. Each reading is a different input format, run at the block shape the driver advertises for it; which formats the engine supports, and how much faster the narrow ones go, is most of what separates one generation of hardware from the next.",
-          "duration_s": 3.663391,
+          "duration_s": 3.657935,
           "metrics": [
             {
               "id": "fp32",
@@ -795,32 +795,32 @@
             },
             {
               "id": "fp16",
-              "value": 4.243316e+13,
+              "value": 4.24439e+13,
               "description": "The matrix engine on 16-bit inputs with a 32-bit running total -- the everyday precision of AI inference, and the widest-supported row here. Keeping the total at 32 bits costs accuracy nothing and, on consumer graphics cards, costs half the speed: see the 16-bit-total row below. Runs at the 16x16x16 tile this driver advertises for it."
             },
             {
               "id": "fp16 f16acc",
-              "value": 8.484507e+13,
+              "value": 8.486022e+13,
               "description": "The matrix engine on 16-bit inputs with the running total also kept at 16 bits. Consumer graphics cards run this at twice the rate of the 32-bit total above, which is why a card's headline AI figure is usually this one; server parts run both alike. Runs at the 16x16x16 tile this driver advertises for it."
             },
             {
               "id": "bf16",
-              "value": 4.241107e+13,
+              "value": 4.242252e+13,
               "description": "The matrix engine on bfloat16 -- 16 bits arranged for AI work, trading digits of accuracy for the number range of a full float, which makes training far more forgiving. Runs at the 16x16x16 tile this driver advertises for it."
             },
             {
               "id": "fp8_e4m3",
-              "value": 8.475883e+13,
+              "value": 8.477414e+13,
               "description": "The matrix engine on 8-bit numbers, in the variant that spends its bits on accuracy rather than range. Half the data of fp16 per value, so the newest hardware runs it at roughly twice the rate. Runs at the 16x16x32 tile this driver advertises for it."
             },
             {
               "id": "fp8_e5m2",
-              "value": 8.476915e+13,
+              "value": 8.477328e+13,
               "description": "The same 8-bit matrix path in the other variant, which spends its bits on range rather than accuracy -- the one that copes with very large and very small values. Runs at the 16x16x32 tile this driver advertises for it."
             },
             {
               "id": "int8",
-              "value": 1.68185e+14,
+              "value": 1.681745e+14,
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
@@ -838,21 +838,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device can stream out of its main memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.",
-          "duration_s": 1.819945,
+          "duration_s": 1.866976,
           "metrics": [
             {
               "id": "float",
-              "value": 3.979631e+11,
+              "value": 3.976748e+11,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 4.171698e+11,
+              "value": 4.169204e+11,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 4.251417e+11,
+              "value": 4.250954e+11,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -867,21 +867,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device moves through shared local memory -- the small on-chip scratchpad a group of threads passes data through, which never goes out to main memory.",
-          "duration_s": 1.434883,
+          "duration_s": 1.48595,
           "metrics": [
             {
               "id": "float",
-              "value": 4.402631e+12,
+              "value": 4.391066e+12,
               "description": "One value per thread at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 7.999958e+12,
+              "value": 7.9992e+12,
               "description": "Two values per thread at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 9.117656e+12,
+              "value": 9.071702e+12,
               "description": "Four values per thread at a time, as one 4-wide vector."
             }
           ]
@@ -895,11 +895,11 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device reads through its texture units, which take a different path to memory than plain buffer reads. Each pixel of the image is read exactly once, so caching cannot flatter the number.",
-          "duration_s": 2.009737,
+          "duration_s": 1.998908,
           "metrics": [
             {
               "id": "float4",
-              "value": 4.249964e+11,
+              "value": 4.246469e+11,
               "description": "Each fetch returns one whole pixel -- four 32-bit colour values, 16 bytes."
             }
           ]
@@ -914,16 +914,16 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast data crosses between the host's memory and the device's. On a discrete card that means the PCIe link, which is usually far narrower than either side's own memory and is what makes moving data to the device worth avoiding.",
-          "duration_s": 1.670517,
+          "duration_s": 1.670426,
           "metrics": [
             {
               "id": "h2d",
-              "value": 1.26509e+10,
+              "value": 1.265849e+10,
               "description": "Host to device: sending data across to the device."
             },
             {
               "id": "d2h",
-              "value": 1.319265e+10,
+              "value": 1.319267e+10,
               "description": "Device to host: reading results back. Often slower than the other direction."
             }
           ]
@@ -937,16 +937,16 @@
           "quantity": "seconds",
           "unit": "s",
           "description": "The overhead of asking the device to do anything at all, measured with a shader that does no work. It is what small, frequent jobs pay before any of their own work begins.",
-          "duration_s": 0.08055896,
+          "duration_s": 0.0824566,
           "metrics": [
             {
               "id": "dispatch",
-              "value": 4.118324e-06,
+              "value": 5.576815e-06,
               "description": "One way only: from the moment the host submits the work to the moment the device starts running it."
             },
             {
               "id": "roundtrip",
-              "value": 3.769058e-05,
+              "value": 4.036907e-05,
               "description": "The full round trip -- submit, run, and hear back that it finished. This is what the host waits for if it has nothing else to get on with."
             }
           ]
@@ -958,7 +958,7 @@
       "platform": "NVIDIA CUDA",
       "name": "NVIDIA GeForce RTX 5060",
       "driver": "610.57.04",
-      "type": "unknown",
+      "type": "gpu",
       "platform_index": 0,
       "device_index": 0,
       "properties": [
@@ -982,31 +982,31 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed of the device's compute units on 32-bit fractional numbers -- the ordinary float type. Nothing touches memory, so only the arithmetic units limit the rate.",
-          "duration_s": 5.071682,
+          "duration_s": 5.070806,
           "metrics": [
             {
               "id": "float",
-              "value": 2.047279e+13,
+              "value": 2.047127e+13,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 2.068854e+13,
+              "value": 2.068804e+13,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 2.076172e+13,
+              "value": 2.075937e+13,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "float8",
-              "value": 2.084395e+13,
+              "value": 2.084073e+13,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "float16",
-              "value": 2.067962e+13,
+              "value": 2.067983e+13,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1021,7 +1021,7 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 16-bit fractional numbers -- half the size of a normal float, and what graphics and on-device AI mostly run on.",
-          "duration_s": 4.388e-06,
+          "duration_s": 3.3995e-05,
           "metrics": [
             {
               "id": "half",
@@ -1060,31 +1060,31 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak arithmetic speed on 64-bit fractional numbers, the high-accuracy type scientific computing relies on. Consumer graphics parts deliberately run these many times slower than 32-bit.",
-          "duration_s": 6.326864,
+          "duration_s": 6.343117,
           "metrics": [
             {
               "id": "double",
-              "value": 3.325561e+11,
+              "value": 3.325603e+11,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "double2",
-              "value": 3.3217e+11,
+              "value": 3.321652e+11,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "double4",
-              "value": 3.326935e+11,
+              "value": 3.313098e+11,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "double8",
-              "value": 3.311667e+11,
+              "value": 3.296835e+11,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "double16",
-              "value": 3.280076e+11,
+              "value": 3.265963e+11,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1099,7 +1099,7 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Peak speed when the device multiplies 16-bit numbers but keeps the running total in 32 bits -- the accuracy-preserving pattern AI code uses.",
-          "duration_s": 4.919e-06,
+          "duration_s": 3.3824e-05,
           "metrics": [
             {
               "id": "mp",
@@ -1138,31 +1138,31 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, addressing and bit manipulation, which kernels do alongside their fractional maths.",
-          "duration_s": 5.080164,
+          "duration_s": 5.080694,
           "metrics": [
             {
               "id": "int",
-              "value": 1.052488e+13,
+              "value": 1.052399e+13,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "int2",
-              "value": 1.052893e+13,
+              "value": 1.04704e+13,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "int4",
-              "value": 1.032913e+13,
+              "value": 1.032602e+13,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "int8",
-              "value": 1.037059e+13,
+              "value": 1.036148e+13,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "int16",
-              "value": 1.031118e+13,
+              "value": 1.031135e+13,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1177,31 +1177,31 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "The same integer maths restricted to 24-bit values, which some devices multiply on their faster floating-point hardware instead. Where this beats the plain integer row, the full 32-bit multiply is the slower path.",
-          "duration_s": 5.066574,
+          "duration_s": 5.07195,
           "metrics": [
             {
               "id": "int",
-              "value": 1.043135e+13,
+              "value": 1.042139e+13,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "int2",
-              "value": 1.047379e+13,
+              "value": 1.047376e+13,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "int4",
-              "value": 1.035281e+13,
+              "value": 1.032931e+13,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "int8",
-              "value": 1.028388e+13,
+              "value": 1.02784e+13,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "int16",
-              "value": 1.018353e+13,
+              "value": 1.018269e+13,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1216,31 +1216,31 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed on 8-bit whole numbers, the smallest integer type -- worth knowing because image and quantized-AI work is full of them.",
-          "duration_s": 5.086854,
+          "duration_s": 5.090791,
           "metrics": [
             {
               "id": "char",
-              "value": 1.005771e+13,
+              "value": 1.002729e+13,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "char2",
-              "value": 1.010881e+13,
+              "value": 1.010662e+13,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "char4",
-              "value": 9.969708e+12,
+              "value": 9.957541e+12,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "char8",
-              "value": 9.037235e+12,
+              "value": 9.035732e+12,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "char16",
-              "value": 1.009298e+13,
+              "value": 1.009304e+13,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1255,31 +1255,31 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed on 16-bit whole numbers -- the middle size, between the 8-bit and 32-bit rows.",
-          "duration_s": 5.100837,
+          "duration_s": 5.09758,
           "metrics": [
             {
               "id": "short",
-              "value": 1.002298e+13,
+              "value": 1.001942e+13,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "short2",
-              "value": 9.907742e+12,
+              "value": 9.905447e+12,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "short4",
-              "value": 9.882584e+12,
+              "value": 9.880109e+12,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "short8",
-              "value": 8.946818e+12,
+              "value": 8.941125e+12,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "short16",
-              "value": 9.242205e+12,
+              "value": 9.241668e+12,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1294,7 +1294,7 @@
           "quantity": "ops",
           "unit": "OPS",
           "description": "Peak speed of the 8-bit dot-product instruction, which multiplies four pairs of small whole numbers and sums them in one step -- the workhorse of quantized (compressed) neural networks.",
-          "duration_s": 3.847e-06,
+          "duration_s": 3.73e-05,
           "metrics": [
             {
               "id": "int8_dp",
@@ -1333,31 +1333,31 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device can stream out of its main memory, reading a buffer far too large to cache. Each reading fetches a different number of values per instruction, since wider fetches usually pull more through before the memory system saturates.",
-          "duration_s": 5.483812,
+          "duration_s": 5.485944,
           "metrics": [
             {
               "id": "float",
-              "value": 3.927638e+11,
+              "value": 3.92786e+11,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 4.097151e+11,
+              "value": 4.093369e+11,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 4.196129e+11,
+              "value": 4.196095e+11,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "float8",
-              "value": 4.228003e+11,
+              "value": 4.228284e+11,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             },
             {
               "id": "float16",
-              "value": 4.243322e+11,
+              "value": 4.24632e+11,
               "description": "Sixteen values per work-item at a time, the widest vector OpenCL offers."
             }
           ]
@@ -1372,26 +1372,26 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device moves through local memory -- the small on-chip scratchpad a group of work-items passes data through, which never goes out to main memory.",
-          "duration_s": 2.044126,
+          "duration_s": 2.044015,
           "metrics": [
             {
               "id": "float",
-              "value": 4.383451e+12,
+              "value": 4.383839e+12,
               "description": "One value per work-item at a time -- the plain, unvectorised case."
             },
             {
               "id": "float2",
-              "value": 7.951041e+12,
+              "value": 7.95144e+12,
               "description": "Two values per work-item at a time, as one 2-wide vector."
             },
             {
               "id": "float4",
-              "value": 9.129595e+12,
+              "value": 9.130513e+12,
               "description": "Four values per work-item at a time, as one 4-wide vector."
             },
             {
               "id": "float8",
-              "value": 5.015152e+12,
+              "value": 5.015635e+12,
               "description": "Eight values per work-item at a time, as one 8-wide vector."
             }
           ]
@@ -1405,11 +1405,11 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How many bytes per second the device reads through its texture units, which take a different path to memory than plain buffer reads. Each pixel of the image is read exactly once, so caching cannot flatter the number.",
-          "duration_s": 1.241547,
+          "duration_s": 1.24682,
           "metrics": [
             {
               "id": "float4",
-              "value": 4.189632e+11,
+              "value": 4.190021e+11,
               "description": "Each fetch returns one whole pixel -- four 32-bit colour values, 16 bytes."
             }
           ]
@@ -1424,16 +1424,16 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast data crosses between the host's memory and the device's. On a discrete card that means the PCIe link, which is far narrower than either side's own memory and is what makes moving data to the device worth avoiding; where the two share one pool of memory the numbers are much higher. Both readings use pinned host memory, the fast path.",
-          "duration_s": 1.884123,
+          "duration_s": 1.875438,
           "metrics": [
             {
               "id": "h2d_pinned",
-              "value": 1.391651e+10,
+              "value": 1.391945e+10,
               "description": "Host to device: sending data across to the device."
             },
             {
               "id": "d2h_pinned",
-              "value": 1.430611e+10,
+              "value": 1.430506e+10,
               "description": "Device to host: reading results back. Often a little slower than the other direction."
             }
           ]
@@ -1447,16 +1447,16 @@
           "quantity": "seconds",
           "unit": "s",
           "description": "The overhead of asking the device to do anything at all. It is what small, frequent jobs pay before any of their own work begins.",
-          "duration_s": 0.0319311,
+          "duration_s": 0.03428663,
           "metrics": [
             {
               "id": "dispatch",
-              "value": 6.387376e-06,
+              "value": 6.28344e-06,
               "description": "One way only: from the moment the host queues the work to the moment the device starts running it."
             },
             {
               "id": "roundtrip",
-              "value": 1.471327e-05,
+              "value": 1.593968e-05,
               "description": "The full round trip -- queue it, run it, and hear back that it finished. This is what the host waits for if it has nothing else to get on with."
             }
           ]
@@ -1468,7 +1468,7 @@
       "platform": "LiteRT",
       "name": "GPU via LiteRT (WebGPU)",
       "driver": "1.0.0",
-      "type": "unknown",
+      "type": "gpu",
       "device_index": 0,
       "properties": [
         {
@@ -1498,13 +1498,14 @@
           "direction": "higher_is_better",
           "quantity": "flops",
           "unit": "FLOPS",
-          "description": "Matrix-multiply rate through LiteRT on this accelerator, one model format per row, swept over square sizes and reported at its best. Each row names the kernel that ran; a format handed back to the CPU reports unsupported.",
-          "duration_s": 1.712644,
+          "description": "Matrix-multiply rate through LiteRT on this accelerator, one model format per row: sixteen distinct square multiplies chained in one dispatch, swept over layer widths and reported at its best. Each row names the kernel that ran, and the int8 row times its layers written both as FULLY_CONNECTED and as 1x1 convolutions and reports the faster; a format handed back to the CPU reports unsupported.",
+          "duration_s": 5.895003,
           "metrics": [
             {
               "id": "fp32",
-              "value": 7.361593e+12,
-              "description": "Full 32-bit precision as a control; the GPU is asked for its fp32 policy, since it otherwise computes an fp32 graph in half. Fastest at 1024 cubed."
+              "status": "error",
+              "reason": "LiteRT could not wait for an inference: LiteRT status 9",
+              "description": "Full 32-bit precision as a control; the GPU is asked for its fp32 policy, since it otherwise computes an fp32 graph in half."
             },
             {
               "id": "fp16",
@@ -1568,8 +1569,8 @@
       "backend": "ONNX",
       "platform": "ONNX",
       "name": "NVIDIA CUDA",
-      "driver": "1.30.0",
-      "type": "unknown",
+      "driver": "0.1.0",
+      "type": "gpu",
       "device_index": 0,
       "properties": [
         {
@@ -1583,6 +1584,10 @@
         {
           "key": "ONNX Runtime",
           "value": "1.30.0"
+        },
+        {
+          "key": "EP plugin",
+          "value": "cuda_ep 0.1.0"
         },
         {
           "key": "Vendor",
@@ -1603,63 +1608,63 @@
           "direction": "higher_is_better",
           "quantity": "flops",
           "unit": "FLOPS",
-          "description": "Matrix-multiply rate through this execution provider, one data type per row, swept over square sizes and reported at its best. The same model runs on every provider, and one that cannot run it entirely on its own device reports unsupported rather than quietly measuring the host.",
-          "duration_s": 69.78619,
+          "description": "Matrix-multiply rate through this execution provider, one data type per row, and int8 a second time with its layers spelled as 1x1 convolutions: sixteen distinct square multiplies chained in one dispatch, each layer's product feeding the next, swept over layer widths and reported at its best. A chain is how a model runs, and it spreads what surrounds a multiply -- the dispatch, the reduction that brings one row back -- over sixteen of them, while the pass that keeps the graph from being computed at build time runs over a narrow seed rather than the first layer's whole input. The same model runs on every provider, and one that cannot run it entirely on its own device reports unsupported rather than quietly measuring the host.",
+          "duration_s": 76.1452,
           "metrics": [
             {
               "id": "fp32",
-              "value": 2.011998e+13,
-              "description": "Peak over a doubling sweep of square sizes; fastest at 8192 cubed. FP32 in and out. Some providers compute it narrower or route it off their matrix hardware entirely; the fp32 numeric-error row says which."
+              "value": 1.929424e+13,
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch; fastest at 4096-wide layers. FP32 in and out. Some providers compute it narrower or route it off their matrix hardware entirely; the fp32 numeric-error row says which. The chain starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the first layer's activations -- so no compiler can fold the multiplies away, and the seed's pass and that multiply are inside the figure."
             },
             {
               "id": "fp16",
-              "value": 4.001163e+13,
-              "description": "Peak over a doubling sweep of square sizes; fastest at 16384 cubed. 16-bit floats, the native currency of most matrix hardware."
+              "value": 3.930864e+13,
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch; fastest at 4096-wide layers. 16-bit floats, the native currency of most matrix hardware. The chain starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the first layer's activations -- so no compiler can fold the multiplies away, and the seed's pass and that multiply are inside the figure."
             },
             {
               "id": "bf16",
-              "value": 3.972018e+13,
-              "description": "Peak over a doubling sweep of square sizes; fastest at 16384 cubed. The 16-bit float with fp32's exponent range and three fewer mantissa bits. Hardware with a real bf16 path runs it at the fp16 rate; well short of that is emulation. The product is cast to fp32 before the reduction; the multiply is unaffected. The activations are scaled at run time, so this provider's compiler cannot fold the multiply away; that pass is inside the figure."
+              "value": 3.934791e+13,
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch; fastest at 4096-wide layers. The 16-bit float with fp32's exponent range and three fewer mantissa bits. Hardware with a real bf16 path runs it at the fp16 rate; well short of that is emulation. The product is cast to fp32 before the reduction; the multiplies are unaffected. The chain starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the first layer's activations -- so no compiler can fold the multiplies away, and the seed's pass and that multiply are inside the figure."
             },
             {
               "id": "fp8_e4m3",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, MatMul, QuantizeLinear, ReduceMax, Mul)",
-              "description": "Peak over a doubling sweep of square sizes. The 8-bit float that spends its bits on precision -- four exponent, three mantissa, reaching 448 -- quantized in and out. This is what inference uses below 16 bits without going to integers."
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. The 8-bit float that spends its bits on precision -- four exponent, three mantissa, reaching 448 -- quantized in and out. This is what inference uses below 16 bits without going to integers."
             },
             {
               "id": "fp8_e5m2",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, MatMul, QuantizeLinear, ReduceMax, Mul)",
-              "description": "Peak over a doubling sweep of square sizes. The other 8-bit float, a mantissa bit traded for an exponent one: it reaches 57344 and rounds more coarsely. A gap against the e4m3 row is the provider reaching for different machinery."
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. The other 8-bit float, a mantissa bit traded for an exponent one: it reaches 57344 and rounds more coarsely. A gap against the e4m3 row is the provider reaching for different machinery."
             },
             {
               "id": "fp4_e2m1",
               "status": "unsupported",
               "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n0' is not set.",
-              "description": "Peak over a doubling sweep of square sizes. 4-bit floating point on both operands, one scale for the whole tensor: eight magnitudes in all, the largest 6. Unlike int4 a provider may fuse it into real 4-bit arithmetic, and the row says whether this one did."
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. 4-bit floating point on both operands, one scale for the whole tensor: eight magnitudes in all, the largest 6. Unlike int4 a provider may fuse it into real 4-bit arithmetic, and the row says whether this one did."
             },
             {
               "id": "nvfp4",
               "status": "unsupported",
               "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n2' is not set.",
-              "description": "Peak over a doubling sweep of square sizes. NVIDIA's 4-bit block format on both operands: an 8-bit float scale for every 16 values along the reduction axis, and one more for the tensor. It is the only row here whose arithmetic is genuinely four-bit rather than four bits unpacked into something wider."
+              "description": "Peak over a doubling sweep of square sizes, one multiply per dispatch. NVIDIA's 4-bit block format on both operands: an 8-bit float scale for every 16 values along the reduction axis, and one more for the tensor. It is the only row here whose arithmetic is genuinely four-bit rather than four bits unpacked into something wider."
             },
             {
               "id": "fp4_weight",
               "status": "unsupported",
               "reason": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user.",
-              "description": "Peak over a doubling sweep of square sizes. 4-bit float weights, one scale per 32, against 16-bit activations. Identical to the int4 row in every respect but whether the four bits are a float or an integer."
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. 4-bit float weights, one scale per 32, against 16-bit activations. Identical to the int4 row in every respect but whether the four bits are a float or an integer."
             },
             {
               "id": "int4_weight",
-              "value": 3.917881e+13,
-              "description": "Peak over a doubling sweep of square sizes; fastest at 16384 cubed. 4-bit integer weights, one scale per 32, against 16-bit activations -- how quantized language models ship. They unpack into a 16-bit multiply, so this reads in TFLOPS: four bits buys weight traffic, not rate, and well below the fp16 row is a costly unpack. Ran as MatMulNBits (16-bit activations against blocked weights). The activations are scaled at run time, so this provider's compiler cannot fold the multiply away; that pass is inside the figure."
+              "value": 4.047699e+13,
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch; fastest at 8192-wide layers. 4-bit integer weights, one scale per 32, against 16-bit activations -- how quantized language models ship. They unpack into a 16-bit multiply, so this reads in TFLOPS: four bits buys weight traffic, not rate, and well below the fp16 row is a costly unpack. Ran as MatMulNBits (16-bit activations against blocked weights). The chain starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the first layer's activations -- so no compiler can fold the multiplies away, and the seed's pass and that multiply are inside the figure."
             },
             {
               "id": "int8_weight",
-              "value": 3.914028e+13,
-              "description": "Peak over a doubling sweep of square sizes; fastest at 16384 cubed. 8-bit integer weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth -- and the same row the Core ML and LiteRT backends measure, so the three ladders line up. Ran as MatMulNBits (16-bit activations against blocked weights). The activations are scaled at run time, so this provider's compiler cannot fold the multiply away; that pass is inside the figure."
+              "value": 4.036207e+13,
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch; fastest at 8192-wide layers. 8-bit integer weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth -- and the same row the Core ML and LiteRT backends measure, so the three ladders line up. Ran as MatMulNBits (16-bit activations against blocked weights). The chain starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the first layer's activations -- so no compiler can fold the multiplies away, and the seed's pass and that multiply are inside the figure."
             },
             {
               "id": "int8_qdq",
@@ -1668,7 +1673,16 @@
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
-              "description": "Peak over a doubling sweep of square sizes. 8-bit integers quantized in and quantized out, the shape quantized inference ships in and what vendors quote headline TOPS figures for."
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. 8-bit integers quantized in and quantized out, the shape quantized inference ships in and what vendors quote headline TOPS figures for."
+            },
+            {
+              "id": "int8_qdq_conv1x1",
+              "status": "unsupported",
+              "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, Mul, QuantizeLinear, Conv, ReduceMax)",
+              "unit": "OPS",
+              "quantity": "ops",
+              "direction": "higher_is_better",
+              "description": "Peak over a doubling sweep of layer widths, sixteen layers chained per dispatch. The int8 chain again, every layer a quantized 1x1 convolution over a grid of as many positions as the layer is wide: the same arithmetic, spelled as the operator NPU compilers were first built for. Where it beats the int8_qdq row, the provider's convolution path is its faster int8 one."
             }
           ]
         },
@@ -1682,36 +1696,36 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "Convolution rate at the precision and shape each row names, swept over feature-map sizes and reported at its best. Accelerators were built for this before anything else, so the gap against the matmul rows says what the hardware was shaped for.",
-          "duration_s": 29.73783,
+          "duration_s": 24.81821,
           "metrics": [
             {
               "id": "fp32_conv3x3",
-              "value": 1.352939e+13,
+              "value": 1.341994e+13,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 128 square. FP32 in and out; far short of this provider's own fp16 row means no full-precision convolution path. A 3x3 convolution over 256 channels, the shape most vision networks are built from and the one accelerators were designed around. Counted as direct multiplies: a Winograd kernel does fewer, so this can read above the matmul peak without the device being built for convolution."
             },
             {
               "id": "fp32_conv1x1",
-              "value": 4.760273e+12,
+              "value": 4.670981e+12,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 128 square. FP32 in and out; far short of this provider's own fp16 row means no full-precision convolution path. Arithmetically a matrix multiply at every pixel, so it should land near the matmul rows; where it does not, the two shapes reach different machinery."
             },
             {
               "id": "fp32_depthwise3x3",
-              "value": 1.698343e+11,
+              "value": 1.656369e+11,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 64 square. FP32 in and out; far short of this provider's own fp16 row means no full-precision convolution path. The 3x3 shape with each channel kept separate, so far less arithmetic per value loaded. Hardware built around dense arrays collapses here, which is why mobile networks run slower than their FLOP counts."
             },
             {
               "id": "fp16_conv3x3",
-              "value": 2.319715e+13,
+              "value": 2.298691e+13,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 128 square. 16-bit floats, the native currency of most convolution engines. A 3x3 convolution over 256 channels, the shape most vision networks are built from and the one accelerators were designed around. Counted as direct multiplies: a Winograd kernel does fewer, so this can read above the matmul peak without the device being built for convolution."
             },
             {
               "id": "fp16_conv1x1",
-              "value": 6.29925e+12,
+              "value": 6.181872e+12,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 128 square. 16-bit floats, the native currency of most convolution engines. Arithmetically a matrix multiply at every pixel, so it should land near the matmul rows; where it does not, the two shapes reach different machinery."
             },
             {
               "id": "fp16_depthwise3x3",
-              "value": 2.357837e+11,
+              "value": 2.32584e+11,
               "description": "Peak over a doubling sweep of feature-map sizes; fastest at 128 square. 16-bit floats, the native currency of most convolution engines. The 3x3 shape with each channel kept separate, so far less arithmetic per value loaded. Hardware built around dense arrays collapses here, which is why mobile networks run slower than their FLOP counts."
             }
           ]
@@ -1726,7 +1740,7 @@
           "quantity": "ratio",
           "unit": "ppm",
           "description": "How far each datatype's answer drifts from a full-precision one, in parts per million, on a fixed 1024-cubed matrix multiply -- what the speed rows cost. The reference multiplies the same operands the device was handed, so this is the arithmetic and the width the answer was kept in, not the rounding of the inputs, which is the format's and identical everywhere.",
-          "duration_s": 0.1129664,
+          "duration_s": 0.1121411,
           "metrics": [
             {
               "id": "fp32",
@@ -1736,7 +1750,7 @@
             {
               "id": "fp16",
               "value": 207.3892,
-              "description": "What half precision costs: fp16 inputs and fp16 accumulation against the fp32 answer."
+              "description": "What half precision costs: fp16 inputs and an fp16 answer, against the fp32 one. Whether the running total inside the multiply stays at 16 bits too is up to the provider -- ONNX Runtime's CUDA provider keeps it at 32 by default -- and a 16-bit total adds error of its own on top of rounding the answer."
             },
             {
               "id": "bf16",
@@ -1779,65 +1793,65 @@
           "quantity": "flops",
           "unit": "FLOPS",
           "description": "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters), working through a prompt -- the phase that decides how long you wait for the first word -- at each precision a model ships in. Everything a real layer does is in here, and only the seven projection matmuls change precision, so whatever separates two rows is the projection format.",
-          "duration_s": 18.29128,
+          "duration_s": 18.79625,
           "metrics": [
             {
               "id": "fp16_s64",
-              "value": 1.411735e+13,
+              "value": 1.410749e+13,
               "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. A prompt of 64 tokens in one pass, counting every multiply in the layer."
             },
             {
               "id": "fp16_s512",
-              "value": 3.363564e+13,
-              "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "value": 3.324124e+13,
+              "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp16_s2048",
-              "value": 3.118563e+13,
-              "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. A prompt of 2048 tokens in one pass, counting every multiply in the layer."
+              "value": 3.100206e+13,
+              "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. A prompt of 2048 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "int4_weight_s64",
-              "value": 1.106324e+13,
+              "value": 1.083867e+13,
               "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. A prompt of 64 tokens in one pass, counting every multiply in the layer. Ran as MatMulNBits."
             },
             {
               "id": "int4_weight_s512",
-              "value": 2.972123e+13,
-              "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. A prompt of 512 tokens in one pass, counting every multiply in the layer. Ran as MatMulNBits."
+              "value": 2.922889e+13,
+              "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic. Ran as MatMulNBits."
             },
             {
               "id": "int4_weight_s2048",
-              "value": 3.017575e+13,
-              "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. A prompt of 2048 tokens in one pass, counting every multiply in the layer. Ran as MatMulNBits."
+              "value": 2.999843e+13,
+              "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. A prompt of 2048 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic. Ran as MatMulNBits."
             },
             {
               "id": "fp4_weight_s512",
               "status": "unsupported",
               "reason": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user.",
-              "description": "The int4 row's shape exactly, with the four bits spent on a float instead of an integer, so a gap between the two is the format alone. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "description": "The int4 row's shape exactly, with the four bits spent on a float instead of an integer, so a gap between the two is the format alone. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "int8_weight_s512",
-              "value": 2.819281e+13,
-              "description": "8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. A prompt of 512 tokens in one pass, counting every multiply in the layer. Ran as MatMulNBits."
+              "value": 2.7712e+13,
+              "description": "8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic. Ran as MatMulNBits."
             },
             {
               "id": "fp32_s512",
-              "value": 1.761337e+13,
-              "description": "Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "value": 1.745291e+13,
+              "description": "Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "bf16_s512",
               "status": "unsupported",
-              "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n25' is not set.",
-              "description": "The 16-bit float with fp32's exponent range and three fewer mantissa bits. A layer needs bf16 kernels for every operation in it, not just the matmul, so a refusal here beside a working MatMul bf16 row is that gap. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n26' is not set.",
+              "description": "The 16-bit float with fp32's exponent range and three fewer mantissa bits. A layer needs bf16 kernels for every operation in it, not just the matmul, so a refusal here beside a working MatMul bf16 row is that gap. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp8_e4m3_s512",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, MatMul, QuantizeLinear, ReduceMax, Mul)",
-              "description": "8-bit floats through the projections, quantized in and out, against 16-bit attention. Unlike int8 it keeps exponent range for activations that have some, and it reports in TFLOPS because it is a float. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "description": "8-bit floats through the projections, quantized in and out, against 16-bit attention. Unlike int8 it keeps exponent range for activations that have some, and it reports in TFLOPS because it is a float. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "int8_qdq_s512",
@@ -1846,7 +1860,7 @@
               "unit": "OPS",
               "quantity": "ops",
               "direction": "higher_is_better",
-              "description": "8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay 16-bit, as they do in every real deployment. A prompt of 512 tokens in one pass, counting every multiply in the layer."
+              "description": "8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay in floating point, as they do in every real deployment: 16-bit unless the row says otherwise. A prompt of 512 tokens in one pass, counting every multiply in the layer. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             }
           ]
         },
@@ -1860,16 +1874,16 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast one 2048-wide, 16-head decoder block (50.6M parameters) streams its weights while generating a token with 2048 of context, at each precision. Each row counts the bytes that format actually moves, so it compares directly against the plain memory-bandwidth rows -- and a narrow-weight row far below the 16-bit one is a provider unpacking to full width before using them.",
-          "duration_s": 3.621479,
+          "duration_s": 3.525499,
           "metrics": [
             {
               "id": "fp16_kv2048",
-              "value": 2.816124e+11,
+              "value": 2.787422e+11,
               "description": "16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. One token with 2048 of context: 96 MB of weights plus 16 MB of cached context, read in full for one token."
             },
             {
               "id": "int4_weight_kv2048",
-              "value": 2.305759e+11,
+              "value": 2.264178e+11,
               "description": "4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. One token with 2048 of context: 27 MB of weights plus 16 MB of cached context, read in full for one token. Ran as MatMulNBits."
             },
             {
@@ -1880,18 +1894,18 @@
             },
             {
               "id": "int8_weight_kv2048",
-              "value": 2.747704e+11,
+              "value": 2.680874e+11,
               "description": "8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. One token with 2048 of context: 51 MB of weights plus 16 MB of cached context, read in full for one token. Ran as MatMulNBits."
             },
             {
               "id": "int8_qdq_kv2048",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, Mul, QuantizeLinear, MatMul, ReduceMax)",
-              "description": "8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay 16-bit, as they do in every real deployment. One token with 2048 of context: 48 MB of weights plus 16 MB of cached context, read in full for one token."
+              "description": "8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay in floating point, as they do in every real deployment: 16-bit unless the row says otherwise. One token with 2048 of context: 48 MB of weights plus 16 MB of cached context, read in full for one token."
             },
             {
               "id": "fp32_kv2048",
-              "value": 3.662734e+11,
+              "value": 3.60966e+11,
               "description": "Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware. One token with 2048 of context: 193 MB of weights plus 32 MB of cached context, read in full for one token."
             },
             {
@@ -1924,53 +1938,53 @@
           "quantity": "seconds",
           "unit": "s",
           "description": "How long one 2048-wide, 16-head decoder block (50.6M parameters) takes at each precision: multiply by a model's layer count for a floor on its time-to-first-token and per-token time here, without downloading anything. Everything but attention costs the same at every context length, so whatever the decode rows add as the context grows is attention.",
-          "duration_s": 3.861577,
+          "duration_s": 2.933428,
           "metrics": [
             {
               "id": "fp16_prefill_s512",
-              "value": 0.001604118,
-              "description": "One pass over a 512-token prompt. 16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against."
+              "value": 0.00162315,
+              "description": "One pass over a 512-token prompt. 16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp16_decode_kv512",
-              "value": 0.0003453301,
+              "value": 0.0003556252,
               "description": "One generated token with 512 tokens of context behind it. 16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against."
             },
             {
               "id": "fp16_decode_kv2048",
-              "value": 0.0004188907,
+              "value": 0.0004232039,
               "description": "One generated token with 2048 tokens of context behind it. 16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against."
             },
             {
               "id": "fp16_decode_kv8192",
-              "value": 0.000543976,
+              "value": 0.0005552238,
               "description": "One generated token with 8192 tokens of context behind it. 16-bit weights and 16-bit arithmetic, the form an unquantized model is served in and the reference the other rows are read against."
             },
             {
               "id": "int4_weight_prefill_s512",
-              "value": 0.001815387,
-              "description": "One pass over a 512-token prompt. 4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. Ran as MatMulNBits."
+              "value": 0.001845966,
+              "description": "One pass over a 512-token prompt. 4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic. Ran as MatMulNBits."
             },
             {
               "id": "int4_weight_decode_kv512",
-              "value": 0.0001584963,
+              "value": 0.0001657928,
               "description": "One generated token with 512 tokens of context behind it. 4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. Ran as MatMulNBits."
             },
             {
               "id": "int4_weight_decode_kv2048",
-              "value": 0.000196188,
+              "value": 0.0001997909,
               "description": "One generated token with 2048 tokens of context behind it. 4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. Ran as MatMulNBits."
             },
             {
               "id": "int4_weight_decode_kv8192",
-              "value": 0.0003197253,
+              "value": 0.0003303811,
               "description": "One generated token with 8192 tokens of context behind it. 4-bit weights, one scale per 32, against 16-bit activations -- what a quantized language model ships as. The arithmetic stays 16-bit, so four bits buys weight traffic rather than rate. Ran as MatMulNBits."
             },
             {
               "id": "fp4_weight_prefill_s512",
               "status": "unsupported",
               "reason": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user.",
-              "description": "One pass over a 512-token prompt. The int4 row's shape exactly, with the four bits spent on a float instead of an integer, so a gap between the two is the format alone."
+              "description": "One pass over a 512-token prompt. The int4 row's shape exactly, with the four bits spent on a float instead of an integer, so a gap between the two is the format alone. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp4_weight_decode_kv2048",
@@ -1980,41 +1994,41 @@
             },
             {
               "id": "int8_weight_prefill_s512",
-              "value": 0.001913804,
-              "description": "One pass over a 512-token prompt. 8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. Ran as MatMulNBits."
+              "value": 0.001947009,
+              "description": "One pass over a 512-token prompt. 8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic. Ran as MatMulNBits."
             },
             {
               "id": "int8_weight_decode_kv2048",
-              "value": 0.0002566984,
+              "value": 0.0002630975,
               "description": "One generated token with 2048 tokens of context behind it. 8-bit weights, blocked the same way, against 16-bit activations. This narrows only the weights where int8_qdq narrows the arithmetic too, so the gap between them is what the integer units are worth. Ran as MatMulNBits."
             },
             {
               "id": "int8_qdq_prefill_s512",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, Mul, QuantizeLinear, MatMul, ReduceMax)",
-              "description": "One pass over a 512-token prompt. 8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay 16-bit, as they do in every real deployment."
+              "description": "One pass over a 512-token prompt. 8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay in floating point, as they do in every real deployment: 16-bit unless the row says otherwise. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "int8_qdq_decode_kv2048",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, Mul, QuantizeLinear, MatMul, ReduceMax)",
-              "description": "One generated token with 2048 tokens of context behind it. 8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay 16-bit, as they do in every real deployment."
+              "description": "One generated token with 2048 tokens of context behind it. 8-bit weights and 8-bit arithmetic through the projections, quantized in and out -- what headline TOPS figures are quoted for, measured on a whole layer. Attention and the softmax stay in floating point, as they do in every real deployment: 16-bit unless the row says otherwise."
             },
             {
               "id": "fp32_prefill_s512",
-              "value": 0.003063329,
-              "description": "One pass over a 512-token prompt. Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware."
+              "value": 0.003091491,
+              "description": "One pass over a 512-token prompt. Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp32_decode_kv2048",
-              "value": 0.0006441353,
+              "value": 0.0006536063,
               "description": "One generated token with 2048 tokens of context behind it. Full precision, which nobody serves a language model in, here as a control: a provider whose fp16 row fails to beat it is not running half-precision hardware."
             },
             {
               "id": "bf16_prefill_s512",
               "status": "unsupported",
-              "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n25' is not set.",
-              "description": "One pass over a 512-token prompt. The 16-bit float with fp32's exponent range and three fewer mantissa bits. A layer needs bf16 kernels for every operation in it, not just the matmul, so a refusal here beside a working MatMul bf16 row is that gap."
+              "reason": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n26' is not set.",
+              "description": "One pass over a 512-token prompt. The 16-bit float with fp32's exponent range and three fewer mantissa bits. A layer needs bf16 kernels for every operation in it, not just the matmul, so a refusal here beside a working MatMul bf16 row is that gap. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "bf16_decode_kv2048",
@@ -2026,7 +2040,7 @@
               "id": "fp8_e4m3_prefill_s512",
               "status": "unsupported",
               "reason": "provider did not fuse a quantized matmul (ran: DequantizeLinear, MatMul, QuantizeLinear, ReduceMax, Mul)",
-              "description": "One pass over a 512-token prompt. 8-bit floats through the projections, quantized in and out, against 16-bit attention. Unlike int8 it keeps exponent range for activations that have some, and it reports in TFLOPS because it is a float."
+              "description": "One pass over a 512-token prompt. 8-bit floats through the projections, quantized in and out, against 16-bit attention. Unlike int8 it keeps exponent range for activations that have some, and it reports in TFLOPS because it is a float. The prompt starts from a 64-wide seed that takes a runtime value, and one more multiply, not counted, widens it into the layer's input -- inside the figure, a quarter of a percent of its arithmetic."
             },
             {
               "id": "fp8_e4m3_decode_kv2048",
@@ -2064,51 +2078,51 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast this provider runs the operations between the matrix multiplies -- normalisation, softmax, the feed-forward gate. They do almost no arithmetic, so their limit is memory and the figure is the bandwidth each achieves, net of a reference graph that reads the same tensor and applies nothing. The sizes are the resident-tensor rows' own, so the two ladders divide row for row.",
-          "duration_s": 10.35517,
+          "duration_s": 10.29813,
           "metrics": [
             {
               "id": "silu_8mb",
-              "value": 5.946844e+11,
+              "value": 5.871909e+11,
               "description": "8mb of activations -- x times sigmoid(x) -- the gate in the feed-forward network of most current language models. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "silu_32mb",
-              "value": 3.978513e+11,
+              "value": 4.07785e+11,
               "description": "32mb of activations -- x times sigmoid(x) -- the gate in the feed-forward network of most current language models. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "silu_128mb",
-              "value": 3.939446e+11,
+              "value": 3.942493e+11,
               "description": "128mb of activations -- x times sigmoid(x) -- the gate in the feed-forward network of most current language models. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "softmax_8mb",
-              "value": 5.649821e+11,
+              "value": 5.495064e+11,
               "description": "8mb of activations -- Softmax across the row, at the heart of attention: two passes and a maximum before it can divide. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "softmax_32mb",
-              "value": 3.914292e+11,
+              "value": 3.880218e+11,
               "description": "32mb of activations -- Softmax across the row, at the heart of attention: two passes and a maximum before it can divide. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "softmax_128mb",
-              "value": 3.867439e+11,
+              "value": 3.906835e+11,
               "description": "128mb of activations -- Softmax across the row, at the heart of attention: two passes and a maximum before it can divide. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "layernorm_8mb",
-              "value": 3.970367e+11,
+              "value": 3.868727e+11,
               "description": "8mb of activations -- Mean and variance across each row, then rescale -- every transformer layer does this at least twice. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "layernorm_32mb",
-              "value": 3.760045e+11,
+              "value": 3.770283e+11,
               "description": "32mb of activations -- Mean and variance across each row, then rescale -- every transformer layer does this at least twice. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             },
             {
               "id": "layernorm_128mb",
-              "value": 3.831473e+11,
+              "value": 3.81245e+11,
               "description": "128mb of activations -- Mean and variance across each row, then rescale -- every transformer layer does this at least twice. Against onnx-tensor-bw's rung of the same name, the ratio is how much of its streaming rate this provider keeps once it has to touch the data."
             }
           ]
@@ -2123,21 +2137,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast this provider streams weights out of its own memory, on the operation generating a token performs: one row of numbers multiplied through a weight matrix, in whichever of fp16 and fp32 it streams faster. The size at which the rate drops is where a model stops fitting in fast local memory, and the cost of handing work over is subtracted, so these are transfer rates rather than round trips.",
-          "duration_s": 1.243832,
+          "duration_s": 1.206876,
           "metrics": [
             {
               "id": "8mb",
-              "value": 9.988945e+11,
+              "value": 5.330073e+11,
               "description": "Eight megabytes of weights -- small enough to sit in fast local memory on most devices, so this is usually the fastest rung."
             },
             {
               "id": "32mb",
-              "value": 3.632598e+11,
+              "value": 3.601748e+11,
               "description": "Thirty-two megabytes -- around the size of a large cache or a device's fast local memory."
             },
             {
               "id": "128mb",
-              "value": 4.350898e+11,
+              "value": 4.328087e+11,
               "description": "128 megabytes -- past the cache of most devices, though not all."
             }
           ]
@@ -2152,21 +2166,21 @@
           "quantity": "bytes_per_second",
           "unit": "B/s",
           "description": "How fast data reaches this provider and comes back -- the cable every other test here keeps its tensors resident to avoid measuring. It decides whether offloading is worth doing at all, and vendors never quote it. A device sharing memory with the host makes no real transfer and says so.",
-          "duration_s": 2.029191,
+          "duration_s": 2.024434,
           "metrics": [
             {
               "id": "h2d",
-              "value": 1.302033e+10,
+              "value": 1.295379e+10,
               "description": "Host to device: the tensor is handed over and one row of it comes back, so almost all of the time is the trip out. Reported at the largest size measured (128 MB), since some providers copy only the big tensors and pass small ones by pointer."
             },
             {
               "id": "roundtrip",
-              "value": 1.204385e+10,
+              "value": 1.22377e+10,
               "description": "The full cost of offloading: a tensor out, one trivial operation, the result back -- the bar any offloaded work has to clear. It includes one elementwise pass on the device, which on hardware slow at that (see the activation rows) is what dominates. Measured at the smallest size (16 MB), where the trip out is reported at the largest, so the two rows are not one subtraction apart."
             },
             {
               "id": "d2h",
-              "value": 1.189559e+10,
+              "value": 1.223712e+10,
               "description": "Device to host, worked out as the difference between the round trip and an otherwise identical graph that keeps its result on the device. What is left is the return journey alone, at the round trip's size (16 MB)."
             }
           ]
@@ -2181,21 +2195,21 @@
           "quantity": "seconds",
           "unit": "s",
           "description": "The fixed cost of handing one piece of work to this provider, with the arithmetic made deliberately negligible. It is why a chip advertising tens of TOPS can still lose to the host on small work, and no throughput row can show it.",
-          "duration_s": 3.3634e-05,
+          "duration_s": 5.4914e-05,
           "metrics": [
             {
               "id": "trivial_op",
-              "value": 1.969762e-05,
+              "value": 1.922253e-05,
               "description": "One multiply over 64 values -- as close to doing nothing as a graph can get, so almost all of this is overhead."
             },
             {
               "id": "matmul_256",
-              "value": 5.07125e-05,
+              "value": 4.991896e-05,
               "description": "A 256x256x256 matrix multiply in fp16: 34 million operations, which any accelerator here should finish in well under a millisecond. Whatever this reads above the row before it is still mostly overhead."
             },
             {
               "id": "session_create",
-              "value": 0.005795707,
+              "value": 0.005533282,
               "description": "Preparing that trivial graph for execution. On providers that compile ahead of time this runs a compiler, not bookkeeping."
             }
           ]
@@ -2204,18 +2218,80 @@
     }
   ],
   "log": [
-    {"elapsed_s": 196.7565, "level": "warning", "backend": "OpenCL", "message": "  Platform \"AMD Accelerated Parallel Processing\": clCreateContextFromType (-1) — no devices, skipping"},
-    {"elapsed_s": 199.3087, "level": "warning", "backend": "LiteRT", "device": "GPU via LiteRT (WebGPU)", "device_index": 0, "message": "LiteRT GPU via LiteRT (WebGPU): the accelerator reported it was lost during the run (a Vulkan/WebGPU file-descriptor or host-memory exhaustion on this platform); any rates shown for it are unreliable and its remaining tests were skipped; the process holds 50 open file descriptors of a limit of 1024 after releasing its environment (1021 before), which is what every later backend in this process has left"},
-    {"elapsed_s": 199.827, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n1' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 200.0347, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n0' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 200.0432, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n2' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 200.0512, "level": "warning", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "1 Memcpy nodes are added to the graph clpeak for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message. (transformer_memcpy.cc:111 ApplyImpl)"},
-    {"elapsed_s": 200.0513, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user. (inference_session.cc:2985 Initialize)"},
-    {"elapsed_s": 200.0596, "level": "warning", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "1 Memcpy nodes are added to the graph clpeak for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message. (transformer_memcpy.cc:111 ApplyImpl)"},
-    {"elapsed_s": 200.0597, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user. (inference_session.cc:2985 Initialize)"},
-    {"elapsed_s": 318.5089, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_prefill", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n25' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 322.5923, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_decode", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n21' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 326.0497, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_latency", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n25' is not set.\n (inference_session.cc:3106 operator())"},
-    {"elapsed_s": 326.4534, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_latency", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n21' is not set.\n (inference_session.cc:3106 operator())"}
+    {"elapsed_s": 0.1735968, "level": "info", "backend": "CUDA", "message": "Backend: CUDA"},
+    {"elapsed_s": 0.2786169, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "message": "  Device 0: NVIDIA GeForce RTX 5060"},
+    {"elapsed_s": 0.2786826, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "single_precision_compute", "message": "    Single-precision compute"},
+    {"elapsed_s": 0.7999273, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "half_precision_compute", "message": "    Half-precision compute"},
+    {"elapsed_s": 1.827103, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "double_precision_compute", "message": "    Double-precision compute"},
+    {"elapsed_s": 3.473878, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "mixed_precision_compute", "message": "    Mixed-precision compute fp16xfp16+fp32"},
+    {"elapsed_s": 3.993068, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "bfloat16_compute", "message": "    BF16 compute bf16xbf16+fp32"},
+    {"elapsed_s": 4.508184, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute", "message": "    Integer compute (32-bit IMAD)"},
+    {"elapsed_s": 5.040695, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_int8_dp", "message": "    INT8 dot-product compute (__dp4a)"},
+    {"elapsed_s": 7.113326, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "wmma", "message": "    Tensor cores (WMMA / mma.sync)"},
+    {"elapsed_s": 51.86365, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "cublas_gemm", "message": "    cuBLASLt GEMM peak"},
+    {"elapsed_s": 112.7222, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "global_memory_bandwidth", "message": "    Global memory bandwidth"},
+    {"elapsed_s": 114.7261, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "local_memory_bandwidth", "message": "    Local memory bandwidth"},
+    {"elapsed_s": 116.2713, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "image_memory_bandwidth", "message": "    Image memory bandwidth"},
+    {"elapsed_s": 117.5126, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "transfer_bandwidth", "message": "    Transfer bandwidth"},
+    {"elapsed_s": 119.3696, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "kernel_launch_latency", "message": "    Kernel launch latency"},
+    {"elapsed_s": 119.4486, "level": "info", "backend": "Vulkan", "message": "Backend: Vulkan"},
+    {"elapsed_s": 119.646, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "message": "  Device 0: NVIDIA GeForce RTX 5060"},
+    {"elapsed_s": 119.6461, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "single_precision_compute", "message": "    Single-precision compute"},
+    {"elapsed_s": 122.5718, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "half_precision_compute", "message": "    Half-precision compute fp16xfp16+fp16"},
+    {"elapsed_s": 125.4429, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "double_precision_compute", "message": "    Double-precision compute"},
+    {"elapsed_s": 129.2876, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "mixed_precision_compute", "message": "    Mixed-precision compute fp16xfp16+fp32"},
+    {"elapsed_s": 132.1764, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "bfloat16_compute", "message": "    BF16 compute bf16xbf16+fp32"},
+    {"elapsed_s": 135.0768, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute", "message": "    Integer compute int32"},
+    {"elapsed_s": 137.9882, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_int8_dp", "message": "    INT8 dot-product compute"},
+    {"elapsed_s": 139.4867, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "coopmat", "message": "    Cooperative matrix"},
+    {"elapsed_s": 143.1446, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "global_memory_bandwidth", "message": "    Global memory bandwidth"},
+    {"elapsed_s": 145.0116, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "local_memory_bandwidth", "message": "    Local memory bandwidth"},
+    {"elapsed_s": 146.4975, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "image_memory_bandwidth", "message": "    Image memory bandwidth"},
+    {"elapsed_s": 148.4965, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "transfer_bandwidth", "message": "    Transfer bandwidth"},
+    {"elapsed_s": 150.1669, "level": "info", "backend": "Vulkan", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "kernel_launch_latency", "message": "    Kernel launch latency"},
+    {"elapsed_s": 150.2952, "level": "info", "backend": "OpenCL", "message": "Backend: OpenCL"},
+    {"elapsed_s": 150.4407, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "message": "  Platform 0: NVIDIA CUDA"},
+    {"elapsed_s": 150.4407, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "message": "  Device 0: NVIDIA GeForce RTX 5060"},
+    {"elapsed_s": 150.4569, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "single_precision_compute", "message": "    Single-precision compute"},
+    {"elapsed_s": 155.5277, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "half_precision_compute", "message": "    Half-precision compute"},
+    {"elapsed_s": 155.5278, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "double_precision_compute", "message": "    Double-precision compute"},
+    {"elapsed_s": 161.8709, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "mixed_precision_compute", "message": "    Mixed-precision compute fp16xfp16+fp32"},
+    {"elapsed_s": 161.8709, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute", "message": "    Integer compute"},
+    {"elapsed_s": 166.9516, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_fast", "message": "    Integer compute Fast 24bit"},
+    {"elapsed_s": 172.0236, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_char", "message": "    Integer char (8bit) compute"},
+    {"elapsed_s": 177.1144, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_short", "message": "    Integer short (16bit) compute"},
+    {"elapsed_s": 182.212, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "integer_compute_int8_dp", "message": "    INT8 dot-product compute"},
+    {"elapsed_s": 182.212, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "global_memory_bandwidth", "message": "    Global memory bandwidth"},
+    {"elapsed_s": 187.698, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "local_memory_bandwidth", "message": "    Local memory bandwidth"},
+    {"elapsed_s": 189.742, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "image_memory_bandwidth", "message": "    Image memory bandwidth"},
+    {"elapsed_s": 190.9888, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "transfer_bandwidth", "message": "    Transfer bandwidth"},
+    {"elapsed_s": 192.8642, "level": "info", "backend": "OpenCL", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "test": "kernel_launch_latency", "message": "    Kernel launch latency"},
+    {"elapsed_s": 192.9743, "level": "warning", "backend": "OpenCL", "message": "  Platform \"AMD Accelerated Parallel Processing\": clCreateContextFromType (-1) — no devices, skipping"},
+    {"elapsed_s": 193.2974, "level": "info", "backend": "LiteRT", "message": "Backend: LiteRT"},
+    {"elapsed_s": 193.2974, "level": "info", "backend": "LiteRT", "device": "GPU via LiteRT (WebGPU)", "device_index": 0, "message": "  Device 0: GPU via LiteRT (WebGPU)"},
+    {"elapsed_s": 193.2975, "level": "info", "backend": "LiteRT", "device": "GPU via LiteRT (WebGPU)", "device_index": 0, "test": "litert_gemm", "message": "    LiteRT matmul peak"},
+    {"elapsed_s": 199.7526, "level": "warning", "backend": "LiteRT", "device": "GPU via LiteRT (WebGPU)", "device_index": 0, "message": "LiteRT GPU via LiteRT (WebGPU): the accelerator reported it was lost during the run (a Vulkan/WebGPU file-descriptor or host-memory exhaustion on this platform); any rates shown for it are unreliable and its remaining tests were skipped; the process holds 50 open file descriptors of a limit of 1024 after releasing its environment (1021 before), which is what every later backend in this process has left"},
+    {"elapsed_s": 199.8902, "level": "info", "backend": "ONNX", "message": "Backend: ONNX"},
+    {"elapsed_s": 199.8902, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "  Device 0: NVIDIA CUDA"},
+    {"elapsed_s": 200.2199, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n1' is not set.\n (inference_session.cc:3106 operator())"},
+    {"elapsed_s": 200.4246, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n0' is not set.\n (inference_session.cc:3106 operator())"},
+    {"elapsed_s": 200.4319, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for DequantizeLinear node with name 'n2' is not set.\n (inference_session.cc:3106 operator())"},
+    {"elapsed_s": 200.4392, "level": "warning", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "1 Memcpy nodes are added to the graph clpeak for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message. (transformer_memcpy.cc:111 ApplyImpl)"},
+    {"elapsed_s": 200.4393, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user. (inference_session.cc:2985 Initialize)"},
+    {"elapsed_s": 200.4464, "level": "warning", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "1 Memcpy nodes are added to the graph clpeak for CUDAExecutionProvider. It might have negative impact on performance (including unable to run CUDA graph). Set session_options.log_severity_level=1 to see the detail logs before this message. (transformer_memcpy.cc:111 ApplyImpl)"},
+    {"elapsed_s": 200.4465, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "message": "This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled by the user. (inference_session.cc:2985 Initialize)"},
+    {"elapsed_s": 200.8736, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_gemm", "message": "    ONNX MatMul peak"},
+    {"elapsed_s": 277.0188, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_conv", "message": "    ONNX convolution peak"},
+    {"elapsed_s": 301.837, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_numeric_error", "message": "    ONNX MatMul numeric error"},
+    {"elapsed_s": 302.7332, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_prefill", "message": "    Transformer block, prefill"},
+    {"elapsed_s": 320.9683, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_prefill", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n26' is not set.\n (inference_session.cc:3106 operator())"},
+    {"elapsed_s": 321.5294, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_prefill", "message": "    Transformer block, prefill"},
+    {"elapsed_s": 321.5294, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_decode", "message": "    Transformer block, decode"},
+    {"elapsed_s": 325.035, "level": "error", "source": "onnxruntime", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_decode", "message": "Exception during initialization: /onnxruntime_src/onnxruntime/core/optimizer/transformer_memcpy.cc:253 bool onnxruntime::TransformerMemcpyImpl::IsNodeCompatibleWithProvider(const onnxruntime::Node&) const !node_provider_type.empty() was false. Provider type for ReduceMax node with name 'n21' is not set.\n (inference_session.cc:3106 operator())"},
+    {"elapsed_s": 325.0549, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_block_latency", "message": "    Transformer block latency"},
+    {"elapsed_s": 327.9884, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_activation", "message": "    ONNX activation throughput"},
+    {"elapsed_s": 338.2865, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_tensor_bw", "message": "    ONNX resident-tensor bandwidth"},
+    {"elapsed_s": 339.4934, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_transfer_bw", "message": "    ONNX host transfer bandwidth"},
+    {"elapsed_s": 342.4119, "level": "info", "backend": "ONNX", "device": "NVIDIA CUDA", "device_index": 0, "test": "onnx_dispatch_latency", "message": "    ONNX dispatch latency"}
   ]
 }
