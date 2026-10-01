@@ -58,13 +58,11 @@
 // slower.
 //
 // The fp16 shaders (compute_hp_v*) redefine it as the contracted a*b + c,
-// which SPIR-V carries as OpFMul + OpFAdd for the driver to fuse.  On Intel's
-// Windows driver an Arc A380 read both hp shapes at 4.94 TFLOPS -- its fp32
-// rate, half its 10.04 fp16 peak -- at 4 values and at 8 alike, while vkpeak's
-// contracted fp16 chain reads 9.56 on the same driver, and so do this repo's
-// OpenCL hp kernels, which have always been contracted.  vkpeak also runs
-// 32-wide work-groups against our 256, so the builtin is one suspect, not a
-// proven cause -- if the A380 stays at 4.94, the work-group size is next.
+// which SPIR-V carries as OpFMul + OpFAdd for the driver to fuse.  The
+// spelling is not what limits them: an Arc A380 read 4.94 TFLOPS both ways at
+// the SIMD16 Intel's driver picks, and 9.50 once the pipeline asked for SIMD32
+// (see runComputeKernel).  It stays contracted because that is the form measured
+// at full rate there, beside vkpeak's contracted chain at 9.49.
 
 #ifndef MAD_CHAIN_GLSL
 #define MAD_CHAIN_GLSL

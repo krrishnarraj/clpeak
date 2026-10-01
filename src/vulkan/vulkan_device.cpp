@@ -403,6 +403,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.subgroupSize = 0;
   self->info.minSubgroupSize = 0;
   self->info.maxSubgroupSize = 0;
+  self->info.maxComputeWorkgroupSubgroups = 0;
   self->info.subgroupSizeControl = false;
   {
     const bool hasSizeCtl = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
@@ -439,6 +440,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
         self->info.subgroupSizeControl = true;
         self->info.minSubgroupSize = sgCtlProps.minSubgroupSize;
         self->info.maxSubgroupSize = sgCtlProps.maxSubgroupSize;
+        self->info.maxComputeWorkgroupSubgroups = sgCtlProps.maxComputeWorkgroupSubgroups;
       }
     }
   }
