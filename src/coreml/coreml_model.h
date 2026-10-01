@@ -334,14 +334,22 @@ struct CoremlBlockShape
   // Attention as Core ML's fused scaled_dot_product_attention (iOS 18+) or
   // as explicit matmul / softmax / matmul.  Set by the caller from the spec.
   bool fusedAttention = true;
+
+  // Prefill: >0 enters the prompt through a [seq, seedWidth] seed that takes
+  // the runtime scalar, widened into the [seq, dModel] input by one more
+  // multiply the rate does not count -- the ONNX block's way in
+  // (OnnxBlockShape::seedWidth).  0 scales the whole input, which is all
+  // decode's single row needs.
+  int64_t seedWidth = 0;
 };
 
 // One llama-style decoder block: QKV projection, multi-head attention, output
 // projection + residual, SwiGLU feed-forward + residual, at the precision the
 // shape names.  Weights and the KV cache are constants; the activations are a
-// constant scaled by the runtime input `s`; the result leaves as one reduced
-// row.  Decode additionally returns the new K/V, the cache write a real step
-// performs and what keeps those projections live.
+// constant scaled by the runtime input `s` (a long prompt's, a seed widened
+// by one more multiply); the result leaves as one reduced row.  Decode
+// additionally returns the new K/V, the cache write a real step performs and
+// what keeps those projections live.
 CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh);
 
 // ---------------------------------------------------------------------------

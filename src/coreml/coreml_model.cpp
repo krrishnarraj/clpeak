@@ -1294,14 +1294,40 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
   const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
   // Weights and activations in [-0.25, 0.25): the SwiGLU squares magnitudes
   // and the down projection sums thousands of terms, which overflowed fp16
-  // at the [-0.5, 0.5) the GEMM rows use.
+  // at the [-0.5, 0.5) the GEMM rows use.  At the halved range the largest
+  // value anywhere in the block is 2059, at the 64-token prompt (1356 at 512
+  // tokens and 1187 at 2048, whose input is a seed's rank-64 widening), 31x
+  // under fp16's 65504.
   const float mag = 0.5f;
 
   // The activations are a constant scaled by a runtime scalar, and the result
-  // leaves as one reduced row (see onnxBlockModel for why).
+  // leaves as one reduced row (see onnxBlockModel for why).  A long prompt
+  // scales a [S, seedWidth] seed rather than its whole input, and one more
+  // multiply widens the seed into the [S, d] activations -- the ONNX block's
+  // way in, for the reason given there.  The widening is seedWidth / d of one
+  // projection, a quarter of a percent of the layer, and is not counted.  Its
+  // weights spread over [-a, a), a = sqrt(3 / seedWidth), so seedWidth
+  // products of the seed's [-0.25, 0.25) values sum to the plain input's rms
+  // of 0.144; the input is rank seedWidth all the same, which is what moves
+  // the magnitudes quoted above.
   p.input("s", ioDtype, {1});
-  p.constTensor("X0", act, {S, d}, coremlFillFloats(act, S * d, 0xa5a5a5a5u, mag));
-  p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {S, d}});
+  if (sh.seedWidth > 0)
+  {
+    const int64_t sw = sh.seedWidth;
+    p.constTensor("X0", act, {S, sw}, coremlFillFloats(act, S * sw, 0xa5a5a5a5u, mag));
+    p.constTensor("Xp", act, {sw, d},
+                  coremlFillFloats(act, sw * d, 0x5eed5eedu, 2.0f * std::sqrt(3.0f / (float)sw)));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"Xs", act, {S, sw}});
+    p.op("matmul",
+         {{"x", "Xs"}, {"y", "Xp"}, {"transpose_x", p.constBool("xp_tx", false)},
+          {"transpose_y", p.constBool("xp_ty", false)}},
+         {"X", act, {S, d}});
+  }
+  else
+  {
+    p.constTensor("X0", act, {S, d}, coremlFillFloats(act, S * d, 0xa5a5a5a5u, mag));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {S, d}});
+  }
 
   auto projection = [&](const std::string &out, const std::string &in, int64_t K, int64_t N,
                         uint32_t seed)

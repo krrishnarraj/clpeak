@@ -1222,11 +1222,13 @@ std::vector<uint8_t> sdpaAttributes(double scale)
   return out;
 }
 
-// The activation scale for a quantized projection input: four sigma of a
-// d-deep dot product of [-0.25, 0.25) operands, the ONNX backend's
-// blockQdqScale.  One scale for all seven projections; the feed-forward's
-// second input runs larger and saturates, which costs nothing here (int8
-// saturation is finite) -- this row measures rate.
+// The activation scale for a quantized projection, in and out: four sigma of
+// a d-deep dot product of [-1, 1] operands, the ONNX backend's
+// blockQdqScale(d).  One scale for all seven projections; the feed-forward
+// runs larger and saturates -- in the int8 graph at 512 tokens, a third of
+// the down projection's output and 0.2% of the SwiGLU product it reads --
+// which costs nothing here (int8 saturation is finite) -- this row measures
+// rate.
 float blockActScale(int64_t d)
 {
   return (float)(4.0 * std::sqrt((double)d) / 3.0 / 127.0);
@@ -1243,7 +1245,10 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   const int64_t ctx = decode ? sh.kvLen : S;
   // Weights and activations in [-0.25, 0.25): the SwiGLU squares magnitudes
   // and the down projection sums thousands of terms, which overflowed fp16
-  // at the [-0.5, 0.5) the GEMM rows use.
+  // at the [-0.5, 0.5) the GEMM rows use.  At the halved range the largest
+  // value anywhere in the block is 2073, at the 64-token prompt (1523 at 512
+  // tokens and 1054 at 2048, whose input is a seed's rank-64 widening), 31x
+  // under fp16's 65504.
   const float mag = 0.5f;
   // The quantized (int8_qdq) block keeps everything but the projections in
   // float: TFLite's QUANTIZE takes float32, and attention, the softmax and
@@ -1258,20 +1263,49 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   fp.dynamicQuant = false;
 
   const TfType stored = litertConstantType(fp);   // the float constants' stored type
+  const int64_t sw = sh.seedWidth;
   r.m.reserveBytes(4 * litertWeightBytes(p, d, d) + 2 * litertWeightBytes(p, ffn, d) +
                    litertWeightBytes(p, d, ffn) +
                    (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : stored, H * ctx * Dh) : 0) +
-                   litertElemBytes(stored, S * d));
+                   litertElemBytes(stored, sw > 0 ? (S + d) * sw : S * d));
 
   auto tensor = [&](const std::vector<int32_t> &shape, const std::string &name) {
     return r.m.addTensor(0, shape, act, name, 0);
   };
   const std::vector<int32_t> xShape = {1, (int32_t)S, (int32_t)d};
 
-  const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
-  const int s = addScalar(r, fp);
-  const int x = tensor(xShape, "X");
-  r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
+  // The activations are a resident constant scaled by the runtime scalar,
+  // and the result leaves as one reduced row (see onnxBlockModel for why).
+  // A long prompt scales a [1, S, seedWidth] seed rather than its whole
+  // input, and one more FULLY_CONNECTED widens the seed into the [1, S, d]
+  // activations -- the ONNX block's way in, for the reason given there.  The
+  // widening is seedWidth / d of one projection, a quarter of a percent of
+  // the layer, and is not counted; it stays in the float parts' type in every
+  // format.  Its weights spread over [-a, a), a = sqrt(3 / seedWidth), so
+  // seedWidth products of the seed's [-0.25, 0.25) values sum to the plain
+  // input's rms of 0.144; the input is rank seedWidth all the same, which is
+  // what moves the magnitudes quoted above and at blockActScale.
+  int s, x;
+  if (sw > 0)
+  {
+    const std::vector<int32_t> seedShape = {1, (int32_t)S, (int32_t)sw};
+    const int x0 = r.actConstant(fp, seedShape, "X0", S, sw, 0xa5a5a5a5u, mag);
+    s = addScalar(r, fp);
+    const int xs = tensor(seedShape, "Xs");
+    r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {xs}, mulOptions());
+    // [d, seedWidth]: FULLY_CONNECTED's [N, K] weight layout.
+    const int xp = r.actConstant(fp, {(int32_t)d, (int32_t)sw}, "Xp", d, sw, 0x5eed5eedu,
+                                 2.0f * std::sqrt(3.0f / (float)sw));
+    x = tensor(xShape, "X");
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, false), {xs, xp, -1}, {x}, fcOptions(fp));
+  }
+  else
+  {
+    const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
+    s = addScalar(r, fp);
+    x = tensor(xShape, "X");
+    r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
+  }
 
   // ---- One projection, in whichever format the plan asks for -------------
   // Distinct seeds so no two projections share a matrix; a repeated weight

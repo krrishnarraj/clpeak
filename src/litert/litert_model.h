@@ -165,6 +165,8 @@ clpeak_tflite::TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels
 // (decode).  The seven projections are in the plan's weight format; the
 // attention, softmax, SwiGLU and residuals stay in the plan's activation
 // type.  `int8Kv` stores the decode cache as int8 dequantized on the way in.
+// The activations are a resident constant scaled by the runtime scalar `s`
+// (a long prompt's, a seed widened by one more multiply).
 struct LitertBlockShape
 {
   int64_t dModel = 2048;
@@ -180,6 +182,12 @@ struct LitertBlockShape
   // LiteRT-LM ship, which an accelerator may fuse into one kernel or hand
   // back to the interpreter.
   bool composite = false;
+  // Prefill: >0 enters the prompt through a [1, seq, seedWidth] seed that
+  // takes the runtime scalar, widened into the [1, seq, dModel] input by one
+  // more multiply the rate does not count -- the ONNX block's way in
+  // (OnnxBlockShape::seedWidth).  0 scales the whole input, which is all
+  // decode's single row needs.
+  int64_t seedWidth = 0;
 };
 clpeak_tflite::TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh);
 
