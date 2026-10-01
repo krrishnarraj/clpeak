@@ -1031,8 +1031,15 @@ std::string quantBlockWeights(int64_t rows, int64_t cols, uint32_t seed,
 // Quantization scale for a K-deep dot product's result: four sigma of the sum
 // mapped onto the widest 8-bit code, exactly as gemm.cpp's qdqOutputScale
 // does.  Each projection has its own K, so each gets its own.  Like gemm's,
-// it assumes operands in [-1, 1]; the block's products are far smaller, so
-// their codes are coarse and none saturates.
+// it assumes operands in [-1, 1], which the block's are not.  Most of its
+// products are far smaller, so their codes are coarse; the down projection's
+// output is the exception.  At 512 tokens 60% of it lies beyond
+// 127 * blockQdqScale(5504) on fp32 values (10% before the prompt entered
+// through the seed, whose rank-64 input widens it), and in the int8 graph
+// itself -- fake quantization at every QuantizeLinear/DequantizeLinear
+// boundary, inputs at blockQdqScale(d), outputs at blockQdqScale(K) -- 8% of
+// it saturates (0% before the seed).  The two methods differ and neither
+// number is the other's.
 float blockQdqScale(int64_t K)
 {
   return (float)(4.0 * std::sqrt((double)K) / 3.0 / 127.0);
