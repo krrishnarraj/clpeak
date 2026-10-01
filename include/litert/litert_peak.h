@@ -30,6 +30,26 @@ constexpr double kLitertMaxBlockCreateUs = 60.0e6;
 constexpr double kLitertCreateGrowthFactor = 6.0;
 constexpr double kLitertCreateGrowthFloor = 2.0e6;
 
+// The gemm ladder's compile cap and the next doubling's predicted compile:
+// the ONNX backend's (kOnnxMaxCreateUs, onnxPredictCreateUs in
+// include/onnx/onnx_peak.h, which has the evidence from QNN's HTP and
+// TensorRT), because the ladder is its sixteen-layer chain and an NPU
+// compiles it as slowly.  The growth already seen is carried forward, 4x to
+// 16x, and squared on the size after one that failed to gain.
+constexpr double kLitertMaxChainCreateUs = 240.0e6;
+inline double litertPredictCreateUs(double prevUs, double prevPrevUs, bool confirming)
+{
+  double growth = 4.0;
+  if (prevPrevUs > 0.0 && prevUs > kLitertCreateGrowthFloor)
+  {
+    growth = prevUs / prevPrevUs;
+    if (confirming)
+      growth *= growth;
+    growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
+  }
+  return prevUs * growth;
+}
+
 // Which hardware accelerator a device row drives.  LiteRT's model of the
 // machine is a bitmask of three -- CPU (XNNPACK), GPU (its ML Drift
 // accelerator over OpenCL, Metal or WebGPU) and NPU (a vendor dispatch

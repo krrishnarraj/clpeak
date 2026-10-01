@@ -33,9 +33,9 @@ micro-graphs on all three side by side.
 | `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
-| `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlResidentMatMulModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
+| `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
 | `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()` |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format over a doubling size ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format, the ONNX backend's chain (sixteen distinct square layers per prediction from a 64-wide live seed) over a doubling width ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
@@ -238,9 +238,12 @@ is *storage*, decompressed into a float multiply by a `constexpr_*` op —
 except `int8_qdq`, whose `quantize` / `dequantize` pair around the matmul is
 the pattern the compiler fuses into integer arithmetic on Neural Engines
 that have it (A17 Pro, M4 and later).  So the narrow rows report flops and
-only `int8_qdq` reports ops, and on an M1 all of them read the fp16 rate
-for a compute-bound square matmul.  The difference shows where traffic is
-the limit: the block's decode rows, and the ANE's prefill (below).
+only `int8_qdq` reports ops.  On an M1 the GPU reads every format at the
+fp16 rate, and so does the CPU but for blockwise int4, a kernel there that
+runs at a sixth of it; the Neural Engine reads every narrow format faster
+than fp16, its weight traffic showing even in the gemm chain.  It shows
+more where traffic is the whole limit: the block's decode rows, and the
+ANE's prefill (below).
 
 | label | stored as | decompression | needs |
 |---|---|---|---|
@@ -284,19 +287,26 @@ fixes it.
 
 ## Reference readings, M1 Pro (macOS 26.6)
 
-`coreml_gemm`, peak over the ladder:
+`coreml_gemm`, peak over the ladder of sixteen-layer chains (macOS 27.0.1):
 
 | row | Neural Engine | GPU | CPU |
 |---|---|---|---|
-| fp16 | 8.7 TFLOPS (2048³; 6.0 at 4096, the SRAM cliff) | 4.7 | 4.9 |
-| fp32 | cannot run (plan: CPU) | 4.2 | 2.1 |
-| int8_weight | 8.7 | 4.7 | |
-| int4_weight | 8.6 (resident activations only — see the block) | 4.7 | |
-| int4_lut | 8.8 | 4.7 | |
-| int8_qdq | 9.6 TOPS (at 4096: int8 activations halve the traffic where fp16 spills) | 4.7 | |
+| fp16 | 10.5 TFLOPS (2048-wide; 5.9 at 4096) | 4.7 | 4.5-5.0 |
+| fp32 | cannot run (plan: CPU) | 4.4 | 2.0 |
+| int8_weight | 11.0 | 4.7 | 4.7 |
+| int4_weight | cannot run: declined with live activations, as in the block | 4.6 | 0.72 |
+| int4_lut | 11.4 | 4.7 | 4.6 |
+| int8_qdq | 11.5 TOPS | 4.6 | 3.6 |
 
-The ONNX backend's CoreML EP reads 8.56 at 2048 on the same machine, so the
-two agree on what they share and this one sees more.
+The ONNX backend's CoreML EP reads 10.5 for its own chain on the same
+machine, so the two agree on what they share and this one sees more.  The
+single multiply the test timed before read 8.2-8.7 on the Neural Engine,
+where one prediction's overhead and the reduction behind it were a fifth of
+the time, and 5.0-5.2 fp16 on the CPU, where BNNS ran it with both operands
+constant: given a live input the same multiply reads 4.2, under the chain.
+The chain costs time instead -- each Neural Engine format compiles for
+4 / 15 / 60 s at 1024 / 2048 / 4096-wide layers, as the CoreML provider's
+does, and the rung that confirms a plateau runs sixteen multiplies.
 
 `coreml_numeric_error` (ppm): fp16 reads **214 on the ANE, 207 on the GPU,
 3320 on the CPU** — the CPU's fp16 matmul accumulates in fp16 (it is also
@@ -323,9 +333,9 @@ codes and applies the scale after accumulating (`dequantizedTo` in
 **The M1 Pro's Neural Engine is weight-bandwidth-bound even at prefill**: a
 palettized block runs 60% faster than fp16 and a per-channel int8 one 38%,
 with identical arithmetic.  And **blockwise int4 is accepted only with the
-activations resident** — the single-matmul row passes, the layer does not,
-and a model has live activations.  That is why the block test exists beside
-the GEMM one.  Both rows are true; the block's is the one a model sees.
+activations resident**: a single matmul over constant activations ran at
+8.6 TFLOPS, and neither the layer nor the gemm chain runs, because their
+activations are live, as a model's are.
 
 Attention is Core ML's fused `scaled_dot_product_attention` where the OS has
 it (spec 9), which is what a converted model carries.  The `fp16_explicit`

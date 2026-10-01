@@ -249,22 +249,24 @@ void coremlEmitProjection(CoremlProgram &p, const std::string &out,
 // number to gate on, but declares only the version it needs (see
 // coremlSpecNeeded).
 
-// Throughput-shaped GEMM: both operands are constants and the result is
-// reduced to one row, so nothing large crosses the host boundary per run.
-// A runtime scalar `s` keeps the graph from being a constant expression.
+// Throughput-shaped GEMM chain, the ONNX backend's (onnxResidentMatMulModel's
+// chain and OnnxLiveSeed): `layers` distinct D x D multiplies in one
+// prediction, each layer's product the next one's activations, the last
+// reduced to one row so nothing large crosses the host boundary.  The
+// runtime scalar `s` scales a [D, seedWidth] seed, and one more multiply --
+// in the format's own weights, and not counted -- widens it into the first
+// layer's activations, so every multiply has a live operand and no compiler
+// can evaluate the chain at build time, while the scaling pass stays a
+// sliver of the work.
 //
-//   resultScaled = true   s scales the reduced result -- cheapest, and the
-//                         one a compiler could fold; the ladder checks that
-//                         its timings grow with the work.
-//   resultScaled = false  s scales A before the multiply, one elementwise
-//                         pass that no compiler can fold away.  The Neural
-//                         Engine compiles a dynamic operand to a slower
-//                         program (about 20%), so it is the fallback shape.
-//
-// The W8A8 form always scales the operand: its activations are quantized on
-// device from a live value, the way a layer's are.
-CoremlProgram coremlResidentMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                        CoremlWeight w, bool resultScaled);
+// Layer 0's weights span [-0.5, 0.5) like the activations; every later
+// layer's are shrunk by sqrt(12 / D), so a D-deep product returns the
+// magnitude it was given and an fp16 chain never grows toward overflow.  In
+// the W8A8 form each layer is one quantized node unit -- dequantize, matmul,
+// quantize -- reading the previous layer's codes, and that magnitude is
+// what lets one output scale serve every layer.
+CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t seedWidth,
+                                     CoremlWeight w);
 
 // y[M, N] = x[M, N] * W, x a model input and y the full result -- the plain
 // shape the accuracy rows need, since they compare actual values.

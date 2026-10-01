@@ -127,6 +127,19 @@ float litertWeightScale(int bits);                    // symmetric weights in [-
 clpeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
                                              uint32_t seedA = 0x243f6a88u, uint32_t seedW = 0x85a308d3u);
 
+// The throughput chain, the ONNX backend's gemm graph (onnxResidentMatMulModel
+// with its chain and OnnxLiveSeed): `layers` distinct D x D FULLY_CONNECTEDs
+// in the plan's format, each one's product the next one's input, the last
+// reduced to one row.  The runtime scalar `s` scales a [1, D, seedWidth]
+// seed, and one more FULLY_CONNECTED in the same format, not counted, widens
+// it into the first layer's input -- so every multiply has a live operand
+// while the scaling pass stays a sliver of the work.  Layer 0's weights span
+// [-0.5, 0.5); later layers' are shrunk by sqrt(12 / D), so a D-deep product
+// returns the magnitude it was handed, an fp16 chain never grows toward
+// overflow, and one output scale serves every integer layer.
+clpeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers,
+                                                  int64_t seedWidth);
+
 // The accuracy matmul: x [1, M, K] is a model input and y [1, M, N] the
 // whole result, so the host can hand over exact values and read back
 // exactly what the accelerator computed.  `weights` receives what the model

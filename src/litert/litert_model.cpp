@@ -908,6 +908,100 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   return r.m.build(describe(p, "matmul"));
 }
 
+TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, int64_t seedWidth)
+{
+  Recipe r;
+  r.halfRounded = p.halfRounded;
+  const int64_t sw = std::min(seedWidth, D);
+  r.m.reserveBytes(litertElemBytes(litertConstantType(p), D * sw) + litertWeightBytes(p, D, sw) +
+                   (uint64_t)layers * litertWeightBytes(p, D, D));
+  const bool integer = isInteger(p.act);
+  const int abits = bitsOf(p.act);
+  const int qmax = integer ? qmaxOf(p.act) : 0;
+  const float xScale = integer ? litertActScale(abits) : 1.0f;
+  // Uniform over +/-sqrt(3/K) once scaled from [-0.5, 0.5): variance 1/K, so
+  // a K-deep product returns the magnitude it was handed.
+  auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
+  auto shape = [&](int64_t cols) { return std::vector<int32_t>{1, (int32_t)D, (int32_t)cols}; };
+
+  const TfQuant xq = actQuant(p, xScale);
+  const int x0 = r.actConstant(p, shape(sw), "X0", D, sw, 0x243f6a88u, 1.0f, xScale, qmax, xq);
+  const int s = addScalar(r, p);
+  const int x = r.m.addTensor(0, shape(sw), p.act, "X", 0, xq);
+  r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
+
+  // W [N, K] at `mag` in the plan's weight format; `wScale` gets the scale
+  // an integer weight is stored at, which its layer's int32 bias needs.
+  auto weight = [&](const std::string &name, int64_t N, int64_t K, uint32_t seed, float mag,
+                    float &wScale) -> int {
+    const TfType wt = p.weight;
+    const std::vector<int32_t> wShape = {(int32_t)N, (int32_t)K};
+    wScale = 1.0f;
+    if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
+      return r.floatWeight(p, wShape, name, N, K, seed, mag);
+    TfQuant q;
+    q.quantizedDim = 0;
+    if (wt == TfType::F8E4M3)
+    {
+      // litertMatMulModel's 1/16 at magnitude 1: the same codes, rescaled.
+      const float scale = mag / 16.0f;
+      q.scale.assign((size_t)N, scale);
+      q.zeroPoint.assign((size_t)N, 0);
+      return r.m.addTensor(0, wShape, wt, name, r.constant(N, K, wt, seed, mag, scale), q);
+    }
+    wScale = litertWeightScale(bitsOf(wt)) * mag;
+    const int buf = r.constant(N, K, wt, seed, mag, wScale, qmaxOf(wt));
+    if (p.weightBlock > 0)
+    {
+      const int64_t nb = K / p.weightBlock;
+      const int sbuf = r.halves(std::vector<uint16_t>((size_t)(N * nb), litertFloatToHalf(wScale)));
+      q.blockSize = p.weightBlock;
+      q.scalesTensor = r.m.addTensor(0, {(int32_t)N, (int32_t)nb}, TfType::F16, name + "_s", sbuf);
+    }
+    else
+    {
+      q.scale.assign((size_t)N, wScale);
+      q.zeroPoint.assign((size_t)N, 0);
+    }
+    return r.m.addTensor(0, wShape, wt, name, buf, q);
+  };
+
+  // One FULLY_CONNECTED from `in` (quantized at `inScale`) to a tensor
+  // quantized at `outScale`; the scales mean nothing to a float plan.
+  const bool bias = fcHasBias(p);
+  auto layer = [&](const std::string &name, int in, float inScale, int64_t K, uint32_t seed,
+                   float mag, float outScale) -> int {
+    float wScale = 1.0f;
+    const int w = weight(name + "_w", D, K, seed, mag, wScale);
+    const int b = bias ? addFcBias(r, D, inScale, wScale) : -1;
+    const int out = r.m.addTensor(0, shape(D), p.act, name, 0, actQuant(p, outScale));
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {in, w, b}, {out}, fcOptions(p));
+    return out;
+  };
+
+  // Integer scales, four sigma of what each tensor holds onto the widest
+  // code: the widened seed has the [-0.5, 0.5) inputs' variance (1/12), and
+  // every layer's product the first layer's, litertOutScale(D).
+  const float aScale = integer ? (float)(4.0 * std::sqrt(1.0 / 12.0) / qmax) : 1.0f;
+  const float cScale = integer ? litertOutScale(D, abits) : 1.0f;
+  int t = layer("A", x, xScale, sw, 0x3c6ef372u, keep(sw), aScale);
+  float tScale = aScale;
+  for (int l = 0; l < layers; l++)
+  {
+    t = layer("C" + std::to_string(l), t, tScale, D, 0x85a308d3u + 0x9e3779b9u * (uint32_t)l,
+              l == 0 ? 1.0f : keep(D), cScale);
+    tScale = cScale;
+  }
+
+  // A maximum, not a sum, as in litertMatMulModel.
+  const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
+  const int out = r.m.addTensor(0, {1, 1, (int32_t)D}, p.act, "out", 0, actQuant(p, cScale));
+  r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {t, ax}, {out}, reduceOptions());
+  r.m.setInputs(0, {s});
+  r.m.setOutputs(0, {out});
+  return r.m.build(describe(p, "matmul chain"));
+}
+
 TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
                                    std::vector<float> *weights, uint32_t seedW)
 {

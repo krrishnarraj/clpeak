@@ -1059,34 +1059,106 @@ void reduceMax(CoremlProgram &p, const std::string &out, const std::string &in,
 
 } // namespace
 
-CoremlProgram coremlResidentMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                        CoremlWeight w, bool resultScaled)
+CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t seedWidth,
+                                     CoremlWeight w)
 {
   (void)spec;
   CoremlProgram p(coremlSpecNeeded(w));
   const int act = coremlActDtype(w);
   const bool qdq = (w == CoremlWeight::Int8Qdq);
-  // Bf16 has no arithmetic to scale in; the attempt fails at the multiply,
-  // which is the answer wanted.  Its scalar rides in as fp16.
-  const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
+  // Bf16 has no arithmetic to scale in, so its scalar rides in as fp16 and
+  // the seed is widened before it is scaled: the first operation the parser
+  // meets is then the matmul, and its refusal is the answer wanted.
+  const bool bf16 = (act == CML_BF16);
+  const int ioDtype = bf16 ? CML_FP16 : act;
+  const int64_t sw = std::min(seedWidth, D);
+  // Uniform over +/-sqrt(3/K) once scaled from [-0.5, 0.5): variance 1/K, so
+  // a K-deep product returns the magnitude it was handed.
+  auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
+  auto layerSeed = [](int l) { return 0x85a308d3u + 0x9e3779b9u * (uint32_t)l; };
+  const uint32_t kSeedProj = 0x3c6ef372u;
 
   p.input("s", ioDtype, {1});
-  p.constTensor("A", act, {M, K}, coremlFillFloats(act, M * K, 0x243f6a88u));
-  std::string x = "A";
-  if (!resultScaled || qdq)
+  p.constTensor("X0", act, {D, sw}, coremlFillFloats(act, D * sw, 0x243f6a88u));
+
+  auto matmul = [&](const std::string &out, const std::string &in, const std::string &wName,
+                    int64_t N) {
+    p.op("matmul",
+         {{"x", in}, {"y", wName},
+          {"transpose_x", p.constBool(out + "_tx", false)},
+          {"transpose_y", p.constBool(out + "_ty", false)}},
+         {out, act, {D, N}});
+  };
+
+  std::string x;
+  if (!qdq)
   {
-    p.op("mul", {{"x", "A"}, {"y", "s"}}, {"xs", act, {M, K}});
-    x = "xs";
-  }
-  coremlEmitProjection(p, "y", x, M, K, N, w, 0x85a308d3u, 1.0f);
-  if (resultScaled && !qdq)
-  {
-    reduceMax(p, "r", "y", {0}, true, act, {1, N});
-    p.op("mul", {{"x", "r"}, {"y", "s"}}, {"out", ioDtype, {1, N}});
+    const std::string pw = coremlEmitWeight(p, "P", w, sw, D, kSeedProj, keep(sw));
+    if (bf16)
+    {
+      matmul("A0", "X0", pw, D);
+      p.op("mul", {{"x", "A0"}, {"y", "s"}}, {"A", act, {D, D}});
+    }
+    else
+    {
+      p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {D, sw}});
+      matmul("A", "X", pw, D);
+    }
+    x = "A";
+    for (int l = 0; l < layers; l++)
+    {
+      const std::string out = "C" + std::to_string(l);
+      const std::string wn = coremlEmitWeight(p, out + "_w", w, D, D, layerSeed(l),
+                                              l == 0 ? 1.0f : keep(D));
+      matmul(out, x, wn, D);
+      x = out;
+    }
   }
   else
-    reduceMax(p, "out", "y", {0}, true, act, {1, N});
-  p.output("out", ioDtype, {1, N});
+  {
+    // W8A8: the seed is quantized and widened by a quantized multiply, and
+    // each layer dequantizes the codes the one before it quantized.  The
+    // widened activations have the [-0.5, 0.5) inputs' variance (1/12), so
+    // they quantize at four sigma of it; every layer's product has the first
+    // layer's, coremlQdqOutScale(D).
+    const std::string zp = p.constInt8("zp", 0);
+    const std::string dt = p.constString("dt", "int8");
+    auto q = [&](const std::string &out, const std::string &in, const std::string &scale,
+                 int64_t cols) {
+      p.op("quantize", {{"input", in}, {"scale", scale}, {"zero_point", zp}, {"output_dtype", dt}},
+           {out, CML_INT8, {D, cols}});
+    };
+    auto dq = [&](const std::string &out, const std::string &in, const std::string &scale,
+                  int64_t cols) {
+      p.op("dequantize", {{"input", in}, {"scale", scale}, {"zero_point", zp}}, {out, act, {D, cols}});
+    };
+    const std::string xS = p.constFloat("xs", act, coremlQdqActScale(1.0f));
+    const std::string aS = p.constFloat("as", act, (float)(4.0 * std::sqrt(1.0 / 12.0) / 127.0));
+    const std::string cS = p.constFloat("cs", act, coremlQdqOutScale(D, 1.0f));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {D, sw}});
+    q("X_q", "X", xS, sw);
+    dq("X_d", "X_q", xS, sw);
+    matmul("A", "X_d", coremlEmitWeight(p, "P", w, sw, D, kSeedProj, keep(sw)), D);
+    q("A_q", "A", aS, D);
+    std::string codes = "A_q", scale = aS;
+    for (int l = 0; l < layers; l++)
+    {
+      const std::string out = "C" + std::to_string(l);
+      dq(out + "_d", codes, scale, D);
+      matmul(out, out + "_d",
+             coremlEmitWeight(p, out + "_w", w, D, D, layerSeed(l), l == 0 ? 1.0f : keep(D)), D);
+      q(out + "_q", out, cS, D);
+      codes = out + "_q";
+      scale = cS;
+    }
+    dq("Y", codes, cS, D);
+    x = "Y";
+  }
+
+  // max, never sum: summed rows of a product are a product of summed rows,
+  // a rewrite that would turn the last multiply into a matrix-vector one.
+  reduceMax(p, "out", x, {0}, true, act, {1, D});
+  p.output("out", ioDtype, {1, D});
   return p;
 }
 
