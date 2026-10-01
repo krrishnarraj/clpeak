@@ -287,6 +287,46 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     test.emit(v.label, value, emitOpts(v.description));
   }
 
+  // TEMPORARY -- one tester round on the Arc A380 (see vk_compute_probe_t).
+  // A probe pins exactly what it names: a refused subgroup size is logged and
+  // skipped rather than retried unpinned, since that would time another case.
+  if (d.probes && clpeak::verboseEnabled())
+  {
+    for (uint32_t i = 0; i < d.numProbes; i++)
+    {
+      const vk_compute_probe_t &p = d.probes[i];
+      if (!p.spirv)
+        continue;   // that build was skipped by glslc
+      const uint32_t sg = p.requiredSubgroupSize;
+      if (sg && !(dev.info.subgroupSizeControl && sg >= dev.info.minSubgroupSize &&
+                  sg <= dev.info.maxSubgroupSize))
+      {
+        CLPEAK_VLOG("%s probe %s: subgroup size %u not offered\n",
+                    d.resultTag, p.label, sg);
+        continue;
+      }
+      VkPipeline pipeline;
+      if (!dev.createComputePipeline(p.spirv, p.spirvSize, dsLayout, pipeLayout,
+                                     pipeline, p.specInfo, sg))
+      {
+        CLPEAK_VLOG("%s probe %s: pipeline creation failed\n", d.resultTag, p.label);
+        continue;
+      }
+      uint64_t groups = globalWIs / p.wgSize;
+      if (dev.info.maxWGCount)
+        groups = std::min(groups, (uint64_t)dev.info.maxWGCount);
+      float timed = runKernel(dev, pipeline, pipeLayout, descSet, (uint32_t)groups,
+                              cfg.targetTimeUs, forceIters ? specifiedIters : 0,
+                              false, d.pushData, d.pushSize);
+      vkDestroyPipeline(dev.device, pipeline, nullptr);
+      if (timed > 0.0f)
+        CLPEAK_VLOG("%s probe %s: %.1f %s\n", d.resultTag, p.label,
+                    (double)groups * p.wgSize * d.workPerWI * 1e6 / timed, d.unit);
+      else
+        CLPEAK_VLOG("%s probe %s: dispatch failed\n", d.resultTag, p.label);
+    }
+  }
+
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
   vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);

@@ -253,6 +253,21 @@ struct vk_compute_variant_t
   size_t altSpirvSize;
 };
 
+// TEMPORARY -- one tester round on the Arc A380, removed once it is read.
+// A shader runComputeKernel times only under --verbose, after the desc's own
+// readings, and logs without emitting: it never reaches the result document.
+// It runs on the desc's buffer and descriptor set at the same total work-item
+// count, so the groups dispatched are that count over wgSize.
+struct vk_compute_probe_t
+{
+  const char *label;
+  const uint32_t *spirv;
+  size_t spirvSize;
+  uint32_t wgSize;                     // the work-group the shader declares
+  uint32_t requiredSubgroupSize;       // 0 = the driver's choice
+  const VkSpecializationInfo *specInfo;
+};
+
 struct vk_compute_desc_t
 {
   // Display / reporting
@@ -322,6 +337,9 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
+  // TEMPORARY: --verbose-only probes (see vk_compute_probe_t).
+  const vk_compute_probe_t *probes;
+  uint32_t numProbes;
 };
 
 // Top-level Vulkan benchmark runner
@@ -541,6 +559,10 @@ namespace vk_shaders {
 #ifdef VK_HAS_COMPUTE_HP_V1_ALT
   extern const uint32_t compute_hp_v1_alt[];
   extern const size_t   compute_hp_v1_alt_size;
+#endif
+#ifdef VK_HAS_PROBE_HP_VKPEAK
+  extern const uint32_t probe_hp_vkpeak[];
+  extern const size_t   probe_hp_vkpeak_size;
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V2
   extern const uint32_t compute_hp_v2[];
