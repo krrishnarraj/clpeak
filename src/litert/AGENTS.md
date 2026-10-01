@@ -39,7 +39,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
 | `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback) |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds (`clpeak::FormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s) |
@@ -217,6 +217,16 @@ kernel name from one profiled run says which kernel it was.
   written for the converter's form may be reading a bias that is not there;
   the next Pixel 7a run says whether that was it, and until then the guard
   keeps the row honest either way.
+- **`int8_qdq` races two operators** (`clpeak::FormRace`,
+  `include/common/form_race.h`): its chain is timed with the layers written
+  as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as many positions as
+  a layer is wide (`litertMatMulChainModel(..., conv1x1)`), and the row
+  reports the faster, naming it and what the other read -- an NPU compiler's
+  convolution path can be its faster int8 one (`gemm.cpp` has the ONNX
+  backend's numbers).  Each form's answer is checked on its own
+  (`answerCheck(..., conv1x1)`): a wrong one leaves the race rather than
+  withholding the row, and the accuracy row reads FULLY_CONNECTED's answer
+  with the convolution's beside it.
 - `int16x8` has no XNNPACK kernel: the CPU row is the runtime's reference
   kernel, three orders of magnitude slower, which is the honest number for
   a format that only an NPU implements -- and, sixteen multiplies to a
@@ -405,6 +415,11 @@ interleaved pairs, the other rows within 5%.
 | activation layernorm 32mb / 128mb | 138-203 / **36-39** GB/s | 16.4 / 16.9 GB/s |
 | tensor_bw 8mb / 128mb | 484 / 142 GB/s | 261 / 115 GB/s |
 | dispatch trivial / matmul_256 / create | 268 µs / 390 µs / 1.36 ms | 602 ns / 144 µs / 277 µs |
+
+The int8_qdq race ties on both: XNNPACK and Metal lower a 1x1 CONV_2D to
+the kernel FULLY_CONNECTED runs (`Fully Connected (NC, QS8, QC8W)`,
+`convolution1x1(conv_wave_matrix)`), to the microsecond and the ppm, so it
+settles at the first width and costs one more model per accelerator.
 
 The Metal delegate's layer norm falls off a cliff at 128 MB -- the 7-op
 decomposition over [8192, 4096] reads 36-39 GB/s on three runs where the

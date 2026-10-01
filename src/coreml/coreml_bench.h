@@ -13,6 +13,7 @@
 //               when the budget affords only one, the probe already is the
 //               measurement.
 
+#include <common/form_race.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_session.h"
 
@@ -127,72 +128,10 @@ inline const char *coremlLayoutName(bool transposed)
 // Engine runs the two at one rate, and compiles [in, out] ten times
 // slower, rearranging every weight first.  So the gemm chain races the two
 // at every width and the block at every point, each row reporting the
-// faster and saying which, and the accuracy matmul reads the faster one.
-//
-// Each point a race stays open costs a second compile and a second
-// measurement, so a race closes as soon as its readings allow: once one
-// layout trails by half again (kCoremlLayoutBehind) -- a slow path, which
-// a larger size does not rescue -- or once the two read within
-// kCoremlLayoutTie of each other, where the layout makes no difference and
-// the one that compiled several times faster (kCoremlLayoutCompileGap)
-// carries on, or failing that the faster.  Only a race with a margin
-// between the two is run again at the next size.
-constexpr double kCoremlLayoutTie = 1.03;
-constexpr double kCoremlLayoutBehind = 1.5;
-constexpr double kCoremlLayoutCompileGap = 2.0;
-
-class CoremlLayoutRace
-{
-public:
-  // Whether the next point times the layout `transposed` names.
-  bool runs(bool transposed) const { return open_[transposed]; }
-  bool done() const { return !open_[0] && !open_[1]; }
-
-  // A layout that could not run a point drops out: a larger size needs
-  // strictly more of everything.
-  void drop(bool transposed) { open_[transposed] = false; }
-
-  // The layout to take from a point at which both ran: `rate` is higher for
-  // faster, `createUs` what each took to compile.
-  static bool pick(const double rate[2], const double createUs[2])
-  {
-    const bool faster = rate[1] > rate[0];
-    if (rate[faster] <= rate[!faster] * kCoremlLayoutTie)
-    {
-      if (createUs[0] >= createUs[1] * kCoremlLayoutCompileGap)
-        return true;
-      if (createUs[1] >= createUs[0] * kCoremlLayoutCompileGap)
-        return false;
-    }
-    return faster;
-  }
-
-  // Close the race if this point, at which both ran, settles it.
-  void settle(const double rate[2], const double createUs[2])
-  {
-    if (!open_[0] || !open_[1] || rate[0] <= 0.0 || rate[1] <= 0.0)
-      return;
-    const bool faster = rate[1] > rate[0];
-    if (rate[faster] >= rate[!faster] * kCoremlLayoutBehind)
-      open_[!faster] = false;
-    else if (rate[faster] <= rate[!faster] * kCoremlLayoutTie)
-    {
-      const bool keep = pick(rate, createUs);
-      open_[!keep] = false;
-      sameProgram_ = createUs[!keep] >= createUs[keep] * kCoremlLayoutCompileGap;
-    }
-  }
-
-  // The race for the same weights in another shape -- the block's decode
-  // after its prefill: a fresh one, unless this one closed on a tie that
-  // the compile times split.  That is the compiler rearranging one layout
-  // into the other, the same program, which no shape changes.
-  CoremlLayoutRace nextShape() const { return sameProgram_ ? *this : CoremlLayoutRace(); }
-
-private:
-  bool open_[2] = {true, true};
-  bool sameProgram_ = false;
-};
+// faster and saying which, and the accuracy matmul reads the faster one --
+// `false` is [in, out], `true` [out, in], and clpeak::FormRace has the rule
+// that closes a race.
+using CoremlLayoutRace = clpeak::FormRace;
 
 // What the timed runs computed, read once they are over: a NaN or an
 // infinity in the row `output` reduces to withholds the timing as an error,

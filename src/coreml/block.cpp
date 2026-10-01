@@ -27,12 +27,12 @@
 // meet.  The compute plan settles it per session, and a row it declines
 // reports so instead of measuring the CPU.
 
+#include <common/units.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
 #include "coreml_model.h"
 #include "coreml_session.h"
 
-#include <cstdio>
 #include <cstring>
 #include <map>
 #include <string>
@@ -211,21 +211,18 @@ struct VariantResult
 
 // A row's word on the layout its point's weights were stored in
 // (CoremlLayoutRace), and what the other read at the same point when both
-// ran: `work` / us * `scale` is the row's figure in `unit`, or with no work
-// the row is a time.
-std::string layoutNote(const Point &pt, double work, double scale, const char *unit)
+// ran: `work` per second is the row's figure in `unit` (flops, ops, bps),
+// or with no work the row is a time.
+std::string layoutNote(const Point &pt, double work, const char *unit)
 {
   std::string s = "  Weights stored " + std::string(coremlLayoutName(pt.transposed));
   if (pt.otherUs > 0.0)
   {
-    char buf[128];
-    if (work > 0.0)
-      std::snprintf(buf, sizeof buf, ": %#.3g %s against %#.3g stored %s", work / pt.us * scale, unit,
-                    work / pt.otherUs * scale, coremlLayoutName(!pt.transposed));
-    else
-      std::snprintf(buf, sizeof buf, ": %#.3g ms against %#.3g stored %s", pt.us / 1.0e3,
-                    pt.otherUs / 1.0e3, coremlLayoutName(!pt.transposed));
-    s += buf;
+    auto figure = [&](double us) {
+      return work > 0.0 ? formatReading(work / (us * 1.0e-6), unit) : formatReading(us * 1.0e-6, "s");
+    };
+    s += ": " + figure(pt.us) + " against " + figure(pt.otherUs) + " stored " +
+         coremlLayoutName(!pt.transposed);
   }
   return s + ".";
 }
@@ -558,8 +555,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         continue;
       if (it->second.us > 0.0)
       {
-        o.description += layoutNote(it->second, blockFlops(seq, seq), 1.0e-6,
-                                    v.unit ? "TOPS" : "TFLOPS") +
+        o.description += layoutNote(it->second, blockFlops(seq, seq), v.unit ? v.unit : "flops") +
                          it->second.glue;
         test.emit(metric, (float)(blockFlops(seq, seq) * 1.0e6 / it->second.us), o);
       }
@@ -684,7 +680,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       const Point &pt = vr.decode[kDecodeKv];
       if (pt.us > 0.0)
       {
-        o.description += layoutNote(pt, (double)(wBytes + kvB), 1.0e-3, "GB/s") + pt.glue;
+        o.description += layoutNote(pt, (double)(wBytes + kvB), "bps") + pt.glue;
         test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
       }
       else
@@ -714,7 +710,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
           measurePrefill(v, vr, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
           if (pt.us > 0.0)
-            test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, 0.0, "")).c_str());
+            test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s")).c_str());
           else
             test.skip(metric, pt.status, pt.error, note);
         }
@@ -734,7 +730,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         measureDecode(v, vr, kv);
         const Point &pt = vr.decode[kv];
         if (pt.us > 0.0)
-          test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, 0.0, "")).c_str());
+          test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s")).c_str());
         else
         {
           test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, note);

@@ -137,16 +137,24 @@ clpeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int
 // [-0.5, 0.5); later layers' are shrunk by sqrt(12 / D), so a D-deep product
 // returns the magnitude it was handed, an fp16 chain never grows toward
 // overflow, and one output scale serves every integer layer.
+//
+// `conv1x1` writes every layer as a 1x1 CONV_2D over a [1, H, W, D] grid of
+// D positions instead: the same multiply-accumulates in the operator NPU
+// compilers were first built for (src/litert/gemm.cpp races the two).  For
+// the float and full-integer int8 plans; a blockwise weight has no
+// convolution form.
 clpeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers,
-                                                  int64_t seedWidth);
+                                                  int64_t seedWidth, bool conv1x1 = false);
 
 // The accuracy matmul: x [1, M, K] is a model input and y [1, M, N] the
 // whole result, so the host can hand over exact values and read back
 // exactly what the accelerator computed.  `weights` receives what the model
-// stores, dequantized -- the values a reference multiplies.
+// stores, dequantized -- the values a reference multiplies.  `conv1x1`
+// computes the same product as a 1x1 CONV_2D over a grid of M positions,
+// whose input and output hold the same bytes as the matmul's.
 clpeak_tflite::TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
                                                   std::vector<float> *weights,
-                                                  uint32_t seedW = 0x85a308d3u);
+                                                  uint32_t seedW = 0x85a308d3u, bool conv1x1 = false);
 
 // y [1, 1, N] = x [1, 1, K] (input) * W [N, K]: the streaming shape.
 clpeak_tflite::TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t seedW);

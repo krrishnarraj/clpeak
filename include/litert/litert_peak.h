@@ -10,6 +10,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -110,13 +111,17 @@ public:
     ResultStatus status = ResultStatus::Ok;
     std::string error;
   };
-  const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+  // `conv1x1` checks the same product written as a 1x1 CONV_2D, the form
+  // litert_gemm races the int8 one against.
+  const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                                 bool conv1x1 = false);
   // Empty when the format's answer is right or could not be checked;
   // otherwise the reason a rate row is refused with.
-  std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+  std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                          bool conv1x1 = false);
 
 private:
-  std::map<std::pair<int, int>, AnswerCheck> answerChecks_;   // (accelerator, format)
+  std::map<std::tuple<int, int, bool>, AnswerCheck> answerChecks_;   // (accelerator, format, conv1x1)
 };
 
 // A relative RMS error past this is a wrong answer, not a loss of precision:

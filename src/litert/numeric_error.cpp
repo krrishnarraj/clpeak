@@ -130,10 +130,10 @@ void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, in
 } // namespace
 
 const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev,
-                                                       LitertFormat f)
+                                                       LitertFormat f, bool conv1x1)
 {
   using clpeak_tflite::TfType;
-  const auto key = std::make_pair((int)dev.accel, (int)f);
+  const auto key = std::make_tuple((int)dev.accel, (int)f, conv1x1);
   auto found = answerChecks_.find(key);
   if (found != answerChecks_.end())
     return found->second;
@@ -148,7 +148,8 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
 
   std::vector<float> weights;   // exactly what the accelerator multiplies
   std::string err;
-  auto s = LitertSession::create(rt, dev, litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights),
+  auto s = LitertSession::create(rt, dev,
+                                 litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights, 0x85a308d3u, conv1x1),
                                  litertConfigFor(plan), err);
   if (!s)
   {
@@ -315,15 +316,19 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
     return c;
   }
   c.ppm = ppm;
-  CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), litertFormatLabel(f), ppm);
+  CLPEAK_VLOG("litert-numeric-error[%s/%s%s]: %.2f ppm\n", dev.displayName.c_str(), litertFormatLabel(f),
+              conv1x1 ? " as 1x1 convolution" : "", ppm);
   return c;
 }
 
-std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f)
+std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                                    bool conv1x1)
 {
-  const AnswerCheck &c = answerCheck(rt, dev, f);
+  const AnswerCheck &c = answerCheck(rt, dev, f, conv1x1);
+  const std::string what =
+      std::string(litertFormatLabel(f)) + (conv1x1 ? " written as a 1x1 convolution" : "");
   if (c.nonFinite)
-    return std::string("this accelerator's answer for ") + litertFormatLabel(f) +
+    return "this accelerator's answer for " + what +
            " holds NaN or infinity where the host's reference is finite everywhere "
            "(litert_numeric_error) -- a kernel that does not compute the format, not one that "
            "loses precision -- so its rate is not reported";
@@ -331,7 +336,7 @@ std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device
     return std::string();
   char pct[32];
   std::snprintf(pct, sizeof pct, "%.0f%%", c.ppm / 10000.0);
-  return std::string("this accelerator's answer for ") + litertFormatLabel(f) + " is wrong by " + pct +
+  return "this accelerator's answer for " + what + " is wrong by " + pct +
          " (litert_numeric_error: " + std::to_string((long long)c.ppm) +
          " ppm against the host's reference) -- a kernel that does not compute the format, not one "
          "that loses precision -- so its rate is not reported";
@@ -365,6 +370,22 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     {
       test.skip(label, c.status, c.error, note);
       continue;
+    }
+    // int8's rate races its layers written as 1x1 convolutions too
+    // (gemm.cpp): the row reads the FULLY_CONNECTED answer and says what
+    // the convolution's read.
+    if (v.f == LitertFormat::Int8Qdq)
+    {
+      const AnswerCheck &cc = answerCheck(rt, dev, v.f, true);
+      if (cc.ppm >= 0.0)
+      {
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      "  Written as a 1x1 convolution, the form litert_gemm races it against, the "
+                      "same product reads %.0f ppm.",
+                      cc.ppm);
+        note += buf;
+      }
     }
     test.emit(label, (float)c.ppm, note.c_str());
   }

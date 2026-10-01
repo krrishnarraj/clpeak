@@ -81,6 +81,14 @@ struct ScaledValue {
 // measured, in the authored unit.
 ScaledValue formatScaledValue(double value, const UnitInfo &unit);
 
+// The same as one string, from a unit token as backends write it, for a
+// reading quoted inside a description: 5.91e11, "flops" -> "591 GFLOPS".
+inline std::string formatReading(double value, const std::string &unitToken)
+{
+    const ScaledValue v = formatScaledValue(value, unitInfo(unitToken));
+    return v.text + " " + v.unit;
+}
+
 // Derive a test's category from its unit when the author did not name one.
 // Units that several categories share (bps is Bandwidth *and* the crypto and
 // string tests; s is Latency) cannot be resolved here -- those call sites

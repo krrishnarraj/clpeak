@@ -52,6 +52,7 @@
 // operations that moved, rather than a CPU number under an accelerator's
 // name.
 
+#include <common/units.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
 #include "coreml_model.h"
@@ -145,16 +146,14 @@ std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2
   std::string s = ", its weights stored " + std::string(coremlLayoutName(transposed));
   if (raceDim > 0)
   {
-    char buf[192];
-    std::snprintf(buf, sizeof buf, "; at %lld-wide layers they ran at %#.3g %s that way and %#.3g stored %s",
-                  (long long)raceDim, raceRate[transposed] / 1.0e12, unit,
-                  raceRate[!transposed] / 1.0e12, coremlLayoutName(!transposed));
-    s += buf;
+    char buf[96];
+    s += "; at " + std::to_string(raceDim) + "-wide layers they ran at " +
+         formatReading(raceRate[transposed], unit) + " that way and " +
+         formatReading(raceRate[!transposed], unit) + " stored " + coremlLayoutName(!transposed);
     // A tie the compile times settled, which would otherwise read as the
     // slower layout kept by mistake.
-    const double hi = std::max(raceRate[0], raceRate[1]), lo = std::min(raceRate[0], raceRate[1]);
-    if (hi <= lo * kCoremlLayoutTie &&
-        raceCreateUs[!transposed] >= raceCreateUs[transposed] * kCoremlLayoutCompileGap)
+    if (CoremlLayoutRace::tieOnBuild(raceRate, raceCreateUs) &&
+        raceCreateUs[!transposed] > raceCreateUs[transposed])
     {
       std::snprintf(buf, sizeof buf, ", which took %.1f s to compile against %.1f",
                     raceCreateUs[!transposed] / 1.0e6, raceCreateUs[transposed] / 1.0e6);
@@ -467,7 +466,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       const Lane &ln = lanes[bestTransposed];
       o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers" +
                       layoutNote(bestTransposed, raceDim, raceRate, raceCreateUs,
-                                 lanes[!bestTransposed].rungs, isInt ? "TOPS" : "TFLOPS") +
+                                 lanes[!bestTransposed].rungs, isInt ? "ops" : "flops") +
                       "  " + v.note + seedNote + ln.offDeviceNote + ln.glueNote;
       test.emit(label, (float)best, o);
     }

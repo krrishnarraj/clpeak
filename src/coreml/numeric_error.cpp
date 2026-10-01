@@ -198,8 +198,8 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     std::string err;
     const std::string note =
         std::string(v.note) + "  The weights stored " + coremlLayoutName(transposed) +
-        (both ? ": of the two orders, the one this compute unit multiplies faster, or compiles "
-                "faster where the two run alike."
+        (both ? ": of the two orders, the one this compute unit multiplies faster -- where the "
+                "two run alike, [in, out] unless [out, in] compiles several times faster."
               : "; stored the other way, this compute unit did not take them.");
 
     std::vector<double> a((size_t)kDim * kDim);
