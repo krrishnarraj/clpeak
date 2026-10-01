@@ -234,7 +234,9 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
   auto measure = [&](const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq, Point &pt)
   {
     std::string err;
-    auto s = CoremlSession::create(dev, coremlBlockModel(spec, shapeFor(v, decode, kvLen, prefillSeq, spec)), err);
+    CoremlBlockShape sh = shapeFor(v, decode, kvLen, prefillSeq, spec);
+    sh.transposedWeights = coremlTransposedWeights(dev);
+    auto s = CoremlSession::create(dev, coremlBlockModel(spec, sh), err);
     const std::string what = decode ? "decode_kv" + std::to_string(kvLen)
                                     : "prefill_s" + std::to_string(prefillSeq);
     if (!s)
@@ -276,6 +278,19 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     {
       pt.error = m.error.empty() ? "run failed" : m.error;
       pt.status = m.status;
+      return;
+    }
+    // What the timed runs computed.  A wrong answer withholds this point
+    // alone: each point is its own graph and its own row.
+    const std::string wrong = coremlNonFiniteReason(
+        *s, "Yr", act,
+        decode ? "for one token against " + std::to_string(kvLen) + " of context"
+               : "for a " + std::to_string(prefillSeq) + "-token prompt");
+    if (!wrong.empty())
+    {
+      CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
+      pt.error = wrong;
+      pt.status = ResultStatus::Error;
       return;
     }
     pt.us = m.meanUs;

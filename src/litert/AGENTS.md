@@ -38,7 +38,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
-| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()` |
+| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
@@ -206,7 +206,12 @@ kernel name from one profiled run says which kernel it was.
   (10% RMS), or with NaN or infinity anywhere in the answer, the gemm, conv
   and block rows for that format are refused with the figure, or the
   non-finite answer, in the reason, and the accuracy row says it is a wrong
-  answer.
+  answer.  That check runs the accuracy matmul, not the graph a rate is
+  timed on, so gemm, conv and the block also read back the row their own
+  last timed run reduced to: a NaN or an infinity there
+  (`litertNonFiniteReason()`, the ONNX backend's rule) withholds the gemm or
+  conv row, or the block's point, as an `Error`.  Nothing in those graphs
+  can overflow, and integer rows hold no NaN and are not read.
   The full-integer FULLY_CONNECTED graphs now carry the int32 zero bias a
   converted model always has (version 5 with keep_num_dims), since a kernel
   written for the converter's form may be reading a bias that is not there;

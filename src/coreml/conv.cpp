@@ -187,8 +187,14 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           break;
         }
         auto m = coremlMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+        std::string wrong;
         if (m.meanUs > 0.0)
+        {
           glueNote = coremlGlueNote(*s);
+          wrong = coremlNonFiniteReason(*s, "out", dt.dtype,
+                                        "on a " + std::to_string(sp) + "x" + std::to_string(sp) +
+                                            " feature map");
+        }
         s.reset();
         if (m.meanUs <= 0.0)
         {
@@ -197,6 +203,15 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
             firstErr = m.error;
             errStatus = m.status;
           }
+          break;
+        }
+        // A wrong answer withholds the whole row, as in gemm.cpp.
+        if (!wrong.empty())
+        {
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
+          best = 0.0;
+          firstErr = wrong;
+          errStatus = ResultStatus::Error;
           break;
         }
         rungs++;

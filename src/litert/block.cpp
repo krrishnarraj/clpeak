@@ -267,6 +267,20 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       pt.status = m.status;
       return;
     }
+    // What the timed runs computed, in the float parts' type the block
+    // returns its row in.  A wrong answer withholds this point alone: each
+    // point is its own graph and its own row.
+    const std::string wrong = litertNonFiniteReason(
+        *s, sp.act,
+        decode ? "for one token against " + std::to_string(kvLen) + " of context"
+               : "for a " + std::to_string(prefillSeq) + "-token prompt");
+    if (!wrong.empty())
+    {
+      CLPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
+      pt.error = wrong;
+      pt.status = ResultStatus::Error;
+      return;
+    }
     pt.us = m.meanUs;
     pt.status = ResultStatus::Ok;
   };

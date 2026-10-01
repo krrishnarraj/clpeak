@@ -131,7 +131,8 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 
     std::vector<float> weights;   // exactly what the device multiplies
     std::string err;
-    auto s = CoremlSession::create(dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, v.w, &weights), err);
+    auto s = CoremlSession::create(
+        dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, v.w, &weights, coremlTransposedWeights(dev)), err);
     if (!s)
     {
       test.skip(label, ResultStatus::Unsupported, err, v.note);

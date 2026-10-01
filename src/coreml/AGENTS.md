@@ -34,7 +34,7 @@ micro-graphs on all three side by side.
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
-| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()` |
+| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()`, `coremlNonFiniteReason()` (the readback below) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format, the ONNX backend's chain (sixteen distinct square layers per prediction from a 64-wide live seed) over a doubling width ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
@@ -140,6 +140,20 @@ which counts each operation whole and fails the session.  The ONNX backend
 reads the same plan through the provider's `ProfileComputePlan` option
 (`src/onnx/onnx_coreml_plan.h`) and applies the same rule.
 
+## A ladder reads back what it timed
+
+A timing says nothing about what was computed, and a unit that
+miscompiles a graph times it like a correct one.  So once a rung's timed
+phase is over, `gemm.cpp`, `conv.cpp` and `block.cpp` read the row the
+last prediction reduced to, and `coremlNonFiniteReason()` turns a NaN or
+an infinity in it into an `Error` -- the ONNX backend's rule (its
+"A ladder reads back what it timed" has the reasoning).  In gemm and conv
+that withholds the whole row; in the block, the one point, which is its
+own row.  It rests on nothing in these graphs being able to overflow: the
+gemm chains keep each layer's magnitude (the reduced row reads 11-48 on an
+M1 Pro) and the block's largest value sits 31x under fp16's.  It sees only
+the reduced row, so it is a tripwire, not an accuracy test.
+
 ## Core ML's compile cache is purged, and free space is checked
 
 E5RT, the runtime behind the GPU and the Neural Engine, caches every model
@@ -239,9 +253,11 @@ except `int8_qdq`, whose `quantize` / `dequantize` pair around the matmul is
 the pattern the compiler fuses into integer arithmetic on Neural Engines
 that have it (A17 Pro, M4 and later).  So the narrow rows report flops and
 only `int8_qdq` reports ops.  On an M1 the GPU reads every format at the
-fp16 rate, and so does the CPU but for blockwise int4, a kernel there that
-runs at a sixth of it; the Neural Engine reads every narrow format faster
-than fp16, its weight traffic showing even in the gemm chain.  It shows
+fp16 rate, and so does the CPU but for blockwise int4, which BNNS runs at a
+sixth of it with the blocks down the columns of the [in, out] weight these
+models give the CPU (at the full rate stored [out, in] -- see
+`coremlTransposedWeights`); the Neural Engine reads every narrow format
+faster than fp16, its weight traffic showing even in the gemm chain.  It shows
 more where traffic is the whole limit: the block's decode rows, and the
 ANE's prefill (below).
 
@@ -304,9 +320,12 @@ single multiply the test timed before read 8.2-8.7 on the Neural Engine,
 where one prediction's overhead and the reduction behind it were a fifth of
 the time, and 5.0-5.2 fp16 on the CPU, where BNNS ran it with both operands
 constant: given a live input the same multiply reads 4.2, under the chain.
-The chain costs time instead -- each Neural Engine format compiles for
-4 / 15 / 60 s at 1024 / 2048 / 4096-wide layers, as the CoreML provider's
-does, and the rung that confirms a plateau runs sixteen multiplies.
+The chain costs time instead: the rung that confirms a plateau runs
+sixteen multiplies.  Its compiles cost little: on the Neural Engine the
+weights are stored [out, in] (`coremlTransposedWeights`, which has the
+numbers), and its formats compile in 0.5 / 1.2 / 4 s at 1024 / 2048 /
+4096-wide layers, where the [in, out] layout every other unit keeps took
+4 / 15 / 60 s -- the figures the ONNX backend's CoreML provider pays.
 
 `coreml_numeric_error` (ppm): fp16 reads **214 on the ANE, 207 on the GPU,
 3320 on the CPU** — the CPU's fp16 matmul accumulates in fp16 (it is also
@@ -318,7 +337,9 @@ the exact scale-times-code values, not fp16-rounded ones: the ANE keeps the
 codes and applies the scale after accumulating (`dequantizedTo` in
 `coreml_model.cpp` says how that was established).
 
-`coreml_block`, Neural Engine:
+`coreml_block`, Neural Engine (its projections' weights stored [out, in]
+since 2026-10-01, which took its 23 sessions' compiles from 247 s to 36 s,
+every row within 2%):
 
 | row | prefill s512 | decode kv2048 | per token |
 |---|---|---|---|

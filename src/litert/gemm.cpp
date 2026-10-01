@@ -307,6 +307,9 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       }
 
       auto m = litertMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+      const std::string wrong =
+          (m.meanUs > 0.0) ? litertNonFiniteReason(*s, plan.act, "at " + std::to_string(D) + "-wide layers")
+                           : std::string();
       s.reset();   // the model's memory goes before the next size is built
       if (m.meanUs <= 0.0)
       {
@@ -315,6 +318,16 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
           firstErr = m.error;
           errStatus = m.status;
         }
+        break;
+      }
+      // A wrong answer withholds the whole row, not just the rungs from here
+      // up: a rung that came back finite is no alibi for the accelerator.
+      if (!wrong.empty())
+      {
+        CLPEAK_VLOG("litert-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrong.c_str());
+        best = 0.0;
+        firstErr = wrong;
+        errStatus = ResultStatus::Error;
         break;
       }
 

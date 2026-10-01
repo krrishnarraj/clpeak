@@ -5,8 +5,11 @@
 // handful of operations, so it emits the ML Program (MIL) protobuf wire
 // format and the weight blob directly -- no protobuf library, no coremltools,
 // no .mlpackage shipped as an asset, and byte-identical models on every
-// device, which is what makes the Neural-Engine-vs-GPU-vs-CPU comparison
-// mean anything.  The layout it produces is exactly what coremltools writes:
+// machine, the compute units' differing only in the order the Neural
+// Engine's weights are stored in (coremlTransposedWeights) -- the same
+// arithmetic everywhere, which is what makes the
+// Neural-Engine-vs-GPU-vs-CPU comparison mean anything.  The layout it
+// produces is exactly what coremltools writes:
 // Model.proto wrapping a MILSpec.Program, weights in the MIL storage-format
 // blob file, packaged as an .mlpackage directory (coreml_session.mm writes
 // that directory; this file only produces its two byte strings).
@@ -230,17 +233,27 @@ float coremlQdqOutScale(int64_t K, float magnitude);
 // to feed the matmul.  When `dequantized` is non-null it receives the exact
 // values the device will multiply -- the stored codes widened -- which is
 // what an accuracy reference has to use.
+//
+// `transposed` stores W as its transpose, [N, K] -- the [out, in] layout a
+// converted Linear layer carries, read by a matmul with transpose_y -- with
+// its scales along the same axes.  That is the layout the Neural Engine's
+// compiler takes as it is (coremlTransposedWeights, in coreml_bench.h, says
+// which units get it and what it saves).  The values, and `dequantized`,
+// are W's either way.
 std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
                              CoremlWeight w, int64_t K, int64_t N, uint32_t seed,
-                             float magnitude, std::vector<float> *dequantized = nullptr);
+                             float magnitude, std::vector<float> *dequantized = nullptr,
+                             bool transposed = false);
 
 // out = in * W in the format's arithmetic; for Int8Qdq the activations are
 // quantized on the way in and the result quantized and dequantized on the way
 // out, the shape a W8A8 layer has.  `in` is [M, K] in coremlActDtype(w).
+// `transposed` stores W as [N, K] and multiplies with transpose_y (see
+// coremlEmitWeight).
 void coremlEmitProjection(CoremlProgram &p, const std::string &out,
                           const std::string &in, int64_t M, int64_t K, int64_t N,
                           CoremlWeight w, uint32_t seed, float magnitude,
-                          std::vector<float> *dequantized = nullptr);
+                          std::vector<float> *dequantized = nullptr, bool transposed = false);
 
 // ---------------------------------------------------------------------------
 // Recipes
@@ -264,14 +277,17 @@ void coremlEmitProjection(CoremlProgram &p, const std::string &out,
 // magnitude it was given and an fp16 chain never grows toward overflow.  In
 // the W8A8 form each layer is one quantized node unit -- dequantize, matmul,
 // quantize -- reading the previous layer's codes, and that magnitude is
-// what lets one output scale serve every layer.
+// what lets one output scale serve every layer.  `transposed` stores every
+// weight as [N, K] (coremlEmitWeight).
 CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t seedWidth,
-                                     CoremlWeight w);
+                                     CoremlWeight w, bool transposed);
 
 // y[M, N] = x[M, N] * W, x a model input and y the full result -- the plain
-// shape the accuracy rows need, since they compare actual values.
+// shape the accuracy rows need, since they compare actual values.  `transposed`
+// as for the projections, so an accuracy row reads the layout its rates do.
 CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                     CoremlWeight w, std::vector<float> *dequantized);
+                                     CoremlWeight w, std::vector<float> *dequantized,
+                                     bool transposed = false);
 
 // y[1, cols] = x[1, d] * W[d, cols] in fp16: one matrix-vector product
 // against a resident weight, the operation generating a token performs.
@@ -343,6 +359,9 @@ struct CoremlBlockShape
   // (OnnxBlockShape::seedWidth).  0 scales the whole input, which is all
   // decode's single row needs.
   int64_t seedWidth = 0;
+
+  // The seven projections' weights stored as [N, K] (coremlEmitWeight).
+  bool transposedWeights = false;
 };
 
 // One llama-style decoder block: QKV projection, multi-head attention, output

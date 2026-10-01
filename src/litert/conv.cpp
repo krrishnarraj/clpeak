@@ -204,6 +204,11 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           break;
         }
         auto m = litertMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+        const std::string wrong =
+            (m.meanUs > 0.0) ? litertNonFiniteReason(*s, plan.act,
+                                                     "on a " + std::to_string(sp) + "x" + std::to_string(sp) +
+                                                         " feature map")
+                             : std::string();
         s.reset();
         if (m.meanUs <= 0.0)
         {
@@ -212,6 +217,15 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             firstErr = m.error;
             errStatus = m.status;
           }
+          break;
+        }
+        // A wrong answer withholds the whole row, as in gemm.cpp.
+        if (!wrong.empty())
+        {
+          CLPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
+          best = 0.0;
+          firstErr = wrong;
+          errStatus = ResultStatus::Error;
           break;
         }
         rungs++;

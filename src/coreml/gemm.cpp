@@ -28,6 +28,11 @@
 // its float rows read up to a tenth lower than before, and the chain is
 // still the faster form.
 //
+// The Neural Engine's chains store every weight as [N, K], the layout its
+// compiler takes as it is (coremlTransposedWeights): the test compiles its
+// 2048-wide layers in about a second there instead of fifteen, at the same
+// rates.
+//
 // One test, `coreml_gemm`: the same chain in every format Core ML can store a
 // weight in.  Core ML's arithmetic is fp16 or fp32 and nothing else, so most
 // narrow rows report flops -- the weights are unpacked into a float multiply
@@ -231,8 +236,9 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       }
 
       std::string err;
-      auto s = CoremlSession::create(dev, coremlMatMulChainModel(spec, D, kChainLayers, kSeedWidth, v.w),
-                                     err);
+      auto s = CoremlSession::create(
+          dev, coremlMatMulChainModel(spec, D, kChainLayers, kSeedWidth, v.w, coremlTransposedWeights(dev)),
+          err);
       if (!s)
       {
         CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide create failed: %s\n", dev.displayName.c_str(),
@@ -284,8 +290,12 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       }
 
       auto m = coremlMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+      std::string wrong;
       if (m.meanUs > 0.0)
+      {
         glueNote = coremlGlueNote(*s);
+        wrong = coremlNonFiniteReason(*s, "out", ioDtype, "at " + std::to_string(D) + "-wide layers");
+      }
       s.reset();   // the temp files go before the next size is written
       if (m.meanUs <= 0.0)
       {
@@ -294,6 +304,16 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           firstErr = m.error;
           errStatus = m.status;
         }
+        break;
+      }
+      // A wrong answer withholds the whole row, not just the rungs from here
+      // up: a rung that came back finite is no alibi for the unit.
+      if (!wrong.empty())
+      {
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrong.c_str());
+        best = 0.0;
+        firstErr = wrong;
+        errStatus = ResultStatus::Error;
         break;
       }
 

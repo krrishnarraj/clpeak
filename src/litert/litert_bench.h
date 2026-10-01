@@ -27,8 +27,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 // A kernel that declines a type at prepare time ("input->type !=
 // kTfLiteFloat32", "failed to prepare") is the runtime saying it has no
@@ -92,6 +94,58 @@ inline bool litertBindScalar(LitertSession &s, const LitertPlan &p, std::string 
   const bool integer = (p.act == clpeak_tflite::TfType::I8 || p.act == clpeak_tflite::TfType::I16);
   const std::string v = litertScalarBytes(p.act, integer ? 1.0f : 1.0009765625f);
   return s.writeInput(0, v.data(), v.size(), error);
+}
+
+// What the timed runs computed, read once they are over: a NaN or an
+// infinity in the row the graph reduces to (output 0, of type `t`)
+// withholds the timing as an error, the ONNX backend's rule
+// (onnxNonFiniteReason, src/onnx/onnx_session.cpp).  Nothing in these
+// graphs can overflow -- the gemm chains keep each layer's magnitude and the
+// block's largest value sits 31x under fp16's -- so either one says the
+// accelerator computed something other than the graph; the answer check
+// (wrongAnswer) sees a different graph, the accuracy matmul, and cannot
+// stand in.  Only the reduced row is read, so a wrong but finite answer
+// passes: a tripwire, not an accuracy test.  Integer rows hold no NaN and
+// are not read.  Empty when the row is finite or cannot be read.
+inline std::string litertNonFiniteReason(LitertSession &s, clpeak_tflite::TfType t,
+                                         const std::string &where)
+{
+  using clpeak_tflite::TfType;
+  if (t != TfType::F32 && t != TfType::F16 && t != TfType::BF16)
+    return std::string();
+  std::vector<uint8_t> raw;
+  std::string err;
+  const size_t es = (t == TfType::F32) ? 4 : 2;
+  if (!s.outputBytes(0, raw, err) || raw.empty() || raw.size() % es != 0)
+    return std::string();
+  // Every exponent bit set is an infinity or a NaN; read as bits, so no
+  // floating-point mode can compile the test away.
+  const uint16_t exp16 = (t == TfType::F16) ? 0x7c00u : 0x7f80u;
+  const size_t n = raw.size() / es;
+  size_t bad = 0;
+  for (size_t i = 0; i < n; i++)
+  {
+    if (es == 4)
+    {
+      uint32_t x;
+      std::memcpy(&x, &raw[4 * i], 4);
+      bad += (x & 0x7f800000u) == 0x7f800000u;
+    }
+    else
+    {
+      uint16_t h;
+      std::memcpy(&h, &raw[2 * i], 2);
+      bad += (h & exp16) == exp16;
+    }
+  }
+  if (bad == 0)
+    return std::string();
+  const std::string count = std::to_string(n);
+  return "the accelerator returned NaN or infinity " + where + " (" +
+         (bad == n ? "all " + count : std::to_string(bad) + " of the " + count) +
+         " values of the row the graph reduces to), and every value in this graph stays far "
+         "inside its type's range: it computed something other than this graph, so its timing "
+         "is withheld";
 }
 
 // Whether a profiled kernel tag names an integer kernel.  The GPU
