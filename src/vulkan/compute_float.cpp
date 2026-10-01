@@ -2,7 +2,6 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
-#include <cstddef>
 
 // ---------------------------------------------------------------------------
 // Floating-point compute benchmarks.
@@ -76,40 +75,6 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.pushSize    = sizeof(A);
   d.skip        = !dev.info.float16Supported;
   d.skipMsg     = "shaderFloat16 not supported! Skipped";
-
-#ifdef VK_HAS_PROBE_HP_VKPEAK
-  // TEMPORARY -- one tester round on the Arc A380, removed once it is read.
-  // The A380 reads 4.94 TFLOPS here on both shapes, half its fp16 peak, while
-  // vkpeak reads 9.56 on the same driver and OpenCL 9.56 in the same run.
-  // ncnn pins each pipeline to the device's reported subgroup size (32 on
-  // Intel, so SIMD32) and we pin nothing, so these time our affine shader at
-  // each pinned width, and vkpeak's own shader with and without its pin and
-  // work-group.  --verbose only; nothing here reaches the result rows.
-  struct ProbeSpec { uint32_t wg; int32_t loop; };
-  static const VkSpecializationMapEntry probeMap[] = {
-    { 0, offsetof(ProbeSpec, wg),   sizeof(uint32_t) },
-    { 1, offsetof(ProbeSpec, loop), sizeof(int32_t)  },
-  };
-  static const ProbeSpec spec32 = { 32, 128 }, spec256 = { 256, 128 };
-  const VkSpecializationInfo si32  = { 2, probeMap, sizeof(ProbeSpec), &spec32 };
-  const VkSpecializationInfo si256 = { 2, probeMap, sizeof(ProbeSpec), &spec256 };
-  const vk_compute_probe_t probes[] = {
-    { "half alt sg8",      VK_ALT_SHADER(compute_hp_v1), 256, 8,  nullptr },
-    { "half alt sg16",     VK_ALT_SHADER(compute_hp_v1), 256, 16, nullptr },
-    { "half alt sg32",     VK_ALT_SHADER(compute_hp_v1), 256, 32, nullptr },
-#ifdef VK_HAS_COMPUTE_HP_V2
-    { "half2 alt sg32",    VK_ALT_SHADER(compute_hp_v2), 256, 32, nullptr },
-#endif
-#ifdef VK_HAS_COMPUTE_HP_V4
-    { "half4 alt sg32",    VK_ALT_SHADER(compute_hp_v4), 256, 32, nullptr },
-#endif
-    { "vkpeak wg32 sg32",  vk_shaders::probe_hp_vkpeak, vk_shaders::probe_hp_vkpeak_size, 32,  32, &si32  },
-    { "vkpeak wg32",       vk_shaders::probe_hp_vkpeak, vk_shaders::probe_hp_vkpeak_size, 32,  0,  &si32  },
-    { "vkpeak wg256",      vk_shaders::probe_hp_vkpeak, vk_shaders::probe_hp_vkpeak_size, 256, 0,  &si256 },
-  };
-  d.probes    = probes;
-  d.numProbes = sizeof(probes) / sizeof(probes[0]);
-#endif
   return runComputeKernel(dev, cfg, d);
 }
 #endif

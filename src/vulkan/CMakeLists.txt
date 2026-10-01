@@ -34,8 +34,6 @@ set(CLPEAK_VK_SHADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_hp_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_hp_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_hp_v4.comp
-    # TEMPORARY: one tester round on the Arc A380 (see the shader).
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/probe_hp_vkpeak.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_dp_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_dp_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_dp_v4.comp
