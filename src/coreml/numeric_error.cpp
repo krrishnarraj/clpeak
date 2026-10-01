@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,10 @@ namespace
 // Fixed size on every device: the error depends on the accumulation depth
 // K, so it has to be the same K everywhere or the rows are not comparable.
 constexpr int64_t kDim = 1024;
+
+// What each weight layout gets to show its speed in: a few hundred
+// multiplies, enough to tell a slow kernel from a fast one.
+constexpr unsigned int kRaceBudgetUs = 200000;
 
 struct Variant
 {
@@ -129,31 +134,73 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
       continue;
     }
 
-    std::vector<float> weights;   // exactly what the device multiplies
-    std::string err;
-    auto s = CoremlSession::create(
-        dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, v.w, &weights, coremlTransposedWeights(dev)), err);
-    if (!s)
-    {
-      test.skip(label, ResultStatus::Unsupported, err, v.note);
-      continue;
-    }
-    if (!s->onDevice())
-    {
-      test.skip(label, ResultStatus::Unsupported, coremlOffDeviceReason(dev, *s), v.note);
-      continue;
-    }
-
     // The activations: the same generator as the speed rows, rounded to the
     // width the model takes them in, which is the width the device sees.
     const std::string xRaw = coremlFillFloats(ioDtype, kDim * kDim, 0x243f6a88u);
-    void *xp = s->bindInput("x", ioDtype, {kDim, kDim}, xRaw.size(), err);
-    if (!xp)
+
+    // The weights stored both ways, each timed, and the faster one's answer
+    // is the row's: the speed rows race the two layouts (CoremlLayoutRace),
+    // and a layout can change the kernel and with it the arithmetic -- the
+    // M1 Pro's CPU multiplies blockwise int4 stored [in, out] in a slow
+    // kernel accumulating in fp32 (272 ppm), and stored [out, in], seven
+    // times faster, in the fp16 one its other rows read (3218).
+    std::vector<float> weights;   // exactly what the device multiplies, either way
+    std::unique_ptr<CoremlSession> sess[2];
+    double rate[2] = {0.0, 0.0}, createUs[2] = {0.0, 0.0};
+    std::string why[2];
+    ResultStatus whyStatus[2] = {ResultStatus::Unsupported, ResultStatus::Unsupported};
+    for (int t = 0; t < 2; t++)
     {
-      test.skip(label, ResultStatus::Error, err, v.note);
+      std::string err;
+      auto s = CoremlSession::create(
+          dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, v.w, &weights, t), err);
+      if (!s)
+      {
+        why[t] = err;
+        continue;
+      }
+      if (!s->onDevice())
+      {
+        why[t] = coremlOffDeviceReason(dev, *s);
+        continue;
+      }
+      void *xp = s->bindInput("x", ioDtype, {kDim, kDim}, xRaw.size(), err);
+      if (!xp)
+      {
+        why[t] = err;
+        whyStatus[t] = ResultStatus::Error;
+        continue;
+      }
+      std::memcpy(xp, xRaw.data(), xRaw.size());
+      const auto m = coremlMeasure(*s, warmupCount, kRaceBudgetUs, false, 0);
+      if (m.meanUs <= 0.0)
+      {
+        why[t] = m.error;
+        whyStatus[t] = m.status;
+        continue;
+      }
+      rate[t] = 1.0 / m.meanUs;
+      createUs[t] = coremlCreateUs(*s);
+      CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.1f us per multiply, create %.2f s\n",
+                  dev.displayName.c_str(), label, coremlLayoutName(t), m.meanUs,
+                  createUs[t] / 1.0e6);
+      sess[t] = std::move(s);
+    }
+    if (!sess[0] && !sess[1])
+    {
+      test.skip(label, whyStatus[0], why[0], v.note);
       continue;
     }
-    std::memcpy(xp, xRaw.data(), xRaw.size());
+    const bool both = sess[0] && sess[1];
+    const bool transposed = both ? CoremlLayoutRace::pick(rate, createUs) : (bool)sess[1];
+    std::unique_ptr<CoremlSession> s = std::move(sess[transposed]);
+    sess[!transposed].reset();
+    std::string err;
+    const std::string note =
+        std::string(v.note) + "  The weights stored " + coremlLayoutName(transposed) +
+        (both ? ": of the two orders, the one this compute unit multiplies faster, or compiles "
+                "faster where the two run alike."
+              : "; stored the other way, this compute unit did not take them.");
 
     std::vector<double> a((size_t)kDim * kDim);
     for (int64_t i = 0; i < kDim * kDim; i++)
@@ -182,13 +229,13 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 
     if (!s->run(err))
     {
-      test.skip(label, ResultStatus::Error, err, v.note);
+      test.skip(label, ResultStatus::Error, err, note);
       continue;
     }
     std::vector<uint8_t> raw;
     if (!s->outputBytes("y", raw, err))
     {
-      test.skip(label, ResultStatus::Error, err, v.note);
+      test.skip(label, ResultStatus::Error, err, note);
       continue;
     }
     s.reset();
@@ -198,7 +245,7 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     {
       if (raw.size() != got.size() * 4)
       {
-        test.skip(label, ResultStatus::Error, "unexpected output size", v.note);
+        test.skip(label, ResultStatus::Error, "unexpected output size", note);
         continue;
       }
       std::memcpy(got.data(), raw.data(), raw.size());
@@ -207,7 +254,7 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     {
       if (raw.size() != got.size() * 2)
       {
-        test.skip(label, ResultStatus::Error, "unexpected output size", v.note);
+        test.skip(label, ResultStatus::Error, "unexpected output size", note);
         continue;
       }
       for (size_t i = 0; i < got.size(); i++)
@@ -239,7 +286,7 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     const double ppm = relativeRmsPpm(got, ref);
     if (ppm < 0.0)
     {
-      test.skip(label, ResultStatus::Error, "reference result was all zero", v.note);
+      test.skip(label, ResultStatus::Error, "reference result was all zero", note);
       continue;
     }
     // A NaN or an infinity anywhere in the compute unit's answer makes the
@@ -253,10 +300,10 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
                 "this compute unit's answer holds NaN or infinity where the host's "
                 "double-precision reference is finite everywhere: it computed something "
                 "other than this matmul, so there is no error figure to report",
-                v.note);
+                note);
       continue;
     }
-    test.emit(label, (float)ppm, v.note);
+    test.emit(label, (float)ppm, note.c_str());
   }
 
   test.end();

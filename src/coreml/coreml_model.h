@@ -5,8 +5,8 @@
 // handful of operations, so it emits the ML Program (MIL) protobuf wire
 // format and the weight blob directly -- no protobuf library, no coremltools,
 // no .mlpackage shipped as an asset, and byte-identical models on every
-// machine, the compute units' differing only in the order the Neural
-// Engine's weights are stored in (coremlTransposedWeights) -- the same
+// machine, the compute units' differing at most in the order a weight is
+// stored in, which each test races (CoremlLayoutRace) -- the same
 // arithmetic everywhere, which is what makes the
 // Neural-Engine-vs-GPU-vs-CPU comparison mean anything.  The layout it
 // produces is exactly what coremltools writes:
@@ -236,10 +236,10 @@ float coremlQdqOutScale(int64_t K, float magnitude);
 //
 // `transposed` stores W as its transpose, [N, K] -- the [out, in] layout a
 // converted Linear layer carries, read by a matmul with transpose_y -- with
-// its scales along the same axes.  That is the layout the Neural Engine's
-// compiler takes as it is (coremlTransposedWeights, in coreml_bench.h, says
-// which units get it and what it saves).  The values, and `dequantized`,
-// are W's either way.
+// its scales along the same axes.  Which of the two a unit runs faster
+// depends on the unit and the format, so the tests race them
+// (CoremlLayoutRace, in coreml_bench.h, has the numbers).  The values, and
+// `dequantized`, are W's either way.
 std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
                              CoremlWeight w, int64_t K, int64_t N, uint32_t seed,
                              float magnitude, std::vector<float> *dequantized = nullptr,
@@ -284,7 +284,7 @@ CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t se
 
 // y[M, N] = x[M, N] * W, x a model input and y the full result -- the plain
 // shape the accuracy rows need, since they compare actual values.  `transposed`
-// as for the projections, so an accuracy row reads the layout its rates do.
+// as for the projections: an accuracy row reads the layout that ran faster.
 CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
                                      CoremlWeight w, std::vector<float> *dequantized,
                                      bool transposed = false);

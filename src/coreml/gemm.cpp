@@ -28,10 +28,15 @@
 // its float rows read up to a tenth lower than before, and the chain is
 // still the faster form.
 //
-// The Neural Engine's chains store every weight as [N, K], the layout its
-// compiler takes as it is (coremlTransposedWeights): the test compiles its
-// 2048-wide layers in about a second there instead of fifteen, at the same
-// rates.
+// Each width is timed with the weights stored both ways, [in, out] and
+// [out, in], until the readings settle which one this unit runs faster
+// (CoremlLayoutRace), and the row takes the faster, names it and says what
+// the other read.  On an M1 Pro every row's race settles at the first width
+// or the second but the GPU's int4_weight, whose layouts stay 7-18% apart
+// all the way up, so the race costs about one more model per row; and on
+// the Neural Engine, which runs the two at one rate, the climb goes on in
+// the [out, in] layout its compiler takes as it is: 2048-wide layers
+// compile in about a second there instead of fifteen.
 //
 // One test, `coreml_gemm`: the same chain in every format Core ML can store a
 // weight in.  Core ML's arithmetic is fp16 or fp32 and nothing else, so most
@@ -53,6 +58,7 @@
 #include "coreml_session.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -130,6 +136,36 @@ const Variant kVariants[] = {
      "Neural Engine doing this in 16-bit."},
 };
 
+// A row's word on the layout of its weights (CoremlLayoutRace): the order
+// the peak was measured in and, from the last width both were timed at,
+// what the other order read there -- or that it never ran.
+std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2],
+                       const double raceCreateUs[2], int otherRungs, const char *unit)
+{
+  std::string s = ", its weights stored " + std::string(coremlLayoutName(transposed));
+  if (raceDim > 0)
+  {
+    char buf[192];
+    std::snprintf(buf, sizeof buf, "; at %lld-wide layers they ran at %#.3g %s that way and %#.3g stored %s",
+                  (long long)raceDim, raceRate[transposed] / 1.0e12, unit,
+                  raceRate[!transposed] / 1.0e12, coremlLayoutName(!transposed));
+    s += buf;
+    // A tie the compile times settled, which would otherwise read as the
+    // slower layout kept by mistake.
+    const double hi = std::max(raceRate[0], raceRate[1]), lo = std::min(raceRate[0], raceRate[1]);
+    if (hi <= lo * kCoremlLayoutTie &&
+        raceCreateUs[!transposed] >= raceCreateUs[transposed] * kCoremlLayoutCompileGap)
+    {
+      std::snprintf(buf, sizeof buf, ", which took %.1f s to compile against %.1f",
+                    raceCreateUs[!transposed] / 1.0e6, raceCreateUs[transposed] / 1.0e6);
+      s += buf;
+    }
+  }
+  else if (otherRungs == 0)
+    s += "; stored " + std::string(coremlLayoutName(!transposed)) + " they did not run here";
+  return s + ".";
+}
+
 // What the chain holds: the seed and the weights that widen it, then every
 // layer's weights.
 uint64_t operandBytes(CoremlWeight w, int64_t D)
@@ -151,10 +187,11 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
        "Matrix-multiply rate through Core ML on this compute unit, one weight "
        "format per row: sixteen distinct square multiplies chained in one "
        "prediction, each layer's product feeding the next, swept over layer "
-       "widths and reported at its best.  The same model runs on the Neural "
-       "Engine, the GPU and the CPU, and the compute plan proves which one "
-       "actually did the multiplies: a row Core ML would have moved to another "
-       "unit reports unsupported instead.",
+       "widths and reported at its best, with the weights stored in whichever "
+       "of their two orders, [in, out] or [out, in], this unit runs faster.  "
+       "The same chain runs on the Neural Engine, the GPU and the CPU, and the "
+       "compute plan proves which one actually did the multiplies: a row Core "
+       "ML would have moved to another unit reports unsupported instead.",
        TestShape::Heterogeneous, "weight format"});
 
   const std::string sweep = "Peak over a doubling sweep of layer widths, sixteen layers chained "
@@ -191,14 +228,28 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
     double best = 0.0;
     int64_t bestDim = 0;
+    bool bestTransposed = false;
     std::string firstErr;
     ResultStatus errStatus = ResultStatus::Unsupported;
-    int rungs = 0;
-    std::string offDeviceNote, glueNote;
-    double lastRate = 0.0, prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
     int strikes = 0;
+    bool wrong = false;
 
-    for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
+    // The two weight layouts climb together, one race per row
+    // (CoremlLayoutRace): every width times each layout the race still
+    // runs, each with its own caps and its own compile history, and the
+    // width's rate is the faster one's.
+    CoremlLayoutRace race;
+    struct Lane
+    {
+      int rungs = 0;
+      double lastRate = 0.0, prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
+      std::string offDeviceNote, glueNote;
+    } lanes[2];
+    // The last width both layouts were timed at, for the row's note.
+    int64_t raceDim = 0;
+    double raceRate[2] = {0.0, 0.0}, raceCreateUs[2] = {0.0, 0.0};
+
+    for (int64_t D = kMinDim; D <= kMaxDim && !race.done(); D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
@@ -212,131 +263,195 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;
-      if (lastRate > 0.0 && layerOps / lastRate > kMaxIterUs)
+      double rate[2] = {0.0, 0.0}, createUs[2] = {0.0, 0.0};
+
+      for (int t = 0; t < 2 && !wrong; t++)
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers would take ~%.1f s per multiply, "
-                    "stopping\n",
-                    dev.displayName.c_str(), label, (long long)D, layerOps / lastRate / 1.0e6);
-        break;
-      }
-      // The compile cap, checked before paying for the build; the first size
-      // always builds, since its time seeds the prediction.
-      if (D > kMinDim && prevCreateUs > 0.0)
-      {
-        const double predictedUs = coremlPredictCreateUs(prevCreateUs, prevPrevCreateUs, strikes > 0);
-        if (predictedUs > kCoremlMaxChainCreateUs)
+        if (!race.runs(t))
+          continue;
+        Lane &ln = lanes[t];
+        const char *layout = coremlLayoutName(t);
+        if (ln.lastRate > 0.0 && layerOps / ln.lastRate > kMaxIterUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers predicted create %.1f s (prev %.1f s%s) "
-                      "> %.1f s, stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, predictedUs / 1.0e6,
-                      prevCreateUs / 1.0e6, strikes > 0 ? ", after a size that did not gain" : "",
-                      kCoremlMaxChainCreateUs / 1.0e6);
-          break;
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
+                      "stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, layout,
+                      layerOps / ln.lastRate / 1.0e6);
+          race.drop(t);
+          continue;
         }
-      }
-
-      std::string err;
-      auto s = CoremlSession::create(
-          dev, coremlMatMulChainModel(spec, D, kChainLayers, kSeedWidth, v.w, coremlTransposedWeights(dev)),
-          err);
-      if (!s)
-      {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide create failed: %s\n", dev.displayName.c_str(),
-                    label, (long long)D, err.c_str());
-        if (firstErr.empty())
-          firstErr = err;
-        // Larger sizes need strictly more of everything.
-        break;
-      }
-      const double createUs = coremlCreateUs(*s);
-      CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d create %.2f s (compile %.2f, load %.2f, plan %.2f)\n",
-                  dev.displayName.c_str(), label, (long long)D, kChainLayers, createUs / 1.0e6,
-                  s->compileUs / 1.0e6, s->loadUs / 1.0e6, s->planUs / 1.0e6);
-
-      if (!s->onDevice())
-      {
-        const std::string why = coremlOffDeviceReason(dev, *s);
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s\n", dev.displayName.c_str(), label,
-                    (long long)D, why.c_str());
-        if (rungs == 0)
+        // The compile cap, checked before paying for the build; the first
+        // size always builds, since its time seeds the prediction.
+        if (D > kMinDim && ln.prevCreateUs > 0.0)
         {
-          if (firstErr.empty())
-            firstErr = why;
-          // Too small for the planner is not too big for the unit; the
-          // ladder climbs on.  A shape the unit cannot run at all will not
-          // become runnable by growing.
-          if (s->offDeviceCapable())
+          const double predictedUs =
+              coremlPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, strikes > 0);
+          if (predictedUs > kCoremlMaxChainCreateUs)
           {
-            s.reset();
-            prevPrevCreateUs = prevCreateUs;
-            prevCreateUs = createUs;
+            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s predicted create %.1f s (prev "
+                        "%.1f s%s) > %.1f s, stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, layout, predictedUs / 1.0e6,
+                        ln.prevCreateUs / 1.0e6, strikes > 0 ? ", after a size that did not gain" : "",
+                        kCoremlMaxChainCreateUs / 1.0e6);
+            race.drop(t);
             continue;
           }
         }
-        else
-          offDeviceNote = "  Wider layers were declined by the " +
-                          std::string(coremlKindName(dev.kind)) + ".";
-        break;
-      }
 
-      if (!coremlBindScalar(*s, "s", ioDtype, err))
-      {
-        if (firstErr.empty())
+        std::string err;
+        auto s = CoremlSession::create(
+            dev, coremlMatMulChainModel(spec, D, kChainLayers, kSeedWidth, v.w, t), err);
+        if (!s)
         {
-          firstErr = err;
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s create failed: %s\n",
+                      dev.displayName.c_str(), label, (long long)D, layout, err.c_str());
+          if (firstErr.empty())
+            firstErr = err;
+          // Larger sizes need strictly more of everything.
+          race.drop(t);
+          continue;
+        }
+        const double cu = coremlCreateUs(*s);
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s create %.2f s (compile %.2f, load %.2f, "
+                    "plan %.2f)\n",
+                    dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, cu / 1.0e6,
+                    s->compileUs / 1.0e6, s->loadUs / 1.0e6, s->planUs / 1.0e6);
+
+        if (!s->onDevice())
+        {
+          const std::string why = coremlOffDeviceReason(dev, *s);
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s %s\n", dev.displayName.c_str(), label,
+                      (long long)D, layout, why.c_str());
+          if (ln.rungs == 0)
+          {
+            if (firstErr.empty())
+              firstErr = why;
+            // Too small for the planner is not too big for the unit; the
+            // ladder climbs on.  A shape the unit cannot run at all will not
+            // become runnable by growing.
+            if (s->offDeviceCapable())
+            {
+              s.reset();
+              ln.prevPrevCreateUs = ln.prevCreateUs;
+              ln.prevCreateUs = cu;
+              continue;
+            }
+          }
+          else
+            ln.offDeviceNote = "  Wider layers were declined by the " +
+                               std::string(coremlKindName(dev.kind)) + ".";
+          race.drop(t);
+          continue;
+        }
+
+        if (!coremlBindScalar(*s, "s", ioDtype, err))
+        {
+          if (firstErr.empty())
+          {
+            firstErr = err;
+            errStatus = ResultStatus::Error;
+          }
+          race.drop(t);
+          continue;
+        }
+
+        auto m = coremlMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+        std::string bad;
+        if (m.meanUs > 0.0)
+        {
+          ln.glueNote = coremlGlueNote(*s);
+          bad = coremlNonFiniteReason(*s, "out", ioDtype,
+                                      "at " + std::to_string(D) + "-wide layers, weights stored " + layout);
+        }
+        s.reset();   // the temp files go before the next model is written
+        if (m.meanUs <= 0.0)
+        {
+          if (firstErr.empty())
+          {
+            firstErr = m.error;
+            errStatus = m.status;
+          }
+          race.drop(t);
+          continue;
+        }
+        // A wrong answer withholds the whole row, not just the rungs from
+        // here up: a rung that came back finite, or the other layout, is no
+        // alibi for the unit.
+        if (!bad.empty())
+        {
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, bad.c_str());
+          firstErr = bad;
           errStatus = ResultStatus::Error;
+          wrong = true;
+          break;
         }
-        break;
-      }
 
-      auto m = coremlMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
-      std::string wrong;
-      if (m.meanUs > 0.0)
-      {
-        glueNote = coremlGlueNote(*s);
-        wrong = coremlNonFiniteReason(*s, "out", ioDtype, "at " + std::to_string(D) + "-wide layers");
-      }
-      s.reset();   // the temp files go before the next size is written
-      if (m.meanUs <= 0.0)
-      {
-        if (firstErr.empty())
+        ln.rungs++;
+        rate[t] = layerOps * kChainLayers * 1.0e6 / m.meanUs;
+        createUs[t] = cu;
+        ln.lastRate = layerOps * kChainLayers / m.meanUs;
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s -> %.3f (%.1f us, %u iters)\n",
+                    dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, rate[t],
+                    m.meanUs, m.iters);
+
+        // Measured, not predicted: an extrapolation cannot see a cliff, and
+        // the next size is eight times the work.
+        if (m.probeUs / kChainLayers > kMaxIterUs)
         {
-          firstErr = m.error;
-          errStatus = m.status;
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.1f s per multiply, "
+                      "stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, layout,
+                      m.probeUs / kChainLayers / 1.0e6);
+          race.drop(t);
         }
-        break;
+        // A size that compiled past the cap anyway is kept, and ends this
+        // layout's climb.  The first may exceed it once: its time seeds the
+        // prediction.
+        else if (D != kMinDim && cu > kCoremlMaxChainCreateUs)
+        {
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s create %.1f s > %.1f s, stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, layout, cu / 1.0e6,
+                      kCoremlMaxChainCreateUs / 1.0e6);
+          race.drop(t);
+        }
+        ln.prevPrevCreateUs = ln.prevCreateUs;
+        ln.prevCreateUs = cu;
       }
-      // A wrong answer withholds the whole row, not just the rungs from here
-      // up: a rung that came back finite is no alibi for the unit.
-      if (!wrong.empty())
+      if (wrong)
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrong.c_str());
         best = 0.0;
-        firstErr = wrong;
-        errStatus = ResultStatus::Error;
         break;
       }
 
-      rungs++;
-      const double ops = layerOps * kChainLayers;
-      const double rate = ops * 1.0e6 / m.meanUs;
-      lastRate = ops / m.meanUs;
-      CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d -> %.3f (%.1f us, %u iters)\n",
-                  dev.displayName.c_str(), label, (long long)D, kChainLayers, rate, m.meanUs,
-                  m.iters);
+      if (rate[0] > 0.0 && rate[1] > 0.0)
+      {
+        raceDim = D;
+        std::copy(rate, rate + 2, raceRate);
+        std::copy(createUs, createUs + 2, raceCreateUs);
+        race.settle(rate, createUs);
+        if (!race.runs(0) || !race.runs(1))
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: layouts settled at %lld-wide layers: %s goes on\n",
+                      dev.displayName.c_str(), label, (long long)D,
+                      race.runs(1) ? coremlLayoutName(true) : coremlLayoutName(false));
+      }
+      const bool t = rate[1] > rate[0];
+      if (rate[t] <= 0.0)
+        continue;   // neither layout measured this width: the planner's size decision
 
-      if (rate > best * kImproveFactor)
+      if (rate[t] > best * kImproveFactor)
       {
         strikes = 0;
-        best = rate;
+        best = rate[t];
         bestDim = D;
+        bestTransposed = t;
       }
       else
       {
-        if (rate > best)
+        if (rate[t] > best)
         {
-          best = rate;
+          best = rate[t];
           bestDim = D;
+          bestTransposed = t;
         }
         if (++strikes >= kMaxStrikes)
         {
@@ -345,33 +460,15 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           break;
         }
       }
-
-      // Measured, not predicted: an extrapolation cannot see a cliff, and the
-      // next size is eight times the work.
-      if (m.probeUs / kChainLayers > kMaxIterUs)
-      {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers measured %.1f s per multiply, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D, m.probeUs / kChainLayers / 1.0e6);
-        break;
-      }
-
-      // A size that compiled past the cap anyway is kept, and ends the
-      // ladder.  The first may exceed it once: its time seeds the prediction.
-      if (D != kMinDim && createUs > kCoremlMaxChainCreateUs)
-      {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: create %.1f s > %.1f s at %lld-wide layers, stopping\n",
-                    dev.displayName.c_str(), label, createUs / 1.0e6,
-                    kCoremlMaxChainCreateUs / 1.0e6, (long long)D);
-        break;
-      }
-      prevPrevCreateUs = prevCreateUs;
-      prevCreateUs = createUs;
     }
 
     if (best > 0.0)
     {
-      o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers.  " + v.note +
-                      seedNote + offDeviceNote + glueNote;
+      const Lane &ln = lanes[bestTransposed];
+      o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers" +
+                      layoutNote(bestTransposed, raceDim, raceRate, raceCreateUs,
+                                 lanes[!bestTransposed].rungs, isInt ? "TOPS" : "TFLOPS") +
+                      "  " + v.note + seedNote + ln.offDeviceNote + ln.glueNote;
       test.emit(label, (float)best, o);
     }
     else

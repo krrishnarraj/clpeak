@@ -110,23 +110,89 @@ inline double coremlCreateUs(const CoremlSession &s)
   return s.compileUs + s.loadUs + s.planUs;
 }
 
-// Whether this device's models store their weights as [N, K], the transpose
-// of the W[K, N] they multiply by, read with transpose_y (coremlEmitWeight):
-// the gemm chain's, the block's projections' and the accuracy matmul's,
-// so an accuracy row reads the layout its rates do.  The Neural Engine's
-// compiler takes that layout as it is and rearranges a [K, N] weight first:
-// on an M1 Pro a sixteen-layer chain of 2048-wide fp16 layers loads in 1.2 s
-// against 15, the gemm test takes 94 s against 332 and the block's 23
-// sessions compile in 36 s against 247, every rate within 2%.  The GPU and
-// CPU compile either in seconds, and there the layout moves readings
-// instead -- the M1 Pro's GPU runs [N, K] int8 per-channel weights at 0.4
-// TFLOPS against 4.7, its CPU blockwise int4 at 5.0 against 0.7 -- so they
-// keep [K, N].  The arithmetic is the same on every unit; only the order a
-// weight's bytes are stored in differs.
-inline bool coremlTransposedWeights(const coreml_device_info_t &dev)
+// The two orders a model can store a weight in (coremlEmitWeight): W[K, N]
+// as it multiplies, [in, out], or its transpose [N, K] -- the [out, in]
+// layout a converted Linear layer carries -- read with transpose_y.
+inline const char *coremlLayoutName(bool transposed)
 {
-  return dev.kind == CoremlDeviceKind::NeuralEngine;
+  return transposed ? "[out, in]" : "[in, out]";
 }
+
+// Which of the two a compute unit runs faster depends on the unit, the
+// format and the shape, in ways no rule written here would carry to the
+// next chip.  On an M1 Pro the CPU runs blockwise int4 at 5.0 TFLOPS
+// stored [out, in] and at 0.74 stored [in, out]; the GPU runs per-channel
+// int8 at 4.7 stored [in, out] and at 0.4 stored [out, in], yet decodes a
+// blockwise int4 block at 48 GB/s stored [out, in] against 20; the Neural
+// Engine runs the two at one rate, and compiles [in, out] ten times
+// slower, rearranging every weight first.  So the gemm chain races the two
+// at every width and the block at every point, each row reporting the
+// faster and saying which, and the accuracy matmul reads the faster one.
+//
+// Each point a race stays open costs a second compile and a second
+// measurement, so a race closes as soon as its readings allow: once one
+// layout trails by half again (kCoremlLayoutBehind) -- a slow path, which
+// a larger size does not rescue -- or once the two read within
+// kCoremlLayoutTie of each other, where the layout makes no difference and
+// the one that compiled several times faster (kCoremlLayoutCompileGap)
+// carries on, or failing that the faster.  Only a race with a margin
+// between the two is run again at the next size.
+constexpr double kCoremlLayoutTie = 1.03;
+constexpr double kCoremlLayoutBehind = 1.5;
+constexpr double kCoremlLayoutCompileGap = 2.0;
+
+class CoremlLayoutRace
+{
+public:
+  // Whether the next point times the layout `transposed` names.
+  bool runs(bool transposed) const { return open_[transposed]; }
+  bool done() const { return !open_[0] && !open_[1]; }
+
+  // A layout that could not run a point drops out: a larger size needs
+  // strictly more of everything.
+  void drop(bool transposed) { open_[transposed] = false; }
+
+  // The layout to take from a point at which both ran: `rate` is higher for
+  // faster, `createUs` what each took to compile.
+  static bool pick(const double rate[2], const double createUs[2])
+  {
+    const bool faster = rate[1] > rate[0];
+    if (rate[faster] <= rate[!faster] * kCoremlLayoutTie)
+    {
+      if (createUs[0] >= createUs[1] * kCoremlLayoutCompileGap)
+        return true;
+      if (createUs[1] >= createUs[0] * kCoremlLayoutCompileGap)
+        return false;
+    }
+    return faster;
+  }
+
+  // Close the race if this point, at which both ran, settles it.
+  void settle(const double rate[2], const double createUs[2])
+  {
+    if (!open_[0] || !open_[1] || rate[0] <= 0.0 || rate[1] <= 0.0)
+      return;
+    const bool faster = rate[1] > rate[0];
+    if (rate[faster] >= rate[!faster] * kCoremlLayoutBehind)
+      open_[!faster] = false;
+    else if (rate[faster] <= rate[!faster] * kCoremlLayoutTie)
+    {
+      const bool keep = pick(rate, createUs);
+      open_[!keep] = false;
+      sameProgram_ = createUs[!keep] >= createUs[keep] * kCoremlLayoutCompileGap;
+    }
+  }
+
+  // The race for the same weights in another shape -- the block's decode
+  // after its prefill: a fresh one, unless this one closed on a tie that
+  // the compile times split.  That is the compiler rearranging one layout
+  // into the other, the same program, which no shape changes.
+  CoremlLayoutRace nextShape() const { return sameProgram_ ? *this : CoremlLayoutRace(); }
+
+private:
+  bool open_[2] = {true, true};
+  bool sameProgram_ = false;
+};
 
 // What the timed runs computed, read once they are over: a NaN or an
 // infinity in the row `output` reduces to withholds the timing as an error,
