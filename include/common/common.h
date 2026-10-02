@@ -176,8 +176,8 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    second shape (below) is the one exception, and it is why that exception
 //    is worth revisiting.
 //
-// Two shapes, raced.  No single recurrence reaches peak on every vendor: the
-// two dominant register files have opposite constraints.
+// Two recurrences, raced.  No single recurrence reaches peak on every vendor:
+// the two dominant register files have opposite constraints.
 //
 //   x = x*x + c      reads {x, x, c}.  Intel Alchemist (Xe-HPG) halves any
 //                    three-source mad whose operands are not all distinct
@@ -186,30 +186,36 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //                    chain count and every work-group size.  Full rate on
 //                    NVIDIA, Apple, Adreno and pre-Xe Intel.
 //
-//   x = a*x + b      a per-lane, b uniform: three distinct registers.  Full
-//                    rate on Alchemist; NVIDIA is the mirror image and halves
-//                    it at one chain, which four independent chains restore.
+//   x = a*x + b      a per-lane: three distinct registers.  NVIDIA is the
+//                    mirror image and halves it at one chain, which four
+//                    independent chains restore.
 //
-// b is uniform because three distinct registers are not enough on Alchemist
-// at SIMD32.  A 32-lane fp32 value spans four GRFs, two in each register bank
-// in the same order, and a mad that reads all three sources from one bank pays
-// for the conflict -- so whenever the allocator lines a, b and x up alike,
-// every mad pays.  IGC's own listing for an Arc A380 (ocloc -device acm-g11)
-// flagged 378 of the 512 mads in the OpenCL fp32 alt kernels at widths 1-4
-// while b was per-lane, and the A380 read every OpenCL fp32 width at 3.95
-// TFLOPS where the same arithmetic reached 4.88 in another kernel.  A uniform b
-// is one register whose bank stays put while the vector operands alternate
-// theirs, so at most one half of a mad can collide; with it those kernels list
-// one flagged mad.  It has to be b: a uniform a with the uniform seeds makes
-// the whole chain uniform, which a CPU runtime vectorising across work-items
-// computes once.  b is one value in every component: two different uniform
-// values in a vec2 cost an RTX 5060 2.7% and llvmpipe 43% on Vulkan mp2, the
-// splat nothing.  oneAPI keeps its per-lane b and races the uniform one
-// beside it (see the loop-trip rule above).
+// On Alchemist three distinct registers are not enough either.  At SIMD32 a
+// 32-lane fp32 value spans four GRFs, two in each register bank in the same
+// order, and a mad that reads all three sources from one bank pays for the
+// conflict.  Whether a, b and x line up that way is the driver's register
+// allocator's call, so the addend comes in two forms and both are raced:
+// per-lane (a + 2) and uniform (the kernel's scalar + 2).  Neither wins
+// everywhere.  On an Arc A380 (driver 8993), a part that reaches 4.88 TFLOPS,
+// the per-lane b read 4.81 in Vulkan fp32 and the uniform one 4.12, but 3.44-
+// 3.55 against 3.92-4.08 in Vulkan mixed precision; OpenCL fp32 read 3.92-3.95
+// against 4.01-4.79 and OpenCL mixed 3.98-4.88 against 3.42-4.25.  IGC's own
+// listing (ocloc -device acm-g11, a newer IGC than that driver's) showed the
+// uniform b conflict-free in every OpenCL kernel, so a listing is no
+// substitute for timing both.  The uniform operand has to be b, never a: a
+// uniform a with the uniform seeds makes the whole chain uniform, which a CPU
+// runtime vectorising across work-items computes once.  And it is one value
+// in every component: two different uniform values in a vec2 cost an RTX 5060
+// 2.7% and llvmpipe 43% on Vulkan mp2, the splat nothing.  oneAPI races its
+// own pair of the two (see the loop-trip rule above).
 //
-// Vulkan, OpenCL, oneAPI and Metal carry both shapes, time both, and report
-// the faster -- landing within 3% of the best measured shape on every device
-// tested.  That covers every backend that can run on Alchemist.
+// Vulkan, OpenCL and oneAPI race all three shapes and report the fastest.
+// Vulkan and OpenCL race the two addends across the vector widths as a
+// clpeak::FormRace (form_race.h), so wherever they tie -- NVIDIA, Apple,
+// Intel's CPU runtime -- the per-lane one stops being timed after the first
+// width.  Metal, which never runs on Alchemist, races the squaring chain
+// against the uniform-b one alone.  That covers every backend that can run on
+// Alchemist.
 //
 // CUDA and ROCm deliberately do not race.  Each targets a single vendor, and
 // racing costs roughly 2x the compute-test budget: on NVIDIA the squaring

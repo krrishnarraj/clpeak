@@ -11,7 +11,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 - Looking for the unified compute test helper? → `compute_test.cpp` (`runComputeTest`)
 - Looking for OpenCL utility types? → `cl_common.cpp` + `include/opencl/cl_common.h`
 - Looking for .cl kernel sources? → `kernels/*.cl`
-- Looking for why a compute family has two chain shapes? → `kernels/mad_chain.cl`
+- Looking for why a compute family races several chain shapes? → `kernels/mad_chain.cl`
 - Looking for the CMake build logic? → `CMakeLists.txt`
 
 ## Key Files
@@ -49,15 +49,18 @@ See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
 
 ## Chain shapes
 
-Every compute family defines its kernels twice: `compute_<fam>_v<W>` with the
-squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
-`kernels/mad_chain.cl`.  `runComputeTest` creates both, times both and reports
-the faster; a family with no `_alt` kernel simply races nothing, which is how
-`compute_int8_dp` currently behaves.
-Float families use the affine `AF*` macros, integer families the rotating
-`RT*` ones -- an integer affine recurrence folds legally and Apple's compiler
-folds it.  Both shapes must spell the same number of chain instructions per
-work-item so the two readings stay comparable.  Per loop trip, the fp32/fp16
+Every compute family defines its kernels at least twice: `compute_<fam>_v<W>`
+with the squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
+`kernels/mad_chain.cl`.  Float families use the affine `AF*` macros and define
+a third, `compute_<fam>_alt_lane_v<W>`: the same affine chain with a per-lane
+addend where `_alt` has a uniform one, both instantiated from one
+`<FAM>_ALT_V<W>(NAME, B)` macro so they cannot drift apart.  Integer families
+use the rotating `RT*` ones -- an integer affine recurrence folds legally and
+Apple's compiler folds it.  `runComputeTest` times every kernel a width has and
+reports the fastest; a family with no `_alt` kernel simply races nothing,
+which is how `compute_int8_dp` currently behaves.  All shapes must spell the
+same number of chain instructions per work-item so the readings stay
+comparable.  Per loop trip, the fp32/fp16
 squaring kernels run 128 (`MAD_128`, but 16 at width 16), mixed precision
 runs 128 in both shapes (`AF*_128`), and everything else 16.  Full rationale:
 `mad_chain.cl` and the MAD chain block in `include/common/common.h`.

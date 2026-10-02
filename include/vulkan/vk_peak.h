@@ -255,6 +255,11 @@ struct vk_compute_variant_t
   size_t altSpirvSize;
 };
 
+// The specialization constant that picks the affine chain's addend in
+// shaders/mad_chain.glsl: false = uniform b, true = per-lane b.  Must equal the
+// constant_id declared there.
+static const uint32_t VK_MAD_CHAIN_LANE_B_ID = 16;
+
 struct vk_compute_desc_t
 {
   // Display / reporting
@@ -312,6 +317,14 @@ struct vk_compute_desc_t
   // Used by the coopmat shaders to bind the selected M/N/K tile + loop count.
   // nullptr => none.
   const VkSpecializationInfo *specInfo;
+
+  // The variants' alt builds are the floating-point affine chain, whose addend
+  // has two forms (VK_MAD_CHAIN_LANE_B_ID): runComputeKernel specializes the
+  // alt module both ways and races both beside the first shape.  The integer
+  // families' alt build is the rotating chain, which has no addend, so they
+  // leave this false.  Replaces specInfo for the alt builds; no family sets
+  // both.
+  bool raceAffineAddend;
 
 
   // Test to write into.  nullptr means "open one from the fields above" --

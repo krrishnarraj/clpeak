@@ -2,15 +2,17 @@ MSTRINGIFY(
 
 // The alternate MAD chains, shared by every compute_*_alt_v* kernel.
 //
-// Each compute family defines its chain twice: the squaring recurrence
+// Each compute family defines its chain at least twice: the squaring
+// recurrence
 //
 //     x = x*x + c                       (c a per-lane loop invariant)
 //
 // which the compute_*_v* kernels have always used, and a second shape with
-// three distinct source registers, which the compute_*_alt_v* kernels add.
-// runComputeTest times both and reports the faster.  Every macro here spells
-// 16 chain instructions per _16, so the per-work-item op budget matches the
-// kernel it is raced against and the two readings are comparable.
+// three distinct source registers, which the compute_*_alt_v* kernels add --
+// the float families twice over, once per addend (AF*, below).
+// runComputeTest times them all and reports the fastest.  Every macro here
+// spells 16 chain instructions per _16, so the per-work-item op budget matches
+// the kernel it is raced against and the readings are comparable.
 //
 // Why two shapes.  No single recurrence reaches peak on every vendor:
 //
@@ -30,13 +32,17 @@ MSTRINGIFY(
 //
 // AF* (affine, x_k = a*x_k + b) is the float families' second shape.  N is 4
 // at vector width 1, 2 at width 2 and 1 from width 4 up, where the vector
-// itself already supplies the instruction-level parallelism.  a is per-lane
-// and b uniform: at SIMD32 Alchemist charges a mad whose three sources sit in
-// one register bank, which a per-lane a, b and x do whenever the allocator
-// lines them up alike, and a uniform b caps that at one half of a mad.  The
-// measurements are in the MAD chain block of include/common/common.h.  b is
-// the kernel's uniform scalar argument (uni) plus 2, the same value in every
-// component of a vector chain.
+// itself already supplies the instruction-level parallelism.  a is per-lane;
+// the addend b is the DECL's last argument plus 2, and every float family
+// builds each width twice -- compute_*_alt_v* passes the kernel's uniform
+// scalar argument, the same value in every component of a vector chain, and
+// compute_*_alt_lane_v* passes a itself, making b per-lane.  Alchemist charges
+// a mad whose three sources sit in one register bank, and which addend avoids
+// that depends on where the allocator puts a, b and x: on an Arc A380 the
+// uniform b read 4.01-4.79 TFLOPS across the fp32 widths where the per-lane
+// one read 3.92-3.95, but 3.42-4.25 in mixed precision where the per-lane one
+// read 3.98-4.88.  So runComputeTest races both.  The measurements are in the
+// MAD chain block of include/common/common.h.
 //
 // RT* (rotating, x_k = x_k * x_(k+1) + c) is the integer families' second
 // shape, and the reason they differ is not stylistic.  The affine form is

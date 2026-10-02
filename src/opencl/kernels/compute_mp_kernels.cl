@@ -137,77 +137,89 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
     ptr[get_global_id(0)] = x.S0 + x.S1 + x.S2 + x.S3 + x.S4 + x.S5 + x.S6 + x.S7 + x.S8 + x.S9 + x.SA + x.SB + x.SC + x.SD + x.SE + x.SF;
 }
 
-// ---- affine-chain variants (generated; see mad_chain.cl) ----
+// ---- affine-chain variants (see mad_chain.cl) ----
+//
+// One macro per width, each instantiated with both of the AF* chain's addends:
+// compute_mp_alt_v* takes b uniform (the kernel argument), compute_mp_alt_lane_v*
+// per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
 
-__kernel void compute_mp_alt_v1(__global float *ptr, float _B)
-{
-    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))), _B)
-
-    for (int i = 0; i < 16; i++)
-    {
-        AF4_128
-        MP4_NARROW(half, float)
-    }
-
-    float r = AF4_RES;
-    ptr[get_global_id(0)] = r;
+\n#define MP_ALT_V1(NAME, B) \
+__kernel void NAME(__global float *ptr, float _B) \
+{ \
+    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))), B) \
+    for (int i = 0; i < 16; i++) \
+    { \
+        AF4_128 \
+        MP4_NARROW(half, float) \
+    } \
+    float r = AF4_RES; \
+    ptr[get_global_id(0)] = r; \
 }
-
-__kernel void compute_mp_alt_v2(__global float *ptr, float _B)
-{
-    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))), _B)
-
-    for (int i = 0; i < 8; i++)
-    {
-        AF2_128
-        MP2_NARROW(half2, float2)
-    }
-
-    float2 r = AF2_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1;
+\n
+\n#define MP_ALT_V2(NAME, B) \
+__kernel void NAME(__global float *ptr, float _B) \
+{ \
+    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))), B) \
+    for (int i = 0; i < 8; i++) \
+    { \
+        AF2_128 \
+        MP2_NARROW(half2, float2) \
+    } \
+    float2 r = AF2_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1; \
 }
-
-__kernel void compute_mp_alt_v4(__global float *ptr, float _B)
-{
-    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))), _B)
-
-    for (int i = 0; i < 4; i++)
-    {
-        AF1_128
-        MP1_NARROW(half4, float4)
-    }
-
-    float4 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+\n
+\n#define MP_ALT_V4(NAME, B) \
+__kernel void NAME(__global float *ptr, float _B) \
+{ \
+    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))), B) \
+    for (int i = 0; i < 4; i++) \
+    { \
+        AF1_128 \
+        MP1_NARROW(half4, float4) \
+    } \
+    float4 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3; \
 }
-
-__kernel void compute_mp_alt_v8(__global float *ptr, float _B)
-{
-    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))), _B)
-
-    for (int i = 0; i < 2; i++)
-    {
-        AF1_128
-        MP1_NARROW(half8, float8)
-    }
-
-    float8 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+\n
+\n#define MP_ALT_V8(NAME, B) \
+__kernel void NAME(__global float *ptr, float _B) \
+{ \
+    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))), B) \
+    for (int i = 0; i < 2; i++) \
+    { \
+        AF1_128 \
+        MP1_NARROW(half8, float8) \
+    } \
+    float8 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7; \
 }
-
-__kernel void compute_mp_alt_v16(__global float *ptr, float _B)
-{
-    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))), _B)
-
-    for (int i = 0; i < 1; i++)
-    {
-        AF1_128
-        MP1_NARROW(half16, float16)
-    }
-
-    float16 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF;
+\n
+\n#define MP_ALT_V16(NAME, B) \
+__kernel void NAME(__global float *ptr, float _B) \
+{ \
+    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))), B) \
+    for (int i = 0; i < 1; i++) \
+    { \
+        AF1_128 \
+        MP1_NARROW(half16, float16) \
+    } \
+    float16 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF; \
 }
+\n
+
+MP_ALT_V1(compute_mp_alt_v1, _B)
+MP_ALT_V2(compute_mp_alt_v2, _B)
+MP_ALT_V4(compute_mp_alt_v4, _B)
+MP_ALT_V8(compute_mp_alt_v8, _B)
+MP_ALT_V16(compute_mp_alt_v16, _B)
+
+MP_ALT_V1(compute_mp_alt_lane_v1, a)
+MP_ALT_V2(compute_mp_alt_lane_v2, a)
+MP_ALT_V4(compute_mp_alt_lane_v4, a)
+MP_ALT_V8(compute_mp_alt_lane_v8, a)
+MP_ALT_V16(compute_mp_alt_lane_v16, a)
 
 \n#endif      // HALF_AVAILABLE
 \n
