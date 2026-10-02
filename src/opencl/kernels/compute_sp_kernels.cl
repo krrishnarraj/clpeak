@@ -17,10 +17,12 @@ MSTRINGIFY(
 \n#undef MAD_4
 \n#undef MAD_16
 \n#undef MAD_64
+\n#undef MAD_128
 \n
 \n#define MAD_4(x, c)     x = (x*x) + c;      x = (x*x) + c;      x = (x*x) + c;      x = (x*x) + c;
 \n#define MAD_16(x, c)    MAD_4(x, c);        MAD_4(x, c);        MAD_4(x, c);        MAD_4(x, c);
 \n#define MAD_64(x, c)    MAD_16(x, c);       MAD_16(x, c);       MAD_16(x, c);       MAD_16(x, c);
+\n#define MAD_128(x, c)   MAD_64(x, c);       MAD_64(x, c);
 \n
 
 __kernel void compute_sp_v1(__global float *ptr, float _A)
@@ -28,9 +30,9 @@ __kernel void compute_sp_v1(__global float *ptr, float _A)
     float x = _A;
     float c = (float)get_local_id(0);
 
-    for(int i=0; i<128; i++)
+    for(int i=0; i<16; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = x;
@@ -42,9 +44,9 @@ __kernel void compute_sp_v2(__global float *ptr, float _A)
     float2 x = (float2)(_A, (_A+1));
     float2 c = (float2)get_local_id(0);
 
-    for(int i=0; i<64; i++)
+    for(int i=0; i<8; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1);
@@ -55,9 +57,9 @@ __kernel void compute_sp_v4(__global float *ptr, float _A)
     float4 x = (float4)(_A, (_A+1), (_A+2), (_A+3));
     float4 c = (float4)get_local_id(0);
 
-    for(int i=0; i<32; i++)
+    for(int i=0; i<4; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1) + (x.S2) + (x.S3);
@@ -69,9 +71,9 @@ __kernel void compute_sp_v8(__global float *ptr, float _A)
     float8 x = (float8)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7));
     float8 c = (float8)get_local_id(0);
 
-    for(int i=0; i<16; i++)
+    for(int i=0; i<2; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1) + (x.S2) + (x.S3) + (x.S4) + (x.S5) + (x.S6) + (x.S7);
@@ -96,7 +98,7 @@ __kernel void compute_sp_v16(__global float *ptr, float _A)
 
 __kernel void compute_sp_alt_v1(__global float *ptr, float _A)
 {
-    AF4_DECL(float, _A, (float)get_local_id(0))
+    AF4_DECL(float, _A, (float)get_local_id(0), _A)
 
     for (int i = 0; i < 128; i++)
     {
@@ -109,7 +111,7 @@ __kernel void compute_sp_alt_v1(__global float *ptr, float _A)
 
 __kernel void compute_sp_alt_v2(__global float *ptr, float _A)
 {
-    AF2_DECL(float2, (float2)(_A, (_A + 1)), (float2)get_local_id(0))
+    AF2_DECL(float2, (float2)(_A, (_A + 1)), (float2)get_local_id(0), _A)
 
     for (int i = 0; i < 64; i++)
     {
@@ -122,7 +124,7 @@ __kernel void compute_sp_alt_v2(__global float *ptr, float _A)
 
 __kernel void compute_sp_alt_v4(__global float *ptr, float _A)
 {
-    AF1_DECL(float4, (float4)(_A, (_A + 1), (_A + 2), (_A + 3)), (float4)get_local_id(0))
+    AF1_DECL(float4, (float4)(_A, (_A + 1), (_A + 2), (_A + 3)), (float4)get_local_id(0), _A)
 
     for (int i = 0; i < 32; i++)
     {
@@ -135,7 +137,7 @@ __kernel void compute_sp_alt_v4(__global float *ptr, float _A)
 
 __kernel void compute_sp_alt_v8(__global float *ptr, float _A)
 {
-    AF1_DECL(float8, (float8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (float8)get_local_id(0))
+    AF1_DECL(float8, (float8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (float8)get_local_id(0), _A)
 
     for (int i = 0; i < 16; i++)
     {
@@ -148,7 +150,7 @@ __kernel void compute_sp_alt_v8(__global float *ptr, float _A)
 
 __kernel void compute_sp_alt_v16(__global float *ptr, float _A)
 {
-    AF1_DECL(float16, (float16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (float16)get_local_id(0))
+    AF1_DECL(float16, (float16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (float16)get_local_id(0), _A)
 
     for (int i = 0; i < 8; i++)
     {

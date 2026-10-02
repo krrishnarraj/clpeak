@@ -21,6 +21,8 @@ using namespace metal;
 
 #define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
 #define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_128(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) \
+                      MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
 
 kernel void compute_hp(device float* out [[buffer(0)]],
                        constant float& A [[buffer(1)]],
@@ -30,9 +32,9 @@ kernel void compute_hp(device float* out [[buffer(0)]],
     half x = (half)A;
     half c = (half)lid;
 
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = (float)x;
@@ -46,16 +48,16 @@ kernel void compute_hp2(device float* out [[buffer(0)]],
     half2 x = half2((half)A, (half)A);
     half2 c = half2((half)lid, (half)(lid + 1));
 
-    // 64 outer * 16 packed FMAs * 4 ops (2 lanes * 2 ops) = 4096 ops/thread.
-    for (int i = 0; i < 64; i++)
+    // 8 outer * 128 packed FMAs * 4 ops (2 lanes * 2 ops) = 4096 ops/thread.
+    for (int i = 0; i < 8; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = (float)(x.x + x.y);
 }
 
-// 32 outer * 16 packed FMAs * 8 ops (4 lanes * 2 ops) = 4096 ops/thread.
+// 4 outer * 128 packed FMAs * 8 ops (4 lanes * 2 ops) = 4096 ops/thread.
 kernel void compute_hp4(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -64,15 +66,15 @@ kernel void compute_hp4(device float* out [[buffer(0)]],
     half4 x = half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f));
     half4 c = half4((half)lid);
 
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 4; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = (float)(x.x + x.y + x.z + x.w);
 }
 
-// MSL has no native half8.  Pair two half4 chains; 16 outer * 16 fmas * 8 ops
+// MSL has no native half8.  Pair two half4 chains; 2 outer * 128 fmas * 8 ops
 // * 2 chains = 4096 ops/thread.
 kernel void compute_hp8(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
@@ -83,10 +85,10 @@ kernel void compute_hp8(device float* out [[buffer(0)]],
     half4 xb = half4((half)(A + 4.0f), (half)(A + 5.0f), (half)(A + 6.0f), (half)(A + 7.0f));
     half4 c  = half4((half)lid);
 
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < 2; i++)
     {
-        MAD_16(xa, c)
-        MAD_16(xb, c)
+        MAD_128(xa, c)
+        MAD_128(xb, c)
     }
 
     half4 r = xa + xb;
@@ -100,7 +102,7 @@ kernel void compute_hp_alt(device float* out [[buffer(0)]],
                             uint tid [[thread_position_in_grid]],
                             uint lid [[thread_position_in_threadgroup]])
 {
-    AF4_DECL(half, (half)A, (half)lid)
+    AF4_DECL(half, (half)A, (half)lid, (half)A)
 
     for (int i = 0; i < 128; i++)
     {
@@ -116,7 +118,7 @@ kernel void compute_hp2_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF2_DECL(half2, half2((half)A, (half)(A + 1.0f)), half2((half)lid))
+    AF2_DECL(half2, half2((half)A, (half)(A + 1.0f)), half2((half)lid), (half)A)
 
     for (int i = 0; i < 64; i++)
     {
@@ -132,7 +134,7 @@ kernel void compute_hp4_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF1_DECL(half4, half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f)), half4((half)lid))
+    AF1_DECL(half4, half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f)), half4((half)lid), (half)A)
 
     for (int i = 0; i < 32; i++)
     {

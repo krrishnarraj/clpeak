@@ -145,15 +145,27 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    totals below are the same as they were under the ping-pong form and the
 //    numbers stay comparable in units.
 //
-//  - 128 chain instructions per loop trip (MAD_128).  The trip counter's add,
-//    compare and branch are ops the per-work-item budget does not count, and
-//    Apple's compilers keep the loop as written: on an M1 Pro the identical
-//    chain read 4.45 TFLOPS at 16 per trip and 5.13 at 128, against a 5.31
-//    peak, and a runtime trip count read the same.  That 16% is why mixed
-//    precision, already 128 deep, read above fp32 there.  Compilers that
-//    unroll lose nothing: Intel's OpenCL compiler turns both depths into the
-//    same 256-instruction trip.  fp64 stays at 16, because its 512-op budget
-//    cannot fill a 128-deep trip at width 4.
+//  - The squaring shape runs 128 chain instructions per loop trip (MAD_128).
+//    The trip counter's add, compare and branch are ops the per-work-item
+//    budget does not count, and Apple's compilers keep the loop as written:
+//    on an M1 Pro the identical chain read 4.45 TFLOPS at 16 per trip and
+//    5.13 at 128, against a 5.31 peak, and a runtime trip count read the
+//    same.  That 16% is why mixed precision, already 128 deep, read above
+//    fp32 there.  Compilers that unroll lose nothing: Intel's OpenCL compiler
+//    turns both depths into the same 256-instruction trip.  16-wide vectors
+//    keep MAD_16 -- already 256 lane-FMAs a trip -- because as one
+//    straight-line trip Intel's CPU OpenCL runtime stopped vectorising
+//    float16 across work-items, 1962 -> 829 GFLOPS on a Threadripper 3955WX.
+//    The affine shape keeps 16 per trip in Vulkan, OpenCL and Metal: deeper,
+//    it gained nothing on any GPU measured and cost llvmpipe's emulated fp16
+//    26-43%.  oneAPI keeps both shapes as they were and races a third, the
+//    uniform-b affine chain at 128 a trip: its loops are pinned rolled
+//    (#pragma unroll 1) on every device, Intel's GPUs included, where the
+//    affine shape is the one that wins, but in place of its affine shape that
+//    one cost Intel's CPU runtime up to 63% at widths 2-4 (compute_float.cpp
+//    there has the numbers).  fp64 stays at 16: Vulkan's and
+//    oneAPI's 512-op fp64 budget cannot fill a 128-deep trip at width 4, and
+//    Apple GPUs, where the counter costs, have no fp64.
 //
 //  - Quadratic, never affine.  x = c*x + c is an affine recurrence: two steps
 //    compose into c*c*x + c*c + c, so a compiler is free to hoist the
@@ -190,7 +202,10 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // theirs, so at most one half of a mad can collide; with it those kernels list
 // one flagged mad.  It has to be b: a uniform a with the uniform seeds makes
 // the whole chain uniform, which a CPU runtime vectorising across work-items
-// computes once.
+// computes once.  b is one value in every component: two different uniform
+// values in a vec2 cost an RTX 5060 2.7% and llvmpipe 43% on Vulkan mp2, the
+// splat nothing.  oneAPI keeps its per-lane b and races the uniform one
+// beside it (see the loop-trip rule above).
 //
 // Vulkan, OpenCL, oneAPI and Metal carry both shapes, time both, and report
 // the faster -- landing within 3% of the best measured shape on every device

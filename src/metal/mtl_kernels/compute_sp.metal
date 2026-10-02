@@ -1,6 +1,6 @@
 // Single-precision MAD-chain throughput.  Mirrors compute_sp_v1.comp /
-// compute_sp.cu: x = x*x + c with c a per-thread loop invariant, 128 outer
-// iters * 16 FMAs * 2 ops = 4096 ops/thread = COMPUTE_FP_WORK_PER_WI.
+// compute_sp.cu: x = x*x + c with c a per-thread loop invariant, 16 outer
+// iters * 128 FMAs * 2 ops = 4096 ops/thread = COMPUTE_FP_WORK_PER_WI.
 //
 // Chain shape and why: see the MAD chain block in include/common/common.h.
 // This kernel is where that shape was measured -- the ping-pong form it
@@ -11,6 +11,8 @@ using namespace metal;
 
 #define MAD_4(x, c)  x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c); x = fma(x, x, c);
 #define MAD_16(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c) MAD_4(x, c)
+#define MAD_128(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) \
+                      MAD_16(x, c) MAD_16(x, c) MAD_16(x, c) MAD_16(x, c)
 
 kernel void compute_sp(device float* out [[buffer(0)]],
                        constant float& A [[buffer(1)]],
@@ -20,15 +22,15 @@ kernel void compute_sp(device float* out [[buffer(0)]],
     float x = A;
     float c = (float)lid;
 
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 16; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = x;
 }
 
-// 64 outer * 16 packed FMAs * 4 ops (2 lanes * 2 ops) = 4096 ops/thread.
+// 8 outer * 128 packed FMAs * 4 ops (2 lanes * 2 ops) = 4096 ops/thread.
 kernel void compute_sp2(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -37,15 +39,15 @@ kernel void compute_sp2(device float* out [[buffer(0)]],
     float2 x = float2(A, A + 1.0f);
     float2 c = float2((float)lid);
 
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < 8; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = x.x + x.y;
 }
 
-// 32 outer * 16 packed FMAs * 8 ops = 4096 ops/thread.
+// 4 outer * 128 packed FMAs * 8 ops = 4096 ops/thread.
 kernel void compute_sp4(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -54,15 +56,15 @@ kernel void compute_sp4(device float* out [[buffer(0)]],
     float4 x = float4(A, A + 1.0f, A + 2.0f, A + 3.0f);
     float4 c = float4((float)lid);
 
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < 4; i++)
     {
-        MAD_16(x, c)
+        MAD_128(x, c)
     }
 
     out[tid] = x.x + x.y + x.z + x.w;
 }
 
-// 16 outer * 16 packed FMAs * 16 ops = 4096 ops/thread.
+// 2 outer * 128 packed FMAs * 16 ops = 4096 ops/thread.
 kernel void compute_sp8(device float* out [[buffer(0)]],
                         constant float& A [[buffer(1)]],
                         uint tid [[thread_position_in_grid]],
@@ -76,10 +78,10 @@ kernel void compute_sp8(device float* out [[buffer(0)]],
     float4 xb = float4(A + 4.0f, A + 5.0f, A + 6.0f, A + 7.0f);
     float4 c  = float4((float)lid);
 
-    for (int i = 0; i < 16; i++)
+    for (int i = 0; i < 2; i++)
     {
-        MAD_16(xa, c)
-        MAD_16(xb, c)
+        MAD_128(xa, c)
+        MAD_128(xb, c)
     }
 
     float4 r = xa + xb;
@@ -93,7 +95,7 @@ kernel void compute_sp_alt(device float* out [[buffer(0)]],
                             uint tid [[thread_position_in_grid]],
                             uint lid [[thread_position_in_threadgroup]])
 {
-    AF4_DECL(float, A, (float)lid)
+    AF4_DECL(float, A, (float)lid, A)
 
     for (int i = 0; i < 128; i++)
     {
@@ -109,7 +111,7 @@ kernel void compute_sp2_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF2_DECL(float2, float2(A, A + 1.0f), float2((float)lid))
+    AF2_DECL(float2, float2(A, A + 1.0f), float2((float)lid), A)
 
     for (int i = 0; i < 64; i++)
     {
@@ -125,7 +127,7 @@ kernel void compute_sp4_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF1_DECL(float4, float4(A, A + 1.0f, A + 2.0f, A + 3.0f), float4((float)lid))
+    AF1_DECL(float4, float4(A, A + 1.0f, A + 2.0f, A + 3.0f), float4((float)lid), A)
 
     for (int i = 0; i < 32; i++)
     {

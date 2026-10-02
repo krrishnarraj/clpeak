@@ -34,7 +34,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
-| `shaders/mad_chain.glsl` | The two MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_MAP` / `CHAIN_RESULT`) |
+| `shaders/mad_chain.glsl` | The two MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_TRIP` / `CHAIN_MAP` / `CHAIN_RESULT`) |
 | `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`) — and why it is shaped that way |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
 

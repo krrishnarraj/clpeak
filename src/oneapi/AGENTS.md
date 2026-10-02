@@ -82,9 +82,11 @@ Gates:
   either: an op beside the work is throughput the per-WI budget does not
   credit, and the reading comes out deflated instead. Chain-shape rules live in
   the MAD chain block in `include/common/common.h`.
-- **Vector-width sweeps keep ops/WI constant** by running `baseIters/W` outer
-  iterations for width `W`, so the same work-constant (`COMPUTE_FP_WORK_PER_WI`
-  etc.) is reported for every width and the numbers stay comparable.
+- **Vector-width sweeps keep ops/WI constant** by running `baseIters/W`
+  outer iterations for width `W` (the uniform-b shape: `baseIters/(W*D)` trips
+  of `D` `MAD_16`s, `D` = 8 for fp32/fp16, 1 at width 16 and for fp64), so the
+  same work-constant (`COMPUTE_FP_WORK_PER_WI` etc.) is reported for every
+  width and the numbers stay comparable.
 - **No `double` inside fp32/fp16 kernels.** A stray `double` (even just for
   computing per-lane seeds) pulls in the `fp64` aspect, so the kernel fails to
   *launch* on devices without fp64 (Intel Arc) with "Required aspect fp64 is not
@@ -124,7 +126,11 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 `runFpWidth` and `runIntWidth` each submit two kernels -- the squaring chain
 and a second shape -- and report the faster.  Float families use an affine
 chain, integer families a rotating one, because an integer affine recurrence
-folds legally and one compiler in the fleet folds it.  This backend runs on
+folds legally and one compiler in the fleet folds it.  The float families
+(and mp, bf16) race a third kernel too: the affine chain with a uniform `b`,
+128 deep for fp32/fp16, which is what Alchemist's register banks and these
+rolled loops want but which loses to the second shape on Intel's CPU runtime
+at widths 2-4 -- so it races instead of replacing it (`compute_float.cpp`).  This backend runs on
 Intel GPUs, where the squaring chain alone reports half rate on Alchemist.
 Each shape needs its own SYCL kernel-name type.  Why: the MAD chain block in
 `include/common/common.h`.

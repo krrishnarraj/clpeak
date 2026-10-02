@@ -30,7 +30,13 @@ MSTRINGIFY(
 //
 // AF* (affine, x_k = a*x_k + b) is the float families' second shape.  N is 4
 // at vector width 1, 2 at width 2 and 1 from width 4 up, where the vector
-// itself already supplies the instruction-level parallelism.
+// itself already supplies the instruction-level parallelism.  a is per-lane
+// and b uniform: at SIMD32 Alchemist charges a mad whose three sources sit in
+// one register bank, which a per-lane a, b and x do whenever the allocator
+// lines them up alike, and a uniform b caps that at one half of a mad.  The
+// measurements are in the MAD chain block of include/common/common.h.  b is
+// the kernel's uniform scalar argument (uni) plus 2, the same value in every
+// component of a vector chain.
 //
 // RT* (rotating, x_k = x_k * x_(k+1) + c) is the integer families' second
 // shape, and the reason they differ is not stylistic.  The affine form is
@@ -49,10 +55,10 @@ MSTRINGIFY(
 // M24_* is the same rotating shape as RT*, spelled with mad24 for the 24-bit
 // fast-integer family.
 //
-// MP* is the mixed-precision family's second shape.  It is now just AF* over
-// an fp32 accumulator with a narrowing round-trip every 128 chain
-// instructions (MP*_128 + MP*_NARROW), which is the shape the CUDA, ROCm,
-// Metal, Vulkan and oneAPI mp kernels all use.
+// MP* is the mixed-precision family's second shape: AF* over an fp32
+// accumulator with a narrowing round-trip once per AF*_128 trip
+// (MP*_NARROW), which is the shape the CUDA, ROCm, Metal, Vulkan and oneAPI mp
+// kernels all use.
 //
 // It used to narrow once per MAC, inside the chain:
 //
@@ -101,14 +107,17 @@ MSTRINGIFY(
 \n#undef AF4_DECL
 \n#undef AF4_G
 \n#undef AF4_16
+\n#undef AF4_128
 \n#undef AF4_RES
 \n#undef AF2_DECL
 \n#undef AF2_G
 \n#undef AF2_16
+\n#undef AF2_128
 \n#undef AF2_RES
 \n#undef AF1_DECL
 \n#undef AF1_G
 \n#undef AF1_16
+\n#undef AF1_128
 \n#undef AF1_RES
 \n#undef RT4_DECL
 \n#undef RT4_G
@@ -119,11 +128,8 @@ MSTRINGIFY(
 \n#undef RT2_16
 \n#undef RT2_RES
 \n#undef MP_NARROW
-\n#undef MP4_128
 \n#undef MP4_NARROW
-\n#undef MP2_128
 \n#undef MP2_NARROW
-\n#undef MP1_128
 \n#undef MP1_NARROW
 \n#undef M24_4_DECL
 \n#undef M24_4_16
@@ -133,19 +139,22 @@ MSTRINGIFY(
 \n#define CH_MAD(d, m1, m2, ad)  d = (m1) * (m2) + (ad);
 \n#define CH_STRIDE 4
 \n
-\n#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
+\n#define AF4_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
 \n#define AF4_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b) CH_MAD(x2, a, x2, b) CH_MAD(x3, a, x3, b)
 \n#define AF4_16                 AF4_G AF4_G AF4_G AF4_G
+\n#define AF4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
 \n#define AF4_RES                ((x0 + x1) + (x2 + x3))
 \n
-\n#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
+\n#define AF2_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
 \n#define AF2_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b)
 \n#define AF2_16                 AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G
+\n#define AF2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
 \n#define AF2_RES                (x0 + x1)
 \n
-\n#define AF1_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed);
+\n#define AF1_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed);
 \n#define AF1_G                  CH_MAD(x0, a, x0, b)
 \n#define AF1_16                 AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G
+\n#define AF1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16
 \n#define AF1_RES                (x0)
 \n
 \n#define RT4_DECL(T, seed, inv) T c = (inv); T x0 = (seed); T x1 = (seed) + (T)(1); T x2 = (seed) + (T)(2); T x3 = (seed) + (T)(3);
@@ -159,7 +168,7 @@ MSTRINGIFY(
 \n#define RT2_RES                (x0 + x1)
 \n
 \n// Mixed-precision (mp) chains.  The accumulator is FT throughout and the
-\n// narrow round-trip happens once per MP*_128 round, not once per MAC: the
+\n// narrow round-trip happens once per AF*_128 trip, not once per MAC: the
 \n// conversion is an uncounted instruction sitting in the dependent chain, so
 \n// at one per MAC it issued two instructions per counted FMA and halved the
 \n// reading.  An Arc A380 read mp at 2.78 TFLOPS against 4.89 for fp32 (57%)
@@ -172,13 +181,10 @@ MSTRINGIFY(
 \n// as the oneAPI mp alt kernel seeds it.
 \n#define MP_NARROW(HT, FT, x)   x = convert_##FT(convert_##HT(x));
 \n
-\n#define MP4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
 \n#define MP4_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1) MP_NARROW(HT,FT,x2) MP_NARROW(HT,FT,x3)
 \n
-\n#define MP2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
 \n#define MP2_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1)
 \n
-\n#define MP1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16
 \n#define MP1_NARROW(HT, FT)     MP_NARROW(HT,FT,x0)
 \n
 \n#define M24_MAD(d, m1, m2, ad)  d = mad24(m1, m2, ad);

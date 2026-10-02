@@ -53,12 +53,14 @@ Every compute family defines its kernels twice: `compute_<fam>_v<W>` with the
 squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
 `kernels/mad_chain.cl`.  `runComputeTest` creates both, times both and reports
 the faster; a family with no `_alt` kernel simply races nothing, which is how
-`compute_mp`, `compute_intfast` and `compute_int8_dp` currently behave.
+`compute_int8_dp` currently behaves.
 Float families use the affine `AF*` macros, integer families the rotating
 `RT*` ones -- an integer affine recurrence folds legally and Apple's compiler
 folds it.  Both shapes must spell the same number of chain instructions per
-`_16` so the two readings stay comparable.  Full rationale: `mad_chain.cl` and
-the MAD chain block in `include/common/common.h`.
+work-item so the two readings stay comparable.  Per loop trip, the fp32/fp16
+squaring kernels run 128 (`MAD_128`, but 16 at width 16), mixed precision
+runs 128 in both shapes (`AF*_128`), and everything else 16.  Full rationale:
+`mad_chain.cl` and the MAD chain block in `include/common/common.h`.
 
 ## When You Change This Directory
 

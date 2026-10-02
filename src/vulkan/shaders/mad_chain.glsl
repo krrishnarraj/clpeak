@@ -8,12 +8,13 @@
 // and once with -DMAD_CHAIN_AFFINE, giving the affine recurrence over
 // MAD_CHAINS independent accumulators
 //
-//     x_k = a*x_k + b                   (a, b per-lane loop invariants)
+//     x_k = a*x_k + b                   (a a per-lane loop invariant,
+//                                        b a uniform one)
 //
-// Both spell exactly 16 chain instructions per MAD_16, so the loop trip counts
-// and the per-work-item op budget are identical between the two and the
-// readings are directly comparable.  runComputeKernel times both and reports
-// the faster one.
+// Both spell exactly 16 chain instructions per MAD_16, so the per-work-item op
+// budget is identical between the two and the readings are directly
+// comparable; only how many MAD_16s one loop trip holds differs (CHAIN_TRIP,
+// below).  runComputeKernel times both and reports the faster one.
 //
 // Why two shapes.  No single shape reaches peak on every vendor, because the
 // two dominant register files have opposite constraints:
@@ -28,6 +29,13 @@
 //    distinct registers is halved (0.51 on a 5060 and a 4060), while the
 //    two-register x = x*x + c runs at full rate; four independent chains
 //    restore the affine form to ~1.0.
+//
+// The affine b is uniform, not per-lane.  Distinct registers still collide on
+// Alchemist when all three sources sit in one register bank, which at SIMD32
+// a per-lane a, b and x do whenever the allocator lines them up alike; a
+// uniform b caps that at one half of a mad.  The measurements are in the MAD
+// chain block of include/common/common.h.  b is T(pc.A) + T(2), one value in
+// every component, so every includer declares the push constant A.
 //
 // Racing the pair lands within 3% of the best measured shape on every device
 // tested (Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45, M1 Pro via
@@ -120,7 +128,7 @@
 
   #if MAD_CHAINS == 8
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = a + T(2);                                         \
+        T a = (inv);  T b = T(pc.A) + T(2);                                   \
         T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
         T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE); \
         T x4 = (seed) + T(4*MAD_CHAIN_STRIDE); T x5 = (seed) + T(5*MAD_CHAIN_STRIDE); \
@@ -135,7 +143,7 @@
     #define CHAIN_RESULT (((x0 + x1) + (x2 + x3)) + ((x4 + x5) + (x6 + x7)))
   #elif MAD_CHAINS == 4
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = a + T(2);                                         \
+        T a = (inv);  T b = T(pc.A) + T(2);                                   \
         T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
         T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b) \
@@ -145,7 +153,7 @@
     #define CHAIN_RESULT ((x0 + x1) + (x2 + x3))
   #elif MAD_CHAINS == 2
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = a + T(2);                                         \
+        T a = (inv);  T b = T(pc.A) + T(2);                                   \
         T x0 = (seed); T x1 = (seed) + T(MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \
@@ -154,7 +162,7 @@
     #define CHAIN_RESULT (x0 + x1)
   #else
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = a + T(2);                                         \
+        T a = (inv);  T b = T(pc.A) + T(2);                                   \
         T x0 = (seed);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \
@@ -178,9 +186,25 @@
 
 #endif
 
-// Deep inner loop for the shaders whose accumulator has to round-trip through
-// a narrow type once per outer iteration (mp, bf16): 128 chain instructions,
-// so the conversion amortises instead of sitting in the critical path.
+// 128 chain instructions in one trip, for the shaders whose accumulator
+// round-trips through a narrow type once per trip (mp, bf16): the conversion
+// amortises instead of sitting in the critical path.
 #define MAD_128  MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16
+
+// One loop trip of the fp32/fp16 shaders, and how many of them make n MAD_16s.
+// The squaring build runs 128 chain instructions a trip: the trip counter is
+// an op nobody counts, and Apple's compilers keep the loop as written -- at
+// MAD_16 an M1 Pro lost 16% of its fp32 rate to it, and squaring is the shape
+// Apple runs.  The affine build keeps MAD_16: deeper, it gained nothing on any
+// GPU measured (the compilers that pick it unroll the loop anyway) and cost
+// llvmpipe's emulated fp16 26-43%.  The op budget is the same either way.
+// The measurements are in the MAD chain block of include/common/common.h.
+#ifdef MAD_CHAIN_AFFINE
+  #define CHAIN_TRIP        MAD_16
+  #define CHAIN_TRIPS(n16)  (n16)
+#else
+  #define CHAIN_TRIP        MAD_128
+  #define CHAIN_TRIPS(n16)  ((n16) / 8)
+#endif
 
 #endif // MAD_CHAIN_GLSL

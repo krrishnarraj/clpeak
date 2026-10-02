@@ -23,6 +23,13 @@ MSTRINGIFY(
 // squaring rate on Intel's CPU runtime from width 4 up).  Nothing in this loop
 // is half; these are fp32 values periodically rounded to fp16 and back.
 //
+// On Intel GPUs even that rounding never reaches the hardware.  IGC folds a
+// float->half->float round-trip away -- compiled for an Arc A380 (ocloc
+// -device acm-g11), every fptrunc/fpext pair is gone by codegen, the seeds'
+// included, with or without -cl-mad-enable -- so there these kernels are the
+// fp32 chain exactly, and any gap between them and compute_sp is code
+// generation, not arithmetic.
+//
 // Chain shape and why: see the MAD chain block in include/common/common.h.
 //
 // The seed carries a get_local_id term.  It is not decoration: without it
@@ -134,11 +141,11 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v1(__global float *ptr, float _B)
 {
-    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))))
+    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))), _B)
 
     for (int i = 0; i < 16; i++)
     {
-        MP4_128
+        AF4_128
         MP4_NARROW(half, float)
     }
 
@@ -148,11 +155,11 @@ __kernel void compute_mp_alt_v1(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v2(__global float *ptr, float _B)
 {
-    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))))
+    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))), _B)
 
     for (int i = 0; i < 8; i++)
     {
-        MP2_128
+        AF2_128
         MP2_NARROW(half2, float2)
     }
 
@@ -162,11 +169,11 @@ __kernel void compute_mp_alt_v2(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v4(__global float *ptr, float _B)
 {
-    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))))
+    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))), _B)
 
     for (int i = 0; i < 4; i++)
     {
-        MP1_128
+        AF1_128
         MP1_NARROW(half4, float4)
     }
 
@@ -176,11 +183,11 @@ __kernel void compute_mp_alt_v4(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v8(__global float *ptr, float _B)
 {
-    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))))
+    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))), _B)
 
     for (int i = 0; i < 2; i++)
     {
-        MP1_128
+        AF1_128
         MP1_NARROW(half8, float8)
     }
 
@@ -190,11 +197,11 @@ __kernel void compute_mp_alt_v8(__global float *ptr, float _B)
 
 __kernel void compute_mp_alt_v16(__global float *ptr, float _B)
 {
-    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))))
+    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))), _B)
 
     for (int i = 0; i < 1; i++)
     {
-        MP1_128
+        AF1_128
         MP1_NARROW(half16, float16)
     }
 
