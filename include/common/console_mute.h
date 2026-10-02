@@ -79,6 +79,10 @@ private:
 
   int savedOut = -1;
   int savedErr = -1;
+  // The bypass an enclosing scope installed, or -1: what this scope's
+  // rendered lines must reach (savedErr would be that scope's pipe), and
+  // what finish() puts back.
+  int outerRealErr = -1;
 
   // Capture only (--verbose).
   int         readFd = -1;

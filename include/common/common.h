@@ -145,6 +145,16 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    totals below are the same as they were under the ping-pong form and the
 //    numbers stay comparable in units.
 //
+//  - 128 chain instructions per loop trip (MAD_128).  The trip counter's add,
+//    compare and branch are ops the per-work-item budget does not count, and
+//    Apple's compilers keep the loop as written: on an M1 Pro the identical
+//    chain read 4.45 TFLOPS at 16 per trip and 5.13 at 128, against a 5.31
+//    peak, and a runtime trip count read the same.  That 16% is why mixed
+//    precision, already 128 deep, read above fp32 there.  Compilers that
+//    unroll lose nothing: Intel's OpenCL compiler turns both depths into the
+//    same 256-instruction trip.  fp64 stays at 16, because its 512-op budget
+//    cannot fill a 128-deep trip at width 4.
+//
 //  - Quadratic, never affine.  x = c*x + c is an affine recurrence: two steps
 //    compose into c*c*x + c*c + c, so a compiler is free to hoist the
 //    coefficient and halve the loop.  Squaring raises the polynomial degree,
@@ -164,9 +174,23 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //                    chain count and every work-group size.  Full rate on
 //                    NVIDIA, Apple, Adreno and pre-Xe Intel.
 //
-//   x = a*x + b      reads three distinct registers.  Full rate on Alchemist;
-//                    NVIDIA is the mirror image and halves it at one chain,
-//                    which four independent chains restore.
+//   x = a*x + b      a per-lane, b uniform: three distinct registers.  Full
+//                    rate on Alchemist; NVIDIA is the mirror image and halves
+//                    it at one chain, which four independent chains restore.
+//
+// b is uniform because three distinct registers are not enough on Alchemist
+// at SIMD32.  A 32-lane fp32 value spans four GRFs, two in each register bank
+// in the same order, and a mad that reads all three sources from one bank pays
+// for the conflict -- so whenever the allocator lines a, b and x up alike,
+// every mad pays.  IGC's own listing for an Arc A380 (ocloc -device acm-g11)
+// flagged 378 of the 512 mads in the OpenCL fp32 alt kernels at widths 1-4
+// while b was per-lane, and the A380 read every OpenCL fp32 width at 3.95
+// TFLOPS where the same arithmetic reached 4.88 in another kernel.  A uniform b
+// is one register whose bank stays put while the vector operands alternate
+// theirs, so at most one half of a mad can collide; with it those kernels list
+// one flagged mad.  It has to be b: a uniform a with the uniform seeds makes
+// the whole chain uniform, which a CPU runtime vectorising across work-items
+// computes once.
 //
 // Vulkan, OpenCL, oneAPI and Metal carry both shapes, time both, and report
 // the faster -- landing within 3% of the best measured shape on every device
@@ -218,7 +242,7 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // fold was 15.5x.
 static const float MAX_ALT_CHAIN_RATIO = 6.0f;
 
-// compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
+// compute_sp/hp/mp_kernels.cl  (16 iters * MAD_128 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
 
 // fp64 runs at 1/16-1/64 of fp32 on most consumer GPUs, so the same per-WI
@@ -454,7 +478,10 @@ LogSink *logSink();
 // crash can take the process down.
 void stderrWrite(const std::string &text);
 // The fd stderrWrite() uses while a capture is redirecting fd 2, or -1.
+// Captures nest (an ONNX attach mute inside the inventory's), so a scope
+// reads the current one on entry and puts it back on exit.
 void setRealStderrFd(int fd);
+int  realStderrFd();
 }
 
 // ---------------------------------------------------------------------------
