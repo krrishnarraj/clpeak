@@ -44,7 +44,7 @@ backend.
 | `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit, twice: as MatMul layers and as 1x1 convolutions (`int8_qdq_conv1x1` — an NPU compiler's convolution path can be the faster int8 one; `kIntVariants` has the numbers).  A size refused with the 2-D reduction is rebuilt with the rank-4 one |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
-| `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows), each swept over feature-map size |
+| `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3-at-stride-2/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows; `kShapes` says why the 3×3's stride is 2), each swept over feature-map size |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per dtype vs an fp32 CPU-EP reference, in ppm |
 | `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built.  The `int8_qdq` prompt runs its float parts at whichever of fp16 and fp32 the provider takes faster |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
@@ -1963,22 +1963,23 @@ actually moving the bytes a precision declares.
 
 Accelerators were built for convolution before they were asked to do anything
 else, and the gap between `onnx-conv` and `onnx-gemm` is an architectural
-number in its own right. M1 Pro, CoreML EP (fp16 rows):
+number in its own right. M1 Pro, CoreML EP (fp16 rows, macOS 27.0.1):
 
-| | rate | vs its own fp16 matmul peak (8.7) |
+| | rate | vs its own fp16 matmul peak (10.5) |
 |---|---|---|
-| fp16_conv3x3 | 9.5 TFLOPS | **109%** |
-| fp16_conv1x1 | 5.1 TFLOPS | 58% |
+| fp16_conv3x3s2 | 4.2 TFLOPS | 40% |
+| fp16_conv1x1 | 4.8 TFLOPS | 46% |
 | fp16_depthwise3x3 | 0.17 TFLOPS | 2% |
 
-The ANE convolves faster than it multiplies, which is what "built for
-convolution" looks like in a measurement. The 1×1 row is arithmetically a
-matmul applied per pixel and still runs at half the 3×3 rate, so the two
-shapes clearly reach different machinery. And depthwise collapses by **56×**
-against the dense 3×3 of identical shape — it loads the same data for a
-fraction of the arithmetic, so it is bandwidth-bound, which is exactly why
-mobile-efficient networks so often run slower than their FLOP counts promise.
-A general-purpose CPU shows none of this spread (0.36 / 0.43 / 0.11).
+The dense 3×3 runs at stride 2 so that every multiply it counts is one the
+device did (`kShapes` in `conv.cpp` has the case against stride 1, where a
+GPU runtime's Winograd kernel read past its hardware's peak). At 256
+channels neither dense shape reaches the matmul ladder's rate, whose layers
+grow to thousands of channels. Depthwise collapses by **25×** against the
+dense 3×3 — it loads the same data for a fraction of the arithmetic, so it
+is bandwidth-bound, which is exactly why mobile-efficient networks so often
+run slower than their FLOP counts promise. A general-purpose CPU shows far
+less of this spread (0.30 / 0.37 / 0.09).
 
 ## Sizes are swept, never chosen by a probe
 

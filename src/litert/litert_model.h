@@ -176,10 +176,10 @@ clpeak_tflite::TfliteBytes litertTrivialModel(const LitertPlan &p, int64_t width
 
 // 2-D convolution over a resident [1, spatial, spatial, channels] feature
 // map scaled by `s`, with a [channels, k, k, channels/group] filter in the
-// plan's weight format (depthwise when group == channels), reduced over the
-// map to [1, 1, 1, channels].
+// plan's weight format (depthwise when group == channels) at `stride`, SAME
+// padding, its spatial / stride output reduced to [1, 1, 1, channels].
 clpeak_tflite::TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial,
-                                           int64_t kernel, bool depthwise);
+                                           int64_t kernel, int64_t stride, bool depthwise);
 
 // One transformer decoder block: `seq` tokens in one pass (prefill) when
 // kvLen is 0, else one token against a resident cache of kvLen entries

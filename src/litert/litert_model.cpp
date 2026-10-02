@@ -1284,7 +1284,7 @@ int addFilter(Recipe &r, const LitertPlan &p, int64_t channels, int64_t kernel, 
 } // namespace
 
 TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial, int64_t kernel,
-                            bool depthwise)
+                            int64_t stride, bool depthwise)
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
@@ -1309,11 +1309,12 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
   // The output's scale: a fan-in-deep dot product of the activations and
   // the shrunk weights lands within the activations' own range.
   const TfQuant yq = actQuant(p, aScale);
-  const int y = r.m.addTensor(0, shape, p.act, "Y", 0, yq);
+  const int32_t outSide = (int32_t)(spatial / stride);
+  const int y = r.m.addTensor(0, {1, outSide, outSide, (int32_t)channels}, p.act, "Y", 0, yq);
   TfOptions co;
   co.kind = depthwise ? TfOptions::Kind::DepthwiseConv2d : TfOptions::Kind::Conv2d;
   co.padding = TfPadding::Same;
-  co.strideW = co.strideH = 1;
+  co.strideW = co.strideH = (int32_t)stride;
   co.depthMultiplier = 1;
   r.m.addOp(0, depthwise ? TfOp::DepthwiseConv2d : TfOp::Conv2d, convVersion(p, depthwise), {x, w, bias}, {y}, co);
 

@@ -1217,11 +1217,12 @@ CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
 }
 
 CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
-                              int64_t kernel, int64_t group, int dtype)
+                              int64_t kernel, int64_t stride, int64_t group, int dtype)
 {
   (void)spec;
   CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
   const int64_t inPerGroup = channels / group;
+  const int64_t outSide = spatial / stride;
   p.input("s", dtype, {1});
   p.constTensor("X0", dtype, {1, channels, spatial, spatial},
                 coremlFillFloats(dtype, channels * spatial * spatial, 0x9e3779b9u));
@@ -1237,12 +1238,12 @@ CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
   // always emits the zeros.
   p.op("conv",
        {{"x", "X"}, {"weight", "Wt"},
-        {"strides", p.constInts("strides", {1, 1})},
+        {"strides", p.constInts("strides", {(int32_t)stride, (int32_t)stride})},
         {"pad_type", p.constString("pad_type", "same")},
         {"pad", p.constInts("pad", {0, 0, 0, 0})},
         {"dilations", p.constInts("dilations", {1, 1})},
         {"groups", p.constInt("groups", (int32_t)group)}},
-       {"Y", dtype, {1, channels, spatial, spatial}});
+       {"Y", dtype, {1, channels, outSide, outSide}});
   reduceMax(p, "out", "Y", {2, 3}, false, dtype, {1, channels});
   p.output("out", dtype, {1, channels});
   return p;

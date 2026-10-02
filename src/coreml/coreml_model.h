@@ -294,9 +294,10 @@ CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
 CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed);
 
 // Throughput-shaped 2-D convolution over a resident [1, C, S, S] input and a
-// [C, C/group, k, k] weight, "same" padding, result reduced per channel.
+// [C, C/group, k, k] weight at `stride`, "same" padding (an S / stride side
+// out), result reduced per channel.
 CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
-                              int64_t kernel, int64_t group, int dtype);
+                              int64_t kernel, int64_t stride, int64_t group, int dtype);
 
 enum class CoremlActivation { None, Silu, Softmax, LayerNorm };
 

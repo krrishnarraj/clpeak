@@ -4,12 +4,14 @@
 //
 // Accelerators were built for convolution before they were asked to do
 // anything else, and the gap between this and coreml-gemm is an
-// architectural number in its own right: the Neural Engine convolves faster
-// than it multiplies.  Three shapes at a fixed 256 channels -- a 3x3, a 1x1
-// (arithmetically a matmul per pixel) and a depthwise 3x3 (a fraction of the
-// arithmetic per byte loaded) -- each swept over feature-map size until the
-// rate stops improving, in fp16 and fp32.  The recipe is the ONNX backend's
-// (src/onnx/conv.cpp), so the two ladders divide row for row.
+// architectural number in its own right.  Three shapes at a fixed 256
+// channels -- a 3x3 at stride 2, a 1x1 (arithmetically a matmul per pixel)
+// and a depthwise 3x3 (a fraction of the arithmetic per byte loaded) -- each
+// swept over feature-map size until the rate stops improving, in fp16 and
+// fp32.  The recipe is the ONNX backend's (src/onnx/conv.cpp, whose kShapes
+// says why the 3x3's stride is 2: at 1, Core ML's GPU ran it with fewer
+// multiplies than counted and read 6.0 TFLOPS on an M1 Pro whose GPU peaks
+// at 5.3), so the two ladders divide row for row.
 
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
@@ -43,6 +45,7 @@ struct DType
 struct Shape
 {
   int64_t kernel;
+  int64_t stride;
   bool depthwise;
   const char *label;
   const char *note;
@@ -56,27 +59,27 @@ const DType kDTypes[] = {
 };
 
 const Shape kShapes[] = {
-    {3, false, "conv3x3",
-     "A 3x3 convolution over 256 channels, the shape most vision networks are "
-     "built from and the one accelerators were designed around.  Counted as "
-     "direct multiplies: a Winograd kernel does fewer, so this can read above "
-     "the matmul peak (an M1 Pro's GPU: 6.0 against 4.7 TFLOPS) without the "
-     "unit being built for convolution."},
-    {1, false, "conv1x1",
+    {3, 2, false, "conv3x3s2",
+     "A 3x3 convolution over 256 channels at stride 2, the layer vision "
+     "networks downsample with.  Winograd kernels, which do a fraction of the "
+     "multiplies a direct count assumes, cannot run a stride of 2, so every "
+     "multiply counted here is one the unit did."},
+    {1, 1, false, "conv1x1",
      "Arithmetically a matrix multiply at every pixel, so it should land near "
      "the matmul rows; where it does not, the two shapes reach different "
      "machinery."},
-    {3, true, "depthwise3x3",
-     "The 3x3 shape with each channel kept separate, so far less arithmetic "
-     "per value loaded.  Hardware built around dense arrays collapses here, "
-     "which is why mobile networks run slower than their FLOP counts."},
+    {3, 1, true, "depthwise3x3",
+     "A 3x3 at stride 1 with each channel kept separate, so far less "
+     "arithmetic per value loaded.  Hardware built around dense arrays "
+     "collapses here, which is why mobile networks run slower than their FLOP "
+     "counts."},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
 {
   const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
-  return 2.0 * (double)kChannels * (double)spatial * (double)spatial * inPerGroup *
-         (double)(v.kernel * v.kernel);
+  const double out = (double)(spatial / v.stride);   // the output's side
+  return 2.0 * (double)kChannels * out * out * inPerGroup * (double)(v.kernel * v.kernel);
 }
 
 } // namespace
@@ -91,10 +94,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
        "2-D convolution rate through Core ML on this compute unit, three "
        "shapes at 256 channels, each swept over feature-map size and reported "
        "at its best.  Against the matmul rows this says whether the unit was "
-       "built for convolution -- the Neural Engine was -- and the depthwise "
-       "row says what it does when the arithmetic per byte collapses.  The "
-       "3x3 rows count direct multiplies, so a Winograd kernel reads above "
-       "the unit's matmul peak.",
+       "built for convolution, and the depthwise row says what it does when "
+       "the arithmetic per byte collapses.",
        TestShape::Heterogeneous, "data type and shape"});
 
   for (const DType &dt : kDTypes)
@@ -141,7 +142,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           break;
 
         std::string err;
-        auto s = CoremlSession::create(dev, coremlConvModel(spec, kChannels, sp, v.kernel, group, dt.dtype), err);
+        auto s = CoremlSession::create(
+            dev, coremlConvModel(spec, kChannels, sp, v.kernel, v.stride, group, dt.dtype), err);
         if (!s)
         {
           CLPEAK_VLOG("coreml-conv[%s/%s]: %lld create failed: %s\n", dev.displayName.c_str(),

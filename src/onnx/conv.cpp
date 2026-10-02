@@ -10,11 +10,12 @@
 // number: a device that convolves far faster than it multiplies is telling
 // you what its hardware was shaped for.
 //
-// Three shapes cover the forms real networks are made of: a 3x3 convolution,
-// a 1x1 (pointwise) one -- arithmetically a matmul over pixels, so it should
-// track the GEMM rows -- and a depthwise 3x3, which has the same shape as the
-// first but a fraction of the multiply-accumulates, and is where hardware
-// built around dense arrays tends to fall over.  Each runs in the full- and
+// Three shapes cover the forms real networks are made of: a 3x3 convolution
+// at stride 2 (kShapes says why not 1), a 1x1 (pointwise) one --
+// arithmetically a matmul over pixels, so it should track the GEMM rows --
+// and a depthwise 3x3, each channel convolved on its own, a fraction of the
+// multiply-accumulates per value loaded, which is where hardware built
+// around dense arrays tends to fall over.  Each runs in the full- and
 // half-precision floating formats (fp32, fp16; see kDTypes for why bf16 is
 // not here), so this test's dtype axis double-checks any one-precision claim
 // the way the gemm rows do.
@@ -59,6 +60,7 @@ namespace
   struct Shape
   {
     int64_t kernel;
+    int64_t stride;
     bool depthwise;
     const char *label;
     const char *note;
@@ -80,21 +82,34 @@ namespace
        "16-bit floats, the native currency of most convolution engines."},
   };
 
+  // The dense 3x3 runs at stride 2 because a FLOPS row has to count
+  // arithmetic the device did.  At stride 1 a runtime may run a 3x3 as
+  // Winograd, which does a fraction of the multiplies a direct count assumes
+  // -- a quarter in the 4x4-tile form LiteRT's GPU accelerator runs -- and
+  // neither Core ML nor ONNX Runtime says which algorithm ran.  On an M1 Pro,
+  // whose GPU peaks at 5.3 TFLOPS, LiteRT's GPU read 12.6 TFLOPS that way and
+  // Core ML's 6.0.  The Winograd and FFT kernels runtimes ship need a stride
+  // of 1, so at stride 2 the direct count is what ran: LiteRT's GPU names a
+  // direct `convolution3x3` kernel there, at 4.1 TFLOPS.  It costs the units
+  // built around stride 1 -- the Neural Engine reads 4.2 here and 9.4 at
+  // stride 1 -- but that figure no runtime can show to be direct arithmetic
+  // either.  Core ML and LiteRT take these shapes, so the ladders divide row
+  // for row.
   const Shape kShapes[] = {
-      {3, false, "conv3x3",
-       "A 3x3 convolution over 256 channels, the shape most vision networks "
-       "are built from and the one accelerators were designed around.  "
-       "Counted as direct multiplies: a Winograd kernel does fewer, so this "
-       "can read above the matmul peak without the device being built for "
-       "convolution."},
-      {1, false, "conv1x1",
+      {3, 2, false, "conv3x3s2",
+       "A 3x3 convolution over 256 channels at stride 2, the layer vision "
+       "networks downsample with.  Winograd kernels, which do a fraction of "
+       "the multiplies a direct count assumes, cannot run a stride of 2, so "
+       "every multiply counted here is one the device did."},
+      {1, 1, false, "conv1x1",
        "Arithmetically a matrix multiply at every pixel, so it should land "
        "near the matmul rows; where it does not, the two shapes reach "
        "different machinery."},
-      {3, true, "depthwise3x3",
-       "The 3x3 shape with each channel kept separate, so far less arithmetic "
-       "per value loaded.  Hardware built around dense arrays collapses here, "
-       "which is why mobile networks run slower than their FLOP counts."},
+      {3, 1, true, "depthwise3x3",
+       "A 3x3 at stride 1 with each channel kept separate, so far less "
+       "arithmetic per value loaded.  Hardware built around dense arrays "
+       "collapses here, which is why mobile networks run slower than their "
+       "FLOP counts."},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -131,7 +146,8 @@ namespace
   double convFlops(const Shape &v, int64_t spatial)
   {
     const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
-    return 2.0 * (double)kChannels * (double)spatial * (double)spatial *
+    const double out = (double)(spatial / v.stride);   // the output's side
+    return 2.0 * (double)kChannels * out * out *
            inPerGroup * (double)v.kernel * (double)v.kernel;
   }
 
@@ -176,7 +192,8 @@ namespace
       fillTensor(wRaw, dtype, kChannels * inPerGroup * v.kernel * v.kernel,
                  0x243f6a88u);
       std::string model = onnxResidentConvModel(kChannels, spatial, v.kernel,
-                                                group, dtype, xRaw, wRaw);
+                                                v.stride, group, dtype, xRaw,
+                                                wRaw);
       xRaw.clear();
       xRaw.shrink_to_fit();
       wRaw.clear();

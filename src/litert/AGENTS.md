@@ -41,7 +41,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds (`clpeak::FormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm |
-| `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s) |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
@@ -189,9 +189,8 @@ kernel name from one profiled run says which kernel it was.
   default.  `fp16_acc32` applies nowhere else.
 - **Its quantized graphs are mostly float kernels between quantize and
   dequantize passes** (`convolution1x1(conv_wave_matrix) ->
-  quantize_and_dequantize` on Metal, `convolution_winograd_3x3(conv_generic)`
-  for int8 conv3x3 on Mali), so an `int8_qdq` "TOPS" figure there equals the
-  fp16 rate.  But Mali has a real one -- `convolution_int8(
+  quantize_and_dequantize` on Metal), so an `int8_qdq` "TOPS" figure there
+  equals the fp16 rate.  But Mali has a real one -- `convolution_int8(
   conv_wave_matrix_mali) -> dequantize_to_float16 -> quantize_and_dequantize`,
   3.5x its fp16 rate on a Pixel 7a -- whose tag carries the same dequantize
   tail, so the tail proves nothing.  `litertKernelIsInteger()` reads the
@@ -399,7 +398,7 @@ the sixteen-layer chain: against the single multiply, XNNPACK read 4-13%
 more in a back-to-back pair of one build (inside its run-to-run spread) and
 Metal up to 8% more in fp32, the same elsewhere; on sf1-ub's Threadripper
 PRO 3955WX, XNNPACK fp32 went from 1.10-1.17 to 1.27-1.33 TFLOPS over two
-interleaved pairs, the other rows within 5%.
+interleaved pairs, the other rows within 5%.  The conv row is 2026-10-02's.
 
 | row | GPU (Metal) | CPU (XNNPACK, 10 threads) |
 |---|---|---|
@@ -408,7 +407,7 @@ interleaved pairs, the other rows within 5%.
 | gemm int8_weight / int4_weight | 4.73 TFLOPS / heap overrun | 2.83 / 1.67 TFLOPS |
 | error fp32 / fp16 / fp16_acc32 | 0.57 / 4690 / 388 ppm | 0.57 / 4690 / — |
 | error int8_qdq / int8_weight / int4_weight | 10430 / 4692 / — | 9317 / 3918 / 4377 |
-| conv3x3 fp32 / fp16 / int8 | 8.60 / 12.7 T (Winograd-counted) / 12.6 TOPS | 484 G / 984 G / 2.31 TOPS |
+| conv3x3s2 fp32 / fp16 / int8 | 3.25 / 4.02 TFLOPS / 4.15 "TOPS" (float kernel) | 464 G / 922 G / 2.09 TOPS |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 4.34 TFLOPS / 102 GB/s | 0.85 TFLOPS / 101 GB/s |
 | block fp16_composite prefill s512 / decode kv2048 | 4.33 TFLOPS / aborts (fenced) | 0.95 TFLOPS / 58 GB/s |
 | activation softmax 32mb / 128mb | 92-117 / 122 GB/s | 111 / 116 GB/s |
@@ -442,7 +441,6 @@ run`) build, so its host-side times are not the device's -- the numbers are.
 | gemm fp32 / fp16 / fp16_acc32 | 180 / 287 / 260 GFLOPS |
 | gemm int8_qdq / int8_weight | 1.01 TOPS (wrong answer, see above) / 294 GFLOPS |
 | error fp32 / fp16 / fp16_acc32 / int8_weight | 0.57 / 4690 / 388 / 4692 ppm (the M1 Pro's figures exactly) |
-| conv3x3 fp32 / fp16 / int8 | 495 G / 982 G (Winograd) / 976 G (float Winograd) |
 | conv1x1 fp32 / fp16 / int8 | 125 / 280 / 369 G |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 280 GFLOPS / 10.5 GB/s |
 | block latency fp16 prefill s512 / decode kv2048 / kv8192 | 178 ms / 11.2 ms / 34 ms |

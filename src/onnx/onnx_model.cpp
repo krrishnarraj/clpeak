@@ -811,11 +811,11 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
 }
 
 std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
-                                  int64_t kernel, int64_t group, int dtype,
-                                  const std::string &xRaw,
+                                  int64_t kernel, int64_t stride, int64_t group,
+                                  int dtype, const std::string &xRaw,
                                   const std::string &wRaw)
 {
-  const int64_t pad = (kernel - 1) / 2;   // keeps the output the same size
+  const int64_t pad = (kernel - 1) / 2;   // an output side of spatial / stride
   const int64_t inPerGroup = channels / group;
 
   OnnxGraph g;
@@ -828,7 +828,7 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   g.node("Conv", {"X", "W"}, {"Y"},
          {OnnxAttr::list("kernel_shape", {kernel, kernel}),
           OnnxAttr::list("pads", {pad, pad, pad, pad}),
-          OnnxAttr::list("strides", {1, 1}),
+          OnnxAttr::list("strides", {stride, stride}),
           OnnxAttr::list("dilations", {1, 1}),
           OnnxAttr::num("group", group)});
 
