@@ -43,6 +43,10 @@ public:
     // and the per-benchmark methods.
     logger::DeviceScope *currentDeviceScope = nullptr;
 
+    // TEMPORARY -- one tester round: the main program built with
+    // -DCLPEAK_ALT_SG=16, or empty.  Set per device by runAll().
+    cl::Program altSg16Prog;
+
     // Which backend this is -- the one place that says so; the registry,
     // the inventory and the device selector all read it from here.
     static constexpr Backend kBackend = Backend::OpenCL;

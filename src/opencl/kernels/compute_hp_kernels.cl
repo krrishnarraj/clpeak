@@ -107,7 +107,7 @@ __kernel void compute_hp_v16(__global half *ptr, float _B)
 // per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
 
 \n#define HP_ALT_V1(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global half *ptr, float _A) \
 { \
     AF4_DECL(half, (half)_A, (half)get_local_id(0), B) \
     for (int i = 0; i < 128; i++) \
@@ -119,7 +119,7 @@ __kernel void NAME(__global half *ptr, float _A) \
 }
 \n
 \n#define HP_ALT_V2(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global half *ptr, float _A) \
 { \
     AF2_DECL(half2, (half2)((half)_A, ((half)_A + 1)), (half2)get_local_id(0), B) \
     for (int i = 0; i < 64; i++) \
@@ -131,7 +131,7 @@ __kernel void NAME(__global half *ptr, float _A) \
 }
 \n
 \n#define HP_ALT_V4(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global half *ptr, float _A) \
 { \
     AF1_DECL(half4, (half4)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3)), (half4)get_local_id(0), B) \
     for (int i = 0; i < 32; i++) \
@@ -143,7 +143,7 @@ __kernel void NAME(__global half *ptr, float _A) \
 }
 \n
 \n#define HP_ALT_V8(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global half *ptr, float _A) \
 { \
     AF1_DECL(half8, (half8)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7)), (half8)get_local_id(0), B) \
     for (int i = 0; i < 16; i++) \
@@ -155,7 +155,7 @@ __kernel void NAME(__global half *ptr, float _A) \
 }
 \n
 \n#define HP_ALT_V16(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global half *ptr, float _A) \
 { \
     AF1_DECL(half16, (half16)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7), ((half)_A + 8), ((half)_A + 9), ((half)_A + 10), ((half)_A + 11), ((half)_A + 12), ((half)_A + 13), ((half)_A + 14), ((half)_A + 15)), (half16)get_local_id(0), B) \
     for (int i = 0; i < 8; i++) \

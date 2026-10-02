@@ -144,7 +144,7 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
 // per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
 
 \n#define MP_ALT_V1(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+__kernel ALT_KERNEL_ATTR void NAME(__global float *ptr, float _B) \
 { \
     AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))), B) \
     for (int i = 0; i < 16; i++) \
@@ -157,7 +157,7 @@ __kernel void NAME(__global float *ptr, float _B) \
 }
 \n
 \n#define MP_ALT_V2(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+__kernel ALT_KERNEL_ATTR void NAME(__global float *ptr, float _B) \
 { \
     AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))), B) \
     for (int i = 0; i < 8; i++) \
@@ -170,7 +170,7 @@ __kernel void NAME(__global float *ptr, float _B) \
 }
 \n
 \n#define MP_ALT_V4(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+__kernel ALT_KERNEL_ATTR void NAME(__global float *ptr, float _B) \
 { \
     AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))), B) \
     for (int i = 0; i < 4; i++) \
@@ -183,7 +183,7 @@ __kernel void NAME(__global float *ptr, float _B) \
 }
 \n
 \n#define MP_ALT_V8(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+__kernel ALT_KERNEL_ATTR void NAME(__global float *ptr, float _B) \
 { \
     AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))), B) \
     for (int i = 0; i < 2; i++) \
@@ -196,7 +196,7 @@ __kernel void NAME(__global float *ptr, float _B) \
 }
 \n
 \n#define MP_ALT_V16(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+__kernel ALT_KERNEL_ATTR void NAME(__global float *ptr, float _B) \
 { \
     AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))), B) \
     for (int i = 0; i < 1; i++) \

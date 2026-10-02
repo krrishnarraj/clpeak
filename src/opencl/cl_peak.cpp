@@ -158,6 +158,16 @@ int clPeak::runAll()
           int8DpProg = buildAuxProg(clGetInt8DpKernels(), "INT8 dot-product compute", int8BuildOptions);
         }
 
+        // TEMPORARY -- one tester round on the Arc A380: the float alt kernels
+        // built again pinned to sub-group 16 (see mad_chain.cl), which
+        // runComputeTest times under --verbose and never reports.
+        altSg16Prog = cl::Program();
+        if (clpeak::verboseEnabled() && devInfo.deviceType == DeviceType::Gpu &&
+            devices[d].getInfo<CL_DEVICE_EXTENSIONS>().find("cl_intel_required_subgroup_size") !=
+                std::string::npos)
+          altSg16Prog = buildAuxProg(clGetMainKernels(), "sub-group 16 probe",
+                                     std::string(BUILD_OPTIONS) + " -DCLPEAK_ALT_SG=16");
+
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
 

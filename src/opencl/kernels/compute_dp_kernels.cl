@@ -103,7 +103,7 @@ __kernel void compute_dp_v16(__global double *ptr, double _A)
 // per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
 
 \n#define DP_ALT_V1(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global double *ptr, double _A) \
 { \
     AF4_DECL(double, _A, (double)get_local_id(0), B) \
     for (int i = 0; i < 128; i++) \
@@ -115,7 +115,7 @@ __kernel void NAME(__global double *ptr, double _A) \
 }
 \n
 \n#define DP_ALT_V2(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global double *ptr, double _A) \
 { \
     AF2_DECL(double2, (double2)(_A, (_A + 1)), (double2)get_local_id(0), B) \
     for (int i = 0; i < 64; i++) \
@@ -127,7 +127,7 @@ __kernel void NAME(__global double *ptr, double _A) \
 }
 \n
 \n#define DP_ALT_V4(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global double *ptr, double _A) \
 { \
     AF1_DECL(double4, (double4)(_A, (_A + 1), (_A + 2), (_A + 3)), (double4)get_local_id(0), B) \
     for (int i = 0; i < 32; i++) \
@@ -139,7 +139,7 @@ __kernel void NAME(__global double *ptr, double _A) \
 }
 \n
 \n#define DP_ALT_V8(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global double *ptr, double _A) \
 { \
     AF1_DECL(double8, (double8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (double8)get_local_id(0), B) \
     for (int i = 0; i < 16; i++) \
@@ -151,7 +151,7 @@ __kernel void NAME(__global double *ptr, double _A) \
 }
 \n
 \n#define DP_ALT_V16(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+__kernel ALT_KERNEL_ATTR void NAME(__global double *ptr, double _A) \
 { \
     AF1_DECL(double16, (double16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (double16)get_local_id(0), B) \
     for (int i = 0; i < 8; i++) \

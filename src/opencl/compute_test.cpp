@@ -248,6 +248,36 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
         test.emit(labels[w], throughput, clWidthNote(widths[w]));
 
+        // TEMPORARY -- one tester round on the Arc A380: both alt kernels
+        // again, pinned to sub-group 16 (altSg16Prog), logged and never
+        // reported.  Comes out once the round is read.
+        if (hasLane[w] && altSg16Prog())
+        {
+          cl::Kernel alt16, lane16;
+          float alt16Value = 0.0f, lane16Value = 0.0f;
+          auto probeKernel = [&](const std::string &name, cl::Kernel &k) -> float
+          {
+            k = cl::Kernel(altSg16Prog, name.c_str());
+            k.setArg(0, outputBuf);
+            if (which == Benchmark::ComputeDP)
+              k.setArg(1, (cl_double)1.3);
+            else
+              k.setArg(1, (cl_float)1.3f);
+            return timeTwin(k);
+          };
+          try
+          {
+            alt16Value = probeKernel(kernelPrefix + "_alt" + suffixes[w], alt16);
+            lane16Value = probeKernel(kernelPrefix + "_alt_lane" + suffixes[w], lane16);
+          }
+          catch (cl::Error &)
+          {
+          }
+          CLPEAK_VLOG("%s %s probe sub-group 16: alt chain %.1f (uniform b), "
+                      "%.1f (per-lane b) %s; work-group multiples %zu/%zu\n",
+                      resultTag.c_str(), labels[w].c_str(), alt16Value,
+                      lane16Value, unit.c_str(), simdHint(alt16), simdHint(lane16));
+        }
       }
       catch (cl::Error &error)
       {
