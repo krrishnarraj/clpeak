@@ -359,36 +359,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
     test.emit(v.label, value, emitOpts(v.description));
 
-    // TEMPORARY -- one tester round on the Arc A380.  Every shape again,
-    // pinned to subgroup 16, logged and never reported: whether SIMD32's
-    // register-bank pairing is what holds Alchemist's affine chain at 70-96%
-    // of its rate.  Comes out once the round is read.
-    if (d.raceAffineAddend && clpeak::verboseEnabled() &&
-        dev.info.subgroupSizeControl && subgroup != 16 &&
-        dev.info.minSubgroupSize <= 16 && 16 <= dev.info.maxSubgroupSize &&
-        (!dev.info.maxComputeWorkgroupSubgroups ||
-         (uint64_t)wgSize <= 16ull * dev.info.maxComputeWorkgroupSubgroups))
-    {
-      auto timeAt16 = [&](const uint32_t *spirv, size_t spirvSize,
-                          const VkSpecializationInfo *spec) -> float
-      {
-        VkPipeline pipeline;
-        if (!spirv || !dev.createComputePipeline(spirv, spirvSize, dsLayout,
-                                                 pipeLayout, pipeline, spec, 16))
-          return 0.0f;
-        float probeTimed = runKernel(dev, pipeline, pipeLayout, descSet, numGroups,
-                                     cfg.targetTimeUs, forceIters ? specifiedIters : 0,
-                                     false, d.pushData, d.pushSize);
-        vkDestroyPipeline(dev.device, pipeline, nullptr);
-        return probeTimed > 0.0f ? toValue(probeTimed) : 0.0f;
-      };
-      float first16 = timeAt16(v.spirv, v.spirvSize, d.specInfo);
-      float uniform16 = timeAt16(v.altSpirv, v.altSpirvSize, &addendSpec[0]);
-      float lane16 = timeAt16(v.altSpirv, v.altSpirvSize, &addendSpec[1]);
-      CLPEAK_VLOG("%s %s probe subgroup 16: first shape %.1f, alt shape %.1f "
-                  "(uniform b), %.1f (per-lane b) %s\n",
-                  d.resultTag, v.label, first16, uniform16, lane16, d.unit);
-    }
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

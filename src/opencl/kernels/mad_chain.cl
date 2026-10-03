@@ -108,16 +108,6 @@ MSTRINGIFY(
 // reason compute_sp_kernels.cl gives: some OpenCL frontends treat the builtin
 // as a slow precise path.  Qualcomm's is 26x slower on it.
 
-// TEMPORARY -- one tester round on the Arc A380: a second build of the program
-// with -DCLPEAK_ALT_SG=16 pins every float alt kernel to sub-group 16, and
-// runComputeTest times those under --verbose without reporting them.
-\n#undef ALT_KERNEL_ATTR
-\n#ifdef CLPEAK_ALT_SG
-\n#define ALT_KERNEL_ATTR __attribute__((intel_reqd_sub_group_size(CLPEAK_ALT_SG)))
-\n#else
-\n#define ALT_KERNEL_ATTR
-\n#endif
-\n
 \n#undef CH_MAD
 \n#undef CH_STRIDE
 \n#undef AF4_DECL
