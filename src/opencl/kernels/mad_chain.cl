@@ -9,10 +9,11 @@ MSTRINGIFY(
 //
 // which the compute_*_v* kernels have always used, and a second shape with
 // three distinct source registers, which the compute_*_alt_v* kernels add --
-// the float families twice over, once per addend (AF*, below).
-// runComputeTest times them all and reports the fastest.  Every macro here
-// spells 16 chain instructions per _16, so the per-work-item op budget matches
-// the kernel it is raced against and the readings are comparable.
+// the float families' once more pinned to sub-group 16 where the device
+// offers it (AF*, below).  runComputeTest times them all and reports the
+// fastest.  Every macro here spells 16 chain instructions per _16, so the
+// per-work-item op budget matches the kernel it is raced against and the
+// readings are comparable.
 //
 // Why two shapes.  No single recurrence reaches peak on every vendor:
 //
@@ -32,17 +33,20 @@ MSTRINGIFY(
 //
 // AF* (affine, x_k = a*x_k + b) is the float families' second shape.  N is 4
 // at vector width 1, 2 at width 2 and 1 from width 4 up, where the vector
-// itself already supplies the instruction-level parallelism.  a is per-lane;
-// the addend b is the DECL's last argument plus 2, and every float family
-// builds each width twice -- compute_*_alt_v* passes the kernel's uniform
-// scalar argument, the same value in every component of a vector chain, and
-// compute_*_alt_lane_v* passes a itself, making b per-lane.  Alchemist charges
-// a mad whose three sources sit in one register bank, and which addend avoids
-// that depends on where the allocator puts a, b and x: on an Arc A380 the
-// uniform b read 4.01-4.79 TFLOPS across the fp32 widths where the per-lane
-// one read 3.92-3.95, but 3.42-4.25 in mixed precision where the per-lane one
-// read 3.98-4.88.  So runComputeTest races both.  The measurements are in the
-// MAD chain block of include/common/common.h.
+// itself already supplies the instruction-level parallelism.
+//
+// Every float family builds AF* twice where the host defines CLPEAK_ALT_SG16:
+// compute_*_alt_v* at whatever sub-group size the compiler picks, and
+// compute_*_alt_sg16_v* pinned to 16 with intel_reqd_sub_group_size.  Intel's
+// compiler picks SIMD32 for these, and at SIMD32 Alchemist's register banks
+// catch a, b and x lined up more often than not: an Arc A380 read the fp32
+// widths at 3.92-3.95 TFLOPS there and 4.93-4.98 pinned to 16, mixed precision
+// 3.98-4.88 against 4.68-4.89 -- but fp16 9.48-9.56 at SIMD32 against 4.92-4.95
+// at 16, since packed fp16 needs SIMD32.  Intel's CPU runtime offers 16 as
+// well, and there it changes the vectorisation: a Threadripper 3955WX read
+// fp32 at widths 1-2 at 1.92-2.06 TFLOPS pinned against 1.52-1.63, and fp64
+// and fp16 slower.  So both are raced wherever 16 is offered.  The
+// measurements are in the MAD chain block of include/common/common.h.
 //
 // RT* (rotating, x_k = x_k * x_(k+1) + c) is the integer families' second
 // shape, and the reason they differ is not stylistic.  The affine form is
@@ -145,19 +149,19 @@ MSTRINGIFY(
 \n#define CH_MAD(d, m1, m2, ad)  d = (m1) * (m2) + (ad);
 \n#define CH_STRIDE 4
 \n
-\n#define AF4_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
+\n#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
 \n#define AF4_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b) CH_MAD(x2, a, x2, b) CH_MAD(x3, a, x3, b)
 \n#define AF4_16                 AF4_G AF4_G AF4_G AF4_G
 \n#define AF4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
 \n#define AF4_RES                ((x0 + x1) + (x2 + x3))
 \n
-\n#define AF2_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
+\n#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
 \n#define AF2_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b)
 \n#define AF2_16                 AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G
 \n#define AF2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
 \n#define AF2_RES                (x0 + x1)
 \n
-\n#define AF1_DECL(T, seed, inv, uni) T a = (inv); T b = (T)(uni) + (T)(2); T x0 = (seed);
+\n#define AF1_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed);
 \n#define AF1_G                  CH_MAD(x0, a, x0, b)
 \n#define AF1_16                 AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G
 \n#define AF1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16

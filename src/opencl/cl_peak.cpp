@@ -30,6 +30,33 @@ void CL_CALLBACK contextNotify(const char *errinfo, const void *, size_t, void *
     clpeak::logMessage(clpeak::LogLevel::Error, "opencl", errinfo);
 }
 
+// Whether the device takes intel_reqd_sub_group_size(16): the extension, and
+// 16 among CL_DEVICE_SUB_GROUP_SIZES_INTEL.  The query is the extension's own,
+// so it goes through the C API.
+bool offersSubGroup16(const cl::Device &device)
+{
+  try
+  {
+    if (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_intel_required_subgroup_size") ==
+        std::string::npos)
+      return false;
+  }
+  catch (cl::Error &)
+  {
+    return false;
+  }
+  const cl_device_info kSubGroupSizesIntel = 0x4108;
+  size_t bytes = 0;
+  if (clGetDeviceInfo(device(), kSubGroupSizesIntel, 0, nullptr, &bytes) != CL_SUCCESS ||
+      bytes == 0)
+    return false;
+  std::vector<size_t> sizes(bytes / sizeof(size_t));
+  if (clGetDeviceInfo(device(), kSubGroupSizesIntel, bytes, sizes.data(), nullptr) !=
+      CL_SUCCESS)
+    return false;
+  return std::find(sizes.begin(), sizes.end(), (size_t)16) != sizes.end();
+}
+
 } // namespace
 
 int clPeak::runAll()
@@ -99,24 +126,36 @@ int clPeak::runAll()
         });
         currentDeviceScope = &deviceScope;
 
-        cl::Program::Sources source(1, clGetMainKernels());
-        cl::Program prog = cl::Program(ctx, source);
-        try
+        // Only the kernels the selected tests use (clGetMainKernels), and on a
+        // device that offers sub-group 16 the float families' affine chain a
+        // second time pinned to it (kernels/mad_chain.cl).
+        const std::string mainSource =
+            clGetMainKernels([this](Benchmark b) { return isAllowed(b); });
+        std::string mainOptions = BUILD_OPTIONS;
+        if (offersSubGroup16(devices[d]))
+          mainOptions += " -DCLPEAK_ALT_SG16 ";
+        cl::Program prog;
+        if (!mainSource.empty())
         {
-          std::vector<cl::Device> dev = {devices[d]};
-          prog.build(dev, BUILD_OPTIONS);
-        }
-        catch (cl::Error &error)
-        {
-          // The device produces nothing after this, and only the compiler
-          // says why -- so the build log is an error on the run log, not a
-          // --verbose extra, and a file from a machine nobody can reach
-          // still explains the missing device.
-          CLPEAK_LOG(Error, "OpenCL: program build failed on %s (%s %d):\n%s",
-                     devInfo.deviceName.c_str(), error.what(), error.err(),
-                     prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
-          currentDeviceScope = nullptr;
-          continue;
+          cl::Program::Sources source(1, mainSource);
+          prog = cl::Program(ctx, source);
+          try
+          {
+            std::vector<cl::Device> dev = {devices[d]};
+            prog.build(dev, mainOptions.c_str());
+          }
+          catch (cl::Error &error)
+          {
+            // The device produces nothing after this, and only the compiler
+            // says why -- so the build log is an error on the run log, not a
+            // --verbose extra, and a file from a machine nobody can reach
+            // still explains the missing device.
+            CLPEAK_LOG(Error, "OpenCL: program build failed on %s (%s %d):\n%s",
+                       devInfo.deviceName.c_str(), error.what(), error.err(),
+                       prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
+            currentDeviceScope = nullptr;
+            continue;
+          }
         }
 
         // Helper: build an auxiliary program, silently skip on failure.
@@ -145,13 +184,16 @@ int clPeak::runAll()
         // that compress the register budget for every other kernel in the same
         // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
         // Each gets its own isolated program object.
-        cl::Program localProg = buildAuxProg(clGetLocalKernels(), "Local bandwidth");
+        cl::Program localProg;
+        if (isAllowed(Benchmark::LocalBW))
+          localProg = buildAuxProg(clGetLocalKernels(), "Local bandwidth");
         cl::Program imgProg;
-        if (devInfo.imageSupported)
+        if (devInfo.imageSupported && isAllowed(Benchmark::ImageBW))
           imgProg = buildAuxProg(clGetImageKernels(), "Image bandwidth");
 
         cl::Program int8DpProg;
-        if (devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported)
+        if ((devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported) &&
+            isAllowed(Benchmark::ComputeInt8DP))
         {
           std::string int8BuildOptions = std::string(BUILD_OPTIONS) +
               (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "");

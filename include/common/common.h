@@ -193,29 +193,31 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // On Alchemist three distinct registers are not enough either.  At SIMD32 a
 // 32-lane fp32 value spans four GRFs, two in each register bank in the same
 // order, and a mad that reads all three sources from one bank pays for the
-// conflict.  Whether a, b and x line up that way is the driver's register
-// allocator's call, so the addend comes in two forms and both are raced:
-// per-lane (a + 2) and uniform (the kernel's scalar + 2).  Neither wins
-// everywhere.  On an Arc A380 (driver 8993), a part that reaches 4.88 TFLOPS,
-// the per-lane b read 4.81 in Vulkan fp32 and the uniform one 4.12, but 3.44-
-// 3.55 against 3.92-4.08 in Vulkan mixed precision; OpenCL fp32 read 3.92-3.95
-// against 4.01-4.79 and OpenCL mixed 3.98-4.88 against 3.42-4.25.  IGC's own
-// listing (ocloc -device acm-g11, a newer IGC than that driver's) showed the
-// uniform b conflict-free in every OpenCL kernel, so a listing is no
-// substitute for timing both.  The uniform operand has to be b, never a: a
-// uniform a with the uniform seeds makes the whole chain uniform, which a CPU
-// runtime vectorising across work-items computes once.  And it is one value
-// in every component: two different uniform values in a vec2 cost an RTX 5060
-// 2.7% and llvmpipe 43% on Vulkan mp2, the splat nothing.  oneAPI races its
-// own pair of the two (see the loop-trip rule above).
+// conflict -- which the allocator's natural layout makes the common case.  At
+// SIMD16 each value sits in one bank and the conflict mostly goes away, but
+// packed fp16 needs SIMD32 for its double rate.  So Vulkan and OpenCL time the
+// float families' affine chain at two sub-group widths: Vulkan at the width
+// its pipelines are pinned to and at half of it, OpenCL at the compiler's
+// choice and pinned to 16 (intel_reqd_sub_group_size, where it is offered).
+// On an Arc A380 (driver 8993), whose fp32 peak is ~5.0 TFLOPS, fp32 read
+// 4.78-4.83 in Vulkan and 3.92-3.95 in OpenCL at SIMD32 against 4.87-4.88 and
+// 4.93-4.98 at 16; mixed precision 3.44-3.55 and 3.98-4.88 against 4.60-4.80
+// and 4.68-4.89; fp16 9.48-9.56 at SIMD32 against 4.92-4.95.  The two widths
+// race as a clpeak::FormRace (form_race.h) that drops only a clear loser: a
+// tie at one vector width does not predict the next, because the allocator
+// lays each width out afresh.
 //
-// Vulkan, OpenCL and oneAPI race all three shapes and report the fastest.
-// Vulkan and OpenCL race the two addends across the vector widths as a
-// clpeak::FormRace (form_race.h), so wherever they tie -- NVIDIA, Apple,
-// Intel's CPU runtime -- the per-lane one stops being timed after the first
-// width.  Metal, which never runs on Alchemist, races the squaring chain
-// against the uniform-b one alone.  That covers every backend that can run on
-// Alchemist.
+// A uniform addend is no substitute.  b = the kernel's scalar + 2 caps the
+// conflict at one half of a mad, and IGC's own listing (ocloc -device
+// acm-g11) showed it conflict-free at SIMD32 -- yet the same A380 read it at
+// 4.12 in Vulkan fp32 and 6.60 in Vulkan fp16, against 4.81 and 9.50 with b
+// per-lane.  So b is per-lane (a + 2), and a listing is no substitute for
+// timing.  oneAPI still races a uniform-b chain as its third kernel (see the
+// loop-trip rule above).
+//
+// Vulkan, OpenCL and oneAPI race these and report the fastest.  Metal, which
+// never runs on Alchemist, races the two shapes alone.  That covers every
+// backend that can run on Alchemist.
 //
 // CUDA and ROCm deliberately do not race.  Each targets a single vendor, and
 // racing costs roughly 2x the compute-test budget: on NVIDIA the squaring

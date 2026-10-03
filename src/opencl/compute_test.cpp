@@ -78,16 +78,30 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
     // Create kernels and set arguments.  Each width also looks for its
     // second-shape twins (see kernels/mad_chain.cl): compute_*_alt_v*, and for
-    // the float families compute_*_alt_lane_v*, the same affine chain with a
-    // per-lane addend instead of a uniform one.  A family that defines neither
-    // simply races nothing.
+    // the float families on a device that offers it compute_*_alt_sg16_v*,
+    // the same affine chain pinned to sub-group 16.  A family that defines
+    // neither simply races nothing.
     cl::Kernel kernels[5];
     cl::Kernel altKernels[5];
-    cl::Kernel laneKernels[5];
+    cl::Kernel sg16Kernels[5];
     bool hasAlt[5] = {false, false, false, false, false};
-    bool hasLane[5] = {false, false, false, false, false};
+    bool hasSg16[5] = {false, false, false, false, false};
+    // Looked up by name first: some runtimes (Apple's) print an error for
+    // every clCreateKernel on a name the program lacks, and most families lack
+    // the twins.
+    std::string programKernels;
+    try
+    {
+      programKernels = ";" + prog.getInfo<CL_PROGRAM_KERNEL_NAMES>() + ";";
+    }
+    catch (cl::Error &)
+    {
+    }
     auto findTwin = [&](const std::string &name, cl::Kernel &k) -> bool
     {
+      if (programKernels.size() > 2 &&
+          programKernels.find(";" + name + ";") == std::string::npos)
+        return false;
       try
       {
         k = cl::Kernel(prog, name.c_str());
@@ -105,7 +119,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       kernels[w] = cl::Kernel(prog, kname.c_str());
       kernels[w].setArg(0, outputBuf);
       hasAlt[w] = findTwin(kernelPrefix + "_alt" + suffixes[w], altKernels[w]);
-      hasLane[w] = findTwin(kernelPrefix + "_alt_lane" + suffixes[w], laneKernels[w]);
+      hasSg16[w] = findTwin(kernelPrefix + "_alt_sg16" + suffixes[w], sg16Kernels[w]);
       // Arg 1: scalar constant -- type depends on the test
       auto setScalarArg = [&](cl::Kernel &k) {
         if (which == Benchmark::ComputeDP)
@@ -137,7 +151,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       };
       setScalarArg(kernels[w]);
       if (hasAlt[w]) setScalarArg(altKernels[w]);
-      if (hasLane[w]) setScalarArg(laneKernels[w]);
+      if (hasSg16[w]) setScalarArg(sg16Kernels[w]);
     }
 
     // Which width the compiler built a kernel at.  On Intel GPUs the preferred
@@ -157,11 +171,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       }
     };
 
-    // The float families' two addends (compute_*_alt_v* uniform,
-    // compute_*_alt_lane_v* per-lane) race width by width as a FormRace: where
-    // the addend makes no difference they tie at the first width, and only the
-    // uniform kernel is timed from there.  See kernels/mad_chain.cl.
-    clpeak::FormRace addendRace;
+    // The affine chain at the compiler's sub-group size and at 16 race as a
+    // FormRace that drops only a clear loser: a tie at one vector width says
+    // nothing about the next, because the register allocator lays every width
+    // out afresh -- that is how Alchemist's mixed-precision chain tied at width
+    // 4 and then read 16-28% low at 8 and 16.  See kernels/mad_chain.cl.
+    clpeak::FormRace widthRace;
 
     // Run each vector width. run_kernel clamps the local size to each kernel's
     // own work-group limit (wide vector widths can be capped by register
@@ -195,10 +210,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           }
         };
         double twin[2] = {0.0, 0.0};
-        if (hasAlt[w] && addendRace.runs(false))
+        if (hasAlt[w] && widthRace.runs(false))
           twin[0] = timeTwin(altKernels[w]);
-        if (hasLane[w] && addendRace.runs(true))
-          twin[1] = timeTwin(laneKernels[w]);
+        if (hasSg16[w] && widthRace.runs(true))
+          twin[1] = timeTwin(sg16Kernels[w]);
         if (clpeak::verboseEnabled() && (twin[0] > 0.0 || twin[1] > 0.0))
         {
           std::string alts;
@@ -208,42 +223,47 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
               continue;
             char reading[64];
             snprintf(reading, sizeof(reading), "%s%.1f%s", alts.empty() ? "" : ", ",
-                     twin[f], !hasLane[w] ? "" : f ? " (per-lane b)" : " (uniform b)");
+                     twin[f], !hasSg16[w] ? "" : f ? " (sub-group 16)" : " (compiler's sub-group)");
             alts += reading;
           }
           std::string multiples = std::to_string(simdHint(kernels[w])) + "/" +
                                   std::to_string(simdHint(altKernels[w]));
-          if (hasLane[w])
-            multiples += "/" + std::to_string(simdHint(laneKernels[w]));
+          if (hasSg16[w])
+            multiples += "/" + std::to_string(simdHint(sg16Kernels[w]));
           CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %s %s; work-group "
                       "multiples %s\n",
                       resultTag.c_str(), labels[w].c_str(), throughput, alts.c_str(),
                       unit.c_str(), multiples.c_str());
         }
-        if (hasLane[w])
-        {
-          for (int f = 0; f < 2; f++)
-            if (addendRace.runs(f == 1) && twin[f] <= 0.0)
-              addendRace.drop(f == 1);
-          if (addendRace.runs(false) && addendRace.runs(true))
-          {
-            const double noBuildPreference[2] = {1.0, 1.0};
-            addendRace.settle(twin, noBuildPreference);
-            if (!addendRace.runs(false) || !addendRace.runs(true))
-              CLPEAK_VLOG("%s %s: alt addends settled -- the %s b alone from here\n",
-                          resultTag.c_str(), labels[w].c_str(),
-                          addendRace.runs(true) ? "per-lane" : "uniform");
-          }
-        }
+        // The fold guard first, so a reading it rejects cannot decide the race.
         const float squaring = throughput;
-        for (double t : twin)
+        double raced[2] = {twin[0], twin[1]};
+        for (int f = 0; f < 2; f++)
         {
-          if (t > squaring * MAX_ALT_CHAIN_RATIO)
+          if (twin[f] > squaring * MAX_ALT_CHAIN_RATIO)
+          {
             CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
                         "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
-                        t / squaring);
-          else if (t > throughput)
-            throughput = (float)t;
+                        twin[f] / squaring);
+            raced[f] = 0.0;
+          }
+          else if (twin[f] > throughput)
+            throughput = (float)twin[f];
+        }
+        if (hasSg16[w])
+        {
+          if (widthRace.runs(true) && twin[1] <= 0.0)
+            widthRace.drop(true);
+          if (widthRace.runs(false) && widthRace.runs(true))
+          {
+            widthRace.dropTrailing(raced);
+            if (!widthRace.runs(false) || !widthRace.runs(true))
+              CLPEAK_VLOG("%s %s: alt chain at the %s sub-group trails by %.1fx -- "
+                          "dropped from here\n",
+                          resultTag.c_str(), labels[w].c_str(),
+                          widthRace.runs(true) ? "compiler's" : "16",
+                          widthRace.runs(true) ? twin[1] / twin[0] : twin[0] / twin[1]);
+          }
         }
 
         test.emit(labels[w], throughput, clWidthNote(widths[w]));

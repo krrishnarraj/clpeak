@@ -8,8 +8,8 @@
 // saying which.  Core ML races the two orders a weight can be stored in
 // (src/coreml/coreml_bench.h), LiteRT the two operators an int8 layer can be
 // written as (src/litert/gemm.cpp), and the Vulkan and OpenCL compute peaks
-// the two addends of their affine chain across the vector widths
-// (src/vulkan/compute_kernel.cpp, src/opencl/compute_test.cpp).
+// the two sub-group widths their affine chain can be built at, across the
+// vector widths (src/vulkan/compute_kernel.cpp, src/opencl/compute_test.cpp).
 //
 // Each point a race stays open costs a second build and a second
 // measurement, so a race closes as soon as its readings allow: once one form
@@ -73,6 +73,22 @@ public:
       open_[!keep] = false;
       sameProgram_ = buildUs[!keep] >= buildUs[keep] * kFormRaceBuildGap;
     }
+  }
+
+  // Close only on a clear loser: drop a form that trails the other by
+  // kFormRaceBehind and leave a tie open.  For a race whose margin moves from
+  // one point to the next, where a tie at one says nothing about the next --
+  // the compute peaks' sub-group widths, which a register allocator lays out
+  // afresh at every vector width.  On an Arc A380 the mixed-precision affine
+  // chain's two forms tied at width 4, and the one a tie kept there read
+  // 16-28% under the other at widths 8 and 16.
+  void dropTrailing(const double rate[2])
+  {
+    if (!open_[0] || !open_[1] || rate[0] <= 0.0 || rate[1] <= 0.0)
+      return;
+    const bool faster = rate[1] > rate[0];
+    if (rate[faster] >= rate[!faster] * kFormRaceBehind)
+      open_[!faster] = false;
   }
 
   // The race for the same work in another shape -- a transformer block's

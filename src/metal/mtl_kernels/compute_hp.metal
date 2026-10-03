@@ -102,7 +102,7 @@ kernel void compute_hp_alt(device float* out [[buffer(0)]],
                             uint tid [[thread_position_in_grid]],
                             uint lid [[thread_position_in_threadgroup]])
 {
-    AF4_DECL(half, (half)A, (half)lid, (half)A)
+    AF4_DECL(half, (half)A, (half)lid)
 
     for (int i = 0; i < 128; i++)
     {
@@ -118,7 +118,7 @@ kernel void compute_hp2_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF2_DECL(half2, half2((half)A, (half)(A + 1.0f)), half2((half)lid), (half)A)
+    AF2_DECL(half2, half2((half)A, (half)(A + 1.0f)), half2((half)lid))
 
     for (int i = 0; i < 64; i++)
     {
@@ -134,7 +134,7 @@ kernel void compute_hp4_alt(device float* out [[buffer(0)]],
                              uint tid [[thread_position_in_grid]],
                              uint lid [[thread_position_in_threadgroup]])
 {
-    AF1_DECL(half4, half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f)), half4((half)lid), (half)A)
+    AF1_DECL(half4, half4((half)A, (half)(A + 1.0f), (half)(A + 2.0f), (half)(A + 3.0f)), half4((half)lid))
 
     for (int i = 0; i < 32; i++)
     {

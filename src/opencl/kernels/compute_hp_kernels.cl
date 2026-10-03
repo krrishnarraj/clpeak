@@ -102,14 +102,16 @@ __kernel void compute_hp_v16(__global half *ptr, float _B)
 
 // ---- affine-chain variants (see mad_chain.cl) ----
 //
-// One macro per width, each instantiated with both of the AF* chain's addends:
-// compute_hp_alt_v* takes b uniform (the kernel argument), compute_hp_alt_lane_v*
-// per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
+// One macro per width, instantiated as compute_hp_alt_v* at whatever sub-group
+// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// device with cl_intel_required_subgroup_size that offers 16), again as
+// compute_hp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
+// the squaring chain.
 
-\n#define HP_ALT_V1(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+\n#define HP_ALT_V1(NAME, ATTR) \
+__kernel ATTR void NAME(__global half *ptr, float _A) \
 { \
-    AF4_DECL(half, (half)_A, (half)get_local_id(0), B) \
+    AF4_DECL(half, (half)_A, (half)get_local_id(0)) \
     for (int i = 0; i < 128; i++) \
     { \
         AF4_16 \
@@ -118,10 +120,10 @@ __kernel void NAME(__global half *ptr, float _A) \
     ptr[get_global_id(0)] = r; \
 }
 \n
-\n#define HP_ALT_V2(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+\n#define HP_ALT_V2(NAME, ATTR) \
+__kernel ATTR void NAME(__global half *ptr, float _A) \
 { \
-    AF2_DECL(half2, (half2)((half)_A, ((half)_A + 1)), (half2)get_local_id(0), B) \
+    AF2_DECL(half2, (half2)((half)_A, ((half)_A + 1)), (half2)get_local_id(0)) \
     for (int i = 0; i < 64; i++) \
     { \
         AF2_16 \
@@ -130,10 +132,10 @@ __kernel void NAME(__global half *ptr, float _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1; \
 }
 \n
-\n#define HP_ALT_V4(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+\n#define HP_ALT_V4(NAME, ATTR) \
+__kernel ATTR void NAME(__global half *ptr, float _A) \
 { \
-    AF1_DECL(half4, (half4)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3)), (half4)get_local_id(0), B) \
+    AF1_DECL(half4, (half4)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3)), (half4)get_local_id(0)) \
     for (int i = 0; i < 32; i++) \
     { \
         AF1_16 \
@@ -142,10 +144,10 @@ __kernel void NAME(__global half *ptr, float _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3; \
 }
 \n
-\n#define HP_ALT_V8(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+\n#define HP_ALT_V8(NAME, ATTR) \
+__kernel ATTR void NAME(__global half *ptr, float _A) \
 { \
-    AF1_DECL(half8, (half8)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7)), (half8)get_local_id(0), B) \
+    AF1_DECL(half8, (half8)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7)), (half8)get_local_id(0)) \
     for (int i = 0; i < 16; i++) \
     { \
         AF1_16 \
@@ -154,10 +156,10 @@ __kernel void NAME(__global half *ptr, float _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7; \
 }
 \n
-\n#define HP_ALT_V16(NAME, B) \
-__kernel void NAME(__global half *ptr, float _A) \
+\n#define HP_ALT_V16(NAME, ATTR) \
+__kernel ATTR void NAME(__global half *ptr, float _A) \
 { \
-    AF1_DECL(half16, (half16)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7), ((half)_A + 8), ((half)_A + 9), ((half)_A + 10), ((half)_A + 11), ((half)_A + 12), ((half)_A + 13), ((half)_A + 14), ((half)_A + 15)), (half16)get_local_id(0), B) \
+    AF1_DECL(half16, (half16)((half)_A, ((half)_A + 1), ((half)_A + 2), ((half)_A + 3), ((half)_A + 4), ((half)_A + 5), ((half)_A + 6), ((half)_A + 7), ((half)_A + 8), ((half)_A + 9), ((half)_A + 10), ((half)_A + 11), ((half)_A + 12), ((half)_A + 13), ((half)_A + 14), ((half)_A + 15)), (half16)get_local_id(0)) \
     for (int i = 0; i < 8; i++) \
     { \
         AF1_16 \
@@ -167,17 +169,20 @@ __kernel void NAME(__global half *ptr, float _A) \
 }
 \n
 
-HP_ALT_V1(compute_hp_alt_v1, (half)_A)
-HP_ALT_V2(compute_hp_alt_v2, (half)_A)
-HP_ALT_V4(compute_hp_alt_v4, (half)_A)
-HP_ALT_V8(compute_hp_alt_v8, (half)_A)
-HP_ALT_V16(compute_hp_alt_v16, (half)_A)
+HP_ALT_V1(compute_hp_alt_v1, )
+HP_ALT_V2(compute_hp_alt_v2, )
+HP_ALT_V4(compute_hp_alt_v4, )
+HP_ALT_V8(compute_hp_alt_v8, )
+HP_ALT_V16(compute_hp_alt_v16, )
 
-HP_ALT_V1(compute_hp_alt_lane_v1, a)
-HP_ALT_V2(compute_hp_alt_lane_v2, a)
-HP_ALT_V4(compute_hp_alt_lane_v4, a)
-HP_ALT_V8(compute_hp_alt_lane_v8, a)
-HP_ALT_V16(compute_hp_alt_lane_v16, a)
+\n#ifdef CLPEAK_ALT_SG16
+\nHP_ALT_V1(compute_hp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
+HP_ALT_V2(compute_hp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
+HP_ALT_V4(compute_hp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))
+HP_ALT_V8(compute_hp_alt_sg16_v8, __attribute__((intel_reqd_sub_group_size(16))))
+HP_ALT_V16(compute_hp_alt_sg16_v16, __attribute__((intel_reqd_sub_group_size(16))))
+\n#endif
+\n
 
 \n
 \n#endif      // half_AVAILABLE

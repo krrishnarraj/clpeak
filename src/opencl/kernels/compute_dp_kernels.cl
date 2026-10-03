@@ -98,14 +98,16 @@ __kernel void compute_dp_v16(__global double *ptr, double _A)
 
 // ---- affine-chain variants (see mad_chain.cl) ----
 //
-// One macro per width, each instantiated with both of the AF* chain's addends:
-// compute_dp_alt_v* takes b uniform (the kernel argument), compute_dp_alt_lane_v*
-// per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
+// One macro per width, instantiated as compute_dp_alt_v* at whatever sub-group
+// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// device with cl_intel_required_subgroup_size that offers 16), again as
+// compute_dp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
+// the squaring chain.
 
-\n#define DP_ALT_V1(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+\n#define DP_ALT_V1(NAME, ATTR) \
+__kernel ATTR void NAME(__global double *ptr, double _A) \
 { \
-    AF4_DECL(double, _A, (double)get_local_id(0), B) \
+    AF4_DECL(double, _A, (double)get_local_id(0)) \
     for (int i = 0; i < 128; i++) \
     { \
         AF4_16 \
@@ -114,10 +116,10 @@ __kernel void NAME(__global double *ptr, double _A) \
     ptr[get_global_id(0)] = r; \
 }
 \n
-\n#define DP_ALT_V2(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+\n#define DP_ALT_V2(NAME, ATTR) \
+__kernel ATTR void NAME(__global double *ptr, double _A) \
 { \
-    AF2_DECL(double2, (double2)(_A, (_A + 1)), (double2)get_local_id(0), B) \
+    AF2_DECL(double2, (double2)(_A, (_A + 1)), (double2)get_local_id(0)) \
     for (int i = 0; i < 64; i++) \
     { \
         AF2_16 \
@@ -126,10 +128,10 @@ __kernel void NAME(__global double *ptr, double _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1; \
 }
 \n
-\n#define DP_ALT_V4(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+\n#define DP_ALT_V4(NAME, ATTR) \
+__kernel ATTR void NAME(__global double *ptr, double _A) \
 { \
-    AF1_DECL(double4, (double4)(_A, (_A + 1), (_A + 2), (_A + 3)), (double4)get_local_id(0), B) \
+    AF1_DECL(double4, (double4)(_A, (_A + 1), (_A + 2), (_A + 3)), (double4)get_local_id(0)) \
     for (int i = 0; i < 32; i++) \
     { \
         AF1_16 \
@@ -138,10 +140,10 @@ __kernel void NAME(__global double *ptr, double _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3; \
 }
 \n
-\n#define DP_ALT_V8(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+\n#define DP_ALT_V8(NAME, ATTR) \
+__kernel ATTR void NAME(__global double *ptr, double _A) \
 { \
-    AF1_DECL(double8, (double8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (double8)get_local_id(0), B) \
+    AF1_DECL(double8, (double8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (double8)get_local_id(0)) \
     for (int i = 0; i < 16; i++) \
     { \
         AF1_16 \
@@ -150,10 +152,10 @@ __kernel void NAME(__global double *ptr, double _A) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7; \
 }
 \n
-\n#define DP_ALT_V16(NAME, B) \
-__kernel void NAME(__global double *ptr, double _A) \
+\n#define DP_ALT_V16(NAME, ATTR) \
+__kernel ATTR void NAME(__global double *ptr, double _A) \
 { \
-    AF1_DECL(double16, (double16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (double16)get_local_id(0), B) \
+    AF1_DECL(double16, (double16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (double16)get_local_id(0)) \
     for (int i = 0; i < 8; i++) \
     { \
         AF1_16 \
@@ -163,17 +165,20 @@ __kernel void NAME(__global double *ptr, double _A) \
 }
 \n
 
-DP_ALT_V1(compute_dp_alt_v1, _A)
-DP_ALT_V2(compute_dp_alt_v2, _A)
-DP_ALT_V4(compute_dp_alt_v4, _A)
-DP_ALT_V8(compute_dp_alt_v8, _A)
-DP_ALT_V16(compute_dp_alt_v16, _A)
+DP_ALT_V1(compute_dp_alt_v1, )
+DP_ALT_V2(compute_dp_alt_v2, )
+DP_ALT_V4(compute_dp_alt_v4, )
+DP_ALT_V8(compute_dp_alt_v8, )
+DP_ALT_V16(compute_dp_alt_v16, )
 
-DP_ALT_V1(compute_dp_alt_lane_v1, a)
-DP_ALT_V2(compute_dp_alt_lane_v2, a)
-DP_ALT_V4(compute_dp_alt_lane_v4, a)
-DP_ALT_V8(compute_dp_alt_lane_v8, a)
-DP_ALT_V16(compute_dp_alt_lane_v16, a)
+\n#ifdef CLPEAK_ALT_SG16
+\nDP_ALT_V1(compute_dp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V2(compute_dp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V4(compute_dp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V8(compute_dp_alt_sg16_v8, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V16(compute_dp_alt_sg16_v16, __attribute__((intel_reqd_sub_group_size(16))))
+\n#endif
+\n
 
 \n
 \n#endif      // DOUBLE_AVAILABLE

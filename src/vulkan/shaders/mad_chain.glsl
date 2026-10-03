@@ -8,22 +8,16 @@
 // and once with -DMAD_CHAIN_AFFINE, giving the affine recurrence over
 // MAD_CHAINS independent accumulators
 //
-//     x_k = a*x_k + b                   (a a per-lane loop invariant)
+//     x_k = a*x_k + b                   (a, b per-lane loop invariants)
 //
-// whose addend b has two forms, chosen when the pipeline is built by the
-// specialization constant MAD_CHAIN_LANE_B: uniform, T(pc.A) + T(2), or
-// per-lane, a + T(2).  runComputeKernel builds the affine module both ways,
-// races the two addends across the vector widths beside the squaring chain
-// (a FormRace: once they tie, only the uniform one runs), and reports the
-// fastest.
+// Both spell exactly 16 chain instructions per MAD_16, so the per-work-item op
+// budget is identical between the two and the readings are directly
+// comparable; only how many MAD_16s one loop trip holds differs (CHAIN_TRIP,
+// below).  runComputeKernel times both -- the affine one at two subgroup
+// widths for the float families -- and reports the fastest.
 //
-// Every shape spells exactly 16 chain instructions per MAD_16, so the
-// per-work-item op budget is identical between them and the readings are
-// directly comparable; only how many MAD_16s one loop trip holds differs
-// (CHAIN_TRIP, below).
-//
-// Why two recurrences.  No single shape reaches peak on every vendor, because
-// the two dominant register files have opposite constraints:
+// Why two shapes.  No single shape reaches peak on every vendor, because the
+// two dominant register files have opposite constraints:
 //
 //  - Intel Alchemist (Xe-HPG) halves a three-source mad unless all three
 //    source operands are distinct registers.  x = x*x + c reads {x, x, c} and
@@ -36,14 +30,14 @@
 //    two-register x = x*x + c runs at full rate; four independent chains
 //    restore the affine form to ~1.0.
 //
-// Why two addends.  Distinct registers still collide on Alchemist when all
-// three sources of a mad sit in one register bank, and which addend avoids it
-// depends on where the driver's allocator happens to put a, b and x.  On an
-// Arc A380 the per-lane b read 4.81 TFLOPS in fp32 and 3.44-3.55 in mixed
-// precision; the uniform one read 4.12 and 3.92-4.08 -- each the better form
-// for one family.  The measurements are in the MAD chain block of
-// include/common/common.h.  The uniform b is one value in every component, so
-// every includer declares the push constant A.
+// Why two widths.  Distinct registers still collide on Alchemist when all
+// three sources of a mad sit in one register bank, and at SIMD32 every 32-lane
+// fp32 value straddles both banks the same way, so the driver's allocator
+// lines them up more often than not.  Pinned to subgroup 16 an Arc A380 read
+// the affine chain at 4.87 TFLOPS in fp32 and 4.60-4.80 in mixed precision,
+// against 4.81 and 3.44-3.55 at the SIMD32 its pipelines are pinned to -- while
+// fp16 needs SIMD32 for its double rate (9.50 against 4.93).  The measurements
+// are in the MAD chain block of include/common/common.h.
 //
 // The race is what keeps Alchemist off the squaring form's half rate: across
 // the Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45 and M1 Pro (via
@@ -134,16 +128,9 @@
 
 #elif defined(MAD_CHAIN_AFFINE)
 
-  // The addend's form.  A specialization constant rather than a third build:
-  // the driver folds it when it creates the pipeline, so each pipeline holds
-  // one form only, and one module serves both.  The id must match
-  // VK_MAD_CHAIN_LANE_B_ID in include/vulkan/vk_peak.h.
-  layout(constant_id = 16) const bool MAD_CHAIN_LANE_B = false;
-  #define CHAIN_ADDEND(T)  (MAD_CHAIN_LANE_B ? a + T(2) : T(pc.A) + T(2))
-
   #if MAD_CHAINS == 8
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = CHAIN_ADDEND(T);                                  \
+        T a = (inv);  T b = a + T(2);                                         \
         T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
         T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE); \
         T x4 = (seed) + T(4*MAD_CHAIN_STRIDE); T x5 = (seed) + T(5*MAD_CHAIN_STRIDE); \
@@ -158,7 +145,7 @@
     #define CHAIN_RESULT (((x0 + x1) + (x2 + x3)) + ((x4 + x5) + (x6 + x7)))
   #elif MAD_CHAINS == 4
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = CHAIN_ADDEND(T);                                  \
+        T a = (inv);  T b = a + T(2);                                         \
         T x0 = (seed);                         T x1 = (seed) + T(MAD_CHAIN_STRIDE); \
         T x2 = (seed) + T(2*MAD_CHAIN_STRIDE); T x3 = (seed) + T(3*MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b) \
@@ -168,7 +155,7 @@
     #define CHAIN_RESULT ((x0 + x1) + (x2 + x3))
   #elif MAD_CHAINS == 2
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = CHAIN_ADDEND(T);                                  \
+        T a = (inv);  T b = a + T(2);                                         \
         T x0 = (seed); T x1 = (seed) + T(MAD_CHAIN_STRIDE);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b) MAD_OP(x1, a, x1, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \
@@ -177,7 +164,7 @@
     #define CHAIN_RESULT (x0 + x1)
   #else
     #define CHAIN_DECL(T, seed, inv)                                          \
-        T a = (inv);  T b = CHAIN_ADDEND(T);                                  \
+        T a = (inv);  T b = a + T(2);                                         \
         T x0 = (seed);
     #define MAD_GROUP    MAD_OP(x0, a, x0, b)
     #define MAD_16       MAD_GROUP MAD_GROUP MAD_GROUP MAD_GROUP \

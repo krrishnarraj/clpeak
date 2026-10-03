@@ -34,7 +34,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
-| `shaders/mad_chain.glsl` | The MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_TRIP` / `CHAIN_MAP` / `CHAIN_RESULT`, and the affine addend's `MAD_CHAIN_LANE_B` spec constant) |
+| `shaders/mad_chain.glsl` | The MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_TRIP` / `CHAIN_MAP` / `CHAIN_RESULT`) |
 | `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`) — and why it is shaped that way |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
 
@@ -86,12 +86,11 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   `<name>_alt`.  `CompileShaders.cmake` detects this from the source, so
   adopting the shared chain is the only step; then declare the `_alt` extern
   and its `VK_ALT_<name>` block in `vk_peak.h` and pass `VK_ALT_SHADER(<name>)`
-  as the variant's last field.  A float family's `_alt` module is the affine
-  chain, whose addend is picked at pipeline creation by the specialization
-  constant `MAD_CHAIN_LANE_B` (id `VK_MAD_CHAIN_LANE_B_ID`, 16); such a desc
-  sets `raceAffineAddend` and `runComputeKernel` builds the module both ways.
-  It times every shape and emits the fastest; `--verbose` prints them all.
-  Why the shapes: the MAD chain block in `include/common/common.h`.
+  as the variant's last field.  A float family's desc also sets
+  `raceHalfSubgroup`, and `runComputeKernel` then times the `_alt` module at
+  half the pinned subgroup width too, where the device offers it.  It emits
+  the fastest reading; `--verbose` prints them all.  Why the shapes and the
+  widths: the MAD chain block in `include/common/common.h`.
 - `runComputeKernel` pins every pipeline it builds to a subgroup width: the
   desc's `requiredSubgroupSize`, or the width the device reports when that is
   0.  Left to choose, Intel's Windows driver compiles compute shaders at

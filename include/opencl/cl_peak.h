@@ -5,6 +5,7 @@
 #include <opencl/cl_common.h>
 #include <opencl/cl_utils.h>
 #include <common/inventory.h>
+#include <functional>
 #include <string>
 #include <memory>
 #include <vector>
@@ -27,8 +28,12 @@ static inline const char *clWidthNote(int width)
   }
 }
 
-// Kernel string accessors (defined in cl_kernels.cpp)
-const std::string& clGetMainKernels();
+// Kernel string accessors (defined in cl_kernels.cpp).  The main program is
+// assembled from the compute families and the global-bandwidth kernels the
+// selected tests use, so a run compiles only those: on a cold driver cache the
+// compile is most of a device's setup -- an Arc A380 spends ~40 s on all of
+// them.
+std::string clGetMainKernels(const std::function<bool(Benchmark)> &selected);
 const std::string& clGetLocalKernels();
 const std::string& clGetImageKernels();
 const std::string& clGetInt8DpKernels();

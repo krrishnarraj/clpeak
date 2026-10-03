@@ -19,7 +19,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | File | Purpose |
 |------|---------|
 | `cl_peak.cpp` | `clPeak` class: constructor, `runAll()` (devices numbered consecutively across platforms), `run_kernel()`, `enumerate()` |
-| `cl_kernels.cpp` | Kernel source strings (stringified .cl includes) + accessor functions |
+| `cl_kernels.cpp` | Kernel source strings (stringified .cl includes) + accessor functions; `clGetMainKernels(selected)` assembles the main program from only the families the selected tests use |
 | `compute_test.cpp` | `runComputeTest()` — shared compute-peak driver for float/int/char/short/etc. |
 | `cl_common.cpp` | `device_info_t` struct, device capability queries |
 | `cl_utils.cpp` | OpenCL-only helpers (`roundToMultipleOf`, `trimString`) — `include/opencl/cl_utils.h` |
@@ -51,19 +51,20 @@ See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
 
 Every compute family defines its kernels at least twice: `compute_<fam>_v<W>`
 with the squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
-`kernels/mad_chain.cl`.  Float families use the affine `AF*` macros and define
-a third, `compute_<fam>_alt_lane_v<W>`: the same affine chain with a per-lane
-addend where `_alt` has a uniform one, both instantiated from one
-`<FAM>_ALT_V<W>(NAME, B)` macro so they cannot drift apart.  Integer families
-use the rotating `RT*` ones -- an integer affine recurrence folds legally and
-Apple's compiler folds it.  `runComputeTest` times every kernel a width has and
-reports the fastest; a family with no `_alt` kernel simply races nothing,
-which is how `compute_int8_dp` currently behaves.  All shapes must spell the
-same number of chain instructions per work-item so the readings stay
-comparable.  Per loop trip, the fp32/fp16
-squaring kernels run 128 (`MAD_128`, but 16 at width 16), mixed precision
-runs 128 in both shapes (`AF*_128`), and everything else 16.  Full rationale:
-`mad_chain.cl` and the MAD chain block in `include/common/common.h`.
+`kernels/mad_chain.cl`.  Float families use the affine `AF*` macros, written
+once per width as `<FAM>_ALT_V<W>(NAME, ATTR)`; where `runAll` passes
+`-DCLPEAK_ALT_SG16` (a device offering sub-group 16 through
+`cl_intel_required_subgroup_size`) the same macro also instantiates
+`compute_<fam>_alt_sg16_v<W>` pinned to 16.  Integer families use the rotating
+`RT*` ones -- an integer affine recurrence folds legally and Apple's compiler
+folds it.  `runComputeTest` times every kernel a width has and reports the
+fastest; a family with no `_alt` kernel simply races nothing, which is how
+`compute_int8_dp` currently behaves.  All shapes must spell the same number of
+chain instructions per work-item so the readings stay comparable.  Per loop
+trip, the fp32/fp16 squaring kernels run 128 (`MAD_128`, but 16 at width 16),
+mixed precision runs 128 in both shapes (`AF*_128`), and everything else 16.
+Full rationale: `mad_chain.cl` and the MAD chain block in
+`include/common/common.h`.
 
 ## When You Change This Directory
 

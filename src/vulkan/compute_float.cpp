@@ -35,7 +35,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.raceAffineAddend = true;
+  d.raceHalfSubgroup = true;
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
@@ -70,7 +70,7 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.raceAffineAddend = true;
+  d.raceHalfSubgroup = true;
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
@@ -109,7 +109,7 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.raceAffineAddend = true;
+  d.raceHalfSubgroup = true;
   d.workPerWI   = COMPUTE_DP_WORK_PER_WI;
   d.elemSize    = sizeof(double);
   d.pushData    = &A;
@@ -150,7 +150,7 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.raceAffineAddend = true;
+  d.raceHalfSubgroup = true;
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;
@@ -190,7 +190,7 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   d.axis        = "vector width";
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
-  d.raceAffineAddend = true;
+  d.raceHalfSubgroup = true;
   d.workPerWI   = COMPUTE_FP_WORK_PER_WI;
   d.elemSize    = sizeof(float);
   d.pushData    = &A;

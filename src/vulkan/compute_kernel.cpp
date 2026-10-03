@@ -227,24 +227,26 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // evidence of where it went -- which of the two below appears last says
   // whether pipeline creation or the dispatch was fatal.
   auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
-                       const VkSpecializationInfo *spec, bool *built) -> float
+                       uint32_t width, bool *built) -> float
   {
     VkPipeline pipeline;
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                       pipeline, spec, subgroup);
+                                       pipeline, d.specInfo, width);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't compile the stage at that width, run it however it likes
     // rather than dropping the row.  Worth knowing about, though -- a coopmat
     // shader that lands on several subgroups per work-group has every one of
     // them recompute the same tile, so the reading comes out divided by that
-    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).
-    if (!*built && subgroup)
+    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).  The half-width
+    // contender (below) is the exception: unpinned it would only time another
+    // case, so a refusal there just drops it.
+    if (!*built && width && width == subgroup)
     {
       CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
                   "falling back to its own choice\n",
-                  d.resultTag, subgroup);
+                  d.resultTag, width);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                         pipeline, spec, 0);
+                                         pipeline, d.specInfo, 0);
     }
     if (!*built)
       return -1.0f;
@@ -264,28 +266,29 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed);
   };
 
-  // The affine chain's two addends, as specializations of the one alt module:
-  // MAD_CHAIN_LANE_B false is the uniform b, true the per-lane one.  Which is
-  // faster depends on where the driver's allocator puts the operands -- on an
-  // Arc A380 each won one of fp32 and mixed precision (shaders/mad_chain.glsl)
-  // -- so they race width by width as a FormRace: where the addend makes no
-  // difference they tie at the first width, and only the uniform one is timed
-  // from there.  A family without an addend runs its alt build once, as built.
-  const VkBool32 laneB[2] = {VK_FALSE, VK_TRUE};
-  const VkSpecializationMapEntry laneBEntry = {VK_MAD_CHAIN_LANE_B_ID, 0,
-                                               sizeof(VkBool32)};
-  const VkSpecializationInfo addendSpec[2] = {
-    {1, &laneBEntry, sizeof(VkBool32), &laneB[0]},
-    {1, &laneBEntry, sizeof(VkBool32), &laneB[1]},
-  };
-  clpeak::FormRace addendRace;
-  if (!d.raceAffineAddend)
-    addendRace.drop(true);
+  // The alt build again at half the pinned width, where the device offers it.
+  // At SIMD32 Alchemist's register banks catch the affine chain's operands
+  // lined up more often than not -- an Arc A380 read it at 3.44-4.83 TFLOPS
+  // there and 4.60-4.88 pinned to 16 -- while fp16 needs SIMD32 for its double
+  // rate, so neither width is right for every family and both are timed.  A
+  // clear loser drops out (FormRace::dropTrailing); a tie does not settle it,
+  // because the allocator lays out every vector width afresh.  See
+  // shaders/mad_chain.glsl.
+  uint32_t halfSubgroup = 0;
+  if (d.raceHalfSubgroup && subgroup && dev.info.subgroupSizeControl &&
+      dev.info.minSubgroupSize <= subgroup / 2 &&
+      subgroup / 2 <= dev.info.maxSubgroupSize &&
+      (!dev.info.maxComputeWorkgroupSubgroups ||
+       (uint64_t)wgSize <= (uint64_t)(subgroup / 2) * dev.info.maxComputeWorkgroupSubgroups))
+    halfSubgroup = subgroup / 2;
+  clpeak::FormRace widthRace;
+  if (!halfSubgroup)
+    widthRace.drop(true);
 
   for (const auto &v : variants)
   {
     bool built = false;
-    float timed = timeShape(v.spirv, v.spirvSize, d.specInfo, &built);
+    float timed = timeShape(v.spirv, v.spirvSize, subgroup, &built);
     if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
@@ -300,25 +303,23 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
     float value = toValue(timed);
 
-    // Race the alt build of the same shader -- both addends of the affine
-    // chain, where the family has one -- and keep the fastest.  A shape that
-    // fails to build or run here is not an error: the first shape already
-    // produced a reading.
+    // Race the alt build of the same shader -- at both widths, where the
+    // family races them -- and keep the fastest.  A shape that fails to build
+    // or run here is not an error: the first shape already produced a reading.
     if (v.altSpirv && v.altSpirvSize)
     {
+      const uint32_t altWidth[2] = {subgroup, halfSubgroup};
       double altValue[2] = {0.0, 0.0};
       for (int f = 0; f < 2; f++)
       {
-        if (!addendRace.runs(f == 1))
+        if (!widthRace.runs(f == 1))
           continue;
         bool altBuilt = false;
-        float altTimed = timeShape(v.altSpirv, v.altSpirvSize,
-                                   d.raceAffineAddend ? &addendSpec[f] : d.specInfo,
-                                   &altBuilt);
+        float altTimed = timeShape(v.altSpirv, v.altSpirvSize, altWidth[f], &altBuilt);
         if (altBuilt && altTimed > 0.0f)
           altValue[f] = toValue(altTimed);
-        else if (d.raceAffineAddend)
-          addendRace.drop(f == 1);
+        else if (f == 1)
+          widthRace.drop(true);
       }
       if (clpeak::verboseEnabled() && (altValue[0] > 0.0 || altValue[1] > 0.0))
       {
@@ -328,37 +329,44 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
           if (altValue[f] <= 0.0)
             continue;
           char reading[64];
-          snprintf(reading, sizeof(reading), "%s%.1f%s", alts.empty() ? "" : ", ",
-                   altValue[f], !d.raceAffineAddend ? ""
-                                : f ? " (per-lane b)" : " (uniform b)");
+          if (halfSubgroup)
+            snprintf(reading, sizeof(reading), "%s%.1f (subgroup %u)",
+                     alts.empty() ? "" : ", ", altValue[f], altWidth[f]);
+          else
+            snprintf(reading, sizeof(reading), "%.1f", altValue[f]);
           alts += reading;
         }
         CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %s %s\n",
                     d.resultTag, v.label, value, alts.c_str(), d.unit);
       }
-      if (d.raceAffineAddend && addendRace.runs(false) && addendRace.runs(true))
-      {
-        const double noBuildPreference[2] = {1.0, 1.0};
-        addendRace.settle(altValue, noBuildPreference);
-        if (!addendRace.runs(false) || !addendRace.runs(true))
-          CLPEAK_VLOG("%s %s: alt addends settled -- the %s b alone from here\n",
-                      d.resultTag, v.label,
-                      addendRace.runs(true) ? "per-lane" : "uniform");
-      }
+      // The fold guard first, so a reading it rejects cannot decide the race.
       const double first = value;
+      double raced[2] = {altValue[0], altValue[1]};
       for (int f = 0; f < 2; f++)
       {
         if (altValue[f] > first * MAX_ALT_CHAIN_RATIO)
+        {
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
                       "compiler fold\n",
                       d.resultTag, v.label, altValue[f] / first);
+          raced[f] = 0.0;
+        }
         else if (altValue[f] > value)
           value = (float)altValue[f];
+      }
+      if (widthRace.runs(false) && widthRace.runs(true))
+      {
+        widthRace.dropTrailing(raced);
+        if (!widthRace.runs(false) || !widthRace.runs(true))
+          CLPEAK_VLOG("%s %s: alt shape at subgroup %u trails by %.1fx -- "
+                      "dropped from here\n", d.resultTag, v.label,
+                      widthRace.runs(true) ? subgroup : halfSubgroup,
+                      widthRace.runs(true) ? altValue[1] / altValue[0]
+                                           : altValue[0] / altValue[1]);
       }
     }
 
     test.emit(v.label, value, emitOpts(v.description));
-
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

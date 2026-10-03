@@ -139,14 +139,16 @@ __kernel void compute_mp_v16(__global float *ptr, float _B)
 
 // ---- affine-chain variants (see mad_chain.cl) ----
 //
-// One macro per width, each instantiated with both of the AF* chain's addends:
-// compute_mp_alt_v* takes b uniform (the kernel argument), compute_mp_alt_lane_v*
-// per-lane (a + 2).  runComputeTest races the two beside the squaring chain.
+// One macro per width, instantiated as compute_mp_alt_v* at whatever sub-group
+// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// device with cl_intel_required_subgroup_size that offers 16), again as
+// compute_mp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
+// the squaring chain.
 
-\n#define MP_ALT_V1(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+\n#define MP_ALT_V1(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _B) \
 { \
-    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0))), B) \
+    AF4_DECL(float, (float)((half)_B), (float)((half)((float)get_local_id(0)))) \
     for (int i = 0; i < 16; i++) \
     { \
         AF4_128 \
@@ -156,10 +158,10 @@ __kernel void NAME(__global float *ptr, float _B) \
     ptr[get_global_id(0)] = r; \
 }
 \n
-\n#define MP_ALT_V2(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+\n#define MP_ALT_V2(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _B) \
 { \
-    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0))), B) \
+    AF2_DECL(float2, convert_float2(convert_half2((float2)(_B, _B+1))), convert_float2(convert_half2((float2)get_local_id(0)))) \
     for (int i = 0; i < 8; i++) \
     { \
         AF2_128 \
@@ -169,10 +171,10 @@ __kernel void NAME(__global float *ptr, float _B) \
     ptr[get_global_id(0)] = r.S0 + r.S1; \
 }
 \n
-\n#define MP_ALT_V4(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+\n#define MP_ALT_V4(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _B) \
 { \
-    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0))), B) \
+    AF1_DECL(float4, convert_float4(convert_half4((float4)(_B, _B+1, _B+2, _B+3))), convert_float4(convert_half4((float4)get_local_id(0)))) \
     for (int i = 0; i < 4; i++) \
     { \
         AF1_128 \
@@ -182,10 +184,10 @@ __kernel void NAME(__global float *ptr, float _B) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3; \
 }
 \n
-\n#define MP_ALT_V8(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+\n#define MP_ALT_V8(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _B) \
 { \
-    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0))), B) \
+    AF1_DECL(float8, convert_float8(convert_half8((float8)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7))), convert_float8(convert_half8((float8)get_local_id(0)))) \
     for (int i = 0; i < 2; i++) \
     { \
         AF1_128 \
@@ -195,10 +197,10 @@ __kernel void NAME(__global float *ptr, float _B) \
     ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7; \
 }
 \n
-\n#define MP_ALT_V16(NAME, B) \
-__kernel void NAME(__global float *ptr, float _B) \
+\n#define MP_ALT_V16(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _B) \
 { \
-    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0))), B) \
+    AF1_DECL(float16, convert_float16(convert_half16((float16)(_B, _B+1, _B+2, _B+3, _B+4, _B+5, _B+6, _B+7, _B+8, _B+9, _B+10, _B+11, _B+12, _B+13, _B+14, _B+15))), convert_float16(convert_half16((float16)get_local_id(0)))) \
     for (int i = 0; i < 1; i++) \
     { \
         AF1_128 \
@@ -209,17 +211,20 @@ __kernel void NAME(__global float *ptr, float _B) \
 }
 \n
 
-MP_ALT_V1(compute_mp_alt_v1, _B)
-MP_ALT_V2(compute_mp_alt_v2, _B)
-MP_ALT_V4(compute_mp_alt_v4, _B)
-MP_ALT_V8(compute_mp_alt_v8, _B)
-MP_ALT_V16(compute_mp_alt_v16, _B)
+MP_ALT_V1(compute_mp_alt_v1, )
+MP_ALT_V2(compute_mp_alt_v2, )
+MP_ALT_V4(compute_mp_alt_v4, )
+MP_ALT_V8(compute_mp_alt_v8, )
+MP_ALT_V16(compute_mp_alt_v16, )
 
-MP_ALT_V1(compute_mp_alt_lane_v1, a)
-MP_ALT_V2(compute_mp_alt_lane_v2, a)
-MP_ALT_V4(compute_mp_alt_lane_v4, a)
-MP_ALT_V8(compute_mp_alt_lane_v8, a)
-MP_ALT_V16(compute_mp_alt_lane_v16, a)
+\n#ifdef CLPEAK_ALT_SG16
+\nMP_ALT_V1(compute_mp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
+MP_ALT_V2(compute_mp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
+MP_ALT_V4(compute_mp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))
+MP_ALT_V8(compute_mp_alt_sg16_v8, __attribute__((intel_reqd_sub_group_size(16))))
+MP_ALT_V16(compute_mp_alt_sg16_v16, __attribute__((intel_reqd_sub_group_size(16))))
+\n#endif
+\n
 
 \n#endif      // HALF_AVAILABLE
 \n
