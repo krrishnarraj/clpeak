@@ -700,11 +700,11 @@ namespace vk_shaders {
   extern const uint32_t coopmat_fp16[];
   extern const size_t   coopmat_fp16_size;
 #endif
-#ifdef VK_HAS_COOPMAT_BF16
 #ifdef VK_HAS_COOPMAT_FP16_F16ACC
   extern const uint32_t coopmat_fp16_f16acc[];
   extern const size_t   coopmat_fp16_f16acc_size;
 #endif
+#ifdef VK_HAS_COOPMAT_BF16
   extern const uint32_t coopmat_bf16[];
   extern const size_t   coopmat_bf16_size;
 #endif
