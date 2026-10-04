@@ -338,6 +338,7 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
 {
   if (!s) return;
   if (s->fp32.fn)     d.fp32 = s->fp32;
+  if (s->fp32lat.fn)  d.fp32lat = s->fp32lat;
   if (s->fp64.fn)     d.fp64 = s->fp64;
   if (s->int32.fn)    d.int32 = s->int32;
   if (s->fp16.fn)     d.fp16 = s->fp16;
@@ -527,6 +528,7 @@ const CpuKernelMenu &kernelMenu()
     // Push the base dtypes (fp32/fp64/int32) a tier TU provides, all one label.
     auto addBase = [&](const CpuKernelTable *t, const char *isa) {
       add(m.fp32, t->fp32, isa);
+      add(m.fp32lat, t->fp32lat, isa);
       add(m.fp64, t->fp64, isa);
       add(m.int32, t->int32, isa);
     };
@@ -729,6 +731,7 @@ const CpuKernelMenu &kernelMenu()
       const char *sveLbl = f.sve2 ? "SVE2" : "SVE";
       const CpuKernelTable *t = clpeak_table_sve();
       add(m.fp32, t->fp32, sveLbl);
+      add(m.fp32lat, t->fp32lat, sveLbl);
       add(m.fp64, t->fp64, sveLbl);
       add(m.int32, t->int32, sveLbl);
       add(m.int8dp, t->int8dp, sveLbl);

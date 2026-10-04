@@ -89,6 +89,12 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   as the variant's last field.  `runComputeKernel` times both and emits the
   faster; `--verbose` prints both readings.  Why two shapes: the MAD chain
   block in `include/common/common.h`.
+- `runComputeKernel` pins every pipeline it builds to a subgroup width: the
+  desc's `requiredSubgroupSize`, or the width the device reports when that is
+  0.  Left to choose, Intel's Windows driver compiles compute shaders at
+  SIMD16, where Alchemist runs fp16 at its fp32 rate; the measurements are in
+  that comment.  The bandwidth and latency tests build their own pipelines and
+  stay unpinned -- nothing measured says the width matters there.
 - If you change `vkPeak` interface → update `include/vulkan/vk_peak.h`.
 - If you change `VulkanDevice` → update `vulkan_device.cpp` + `include/vulkan/vk_peak.h`.
 - If you change `CompileShaders.cmake` → test that `glslc` is found or gracefully skipped.

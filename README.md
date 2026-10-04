@@ -42,11 +42,11 @@ Backend: CUDA
       int8     : 84.7 TOPS
     cuBLASLt GEMM peak
       fp16     : 79.1 TFLOPS
-      nvf4_e2m1 : 301 TFLOPS
+      nvf4_e2m1 : 300 TFLOPS
     Global memory bandwidth
       float4   : 420 GB/s
     Kernel launch latency
-      roundtrip : 6.68 us
+      roundtrip : 6.35 us
 ```
 
 ```text
@@ -54,15 +54,15 @@ $ clpeak --devices coreml:0
 Backend: CoreML
   Device 0: Apple Neural Engine
     Core ML matmul peak
-      fp16     : 8.58 TFLOPS
-      int4_lut : 7.70 TFLOPS
-      int8_qdq : 9.43 TOPS
+      fp16     : 10.4 TFLOPS
+      int4_lut : 11.3 TFLOPS
+      int8_qdq : 11.5 TOPS
     Transformer block, prefill
-      fp16_s512 : 4.95 TFLOPS
+      fp16_s512 : 4.99 TFLOPS
     Transformer block, decode
-      fp16_kv2048 : 43.3 GB/s
+      fp16_kv2048 : 43.2 GB/s
     Core ML dispatch latency
-      trivial_op : 769 us
+      trivial_op : 781 us
 ```
 
 More screenshots are on the [project page](https://krrishnarraj.github.io/clpeak/).

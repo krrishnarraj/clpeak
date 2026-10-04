@@ -10,6 +10,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -29,6 +30,26 @@ constexpr double kLitertMaxCreateUs = 30.0e6;
 constexpr double kLitertMaxBlockCreateUs = 60.0e6;
 constexpr double kLitertCreateGrowthFactor = 6.0;
 constexpr double kLitertCreateGrowthFloor = 2.0e6;
+
+// The gemm ladder's compile cap and the next doubling's predicted compile:
+// the ONNX backend's (kOnnxMaxCreateUs, onnxPredictCreateUs in
+// include/onnx/onnx_peak.h, which has the evidence from QNN's HTP and
+// TensorRT), because the ladder is its sixteen-layer chain and an NPU
+// compiles it as slowly.  The growth already seen is carried forward, 4x to
+// 16x, and squared on the size after one that failed to gain.
+constexpr double kLitertMaxChainCreateUs = 240.0e6;
+inline double litertPredictCreateUs(double prevUs, double prevPrevUs, bool confirming)
+{
+  double growth = 4.0;
+  if (prevPrevUs > 0.0 && prevUs > kLitertCreateGrowthFloor)
+  {
+    growth = prevUs / prevPrevUs;
+    if (confirming)
+      growth *= growth;
+    growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
+  }
+  return prevUs * growth;
+}
 
 // Which hardware accelerator a device row drives.  LiteRT's model of the
 // machine is a bitmask of three -- CPU (XNNPACK), GPU (its ML Drift
@@ -84,16 +105,23 @@ public:
   struct AnswerCheck
   {
     double ppm = -1.0;
+    // The answer held NaN or infinity where the reference is finite
+    // everywhere: no figure, and the most wrong answer there is.
+    bool nonFinite = false;
     ResultStatus status = ResultStatus::Ok;
     std::string error;
   };
-  const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+  // `conv1x1` checks the same product written as a 1x1 CONV_2D, the form
+  // litert_gemm races the int8 one against.
+  const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                                 bool conv1x1 = false);
   // Empty when the format's answer is right or could not be checked;
   // otherwise the reason a rate row is refused with.
-  std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f);
+  std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                          bool conv1x1 = false);
 
 private:
-  std::map<std::pair<int, int>, AnswerCheck> answerChecks_;   // (accelerator, format)
+  std::map<std::tuple<int, int, bool>, AnswerCheck> answerChecks_;   // (accelerator, format, conv1x1)
 };
 
 // A relative RMS error past this is a wrong answer, not a loss of precision:

@@ -5,8 +5,11 @@
 // handful of operations, so it emits the ML Program (MIL) protobuf wire
 // format and the weight blob directly -- no protobuf library, no coremltools,
 // no .mlpackage shipped as an asset, and byte-identical models on every
-// device, which is what makes the Neural-Engine-vs-GPU-vs-CPU comparison
-// mean anything.  The layout it produces is exactly what coremltools writes:
+// machine, the compute units' differing at most in the order a weight is
+// stored in, which each test races (CoremlLayoutRace) -- the same
+// arithmetic everywhere, which is what makes the
+// Neural-Engine-vs-GPU-vs-CPU comparison mean anything.  The layout it
+// produces is exactly what coremltools writes:
 // Model.proto wrapping a MILSpec.Program, weights in the MIL storage-format
 // blob file, packaged as an .mlpackage directory (coreml_session.mm writes
 // that directory; this file only produces its two byte strings).
@@ -230,17 +233,27 @@ float coremlQdqOutScale(int64_t K, float magnitude);
 // to feed the matmul.  When `dequantized` is non-null it receives the exact
 // values the device will multiply -- the stored codes widened -- which is
 // what an accuracy reference has to use.
+//
+// `transposed` stores W as its transpose, [N, K] -- the [out, in] layout a
+// converted Linear layer carries, read by a matmul with transpose_y -- with
+// its scales along the same axes.  Which of the two a unit runs faster
+// depends on the unit and the format, so the tests race them
+// (CoremlLayoutRace, in coreml_bench.h, has the numbers).  The values, and
+// `dequantized`, are W's either way.
 std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
                              CoremlWeight w, int64_t K, int64_t N, uint32_t seed,
-                             float magnitude, std::vector<float> *dequantized = nullptr);
+                             float magnitude, std::vector<float> *dequantized = nullptr,
+                             bool transposed = false);
 
 // out = in * W in the format's arithmetic; for Int8Qdq the activations are
 // quantized on the way in and the result quantized and dequantized on the way
 // out, the shape a W8A8 layer has.  `in` is [M, K] in coremlActDtype(w).
+// `transposed` stores W as [N, K] and multiplies with transpose_y (see
+// coremlEmitWeight).
 void coremlEmitProjection(CoremlProgram &p, const std::string &out,
                           const std::string &in, int64_t M, int64_t K, int64_t N,
                           CoremlWeight w, uint32_t seed, float magnitude,
-                          std::vector<float> *dequantized = nullptr);
+                          std::vector<float> *dequantized = nullptr, bool transposed = false);
 
 // ---------------------------------------------------------------------------
 // Recipes
@@ -249,36 +262,42 @@ void coremlEmitProjection(CoremlProgram &p, const std::string &out,
 // number to gate on, but declares only the version it needs (see
 // coremlSpecNeeded).
 
-// Throughput-shaped GEMM: both operands are constants and the result is
-// reduced to one row, so nothing large crosses the host boundary per run.
-// A runtime scalar `s` keeps the graph from being a constant expression.
+// Throughput-shaped GEMM chain, the ONNX backend's (onnxResidentMatMulModel's
+// chain and OnnxLiveSeed): `layers` distinct D x D multiplies in one
+// prediction, each layer's product the next one's activations, the last
+// reduced to one row so nothing large crosses the host boundary.  The
+// runtime scalar `s` scales a [D, seedWidth] seed, and one more multiply --
+// in the format's own weights, and not counted -- widens it into the first
+// layer's activations, so every multiply has a live operand and no compiler
+// can evaluate the chain at build time, while the scaling pass stays a
+// sliver of the work.
 //
-//   resultScaled = true   s scales the reduced result -- cheapest, and the
-//                         one a compiler could fold; the ladder checks that
-//                         its timings grow with the work.
-//   resultScaled = false  s scales A before the multiply, one elementwise
-//                         pass that no compiler can fold away.  The Neural
-//                         Engine compiles a dynamic operand to a slower
-//                         program (about 20%), so it is the fallback shape.
-//
-// The W8A8 form always scales the operand: its activations are quantized on
-// device from a live value, the way a layer's are.
-CoremlProgram coremlResidentMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                        CoremlWeight w, bool resultScaled);
+// Layer 0's weights span [-0.5, 0.5) like the activations; every later
+// layer's are shrunk by sqrt(12 / D), so a D-deep product returns the
+// magnitude it was given and an fp16 chain never grows toward overflow.  In
+// the W8A8 form each layer is one quantized node unit -- dequantize, matmul,
+// quantize -- reading the previous layer's codes, and that magnitude is
+// what lets one output scale serve every layer.  `transposed` stores every
+// weight as [N, K] (coremlEmitWeight).
+CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t seedWidth,
+                                     CoremlWeight w, bool transposed);
 
 // y[M, N] = x[M, N] * W, x a model input and y the full result -- the plain
-// shape the accuracy rows need, since they compare actual values.
+// shape the accuracy rows need, since they compare actual values.  `transposed`
+// as for the projections: an accuracy row reads the layout that ran faster.
 CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                     CoremlWeight w, std::vector<float> *dequantized);
+                                     CoremlWeight w, std::vector<float> *dequantized,
+                                     bool transposed = false);
 
 // y[1, cols] = x[1, d] * W[d, cols] in fp16: one matrix-vector product
 // against a resident weight, the operation generating a token performs.
 CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed);
 
 // Throughput-shaped 2-D convolution over a resident [1, C, S, S] input and a
-// [C, C/group, k, k] weight, "same" padding, result reduced per channel.
+// [C, C/group, k, k] weight at `stride`, "same" padding (an S / stride side
+// out), result reduced per channel.
 CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
-                              int64_t kernel, int64_t group, int dtype);
+                              int64_t kernel, int64_t stride, int64_t group, int dtype);
 
 enum class CoremlActivation { None, Silu, Softmax, LayerNorm };
 
@@ -334,14 +353,25 @@ struct CoremlBlockShape
   // Attention as Core ML's fused scaled_dot_product_attention (iOS 18+) or
   // as explicit matmul / softmax / matmul.  Set by the caller from the spec.
   bool fusedAttention = true;
+
+  // Prefill: >0 enters the prompt through a [seq, seedWidth] seed that takes
+  // the runtime scalar, widened into the [seq, dModel] input by one more
+  // multiply the rate does not count -- the ONNX block's way in
+  // (OnnxBlockShape::seedWidth).  0 scales the whole input, which is all
+  // decode's single row needs.
+  int64_t seedWidth = 0;
+
+  // The seven projections' weights stored as [N, K] (coremlEmitWeight).
+  bool transposedWeights = false;
 };
 
 // One llama-style decoder block: QKV projection, multi-head attention, output
 // projection + residual, SwiGLU feed-forward + residual, at the precision the
 // shape names.  Weights and the KV cache are constants; the activations are a
-// constant scaled by the runtime input `s`; the result leaves as one reduced
-// row.  Decode additionally returns the new K/V, the cache write a real step
-// performs and what keeps those projections live.
+// constant scaled by the runtime input `s` (a long prompt's, a seed widened
+// by one more multiply); the result leaves as one reduced row.  Decode
+// additionally returns the new K/V, the cache write a real step performs and
+// what keeps those projections live.
 CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh);
 
 // ---------------------------------------------------------------------------

@@ -38,34 +38,71 @@ struct OrtEpDevice; // ONNX Runtime's (EP, hardware device) pair; opaque here
 // microseconds, and it passes its own far larger cap.
 constexpr unsigned int kOnnxMaxIters = 500;
 
-// Ceiling on session creation (graph compilation) time.  Separate from
-// kMaxIterUs which gates per-iteration execution time: on QNN HTP the
-// compilation dominates (1024^3: 33s, 2048^3: 313s, ~9x per 2x dim) and the
-// execution gate never fires because per-iter stays in ms.  Two guards:
+// How the doubling ladders (onnx-gemm, onnx-conv) decide to stop.
 //
-//  * absolute: one create > kOnnxMaxCreateUs -> stop ladder after this rung
-//    (keep its result, skip larger).  60s for the doubling ladders (gemm,
-//    conv), 60s for the fixed-geometry block whose 8192 context legitimately
-//    needs ~1 min on CoreML/TensorRT AOT toolchains.
-//
-//  * factor: create grew > kOnnxCreateGrowthFactor since previous rung, and
-//    is itself past kOnnxCreateGrowthFloor (memory 4x, flops 8x per 2x dim;
-//    6x tolerates jitter but catches QNN's 9.3x).  Applies only to ladders
-//    where D doubles.
-//
-// The first rung (kMinDim) is allowed to exceed the absolute once - its time
-// is the seed for the factor gate; truncating it would discard a valid peak.
-constexpr double kOnnxMaxCreateUs = 60.0e6;
-constexpr double kOnnxMaxBlockCreateUs = 60.0e6;
-constexpr double kOnnxCreateGrowthFactor = 6.0;
-// ...and only once creation is expensive enough for its growth to mean
-// anything.  The factor exists to catch an ahead-of-time compiler's cliff
-// before the next model is built, but a ratio between two trivial numbers is
-// not a cliff: ONNX Runtime's CPU EP went from 0.1 s to 0.7 s simply
-// serializing a larger model, tripped 7.8x, and lost the rung that gave the
-// same provider on another OS 11% more.  Below this the absolute gate and
-// the predicted-create gate are the ones that matter, and both still apply.
+// Every device climbs to a plateau: the rate rises with size while dispatch
+// and the passes around the arithmetic still matter, and levels off -- or
+// falls off a cliff -- once they do not.  Where that happens differs by an
+// order of magnitude between a phone and a workstation, so no fixed size or
+// time budget is right for both.  The ladder climbs while each size beats the
+// best so far by more than kOnnxPlateauGain, and stops once
+// kOnnxPlateauStrikes sizes in a row have not.  The grace of one is not
+// optional: a size that lands badly and the next that recovers is ordinary --
+// QNN's unsigned int8 matmul read 3.98, 3.66, 13.2 TOPS across 2048..8192,
+// and ONNX Runtime's CPU EP 1.01, 1.02, 1.27, 1.49 across 1024..8192 -- and a
+// ladder stopped at the first flat step reports a third of the device.  A
+// slow device plateaus early and pays for fewer compiles.
+constexpr double kOnnxPlateauGain = 1.10;
+constexpr int kOnnxPlateauStrikes = 2;
+
+// Session creation (graph compilation) is capped, not budgeted.  It is a
+// separate axis from the per-iteration gates: on QNN's HTP a single 8192-cube
+// matmul compiles for 16-71 s while running in milliseconds, and TensorRT's
+// best NVFP4 reading (240 TFLOPS on an RTX 5060) needed a compile allowance
+// of three minutes to be reached at all.  A ladder skips a size whose compile the
+// earlier sizes predict past kOnnxMaxCreateUs (onnxPredictCreateUs), and stops
+// after a size whose compile went past it anyway -- keeping that size's
+// reading.  The first size is always built: its time seeds the prediction.
+constexpr double kOnnxMaxCreateUs = 240.0e6;
+constexpr double kOnnxMaxBlockCreateUs = 240.0e6;
+// A growth ratio means something only once the compile it ends with is this
+// long: ONNX Runtime's CPU EP went from 0.1 s to 0.7 s simply serializing a
+// larger model, and extrapolating that 7x would have cut a ladder short.
 constexpr double kOnnxCreateGrowthFloor = 2.0e6;
+
+// The next doubling's session creation, predicted from the last two.
+// Doubling a dimension is 4x the weights and up to 8x the work, and a
+// compiler's time lands anywhere in that range and past it.  Once the latest
+// compile is past kOnnxCreateGrowthFloor, the growth already seen is carried
+// forward -- at least 4x, bounded at 16x so one noisy pair cannot predict a
+// runaway; before that, 4x.  No steeper while the ladder is still climbing:
+// TensorRT's NVFP4 multiply on an RTX 5060 compiled in 6.1, 20.4 and then
+// 92 s for its best reading (238 TFLOPS at 32768), and squaring the 3.3x
+// step before it would have predicted that size within 5% of the cap.
+//
+// `confirming` marks the size after one that failed to gain (a plateau
+// strike) -- the size that decides whether the plateau is real -- and squares
+// the growth instead.  That is where compiles ran away.  QNN's HTP grew chains
+// 7.3x and then 49x (to 1262 s), 11.8x and then 67x, 5.3x and then 32x, and
+// 3.65x and then 18x, each time on the size after one that had not gained.
+// All four were predicted under the cap unsquared, for over an hour of
+// compiles in one run and no better reading.  The sizes that did beat a flat
+// step, on QNN, TensorRT, CUDA and CPU providers alike, gained 0-7%, and the
+// square predicted none of them past 71 s.
+inline double onnxPredictCreateUs(double prevUs, double prevPrevUs,
+                                  bool confirming)
+{
+  double growth = 4.0;
+  if (prevPrevUs > 0.0 && prevUs > kOnnxCreateGrowthFloor)
+  {
+    growth = prevUs / prevPrevUs;
+    if (confirming)
+      growth *= growth;
+    growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
+  }
+  return prevUs * growth;
+}
+
 // Tiny probe budget: 64^3 model should compile in <10s even on AOT.
 // If it exceeds this, the dtype is emulated/slow and the full 1024
 // ladder will be minutes - skip the variant early.
@@ -117,6 +154,9 @@ struct onnx_ep_info_t
   // Plugin-provider devices only.
   const OrtEpDevice *epDevicePtr = nullptr;
   std::string library;                                       // registration name of the plugin library
+  std::string pluginVersion;                                 // the version the plugin reports for
+                                                             // itself ("version" metadata); empty when
+                                                             // it reports none
   std::string vendor;                                        // the hardware vendor the runtime reports
   std::vector<std::pair<std::string, std::string>> hardware; // device metadata, as reported
 };

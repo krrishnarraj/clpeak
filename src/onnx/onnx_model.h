@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ONNX TensorProto.DataType values.  The ONNXTensorElementDataType enum in
@@ -77,6 +78,30 @@ struct OnnxAttr
   }
 };
 
+// How a graph's [rows, cols] result is reduced to the one row that leaves the
+// device (OnnxGraph::reduceRows): the resident GEMMs' product, the transformer
+// block's output, the activation graphs' result.  Both views are the same
+// ReduceMax over the same values -- the maximum down each column -- and
+// differ only in the shape the reduction is handed.
+enum class OnnxReduceView
+{
+  // ReduceMax over axis 0 of the 2-D tensor.  What every provider has taken
+  // and what every row is measured with, until a provider refuses it.
+  Rows,
+
+  // The tensor reshaped to [1, rows, 1, cols] and reduced over axes {0, 1, 2}.
+  // A provider can take a reduction at one rank and refuse it at another: the
+  // QNN Adreno backend ran the 2-D form at [32, 32] and [1, 2048] and refused
+  // it at [1024, 1024] and [64, 2048], while taking the convolution test's
+  // 4-D reduction at [1, 256, 256, 256].  The reshape leaves the values
+  // alone, so where both forms build the reading is the same; the tests fall
+  // back to this one only when a graph is refused with the other, and
+  // remember the refusal for the provider (onnxPrefersRank4Reduce).  It is
+  // not always free: the Adreno backend copies the tensor for the reshape,
+  // 7% of an fp32 4096-cube matmul there.
+  Rank4,
+};
+
 // Builds one GraphProto and wraps it in a ModelProto.  Nodes must be added
 // in topological order (ONNX requires it, and no sort is done here).
 class OnnxGraph
@@ -108,6 +133,12 @@ public:
   // nothing to do with that datatype.  Every reduction here goes through this.
   void reduceMax(const std::string &in, const std::string &out,
                  const OnnxDims &axes);
+
+  // The column maxima of a [rows, cols] tensor, as a [cols] row, in the given
+  // view (OnnxReduceView).  Every graph that hands one row back goes through
+  // this.
+  void reduceRows(const std::string &in, const std::string &out,
+                  int64_t rows, int64_t cols, OnnxReduceView view);
 
   // Convenience for the int64 shape tensors Reshape takes as an input.
   void shapeInitializer(const std::string &name, const OnnxDims &shape);
@@ -200,6 +231,27 @@ enum class OnnxLiveShape
   QdqAdd0,
 };
 
+// A chain's narrow way in, for the live shapes.  The pass that makes a graph
+// live is elementwise over whatever it is handed, and handed the first
+// layer's whole [M, K] activations it is a cost that grows with the layer
+// while saying nothing about the multiply: on QNN's HTP it took 13% of a
+// 4096-wide int8 chain, the vector units spending half a nanosecond an
+// element on it.  So a chain applies it to a [M, width] seed instead, and one
+// more multiply -- the seed times `proj`, [width, K], in the chain's own
+// weight encoding -- widens the seed into the first layer's activations.  The
+// pass shrinks by K / width, every value downstream still depends on the
+// runtime input, and the extra multiply is width / (K * layers) of the
+// chain's arithmetic, which the rate does not count.
+struct OnnxLiveSeed
+{
+  int64_t width = 0;
+  std::string proj;       // [width, K], encoded like the chain's weights
+  std::string projScales; // weight-only: fp16 block scales, [width / block, K]
+  float projScale = 0.0f; // QDQ: the projection weights' dequantize scale
+  float outScale = 0.0f;  // QDQ: what the widened activations are quantized
+                          // with, and so what the first layer dequantizes by
+};
+
 // Throughput-shaped GEMM: both operands are initializers and the result is
 // summed down to one row, so nothing large crosses the host boundary on each
 // run.  With A as a graph input and C returned to the host -- the obvious
@@ -254,20 +306,40 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &aBlockScales,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
-                                         float globalScale);
+                                         float globalScale,
+                                         OnnxReduceView view = OnnxReduceView::Rows);
 
-std::string onnxResidentWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N,
-                                              int wDtype, int64_t blockSize,
-                                              const std::string &aRaw,
-                                              const std::string &wPacked,
-                                              const std::string &wScalesRaw,
-                                              OnnxLiveShape shape);
+// `chain` holds further [N, N] layers as (packed weights, fp16 block scales)
+// pairs, blocked like the first; see the chain note below.
+std::string onnxResidentWeightOnlyMatMulModel(
+    int64_t M, int64_t K, int64_t N, int wDtype, int64_t blockSize,
+    const std::string &aRaw, const std::string &wPacked,
+    const std::string &wScalesRaw, OnnxLiveShape shape,
+    OnnxReduceView view = OnnxReduceView::Rows,
+    const std::vector<std::pair<std::string, std::string>> *chain = nullptr,
+    const OnnxLiveSeed *seed = nullptr);
 
+// `chain` (the weight-only form above, the plain and QDQ forms below):
+// further [N, N] weight matrices the product passes through, in order, before
+// it is reduced -- one dispatch that multiplies 1 + chain->size() times.  Each
+// is distinct, so no layer repeats an operand pair a runtime could cache, and
+// the caller scales them so the activations keep their magnitude from layer to
+// layer: an fp16 chain whose every layer grew the values by sqrt(N) would
+// overflow within a few layers.  A chain of constants is one long constant
+// expression, so gemm.cpp builds chains on a live shape wherever one exists,
+// and holds a result-scaled one to the same folding checks as a single
+// multiply.
+//
+// `seed` (all three forms, live shapes only): `aRaw` is then the [M, width]
+// seed rather than A itself; see OnnxLiveSeed.
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const std::string &aRaw,
                                      const std::string &bRaw,
                                      OnnxLiveShape shape,
-                                     bool reduceInFloat = false);
+                                     bool reduceInFloat = false,
+                                     OnnxReduceView view = OnnxReduceView::Rows,
+                                     const std::vector<std::string> *chain = nullptr,
+                                     const OnnxLiveSeed *seed = nullptr);
 
 // Same idea in QDQ form.  The DequantizeLinear/MatMul/QuantizeLinear pattern
 // is left untouched -- inserting anything between the dequantize and the
@@ -292,25 +364,43 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
 // activations against int8 weights and will not fuse signed ones, while
 // TensorRT rejects uint8 outright and requires a zero point of zero.  The
 // caller picks by trying, and the fusion check decides.
+//
+// A `chain` layer is the same quantized node unit again -- DQ -> MatMul -> Q,
+// its weight codes dequantized by `chainWScale` -- fed the previous layer's
+// quantized product and requantized with `cScale`.  The caller picks
+// `chainWScale` so each layer keeps the magnitude of its input, which is what
+// lets one output scale serve every layer.  A `seed`'s widening multiply is
+// that node unit too, its product quantized by the seed's `outScale`.
+//
+// `conv1x1` spells every one of those multiplies, the seed's included, as a
+// 1x1 Conv over [1, K, H, W] activations with H * W = M against [N, K, 1, 1]
+// weights -- the same arithmetic, in the operator NPU compilers were first
+// tuned for (the int8_qdq_conv1x1 row, gemm_setup.cpp) -- and reduces the
+// product over the batch and spatial axes to the same [N] row.
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                        const std::string &aRaw,
                                        const std::string &bRaw,
                                        float aScale, float bScale, float cScale,
                                        int actDtype, int wDtype,
-                                       OnnxLiveShape shape);
+                                       OnnxLiveShape shape,
+                                       OnnxReduceView view = OnnxReduceView::Rows,
+                                       const std::vector<std::string> *chain = nullptr,
+                                       float chainWScale = 0.0f,
+                                       const OnnxLiveSeed *seed = nullptr,
+                                       bool conv1x1 = false);
 
 // Throughput-shaped 2-D convolution, built like the resident GEMM above:
 // input and weights are constants, the result is reduced to one value per
 // output channel, and a runtime scalar keeps the graph live.  NCHW layout,
-// stride 1, padding chosen so the output keeps the input's spatial size.
+// padding chosen so the output's side is the input's divided by `stride`.
 //
 // `group` == 1 is an ordinary convolution; `group` == channels is a depthwise
 // one, which has the same shape but a fraction of the arithmetic and is where
 // accelerators built around dense multiply-accumulate arrays tend to fall
 // down.
 std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
-                                  int64_t kernel, int64_t group, int dtype,
-                                  const std::string &xRaw,
+                                  int64_t kernel, int64_t stride, int64_t group,
+                                  int dtype, const std::string &xRaw,
                                   const std::string &wRaw);
 
 // The non-matmul operations a transformer layer is padded with.  `None` is
@@ -327,7 +417,8 @@ enum class OnnxActivation { None, Silu, Softmax, LayerNorm };
 // subtraction removes it along with the read and the reduction.
 std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxActivation act,
-                                        const std::string &xRaw);
+                                        const std::string &xRaw,
+                                        OnnxReduceView view = OnnxReduceView::Rows);
 
 // Which direction a transfer model exercises.
 enum class OnnxTransfer { ToDevice, RoundTrip, ComputeOnly };
@@ -397,6 +488,16 @@ struct OnnxBlockShape
   // projections: serving stacks quantize the cache separately because at long
   // context it outweighs the weights.
   int     kvDtype = 0;
+
+  // How the output is reduced to the row that leaves the device.
+  OnnxReduceView reduceView = OnnxReduceView::Rows;
+
+  // Prefill: >0 enters the prompt through a [seq, seedWidth] seed that takes
+  // the runtime scalar, widened into the [seq, dModel] input by one more
+  // multiply the rate does not count -- the GEMM chains' way in
+  // (OnnxLiveSeed), for the same reason.  0 scales the whole input, which is
+  // all decode's single row needs.
+  int64_t seedWidth = 0;
 };
 
 // One decoder block: QKV projection, multi-head attention, output projection
@@ -468,15 +569,23 @@ int  onnxLoadInt4(const void *src, int64_t index);
 // visited twice -- once to find its maximum, once to quantize against it --
 // without holding the matrix in floats.  At 16384 square that would be a
 // gigabyte of scratch to produce 128 MB of weights.
-float onnxWeightAt(int64_t i, int64_t j, uint32_t seed);
+//
+// The hash is splitmix64's finalizer over the whole position, and it has to
+// mix nonlinearly.  One xorshift round over a linear mix of i and j is linear
+// over GF(2): every value's sign is then a row bit XOR a column bit, each
+// matrix has a rank-1 sign pattern, and chained layers drift -- sixteen
+// 1024-wide GEMM layers took their activations from an RMS of 2.3 to 0.0004,
+// and the transformer block's prompt put a fifth to a half of its softmax,
+// SiLU and SwiGLU values under fp16's smallest normal.
+float onnxMixedWeightAt(int64_t i, int64_t j, uint32_t seed);
 
 // Quantize a [K, N] weight matrix into `wDtype` plus one fp16 scale per block
 // of `blockSize` rows per column -- the axis a group-quantized model groups on,
 // because it is the axis the reduction runs along.  Symmetric, so the scale is
 // the block maximum over the format's widest magnitude and there is no zero
-// point.  Values come from onnxWeightAt(), so a block can be visited twice --
-// once to find its maximum, once to quantize against it -- without holding the
-// matrix in floats.
+// point.  Values come from onnxMixedWeightAt(), so a block can be visited
+// twice -- once to find its maximum, once to quantize against it -- without
+// holding the matrix in floats.
 void onnxFillBlockedWeights(std::string &packed, std::string &scales,
                             int64_t K, int64_t N, int64_t blockSize,
                             uint32_t seed, int wDtype);

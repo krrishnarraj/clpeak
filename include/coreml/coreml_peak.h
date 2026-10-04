@@ -23,15 +23,37 @@ constexpr unsigned int kCoremlMaxIters = 500;
 
 // Ceilings on model creation -- writing, compiling and loading a model, which
 // on the Neural Engine is a compiler run and not a bookkeeping call.  30 s for
-// the doubling ladders (gemm, conv), 60 s for the fixed-geometry block whose
-// longest context legitimately needs the better part of a minute on the ANE
-// compiler.  A create that grew more than kCoremlCreateGrowthFactor since the
-// previous rung, once past kCoremlCreateGrowthFloor, is a compile cliff and
-// ends a ladder before the next model is even built.
+// the conv and resident-bandwidth ladders (gemm's chain has its own, below),
+// 60 s for the fixed-geometry block whose longest context legitimately needs
+// the better part of a minute on the ANE compiler.  A create that grew more
+// than kCoremlCreateGrowthFactor since the previous rung, once past
+// kCoremlCreateGrowthFloor, is a compile cliff and ends a ladder before the
+// next model is even built.
 constexpr double kCoremlMaxCreateUs = 30.0e6;
 constexpr double kCoremlMaxBlockCreateUs = 60.0e6;
 constexpr double kCoremlCreateGrowthFactor = 6.0;
 constexpr double kCoremlCreateGrowthFloor = 2.0e6;
+
+// The gemm ladder's compile cap and the next doubling's predicted compile:
+// the ONNX backend's (kOnnxMaxCreateUs, onnxPredictCreateUs in
+// include/onnx/onnx_peak.h, which has the evidence), because the ladder is
+// its sixteen-layer chain and compiles like it.  A chain compiles sixteen
+// layers' weights, so the conv ladders' 30 s would end it a size or two
+// early on a slow compiler.  The growth already seen is carried forward,
+// 4x to 16x, and squared on the size after one that failed to gain.
+constexpr double kCoremlMaxChainCreateUs = 240.0e6;
+inline double coremlPredictCreateUs(double prevUs, double prevPrevUs, bool confirming)
+{
+  double growth = 4.0;
+  if (prevPrevUs > 0.0 && prevUs > kCoremlCreateGrowthFloor)
+  {
+    growth = prevUs / prevPrevUs;
+    if (confirming)
+      growth *= growth;
+    growth = growth < 4.0 ? 4.0 : (growth > 16.0 ? 16.0 : growth);
+  }
+  return prevUs * growth;
+}
 
 // Which piece of silicon a Core ML compute device is.  Core ML has no
 // exclusive mode -- every configuration keeps the CPU as a fallback -- so a

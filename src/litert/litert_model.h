@@ -127,13 +127,34 @@ float litertWeightScale(int bits);                    // symmetric weights in [-
 clpeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
                                              uint32_t seedA = 0x243f6a88u, uint32_t seedW = 0x85a308d3u);
 
+// The throughput chain, the ONNX backend's gemm graph (onnxResidentMatMulModel
+// with its chain and OnnxLiveSeed): `layers` distinct D x D FULLY_CONNECTEDs
+// in the plan's format, each one's product the next one's input, the last
+// reduced to one row.  The runtime scalar `s` scales a [1, D, seedWidth]
+// seed, and one more FULLY_CONNECTED in the same format, not counted, widens
+// it into the first layer's input -- so every multiply has a live operand
+// while the scaling pass stays a sliver of the work.  Layer 0's weights span
+// [-0.5, 0.5); later layers' are shrunk by sqrt(12 / D), so a D-deep product
+// returns the magnitude it was handed, an fp16 chain never grows toward
+// overflow, and one output scale serves every integer layer.
+//
+// `conv1x1` writes every layer as a 1x1 CONV_2D over a [1, H, W, D] grid of
+// D positions instead: the same multiply-accumulates in the operator NPU
+// compilers were first built for (src/litert/gemm.cpp races the two).  For
+// the float and full-integer int8 plans; a blockwise weight has no
+// convolution form.
+clpeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers,
+                                                  int64_t seedWidth, bool conv1x1 = false);
+
 // The accuracy matmul: x [1, M, K] is a model input and y [1, M, N] the
 // whole result, so the host can hand over exact values and read back
 // exactly what the accelerator computed.  `weights` receives what the model
-// stores, dequantized -- the values a reference multiplies.
+// stores, dequantized -- the values a reference multiplies.  `conv1x1`
+// computes the same product as a 1x1 CONV_2D over a grid of M positions,
+// whose input and output hold the same bytes as the matmul's.
 clpeak_tflite::TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
                                                   std::vector<float> *weights,
-                                                  uint32_t seedW = 0x85a308d3u);
+                                                  uint32_t seedW = 0x85a308d3u, bool conv1x1 = false);
 
 // y [1, 1, N] = x [1, 1, K] (input) * W [N, K]: the streaming shape.
 clpeak_tflite::TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t seedW);
@@ -155,16 +176,18 @@ clpeak_tflite::TfliteBytes litertTrivialModel(const LitertPlan &p, int64_t width
 
 // 2-D convolution over a resident [1, spatial, spatial, channels] feature
 // map scaled by `s`, with a [channels, k, k, channels/group] filter in the
-// plan's weight format (depthwise when group == channels), reduced over the
-// map to [1, 1, 1, channels].
+// plan's weight format (depthwise when group == channels) at `stride`, SAME
+// padding, its spatial / stride output reduced to [1, 1, 1, channels].
 clpeak_tflite::TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial,
-                                           int64_t kernel, bool depthwise);
+                                           int64_t kernel, int64_t stride, bool depthwise);
 
 // One transformer decoder block: `seq` tokens in one pass (prefill) when
 // kvLen is 0, else one token against a resident cache of kvLen entries
 // (decode).  The seven projections are in the plan's weight format; the
 // attention, softmax, SwiGLU and residuals stay in the plan's activation
 // type.  `int8Kv` stores the decode cache as int8 dequantized on the way in.
+// The activations are a resident constant scaled by the runtime scalar `s`
+// (a long prompt's, a seed widened by one more multiply).
 struct LitertBlockShape
 {
   int64_t dModel = 2048;
@@ -180,6 +203,12 @@ struct LitertBlockShape
   // LiteRT-LM ship, which an accelerator may fuse into one kernel or hand
   // back to the interpreter.
   bool composite = false;
+  // Prefill: >0 enters the prompt through a [1, seq, seedWidth] seed that
+  // takes the runtime scalar, widened into the [1, seq, dModel] input by one
+  // more multiply the rate does not count -- the ONNX block's way in
+  // (OnnxBlockShape::seedWidth).  0 scales the whole input, which is all
+  // decode's single row needs.
+  int64_t seedWidth = 0;
 };
 clpeak_tflite::TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh);
 

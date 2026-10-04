@@ -40,6 +40,44 @@ stay measured.  Lifting either is deleting its `if`.
   --verbose`.  The 32-cube probe is the graph that died; a build, or a
   refusal carrying a message, is a fixed runtime.
 
+### TensorRT: blocked int8 weights (`int8_weight`)
+
+- **Gate**: `onnxProviderFenceReason()`, the `TensorrtExecutionProvider`
+  branch, keyed on int8 with a block size.
+- **Withheld**: `onnx_gemm` row `int8_weight`, and the transformer block's
+  `int8_weight` rows (`onnx_block_prefill`, `onnx_block_decode`,
+  `onnx_block_latency`), which take the gemm probe's verdict.  `int4_weight`,
+  `fp4_weight` and `int8_qdq` are other graphs and are still put to it.
+- **Fault**: `DequantizeLinear` of int8 codes with one fp16 scale per 32 rows
+  (opset 21, `block_size=32`, `axis=0`) is not declined, although
+  `IDequantizeLayer`'s documentation lists block scales for FP4, FP8 and INT4
+  only.  The build folds it as a plain broadcast multiply that reads the
+  `[K/32, N]` scales as though they were the `[K, N]` weights, so 31 of every
+  32 scale reads land past the end of the buffer.  Every width from 128
+  comes back all NaN, and 64 NaN, Inf and garbage that changes from run to
+  run; 32, the probe's size, has one scale row, which broadcasts correctly by
+  accident.  When the memory past the buffer is unmapped the
+  fold segfaults inside `buildSerializedNetwork` (in 11.2.1, a half-float
+  load at `libnvinfer.so.11` +0x82de4ed, in a recursive elementwise loop), so
+  whether a run dies depends on its memory layout: a Debug build died at the
+  8192-wide chain, a Release build ran the same ladder to the end, and both
+  had timed NaN at every rung.
+- **Seen**: TensorRT 11.2.1 (`trtexec` alone returns the NaNs), ONNX Runtime
+  1.30.0 built with the TensorRT provider, RTX 5060, 2026-09-27.
+  `int4_weight` on the same provider matches the CPU provider to 0.15%;
+  `fp4_weight` was not checked, since neither the CPU nor the CUDA provider
+  has a float4 kernel to check it against.  Whether TensorRT for RTX shares
+  the fold is untested.
+- **To lift**: delete the branch, then check the numbers rather than the exit
+  code -- a build that completes proves nothing here.  A 128-wide blocked
+  int8 matmul (int8 `[128,128]` weights, fp16 `[4,128]` scales,
+  `block_size=32`, `axis=0`, fp16 activations) through `trtexec
+  --exportOutput` must come back finite and agree with the CPU provider;
+  11.2.1 returns 128 NaNs.  Then run `clpeak --onnx --gemm --verbose` on the
+  TensorRT device: a release that still returns NaN fails the row as an
+  error there instead of publishing a rate, but only the comparison above
+  catches an answer that is finite and wrong.
+
 ### DirectML: the transformer block's `int8_weight`
 
 - **Gate**: `variantFence()` in `src/onnx/block.cpp`, asked at the top of

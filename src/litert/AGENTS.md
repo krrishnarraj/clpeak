@@ -37,11 +37,11 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
-| `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
-| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()` |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format over a doubling size ladder, in flops or ops, naming the kernel that ran |
+| `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
+| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds (`clpeak::FormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm |
-| `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s) |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
@@ -176,7 +176,7 @@ kernel name from one profiled run says which kernel it was.
   F32, QB4W)`.  The last two are the finding: the weight-only formats
   (`int8_weight`, `int4_weight`) run as *int8 arithmetic on dynamically
   quantized activations*, not as float multiplies of unpacked weights.  On
-  an M1 Pro that is why `int8_weight` reads 2.4 TFLOPS against fp32's 489
+  an M1 Pro that is why `int8_weight` reads 2.8 TFLOPS against fp32's 488
   GFLOPS, and why its accuracy row reads 3918 ppm where the GPU's -- which
   unpacks the same weights to half and multiplies in float -- reads 4692
   because it accumulates in fp16.
@@ -184,14 +184,13 @@ kernel name from one profiled run says which kernel it was.
   otherwise**, so `fp32` asks for its fp32 policy, `fp16` is its fp16 policy
   over an fp32 graph whose constants are stored as fp16 (it refuses
   half-typed *activations* outright), and `fp16_acc32` is its third policy,
-  fp16 storage with fp32 accumulation.  On an M1 Pro: 4.06 / 4.69 / 3.2
+  fp16 storage with fp32 accumulation.  On an M1 Pro: 4.25 / 4.66 / 3.43
   TFLOPS and 0.57 / 4690 / 388 ppm -- the GPU accumulates fp16 in fp16 by
   default.  `fp16_acc32` applies nowhere else.
 - **Its quantized graphs are mostly float kernels between quantize and
   dequantize passes** (`convolution1x1(conv_wave_matrix) ->
-  quantize_and_dequantize` on Metal, `convolution_winograd_3x3(conv_generic)`
-  for int8 conv3x3 on Mali), so an `int8_qdq` "TOPS" figure there equals the
-  fp16 rate.  But Mali has a real one -- `convolution_int8(
+  quantize_and_dequantize` on Metal), so an `int8_qdq` "TOPS" figure there
+  equals the fp16 rate.  But Mali has a real one -- `convolution_int8(
   conv_wave_matrix_mali) -> dequantize_to_float16 -> quantize_and_dequantize`,
   3.5x its fp16 rate on a Pixel 7a -- whose tag carries the same dequantize
   tail, so the tail proves nothing.  `litertKernelIsInteger()` reads the
@@ -203,16 +202,35 @@ kernel name from one profiled run says which kernel it was.
   answer, not precision.  So the accuracy measurement is memoised per
   device and format (`LitertPeak::answerCheck`) and every rate test asks
   `wrongAnswer()` before publishing a format: past `kLitertWrongAnswerPpm`
-  (10% RMS) the gemm, conv and block rows for that format are refused with
-  the figure in the reason, and the accuracy row says it is a wrong answer.
+  (10% RMS), or with NaN or infinity anywhere in the answer, the gemm, conv
+  and block rows for that format are refused with the figure, or the
+  non-finite answer, in the reason, and the accuracy row says it is a wrong
+  answer.  That check runs the accuracy matmul, not the graph a rate is
+  timed on, so gemm, conv and the block also read back the row their own
+  last timed run reduced to: a NaN or an infinity there
+  (`litertNonFiniteReason()`, the ONNX backend's rule) withholds the gemm or
+  conv row, or the block's point, as an `Error`.  Nothing in those graphs
+  can overflow, and integer rows hold no NaN and are not read.
   The full-integer FULLY_CONNECTED graphs now carry the int32 zero bias a
   converted model always has (version 5 with keep_num_dims), since a kernel
   written for the converter's form may be reading a bias that is not there;
   the next Pixel 7a run says whether that was it, and until then the guard
   keeps the row honest either way.
+- **`int8_qdq` races two operators** (`clpeak::FormRace`,
+  `include/common/form_race.h`): its chain is timed with the layers written
+  as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as many positions as
+  a layer is wide (`litertMatMulChainModel(..., conv1x1)`), and the row
+  reports the faster, naming it and what the other read -- an NPU compiler's
+  convolution path can be its faster int8 one (`gemm.cpp` has the ONNX
+  backend's numbers).  Each form's answer is checked on its own
+  (`answerCheck(..., conv1x1)`): a wrong one leaves the race rather than
+  withholding the row, and the accuracy row reads FULLY_CONNECTED's answer
+  with the convolution's beside it.
 - `int16x8` has no XNNPACK kernel: the CPU row is the runtime's reference
   kernel, three orders of magnitude slower, which is the honest number for
-  a format that only an NPU implements.
+  a format that only an NPU implements -- and, sixteen multiplies to a
+  dispatch, the gemm test's slowest row there (140 s on an M1 Pro, 30 of
+  them the profiled run that names the kernel).
 - `bf16` and `fp8_weight` are in the schema (fp8 since 2.2.0) and no kernel
   takes them on the CPU; the rows record the runtime's refusal.
 
@@ -375,16 +393,21 @@ and the WebGPU device should run last, or not at all.
 
 One run, 2026-09-16, after the fill/sync/fp16-constant changes; CPU rows
 move ±15% between runs on a laptop (and more if anything else is
-compiling), GPU rows ±10%.
+compiling), GPU rows ±10%.  The gemm rows are 2026-10-01's (macOS 27.0.1),
+the sixteen-layer chain: against the single multiply, XNNPACK read 4-13%
+more in a back-to-back pair of one build (inside its run-to-run spread) and
+Metal up to 8% more in fp32, the same elsewhere; on sf1-ub's Threadripper
+PRO 3955WX, XNNPACK fp32 went from 1.10-1.17 to 1.27-1.33 TFLOPS over two
+interleaved pairs, the other rows within 5%.  The conv row is 2026-10-02's.
 
 | row | GPU (Metal) | CPU (XNNPACK, 10 threads) |
 |---|---|---|
-| gemm fp32 / fp16 / fp16_acc32 | 3.64 / 4.70 / 3.37 TFLOPS | 489 GFLOPS / 903 GFLOPS / — |
-| gemm int8_qdq / int16x8 | 4.70 "TOPS" (float kernel) / aborts | 2.21 TOPS / 1.25 GOPS |
-| gemm int8_weight / int4_weight | 4.67 TFLOPS / heap overrun | 2.40 / 1.53 TFLOPS |
+| gemm fp32 / fp16 / fp16_acc32 | 4.25 / 4.66 / 3.43 TFLOPS | 488 GFLOPS / 967 GFLOPS / — |
+| gemm int8_qdq / int16x8 | 4.67 "TOPS" (float kernel) / aborts | 2.43 TOPS / 1.24 GOPS |
+| gemm int8_weight / int4_weight | 4.73 TFLOPS / heap overrun | 2.83 / 1.67 TFLOPS |
 | error fp32 / fp16 / fp16_acc32 | 0.57 / 4690 / 388 ppm | 0.57 / 4690 / — |
 | error int8_qdq / int8_weight / int4_weight | 10430 / 4692 / — | 9317 / 3918 / 4377 |
-| conv3x3 fp32 / fp16 / int8 | 8.60 / 12.7 T (Winograd-counted) / 12.6 TOPS | 484 G / 984 G / 2.31 TOPS |
+| conv3x3s2 fp32 / fp16 / int8 | 3.25 / 4.02 TFLOPS / 4.15 "TOPS" (float kernel) | 464 G / 922 G / 2.09 TOPS |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 4.34 TFLOPS / 102 GB/s | 0.85 TFLOPS / 101 GB/s |
 | block fp16_composite prefill s512 / decode kv2048 | 4.33 TFLOPS / aborts (fenced) | 0.95 TFLOPS / 58 GB/s |
 | activation softmax 32mb / 128mb | 92-117 / 122 GB/s | 111 / 116 GB/s |
@@ -392,12 +415,18 @@ compiling), GPU rows ±10%.
 | tensor_bw 8mb / 128mb | 484 / 142 GB/s | 261 / 115 GB/s |
 | dispatch trivial / matmul_256 / create | 268 µs / 390 µs / 1.36 ms | 602 ns / 144 µs / 277 µs |
 
+The int8_qdq race ties on both: XNNPACK and Metal lower a 1x1 CONV_2D to
+the kernel FULLY_CONNECTED runs (`Fully Connected (NC, QS8, QC8W)`,
+`convolution1x1(conv_wave_matrix)`), to the microsecond and the ppm, so it
+settles at the first width and costs one more model per accelerator.
+
 The Metal delegate's layer norm falls off a cliff at 128 MB -- the 7-op
 decomposition over [8192, 4096] reads 36-39 GB/s on three runs where the
 32 MB tensor reads 138-203 and softmax at the same size reads 122 -- which
 is reproducible and therefore the row, not noise; the SiLU rows and every
 8 MB row are fused or lost in the reference's spread and say so.  The
-whole backend, both devices, takes 6:46 here; the time is the timed
+whole backend, both devices, took 6:46 here before the gemm chain, which
+adds about six minutes (sixteen multiplies a dispatch); the time is the timed
 budgets (1 s per activation/tensor size, 2 s per gemm/conv rung, 5 s per
 block point, the ONNX and Core ML backends' figures), not the models.
 
@@ -412,7 +441,6 @@ run`) build, so its host-side times are not the device's -- the numbers are.
 | gemm fp32 / fp16 / fp16_acc32 | 180 / 287 / 260 GFLOPS |
 | gemm int8_qdq / int8_weight | 1.01 TOPS (wrong answer, see above) / 294 GFLOPS |
 | error fp32 / fp16 / fp16_acc32 / int8_weight | 0.57 / 4690 / 388 / 4692 ppm (the M1 Pro's figures exactly) |
-| conv3x3 fp32 / fp16 / int8 | 495 G / 982 G (Winograd) / 976 G (float Winograd) |
 | conv1x1 fp32 / fp16 / int8 | 125 / 280 / 369 G |
 | block prefill fp16 s2048 / decode fp16 kv2048 | 280 GFLOPS / 10.5 GB/s |
 | block latency fp16 prefill s512 / decode kv2048 / kv8192 | 178 ms / 11.2 ms / 34 ms |

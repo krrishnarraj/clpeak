@@ -87,7 +87,9 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 // native fp16 kernel for the operation -- ONNX Runtime's CPU EP converts
 // every fp16 tensor on the way in -- would otherwise report its conversion
 // rate under a bandwidth heading (2 GB/s on a Threadripper whose fp32 rows
-// stream 38).  Memoized per runtime and target.
+// stream 38).  fp32 is not a candidate on a provider that narrows it
+// (onnxFp32Narrowed): there it wins every time by moving half the bytes it is
+// credited with.  Memoized per runtime and target.
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // The bandwidth that probe measured in the width it chose, in bytes/second,
@@ -103,6 +105,29 @@ int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // the operation costs little the remainder is mostly the noise of two large
 // numbers.
 double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
+// Does this provider hold fp32 tensors at half width?
+//
+// Several accelerators run an fp32 graph in 16 bits by default and store its
+// weights that way -- QNN's HTP (enable_htp_fp16_precision), OpenVINO's GPU and
+// NPU, the XDNA NPUs in bf16 -- so an fp32 reading credited four bytes an
+// element moved two, and read twice the rate the device has.  The same
+// streaming probe answers it, from two things it measures anyway, and it takes
+// both: the fp32 matrix-vector product came back with half-precision error
+// against a host reference (a narrowed *computation*), and streamed half again
+// or more of fp16's bytes per second (narrowed *storage* -- the same bytes in
+// half the time).  Error alone would condemn NVIDIA's TF32, which rounds the
+// arithmetic and still reads all four bytes; speed alone would condemn a CPU
+// whose fp16 path converts.  False when either width could not be timed.
+bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
+// Did this provider refuse a row reduction at some size and take the rank-4
+// view of it (OnnxReduceView)?  Learned by whichever test meets the refusal
+// first and kept for the provider, so the others build the view that works
+// instead of paying a refused compile to learn it again.  Memoized like the
+// probes: per runtime and target, for the life of the process.
+void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only

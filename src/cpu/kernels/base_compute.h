@@ -57,6 +57,20 @@ static double runFp32Chain(uint64_t outer)
   return (double)vaddvq_f32(s);
 }
 
+// runFp32Chain with ONE accumulator: every FMLA waits on the one before it, so
+// a lone thread leaves the FMA pipes idle for all but one slot per latency.
+// Only the SMT scaling test runs it -- the gap a second hardware thread fills.
+static double runFp32LatChain(uint64_t outer)
+{
+  volatile float vseed = -0.5f;
+  float32x4_t acc = vdupq_n_f32(vseed);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+      acc = vfmaq_f32(acc, acc, acc);
+  return (double)vaddvq_f32(acc);
+}
+
 static double runFp64Chain(uint64_t outer)
 {
   float64x2_t acc[F64_NACC];
@@ -99,6 +113,23 @@ static double runFp32Chain(uint64_t outer)
   f32v s = acc[0];
   for (int j = 1; j < F32_NACC; j++) s = f32_add(s, acc[j]);
   return (double)f32_hsum(s);
+}
+
+// runFp32Chain with ONE accumulator: every FMA waits on the one before it, so
+// a lone thread leaves the FMA pipes idle for all but one slot per latency.
+// Only the SMT scaling test runs it -- the gap a second hardware thread fills.
+// Volatile-seeded coefficients for the same reason as above.
+static double runFp32LatChain(uint64_t outer)
+{
+  volatile float vb = 0.999999f, vc = 0.000001f;
+  const f32v b = f32_set(vb);
+  const f32v c = f32_set(vc);
+  f32v acc = f32_set(0.1f);
+  for (uint64_t o = 0; o < outer; o++)
+    CPU_UNROLL_K
+    for (int k = 0; k < INNER; k++)
+      acc = f32_fma(acc, b, c);
+  return (double)f32_hsum(acc);
 }
 
 static double runFp64Chain(uint64_t outer)

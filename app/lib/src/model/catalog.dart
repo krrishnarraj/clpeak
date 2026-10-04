@@ -10,6 +10,7 @@ class CatalogDevice {
     required this.type,
     required this.driver,
     required this.api,
+    required this.origin,
     required this.computeUnits,
     required this.clockMHz,
     required this.globalMemBytes,
@@ -22,6 +23,7 @@ class CatalogDevice {
   final String type; // "GPU" / "CPU" / "Discrete GPU" / ...
   final String driver;
   final String api;
+  final String origin; // "EP plugin (…)" for ONNX plugin EPs; empty otherwise
   final int computeUnits;
   final int clockMHz;
   final int globalMemBytes;
@@ -34,6 +36,7 @@ class CatalogDevice {
         type: m['type'] as String? ?? '',
         driver: m['driver'] as String? ?? '',
         api: m['api'] as String? ?? '',
+        origin: m['origin'] as String? ?? '',
         computeUnits: (m['compute_units'] as num?)?.toInt() ?? 0,
         clockMHz: (m['clock_mhz'] as num?)?.toInt() ?? 0,
         globalMemBytes: (m['global_mem_bytes'] as num?)?.toInt() ?? 0,

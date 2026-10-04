@@ -168,7 +168,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `CLPEAK_LOG` / `CLPEAK_VLOG`, `LogSink`) |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
-| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix |
+| `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix, `formatReading()` the same as one string for a reading quoted in a description |
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
@@ -176,6 +176,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
+| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, LiteRT's int8 operators) |
 | `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory

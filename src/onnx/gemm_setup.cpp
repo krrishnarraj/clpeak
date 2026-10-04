@@ -4,6 +4,7 @@
 
 #include <onnx/onnx_peak.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -65,11 +66,30 @@ const Variant kFpVariants[] = {
 };
 const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 
+// The int8 chain once more, spelled as 1x1 convolutions: the same
+// multiply-accumulates in the operator NPU compilers were first tuned for,
+// and not a detail on most providers.  QNN's HTP ran it at 38 TOPS against
+// 35 for the MatMul spelling, and through ONNX Runtime 1.24.4's built-in QNN
+// at 36 against 5 -- its FullyConnected int8 path is the slow one.
+// TensorRT on an RTX 5060 read 142 against 135, and ONNX Runtime's CPU
+// provider 4-6% more on an M1 Pro and 60-75% more on a Zen 2 Threadripper,
+// where QLinearConv is its faster int8 kernel.  The fp16 chain was measured
+// the same way and lost or tied on every provider tried (QNN's HTP and
+// Adreno, the Neural Engine, the CPU), so it has no row, and neither do
+// activations four times taller than the layers, which gained fp16 nothing
+// and cost the HTP's int8 seven eighths of its rate.
 const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
      "8-bit integers quantized in and quantized out, the shape quantized "
      "inference ships in and what vendors quote headline TOPS figures for.",
      0, false},
+    {ONNX_DT_INT8, true, "int8_qdq_conv1x1",
+     "The int8 chain again, every layer a quantized 1x1 convolution over a "
+     "grid of as many positions as the layer is wide: the same arithmetic, "
+     "spelled as the operator NPU compilers were first built for.  Where it "
+     "beats the int8_qdq row, the provider's convolution path is its faster "
+     "int8 one.",
+     0, false, /*conv1x1=*/true},
 };
 const size_t kIntVariantCount = sizeof(kIntVariants) / sizeof(kIntVariants[0]);
 
@@ -134,25 +154,38 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v)
   return {OnnxLiveShape::ResultScaled, OnnxLiveShape::OperandScaled};
 }
 
-uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape)
+uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
+                      int layers)
 {
-  const uint64_t elems = (uint64_t)D * (uint64_t)D;
   if (v.nvfp4)
+  {
+    const uint64_t elems = (uint64_t)D * (uint64_t)D;
     return 2ull * (onnxElemBytes(ONNX_DT_FLOAT4E2M1, (int64_t)elems) +
                    elems / (uint64_t)v.blockSize);
-  if (v.blockSize > 0)
-    return elems * 2ull                              // fp16 A
-           + onnxElemBytes(v.dtype, (int64_t)elems)  // packed weights
-           + elems / (uint64_t)v.blockSize * 2ull;   // fp16 scales
-  if (v.qdq)
-  {
-    // The float-scaled form holds A as fp32 values rather than codes.
-    const uint64_t aBytes = (shape == OnnxLiveShape::OperandScaled)
-                                ? elems * 4ull
-                                : onnxElemBytes(v.dtype, (int64_t)elems);
-    return aBytes + onnxElemBytes(v.dtype, (int64_t)elems);
   }
-  return 2ull * onnxElemBytes(v.dtype, (int64_t)elems);
+  // One weight matrix of `rows` x D in the row's weight encoding, scales
+  // included.
+  auto weights = [&](int64_t rows) {
+    const uint64_t elems = (uint64_t)rows * (uint64_t)D;
+    uint64_t bytes = onnxElemBytes(v.dtype, (int64_t)elems);
+    if (v.blockSize > 0)
+      bytes += elems / (uint64_t)v.blockSize * 2ull;
+    return bytes;
+  };
+  // The activations the graph holds: the first layer's whole, or a seed plus
+  // the weights that widen it.  Weight-only rows hold them in fp16, and the
+  // float-scaled QDQ form as fp32 values rather than codes.
+  const bool seeded = usesSeed(shape, layers);
+  const int64_t cols = seeded ? std::min(kSeedWidth, D) : D;
+  const int64_t actElems = D * cols;
+  uint64_t act = onnxElemBytes(v.dtype, actElems);
+  if (v.blockSize > 0)
+    act = (uint64_t)actElems * 2ull;
+  else if (v.qdq && shape == OnnxLiveShape::OperandScaled)
+    act = (uint64_t)actElems * 4ull;
+  if (seeded)
+    act += weights(cols);
+  return act + (uint64_t)layers * weights(D);
 }
 
 size_t dtypeSize(int dtype)
@@ -169,7 +202,8 @@ size_t dtypeSize(int dtype)
   }
 }
 
-void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
+void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed,
+                float floatScale)
 {
   uint32_t s = seed;
   // assign, not resize: the sub-byte types write one nibble at a time over
@@ -186,13 +220,13 @@ void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed)
     switch (dtype)
     {
     case ONNX_DT_FLOAT:
-      f[i] = v;
+      f[i] = v * floatScale;
       break;
     case ONNX_DT_FLOAT16:
-      h[i] = floatToHalf(v);
+      h[i] = floatToHalf(v * floatScale);
       break;
     case ONNX_DT_BFLOAT16:
-      h[i] = floatToBf16(v);
+      h[i] = floatToBf16(v * floatScale);
       break;
     // Quantized types all store a value already spread over [-1, 1], so the
     // dequantized operands match whatever the format's rounding leaves of
@@ -277,6 +311,7 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     g.inBuf.assign(one.begin(), one.end());
   }
   g.outBuf.assign((size_t)D * dtypeSize(ioDtype), 0);
+  g.outDtype = ioDtype;
 
   OrtMemoryInfo *mi = nullptr;
   OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
@@ -318,7 +353,8 @@ static void finishSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape, bool verifyPlacement)
+                    OnnxLiveShape shape, bool verifyPlacement,
+                    OnnxReduceView view, int layers)
 {
   GemmSetup g;
   std::string modelBytes;
@@ -332,7 +368,7 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   kNvfp4GlobalScale, 0x243f6a88u);
     modelBytes = onnxResidentNvfp4MatMulModel(D, D, D, v.blockSize, aPacked,
                                               aScales, bPacked, bScales,
-                                              kNvfp4GlobalScale);
+                                              kNvfp4GlobalScale, view);
     // Free the raw operands before the session copies the model.
     std::string().swap(aPacked);
     std::string().swap(aScales);
@@ -343,20 +379,59 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return g;
   }
 
+  // The activations: on a live chain the seed's `sw` columns in place of the
+  // layer's D (OnnxLiveSeed).  Its widening weights keep the magnitude the
+  // whole activations would have had, as every chain layer keeps its
+  // input's -- uniform over +/-sqrt(3/sw) for sw-deep products.
+  const bool seeded = usesSeed(shape, layers);
+  const int64_t sw = std::min(kSeedWidth, D);
+  const int64_t aCols = seeded ? sw : D;
+  OnnxLiveSeed seed;
+  seed.width = sw;
+  const uint32_t kSeedProjSeed = 0x3c6ef372u;
+
   if (v.blockSize > 0)
   {
     // Weight-only: fp16 activations, blocked-quantized weights, no quantized
     // tensor anywhere near the graph boundary.
     std::string aRaw, wPacked, wScales;
-    fillTensor(aRaw, ONNX_DT_FLOAT16, D * D, 0x9e3779b9u);
+    fillTensor(aRaw, ONNX_DT_FLOAT16, D * aCols, 0x9e3779b9u);
     onnxFillBlockedWeights(wPacked, wScales, D, D, v.blockSize, 0x243f6a88u,
                            v.dtype);
-    modelBytes = onnxResidentWeightOnlyMatMulModel(D, D, D, v.dtype,
-                                                   v.blockSize, aRaw, wPacked,
-                                                   wScales, shape);
+    // A chain's later layers: the same blocked format, each block's scale
+    // grown by 2*sqrt(3/D) so the dequantized weights -- [-0.5, 0.5) before
+    // it -- keep the activations' magnitude from layer to layer, as the float
+    // chains below do.  The seed's weights likewise, for their depth.
+    auto grow = [](std::string &scales, int64_t depth) {
+      const float by = 2.0f * std::sqrt(3.0f / (float)depth);
+      uint16_t *sc = reinterpret_cast<uint16_t *>(&scales[0]);
+      const size_t n = scales.size() / 2;
+      for (size_t i = 0; i < n; i++)
+        sc[i] = floatToHalf(halfToFloat(sc[i]) * by);
+    };
+    std::vector<std::pair<std::string, std::string>> chain;
+    for (int l = 1; l < layers; l++)
+    {
+      chain.emplace_back();
+      onnxFillBlockedWeights(chain.back().first, chain.back().second, D, D,
+                             v.blockSize, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
+                             v.dtype);
+      grow(chain.back().second, D);
+    }
+    if (seeded)
+    {
+      onnxFillBlockedWeights(seed.proj, seed.projScales, sw, D, v.blockSize,
+                             kSeedProjSeed, v.dtype);
+      grow(seed.projScales, sw);
+    }
+    modelBytes = onnxResidentWeightOnlyMatMulModel(
+        D, D, D, v.dtype, v.blockSize, aRaw, wPacked, wScales, shape, view,
+        chain.empty() ? nullptr : &chain, seeded ? &seed : nullptr);
     std::string().swap(aRaw);
     std::string().swap(wPacked);
     std::string().swap(wScales);
+    std::vector<std::pair<std::string, std::string>>().swap(chain);
+    seed = OnnxLiveSeed();
     finishSetup(rt, ep, g, modelBytes, ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, D,
                 profile, /*keepQdqUnfused=*/false, /*zaDtype=*/0, verifyPlacement);
     return g;
@@ -364,23 +439,55 @@ GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   std::string aRaw, bRaw;
   const int wDtype = v.qdq ? wgtDtype : v.dtype;
-  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * D, 0x9e3779b9u);
+  fillTensor(aRaw, v.qdq ? actDtype : v.dtype, D * aCols, 0x9e3779b9u);
   fillTensor(bRaw, wDtype, D * D, 0x243f6a88u);
+
+  // A chain's later layers keep the magnitude their input arrives with: a
+  // D-deep product of values whose RMS is 1/sqrt(D) returns what it was
+  // given.  In floats that is the weights themselves, uniform over
+  // +/-sqrt(3/D); in QDQ it is the weights' dequantize scale, so the codes
+  // still spend their whole range and one output scale serves every layer.
+  std::vector<std::string> chain;
+  for (int l = 1; l < layers; l++)
+  {
+    chain.emplace_back();
+    fillTensor(chain.back(), wDtype, D * D, 0x243f6a88u + 0x9e3779b9u * (uint32_t)l,
+               /*floatScale=*/2.0f * std::sqrt(3.0f / (float)D));
+  }
+  const std::vector<std::string> *chainPtr = chain.empty() ? nullptr : &chain;
+  if (seeded)
+  {
+    fillTensor(seed.proj, wDtype, sw * D, kSeedProjSeed,
+               /*floatScale=*/2.0f * std::sqrt(3.0f / (float)sw));
+    // QDQ: the seed dequantizes to values uniform over [-1, 1], variance 1/3,
+    // and widening keeps that variance, so the first layer's operands -- and
+    // every output scale after them -- match what whole activations held as
+    // codes would have given.  Four sigma of it on the widest code, as
+    // qdqOutputScale() does for a product.
+    seed.projScale = onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)sw);
+    seed.outScale = (float)(4.0 / std::sqrt(3.0) / 127.0);
+  }
+  const OnnxLiveSeed *seedPtr = seeded ? &seed : nullptr;
 
   if (v.qdq)
   {
     modelBytes = onnxResidentQdqMatMulModel(
         D, D, D, aRaw, bRaw, onnxQuantScaleFor(actDtype),
         onnxQuantScaleFor(wDtype), qdqOutputScale(D, actDtype),
-        actDtype, wDtype, shape);
+        actDtype, wDtype, shape, view, chainPtr,
+        onnxQuantScaleFor(wDtype) * std::sqrt(3.0f / (float)D), seedPtr,
+        v.conv1x1);
   }
   else
   {
     modelBytes = onnxResidentMatMulModel(D, D, D, v.dtype, aRaw, bRaw, shape,
-                                         reduceInFloat);
+                                         reduceInFloat, view, chainPtr,
+                                         seedPtr);
   }
   std::string().swap(aRaw);
   std::string().swap(bRaw);
+  std::vector<std::string>().swap(chain);
+  seed = OnnxLiveSeed();
 
   // Anything QLinearMatMul cannot carry must not be fused into it.
   const bool unfusable = v.qdq && (!onnxQdqFusionIsLegal(actDtype) ||

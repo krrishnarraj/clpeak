@@ -78,8 +78,8 @@ bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
 // library someone named that would not register is said in normal output,
 // like a named runtime that would not load; one the app bundled on the
 // off-chance (`named == false`) only under --verbose, where a registered
-// library is also confirmed with its path.  The Windows ML catalog reports
-// the same way: its failures out loud, since --onnx-winml asked for it.
+// library is also confirmed with its path.  A registered library with no
+// device here, and an uncertified Windows ML provider, are verbose-only.
 static void pluginNotes(const OrtRuntime &rt,
                         std::vector<std::string> &loud,
                         std::vector<std::string> &quiet)
@@ -94,10 +94,8 @@ static void pluginNotes(const OrtRuntime &rt,
                      ") did not register: " + st.error);
       continue;
     }
-    // A plugin enumerates the hardware it can serve, and on a machine
-    // without that hardware a registered library offers nothing -- which
-    // is the answer, not a fault, but one worth a line for the person who
-    // named the library.
+    // A registered library with no hardware behind it is the answer, not a
+    // fault, so it rides the verbose-only notes even when named.
     bool any = false;
     for (const auto &d : devices)
       any = any || d.library == st.lib.name;
@@ -105,9 +103,8 @@ static void pluginNotes(const OrtRuntime &rt,
       quiet.push_back("registered the " + st.lib.name + " plugin library from " +
                       st.lib.path);
     else
-      (st.lib.named ? loud : quiet)
-          .push_back("the " + st.lib.name + " plugin library (" + st.lib.path +
-                     ") registered but offers no device on this machine");
+      quiet.push_back("the " + st.lib.name + " plugin library (" + st.lib.path +
+                      ") registered but offers no device on this machine");
   }
   if (onnxWinmlEnabled())
   {
@@ -116,7 +113,8 @@ static void pluginNotes(const OrtRuntime &rt,
       loud.push_back("Windows ML: " + res.error);
     for (const auto &p : res.providers)
       if (!p.ready)
-        loud.push_back("Windows ML: the " + p.name +
+        (p.certified ? loud : quiet)
+            .push_back("Windows ML: the " + p.name +
                        (p.version.empty() ? "" : " " + p.version) +
                        " execution provider is not usable: " + p.error);
     if (res.error.empty() && res.providers.empty())
@@ -373,6 +371,16 @@ int OnnxPeak::runAll()
         {"Type", ep.typeStr.empty() ? "Unknown" : ep.typeStr},
         {"ONNX Runtime", rt->versionString},
     };
+    // A device a plugin library registered names it, or two rows for the
+    // same silicon read as a duplicated listing -- the same origin the
+    // listing carries (enumerate()), repeated here so live and saved
+    // results say it too.  Built-ins stay plain.
+    if (ep.epDevicePtr)
+    {
+      const std::string origin = onnxPluginOrigin(ep);
+      if (!origin.empty())
+        details.push_back({"EP plugin", origin});
+    }
     if (ep.epDevicePtr)
     {
       // A plugin provider: what the runtime says about the silicon behind
@@ -410,10 +418,15 @@ int OnnxPeak::runAll()
       }
     }
 
+    // The driver slot names the device's own version: a plugin reports
+    // one for itself, while a built-in EP (or a plugin reporting none)
+    // is the runtime's own, which the "ONNX Runtime" prop repeats.
+    const std::string driver = !ep.epDevicePtr || ep.pluginVersion.empty()
+        ? rt->versionString : ep.pluginVersion;
     auto deviceScope = backendScope.beginDevice({
         ep.displayName,
         "",   // platform defaults to "ONNX"
-        rt->versionString,
+        driver,
         details,
         -1,
         idx,
@@ -597,6 +610,14 @@ BackendInventory OnnxPeak::enumerate()
     dev.index         = i;
     dev.name          = eps[i].displayName;
     dev.typeStr       = eps[i].typeStr;
+    // A device the runtime built in needs no qualifier; one a plugin
+    // library registered does, or two rows for the same silicon read
+    // as a duplicated listing.
+    if (eps[i].epDevicePtr)
+    {
+      const std::string origin = onnxPluginOrigin(eps[i]);
+      dev.origin = origin.empty() ? "EP plugin" : "EP plugin (" + origin + ")";
+    }
     plat.devices.push_back(std::move(dev));
   }
 

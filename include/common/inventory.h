@@ -20,6 +20,8 @@ struct InventoryDevice
   std::string   arch;             // "sm_120" (CUDA), "gfx1201" (ROCm)
   std::string   driverVersion;    // OpenCL
   std::string   apiVersion;       // Vulkan ("1.2.3")
+  std::string   origin;           // how the device arrived: "EP plugin (...)"
+                                  // (ONNX plugin EPs only; empty otherwise)
   unsigned int  numComputeUnits = 0;
   unsigned int  maxClockMHz     = 0;
   std::uint64_t globalMemBytes  = 0;
@@ -55,8 +57,8 @@ struct BackendInventory
 
 // JSON serializer used by the GUI catalog (clpeak_copy_backend_catalog_json):
 //   {"backends":[{"name","flag","available",info?,reason?,notes?,
-//     "platforms":[{"index","name","devices":[{"index","name","type",arch?,
-//       driver?,api?,compute_units?,clock_mhz?,global_mem_bytes?,
+//   "platforms":[{"index","name","devices":[{"index","name","type",arch?,
+//       driver?,api?,origin?,compute_units?,clock_mhz?,global_mem_bytes?,
 //       max_alloc_bytes?,fp16?,fp64?}]}]}]}
 // Consumed by app/lib/src/model/catalog.dart.
 std::string inventoryToJson(const std::vector<BackendInventory> &inv);

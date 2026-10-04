@@ -25,6 +25,9 @@ layout(push_constant) uniform PushConstants {
 // twice the fp32 shaders' value count, the same register footprint.  See the
 // MAD_CHAINS block in mad_chain.glsl for why the budget is registers.
 #define MAD_CHAINS 4
+// Contracted a*b + c rather than the fma() builtin -- see the MAD_OP block in
+// mad_chain.glsl.
+#define MAD_OP(d, m1, m2, ad)  d = (m1) * (m2) + (ad);
 #include "mad_chain.glsl"
 
 void main()

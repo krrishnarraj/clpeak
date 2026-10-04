@@ -10,11 +10,12 @@
 // number: a device that convolves far faster than it multiplies is telling
 // you what its hardware was shaped for.
 //
-// Three shapes cover the forms real networks are made of: a 3x3 convolution,
-// a 1x1 (pointwise) one -- arithmetically a matmul over pixels, so it should
-// track the GEMM rows -- and a depthwise 3x3, which has the same shape as the
-// first but a fraction of the multiply-accumulates, and is where hardware
-// built around dense arrays tends to fall over.  Each runs in the full- and
+// Three shapes cover the forms real networks are made of: a 3x3 convolution
+// at stride 2 (kShapes says why not 1), a 1x1 (pointwise) one --
+// arithmetically a matmul over pixels, so it should track the GEMM rows --
+// and a depthwise 3x3, each channel convolved on its own, a fraction of the
+// multiply-accumulates per value loaded, which is where hardware built
+// around dense arrays tends to fall over.  Each runs in the full- and
 // half-precision floating formats (fp32, fp16; see kDTypes for why bf16 is
 // not here), so this test's dtype axis double-checks any one-precision claim
 // the way the gemm rows do.
@@ -46,8 +47,6 @@ namespace
   constexpr int64_t kMaxSpatial = 4096;
   static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
 
-  constexpr double kImproveFactor = 1.03;
-  constexpr int kMaxStrikes = 2;
   constexpr double kMaxIterUs = 2.0e6;
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
@@ -61,6 +60,7 @@ namespace
   struct Shape
   {
     int64_t kernel;
+    int64_t stride;
     bool depthwise;
     const char *label;
     const char *note;
@@ -82,21 +82,34 @@ namespace
        "16-bit floats, the native currency of most convolution engines."},
   };
 
+  // The dense 3x3 runs at stride 2 because a FLOPS row has to count
+  // arithmetic the device did.  At stride 1 a runtime may run a 3x3 as
+  // Winograd, which does a fraction of the multiplies a direct count assumes
+  // -- a quarter in the 4x4-tile form LiteRT's GPU accelerator runs -- and
+  // neither Core ML nor ONNX Runtime says which algorithm ran.  On an M1 Pro,
+  // whose GPU peaks at 5.3 TFLOPS, LiteRT's GPU read 12.6 TFLOPS that way and
+  // Core ML's 6.0.  The Winograd and FFT kernels runtimes ship need a stride
+  // of 1, so at stride 2 the direct count is what ran: LiteRT's GPU names a
+  // direct `convolution3x3` kernel there, at 4.1 TFLOPS.  It costs the units
+  // built around stride 1 -- the Neural Engine reads 4.2 here and 9.4 at
+  // stride 1 -- but that figure no runtime can show to be direct arithmetic
+  // either.  Core ML and LiteRT take these shapes, so the ladders divide row
+  // for row.
   const Shape kShapes[] = {
-      {3, false, "conv3x3",
-       "A 3x3 convolution over 256 channels, the shape most vision networks "
-       "are built from and the one accelerators were designed around.  "
-       "Counted as direct multiplies: a Winograd kernel does fewer, so this "
-       "can read above the matmul peak without the device being built for "
-       "convolution."},
-      {1, false, "conv1x1",
+      {3, 2, false, "conv3x3s2",
+       "A 3x3 convolution over 256 channels at stride 2, the layer vision "
+       "networks downsample with.  Winograd kernels, which do a fraction of "
+       "the multiplies a direct count assumes, cannot run a stride of 2, so "
+       "every multiply counted here is one the device did."},
+      {1, 1, false, "conv1x1",
        "Arithmetically a matrix multiply at every pixel, so it should land "
        "near the matmul rows; where it does not, the two shapes reach "
        "different machinery."},
-      {3, true, "depthwise3x3",
-       "The 3x3 shape with each channel kept separate, so far less arithmetic "
-       "per value loaded.  Hardware built around dense arrays collapses here, "
-       "which is why mobile networks run slower than their FLOP counts."},
+      {3, 1, true, "depthwise3x3",
+       "A 3x3 at stride 1 with each channel kept separate, so far less "
+       "arithmetic per value loaded.  Hardware built around dense arrays "
+       "collapses here, which is why mobile networks run slower than their "
+       "FLOP counts."},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -133,7 +146,8 @@ namespace
   double convFlops(const Shape &v, int64_t spatial)
   {
     const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
-    return 2.0 * (double)kChannels * (double)spatial * (double)spatial *
+    const double out = (double)(spatial / v.stride);   // the output's side
+    return 2.0 * (double)kChannels * out * out *
            inPerGroup * (double)v.kernel * (double)v.kernel;
   }
 
@@ -178,7 +192,8 @@ namespace
       fillTensor(wRaw, dtype, kChannels * inPerGroup * v.kernel * v.kernel,
                  0x243f6a88u);
       std::string model = onnxResidentConvModel(kChannels, spatial, v.kernel,
-                                                group, dtype, xRaw, wRaw);
+                                                v.stride, group, dtype, xRaw,
+                                                wRaw);
       xRaw.clear();
       xRaw.shrink_to_fit();
       wRaw.clear();
@@ -302,7 +317,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       int64_t bestSpatial = 0;
       std::string ranWider; // set when the provider widened the arithmetic
       double lastRate = 0.0;
-      double prevCreateUs = 0.0;
+      double prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
       int strikes = 0;
       int rungs = 0;
       std::string firstErr;
@@ -337,6 +352,21 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       (long long)sp, (long long)sp);
           break;
         }
+        // The compile cap, checked before paying for the build
+        // (onnxPredictCreateUs); the first size always builds.
+        const double predictedCreateUs = onnxPredictCreateUs(
+            prevCreateUs, prevPrevCreateUs, /*confirming=*/strikes > 0);
+        if (sp > kMinSpatial && prevCreateUs > 0.0 &&
+            predictedCreateUs > kOnnxMaxCreateUs)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s%s > "
+                      "%.1f s, stopping\n",
+                      ep.providerKey.c_str(), row.c_str(),
+                      (long long)sp, (long long)sp, predictedCreateUs / 1.0e6,
+                      strikes > 0 ? " (after a size that did not gain)" : "",
+                      kOnnxMaxCreateUs / 1.0e6);
+          break;
+        }
 
         // The first rung that runs is profiled: one run tells us the width
         // the Conv kernel actually consumed.  A provider without an fp16
@@ -366,6 +396,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
               offDeviceAbove = sp;
               break;
             }
+            prevPrevCreateUs = prevCreateUs;
             prevCreateUs = createUs;
             if (++offDeviceBelow < kOnnxOffDevicePatience)
               continue;
@@ -410,9 +441,26 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           firstErr = c.error.empty() ? "run failed" : c.error;
           errStatus = ResultStatus::Error;
         }
+        // What the timed runs computed (onnxNonFiniteReason), read once they
+        // are over.  A wrong answer withholds the whole row, as in gemm.cpp.
+        const std::string wrong =
+            (mean_us > 0.0)
+                ? onnxNonFiniteReason(c.outBuf.data(), kChannels, dt.dtype,
+                                      "on a " + std::to_string(sp) + "x" +
+                                          std::to_string(sp) + " feature map")
+                : std::string();
         destroySetup(rt, c);
         if (mean_us <= 0.0)
           break;
+        if (!wrong.empty())
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(),
+                      row.c_str(), wrong.c_str());
+          best = 0.0;
+          firstErr = wrong;
+          errStatus = ResultStatus::Error;
+          break;
+        }
 
         rungs++;
         if (firstSpatial == 0)
@@ -424,7 +472,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     ep.providerKey.c_str(), row.c_str(),
                     (long long)sp, (long long)sp, rate);
 
-        if (rate > best * kImproveFactor)
+        // Climb to the plateau (kOnnxPlateauGain, one grace size).
+        if (rate > best * kOnnxPlateauGain)
         {
           strikes = 0;
           best = rate;
@@ -437,8 +486,13 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             best = rate;
             bestSpatial = sp;
           }
-          if (++strikes >= kMaxStrikes)
+          if (++strikes >= kOnnxPlateauStrikes)
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: plateau past %lldx%lld\n",
+                        ep.providerKey.c_str(), row.c_str(),
+                        (long long)bestSpatial, (long long)bestSpatial);
             break;
+          }
         }
 
         // Measured, not predicted.  The gate at the top of the loop
@@ -455,29 +509,17 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
-        bool createCliff = (prevCreateUs > 0.0 &&
-                            createUs > kOnnxCreateGrowthFloor &&
-                            createUs > prevCreateUs * kOnnxCreateGrowthFactor);
-        if (createCliff)
-        {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create grew %.1fx (%.1f s -> %.1f s) > %.1fx, stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp,
-                      createUs / prevCreateUs,
-                      prevCreateUs / 1.0e6, createUs / 1.0e6,
-                      kOnnxCreateGrowthFactor);
-          prevCreateUs = createUs;
-          break;
-        }
+        // A size that compiled past the cap anyway is kept, and ends the
+        // ladder.
         if (sp != kMinSpatial && createUs > kOnnxMaxCreateUs)
         {
           CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create %.1f s > %.1f s, stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
                       (long long)sp, (long long)sp,
                       createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
-          prevCreateUs = createUs;
           break;
         }
+        prevPrevCreateUs = prevCreateUs;
         prevCreateUs = createUs;
       }
 

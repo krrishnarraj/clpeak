@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -49,7 +50,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
 }
 
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq)
+                                    bool qdq, int64_t blockSize)
 {
   // TensorRT for RTX on a per-tensor float4 QDQ matmul: GetCapability takes
   // the whole graph and the engine build that follows dies with an access
@@ -67,6 +68,33 @@ std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
            "its engine build) on a per-tensor float4 QDQ matmul instead of "
            "declining it as TensorRT does -- its float4 path wants a block "
            "scale, which the nvfp4 row has -- so this graph is not sent to it";
+
+  // TensorRT on blocked int8 weights: DequantizeLinear of int8 codes with one
+  // fp16 scale per 32 rows (opset 21, axis 0) into a MatMul.  TensorRT
+  // documents block dequantize for FP4, FP8 and INT4 inputs only, and given
+  // INT8 it does not decline: the build folds the dequantize as a plain
+  // broadcast multiply, reading the [K/32, N] scales as though they were the
+  // [K, N] weights, so 31 of every 32 scale reads land past the end of the
+  // buffer.  Whatever lies there becomes the weights: every width from 128
+  // comes back all NaN -- against the CPU provider, and through trtexec with
+  // no ONNX Runtime at all -- and 64 comes back NaN, Inf and garbage that
+  // changes from run to run, while 32, the probe's size, has a single scale
+  // row that broadcasts correctly by accident, so the probe passes.  When the
+  // memory past the buffer is unmapped, the fold segfaults inside the engine
+  // build: a Debug build died at the 8192-wide chain after 1024..4096 had
+  // timed NaN at 47-72 TFLOPS, and a Release build ran the same ladder to the
+  // end.  TensorRT 11.2.1, ONNX Runtime 1.30.0, RTX 5060.  The int4 block,
+  // which TensorRT does implement, comes back right (0.15% from the CPU
+  // provider at 1024); int8_qdq, one scale per tensor, is another graph and
+  // runs.
+  if (ep.providerKey == "TensorrtExecutionProvider" &&
+      dtype == ONNX_DT_INT8 && !qdq && blockSize > 0)
+    return "TensorRT has no blocked int8 dequantize -- it documents block "
+           "scales for FP4, FP8 and INT4 only -- and instead of declining it "
+           "folds it at build time, reading the weight scales past the end of "
+           "their buffer: the engine computes NaN, and a build whose read runs "
+           "into unmapped memory takes the process down with a segfault.  So "
+           "blocked int8 weights are not sent to it";
 
   return std::string();
 }
@@ -95,6 +123,27 @@ bool onnxReasonIsDeviceLoss(const std::string &reason)
   return false;
 }
 
+bool onnxReasonIsOutOfMemory(const std::string &reason)
+{
+  // How the runtimes seen here say it, lower-cased: QNN's error name and its
+  // text, ORT's own allocator, C++'s bad_alloc, and the CUDA, Vulkan and
+  // Direct3D spellings of the same thing.
+  static const char *kMarkers[] = {
+      "mem_alloc",           "memory allocation",  "out of memory",
+      "outofmemory",         "out_of_memory",      "out_of_device_memory",
+      "out_of_host_memory",  "failed to allocate", "bad_alloc",
+      "not enough memory",   "insufficient memory",
+      "cudaerrormemoryallocation",
+  };
+  std::string lower(reason);
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return (char)std::tolower(c); });
+  for (const char *m : kMarkers)
+    if (lower.find(m) != std::string::npos)
+      return true;
+  return false;
+}
+
 // Latch when `text` carries the loss; harmless for anything else.
 static void noteDeviceLost(const std::string &text)
 {
@@ -110,6 +159,44 @@ ResultStatus onnxFailureStatus(const std::string &reason, ResultStatus current)
   if (current == ResultStatus::Error)
     return current;
   return onnxReasonIsDeviceLoss(reason) ? ResultStatus::Error : ResultStatus::Unsupported;
+}
+
+std::string onnxNonFiniteReason(const void *data, int64_t count, int dtype,
+                                const std::string &where)
+{
+  // Every exponent bit set is an infinity or a NaN in all three widths.  Read
+  // as bits, so no floating-point mode can compile the test away.
+  const unsigned char *p = static_cast<const unsigned char *>(data);
+  int64_t bad = 0;
+  if (dtype == ONNX_DT_FLOAT)
+  {
+    for (int64_t i = 0; i < count; i++)
+    {
+      uint32_t x;
+      std::memcpy(&x, p + 4 * i, 4);
+      bad += (x & 0x7f800000u) == 0x7f800000u;
+    }
+  }
+  else if (dtype == ONNX_DT_FLOAT16 || dtype == ONNX_DT_BFLOAT16)
+  {
+    const uint16_t exp = (dtype == ONNX_DT_FLOAT16) ? 0x7c00u : 0x7f80u;
+    for (int64_t i = 0; i < count; i++)
+    {
+      uint16_t h;
+      std::memcpy(&h, p + 2 * i, 2);
+      bad += (h & exp) == exp;
+    }
+  }
+  if (bad == 0)
+    return std::string();
+
+  const std::string n = std::to_string((long long)count);
+  return "this provider returned NaN or infinity " + where + " (" +
+         (bad == count ? "all " + n
+                       : std::to_string((long long)bad) + " of the " + n) +
+         " values of the row the graph reduces to), and every value in this "
+         "graph stays far inside its type's range: it computed something "
+         "other than this graph, so its timing is withheld";
 }
 
 std::string onnxStatusText(const OrtRuntime &rt, OrtStatus *st)
@@ -390,31 +477,28 @@ bool genericEpOptions(const onnx_ep_info_t &ep, EpOptions &out, bool wantPlan)
     // would settle for the DSP or the CPU reference backend and the row
     // would not mean what it says.
     if (ep.epDevicePtr && ep.deviceType == DeviceType::Gpu)
-    {
       qnnBackend(ep, "gpu", gpuFile, out);
-      return true;
-    }
-    if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
-    {
+    else if (ep.epDevicePtr && ep.deviceType == DeviceType::Cpu)
       qnnBackend(ep, "cpu", cpuFile, out);
-      return true;
+    else
+    {
+      qnnBackend(ep, "htp", htpFile, out);
+      // Peak clocks.  The HTP's default performance mode is a power
+      // saver; "burst" is what a benchmark -- and Qualcomm's own
+      // profiling tools -- ask for, and the difference is a large
+      // multiple on sustained work.
+      out.kv.emplace_back("htp_performance_mode", "burst");
+      out.kv.emplace_back("qnn_context_priority", "high");
+      // The most optimised graph the finalizer will produce.  Costs
+      // preparation time, which the session-creation budgets bound.
+      out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
+      // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
+      // HTP.  The default hands them to the CPU EP, which the fallback
+      // guard then refuses -- and a quantized input arriving through
+      // a dequantize is exactly what the numeric-error and live QDQ
+      // graphs have at their boundary.
+      out.kv.emplace_back("offload_graph_io_quantization", "0");
     }
-    qnnBackend(ep, "htp", htpFile, out);
-    // Peak clocks.  The HTP's default performance mode is a power
-    // saver; "burst" is what a benchmark -- and Qualcomm's own
-    // profiling tools -- ask for, and the difference is a large
-    // multiple on sustained work.
-    out.kv.emplace_back("htp_performance_mode", "burst");
-    out.kv.emplace_back("qnn_context_priority", "high");
-    // The most optimised graph the finalizer will produce.  Costs
-    // preparation time, which the session-creation budgets bound.
-    out.kv.emplace_back("htp_graph_finalization_optimization_mode", "3");
-    // Keep the graph-boundary QuantizeLinear/DequantizeLinear on the
-    // HTP.  The default hands them to the CPU EP, which the fallback
-    // guard then refuses -- and a quantized input arriving through
-    // a dequantize is exactly what the numeric-error and live QDQ
-    // graphs have at their boundary.
-    out.kv.emplace_back("offload_graph_io_quantization", "0");
     return true;
   }
   if (providerKey == "OpenVINOExecutionProvider")
@@ -727,6 +811,111 @@ const char *onnxProfileTypeName(int dtype)
   }
 }
 
+// ONNX Runtime writes its profile as one JSON array of events,
+//
+//   {"cat" : "Node", ..., "name" :"n0_kernel_time","args" : {...}},
+//
+// and a kernel's event carries its op_name and input_type_shape together in
+// its args -- in no fixed order, which differs from one event to the next, so
+// either can come first.  A search that strays past the event's own braces
+// reads a neighbour's field instead, and which neighbour depends on how long
+// the lines in between happened to be: the fp16 probe's MatMul read as
+// float16 on one run and float on the next, the float16 being the input of
+// the Cast that runs before it.  So the events are delimited first, by
+// matching braces outside strings, and every field is read from inside the
+// one it belongs to.  That is all the structure needed; no JSON library.
+
+static size_t profileSkipSpace(const std::string &s, size_t i)
+{
+  while (i < s.size() &&
+         (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r'))
+    i++;
+  return i;
+}
+
+// Just past the string that opens at `i`, or npos when it never closes.
+static size_t profileSkipString(const std::string &s, size_t i)
+{
+  for (i++; i < s.size(); i++)
+  {
+    if (s[i] == '\\')
+      i++;
+    else if (s[i] == '"')
+      return i + 1;
+  }
+  return std::string::npos;
+}
+
+// The next event at or after `from`, which moves past it; empty when there
+// are no more.  A last event the file cuts off runs to the end of the file.
+static std::string profileNextEvent(const std::string &json, size_t &from)
+{
+  const size_t begin = json.find('{', from);
+  from = json.size();
+  if (begin == std::string::npos)
+    return std::string();
+  int depth = 0;
+  for (size_t i = begin; i < json.size();)
+  {
+    const char c = json[i];
+    if (c == '"')
+    {
+      i = profileSkipString(json, i);
+      continue;
+    }
+    if (c == '{' || c == '[')
+      depth++;
+    else if ((c == '}' || c == ']') && --depth == 0)
+    {
+      from = i + 1;
+      break;
+    }
+    i++;
+  }
+  return json.substr(begin, from - begin);
+}
+
+// Where the value of `key` starts in one event, or npos.  ONNX Runtime
+// writes `"op_name" : "QLinearMatMul"`, spaces around the colon included, so
+// the separator is skipped rather than matched literally -- a fixed
+// `"op_name":"` finds nothing.
+static size_t profileValueAt(const std::string &ev, const char *key)
+{
+  const std::string quoted = std::string("\"") + key + "\"";
+  for (size_t at = ev.find(quoted); at != std::string::npos;
+       at = ev.find(quoted, at + 1))
+  {
+    const size_t colon = profileSkipSpace(ev, at + quoted.size());
+    if (colon < ev.size() && ev[colon] == ':')
+      return profileSkipSpace(ev, colon + 1);
+  }
+  return std::string::npos;
+}
+
+// The contents of the string that opens at `i`, or empty when none does.
+static std::string profileStringAt(const std::string &ev, size_t i)
+{
+  if (i >= ev.size() || ev[i] != '"')
+    return std::string();
+  const size_t end = profileSkipString(ev, i);
+  if (end == std::string::npos)
+    return std::string();
+  return ev.substr(i + 1, end - i - 2);
+}
+
+// The element type of the first tensor in one event's input_type_shape --
+// `[{"float16":[32,32]},{"float16":[32,32]}]` -- or empty when it lists none.
+static std::string profileFirstInputType(const std::string &ev)
+{
+  size_t i = profileValueAt(ev, "input_type_shape");
+  if (i >= ev.size() || ev[i] != '[')
+    return std::string();
+  i = profileSkipSpace(ev, i + 1);
+  if (i >= ev.size() || ev[i] != '{')
+    return std::string();
+  return profileStringAt(ev, profileSkipSpace(ev, i + 1));
+}
+
 std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
                                                 OrtSession *session,
                                                 std::string *opInType,
@@ -759,9 +948,6 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   if (OrtStatus *st = rt.api->AllocatorFree(alloc, path))
     rt.api->ReleaseStatus(st);
 
-  // The profile is JSON, and every executed kernel carries an "op_name".
-  // Scanning for that key beats parsing: no dependency, and the format has
-  // been stable for years.
   std::ifstream in(file, std::ios::binary);
   std::string json((std::istreambuf_iterator<char>(in)),
                    std::istreambuf_iterator<char>());
@@ -769,60 +955,25 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   CLPEAK_VLOG("onnx: profile %s (%zu bytes)\n", file.c_str(), json.size());
   std::remove(file.c_str());
 
-  // ONNX Runtime writes `"op_name" : "QLinearMatMul"`, spaces around the
-  // colon included, so the separator is skipped rather than matched
-  // literally -- a fixed `"op_name":"` finds nothing.
-  const std::string key = "\"op_name\"";
-  size_t pos = 0;
-  while ((pos = json.find(key, pos)) != std::string::npos)
+  // Every executed kernel's event carries an op_name; the session's own
+  // events and each run's carry none.
+  for (size_t at = 0;;)
   {
-    pos += key.size();
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
-      pos++;
-    if (pos >= json.size() || json[pos] != ':')
-      continue;
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
-      pos++;
-    if (pos >= json.size() || json[pos] != '"')
-      continue;
-    pos++;
-    const size_t end = json.find('"', pos);
-    if (end == std::string::npos)
+    const std::string ev = profileNextEvent(json, at);
+    if (ev.empty())
       break;
-    std::string name = json.substr(pos, end - pos);
-    pos = end;
+    std::string name = profileStringAt(ev, profileValueAt(ev, "op_name"));
+    if (name.empty())
+      continue;
 
-    // Capture the element type of the kernel's first input.  ORT writes
-    // `"input_type_shape" : [ { "float16" : [32,32] }, ...` in the same
-    // event's args; find it near this op_name and read the first quoted key
-    // inside the first brace.
+    // The element type of the kernel's first input, from its own event.
     const bool wanted = ofOp ? (name == ofOp)
                              : (name == "MatMul" || name == "FusedMatMul" ||
                                 name == "Gemm");
     if (opInType && opInType->empty() && wanted)
-    {
-      const std::string itsKey = "\"input_type_shape\"";
-      // The args object holds op_name and input_type_shape together; search a
-      // bounded window on either side rather than counting braces.
-      size_t lo = (pos > 800) ? pos - 800 : 0;
-      size_t its = json.find(itsKey, lo);
-      if (its != std::string::npos && its < pos + 800)
-      {
-        size_t br = json.find('{', its); // first tensor's { "<type>": ... }
-        size_t q1 = (br == std::string::npos) ? std::string::npos
-                                              : json.find('"', br);
-        if (q1 != std::string::npos)
-        {
-          size_t q2 = json.find('"', q1 + 1);
-          if (q2 != std::string::npos)
-            *opInType = json.substr(q1 + 1, q2 - q1 - 1);
-        }
-      }
-    }
+      *opInType = profileFirstInputType(ev);
 
-    if (!name.empty())
-      ops.push_back(std::move(name));
+    ops.push_back(std::move(name));
   }
   return ops;
 }
@@ -855,6 +1006,8 @@ std::string onnxJoinOps(const std::vector<std::string> &ops)
 static const char *kQuantMarkers[] = {
   "QLinearMatMul", "MatMulInteger", "QGemm", "QLinearGemm",
   "MatMulIntegerToFloat", "QuantizeLinearMatMul", "QOrderedMatMul",
+  // The same arithmetic as the int8_qdq_conv1x1 row spells it.
+  "QLinearConv", "ConvInteger",
   // Weight-only: ORT's own kernel for narrow blocked weights against
   // floating-point activations, and what a quantized language model runs on.
   "MatMulNBits",
@@ -869,6 +1022,19 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops)
   return std::string();
 }
 
+size_t onnxCountQuantizedKernels(const std::vector<std::string> &ops)
+{
+  size_t n = 0;
+  for (const auto &op : ops)
+    for (const char *m : kQuantMarkers)
+      if (op.find(m) != std::string::npos)
+      {
+        n++;   // once per launch: MatMulIntegerToFloat also holds MatMulInteger
+        break;
+      }
+  return n;
+}
+
 bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops)
 {
   if (ops.empty())
@@ -878,8 +1044,11 @@ bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops)
   for (const auto &op : ops)
   {
     // Exact names: "MatMul" is a substring of QLinearMatMul and
-    // MatMulInteger, so a loose match here would reject every success.
-    if (op == "MatMul" || op == "Gemm" || op == "FusedMatMul")
+    // MatMulInteger, so a loose match here would reject every success.  A
+    // float Conv beside the quantize nodes is the int8_qdq_conv1x1 row left
+    // unfused, the same failure spelled the other way.
+    if (op == "MatMul" || op == "Gemm" || op == "FusedMatMul" ||
+        op == "Conv" || op == "FusedConv" || op == "NhwcFusedConv")
       sawPlainMatMul = true;
     if (op == "DequantizeLinear" || op == "QuantizeLinear")
       sawQuantizeNode = true;
@@ -893,7 +1062,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     bool keepConstantsUnfolded,
                                     bool profile,
                                     bool keepQdqUnfused,
-                                    bool verifyPlacement)
+                                    bool verifyPlacement,
+                                    bool keepQdqInPlace)
 {
   OnnxSessionResult res;
   const OrtApi *api = rt.api;
@@ -960,6 +1130,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     // selector fire on a float8 graph turns a valid model into an invalid one.
     if (keepQdqUnfused)
       disabled += ";QDQSelectorActionTransformer";
+    if (keepQdqInPlace)
+      disabled += ";QDQPropagationTransformer";
     st = api->AddSessionConfigEntry(
         so, "optimization.disable_specified_optimizers", disabled.c_str());
     if (st)

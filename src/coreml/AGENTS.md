@@ -33,11 +33,11 @@ micro-graphs on all three side by side.
 | `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
-| `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlResidentMatMulModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
-| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()` |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format over a doubling size ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
+| `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
+| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()`, `coremlNonFiniteReason()` (the readback below), `CoremlLayoutRace` (the weight-layout race below) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format, the ONNX backend's chain (sixteen distinct square layers per prediction from a 64-wide live seed) over a doubling width ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
-| `conv.cpp` | `runConv` (`--convolution`) — 3×3 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
@@ -140,6 +140,39 @@ which counts each operation whole and fails the session.  The ONNX backend
 reads the same plan through the provider's `ProfileComputePlan` option
 (`src/onnx/onnx_coreml_plan.h`) and applies the same rule.
 
+## A ladder reads back what it timed
+
+A timing says nothing about what was computed, and a unit that
+miscompiles a graph times it like a correct one.  So once a rung's timed
+phase is over, `gemm.cpp`, `conv.cpp` and `block.cpp` read the row the
+last prediction reduced to, and `coremlNonFiniteReason()` turns a NaN or
+an infinity in it into an `Error` -- the ONNX backend's rule (its
+"A ladder reads back what it timed" has the reasoning).  In gemm and conv
+that withholds the whole row; in the block, the one point, which is its
+own row.  It rests on nothing in these graphs being able to overflow: the
+gemm chains keep each layer's magnitude (the reduced row reads 11-48 on an
+M1 Pro) and the block's largest value sits 31x under fp16's.  It sees only
+the reduced row, so it is a tripwire, not an accuracy test.
+
+## Every weight is raced in both layouts
+
+`coremlEmitWeight` stores a weight matrix as `[in, out]`, W[K, N] the way it
+multiplies, or as `[out, in]`, its transpose read with `transpose_y` -- the
+layout a converted Linear layer carries.  Which one a unit runs faster
+depends on the unit, the format and the shape, often by a factor and in
+both directions, so no test fixes one: the gemm chain races the two at
+every width, the block at every point (its prompt and its cache race
+separately, since one unit can take the wide multiply and the one-row one
+in opposite layouts), and the accuracy matmul times both and reads the
+faster one's answer, because a layout can change the kernel and with it
+the arithmetic.  Each row reports the faster and names its layout, with
+what the other read beside it.  `CoremlLayoutRace` (`coreml_bench.h`) has
+the M1 Pro's cases, and `clpeak::FormRace` (`include/common/form_race.h`)
+the rule that closes a race once its readings settle it, so most rows pay
+for one extra model; on the Neural Engine, which runs
+the two at one rate and compiles `[in, out]` ten times slower, the tie
+sends the climb on in `[out, in]`.
+
 ## Core ML's compile cache is purged, and free space is checked
 
 E5RT, the runtime behind the GPU and the Neural Engine, caches every model
@@ -238,9 +271,13 @@ is *storage*, decompressed into a float multiply by a `constexpr_*` op —
 except `int8_qdq`, whose `quantize` / `dequantize` pair around the matmul is
 the pattern the compiler fuses into integer arithmetic on Neural Engines
 that have it (A17 Pro, M4 and later).  So the narrow rows report flops and
-only `int8_qdq` reports ops, and on an M1 all of them read the fp16 rate
-for a compute-bound square matmul.  The difference shows where traffic is
-the limit: the block's decode rows, and the ANE's prefill (below).
+only `int8_qdq` reports ops.  On an M1 the GPU and the CPU read every
+format at the fp16 rate, each in the layout it runs that format faster
+(above: stored the other way, the GPU's per-channel int8 and the CPU's
+blockwise int4 run at a tenth of it or less); the Neural Engine reads every
+narrow format faster than fp16, its weight traffic showing even in the gemm
+chain.  It shows more where traffic is the whole limit: the block's decode
+rows, and the ANE's prefill (below).
 
 | label | stored as | decompression | needs |
 |---|---|---|---|
@@ -284,31 +321,46 @@ fixes it.
 
 ## Reference readings, M1 Pro (macOS 26.6)
 
-`coreml_gemm`, peak over the ladder:
+`coreml_gemm`, peak over the ladder of sixteen-layer chains (macOS 27.0.1):
 
 | row | Neural Engine | GPU | CPU |
 |---|---|---|---|
-| fp16 | 8.7 TFLOPS (2048³; 6.0 at 4096, the SRAM cliff) | 4.7 | 4.9 |
-| fp32 | cannot run (plan: CPU) | 4.2 | 2.1 |
-| int8_weight | 8.7 | 4.7 | |
-| int4_weight | 8.6 (resident activations only — see the block) | 4.7 | |
-| int4_lut | 8.8 | 4.7 | |
-| int8_qdq | 9.6 TOPS (at 4096: int8 activations halve the traffic where fp16 spills) | 4.7 | |
+| fp16 | 10.5 TFLOPS (2048-wide; 5.9 at 4096) | 4.7 | 4.5-5.0 |
+| fp32 | cannot run (plan: CPU) | 4.4 | 2.0 |
+| int8_weight | 11.0 | 4.7 (0.38 stored [out, in]) | 4.7 |
+| int4_weight | cannot run: declined with live activations, as in the block | 4.7 (4.4 stored [out, in]) | 5.1 (0.76 stored [in, out]) |
+| int4_lut | 11.4 | 4.7 | 4.6 |
+| int8_qdq | 11.5 TOPS | 4.6 | 3.6 |
 
-The ONNX backend's CoreML EP reads 8.56 at 2048 on the same machine, so the
-two agree on what they share and this one sees more.
+Each cell is the faster of the two layouts; where a cell names the other,
+the race was won by a margin, and everywhere else the two tie within 3%.
+
+The ONNX backend's CoreML EP reads 10.5 for its own chain on the same
+machine, so the two agree on what they share and this one sees more.  The
+single multiply the test timed before read 8.2-8.7 on the Neural Engine,
+where one prediction's overhead and the reduction behind it were a fifth of
+the time, and 5.0-5.2 fp16 on the CPU, where BNNS ran it with both operands
+constant: given a live input the same multiply reads 4.2, under the chain.
+The chain costs time instead: the rung that confirms a plateau runs
+sixteen multiplies.  Its compiles cost little: on the Neural Engine the
+two layouts tie at the first width and the climb goes on `[out, in]`,
+whose formats compile in 0.5 / 1.2 / 4 s at 1024 / 2048 / 4096-wide
+layers where `[in, out]` takes 4 / 15 / 60 s -- the figures the ONNX
+backend's CoreML provider pays.
 
 `coreml_numeric_error` (ppm): fp16 reads **214 on the ANE, 207 on the GPU,
 3320 on the CPU** — the CPU's fp16 matmul accumulates in fp16 (it is also
-the fastest fp16 unit on the machine at 4.9 TFLOPS), while its int4 row
-reads 272, a different kernel accumulating in fp32.  GPU fp32 0.6, CPU fp32
-0.4.  int8_qdq ~9600 everywhere, the cost of keeping the answer in int8.
-int8_weight reads 294 on the ANE against fp16's 214.  The reference uses
+the fastest fp16 unit on the machine at 4.9 TFLOPS), and so does its int4
+one, 3218, with the weights [out, in]; stored [in, out] they go to a kernel
+seven times slower that accumulates in fp32 and reads 272.  GPU fp32 0.6,
+CPU fp32 0.4.  int8_qdq ~9600 everywhere, the cost of keeping the answer in
+int8.  int8_weight reads 294 on the ANE against fp16's 214.  The reference uses
 the exact scale-times-code values, not fp16-rounded ones: the ANE keeps the
 codes and applies the scale after accumulating (`dequantizedTo` in
 `coreml_model.cpp` says how that was established).
 
-`coreml_block`, Neural Engine:
+`coreml_block`, Neural Engine (every row ties between the two layouts and
+is measured `[out, in]`):
 
 | row | prefill s512 | decode kv2048 | per token |
 |---|---|---|---|
@@ -323,9 +375,9 @@ codes and applies the scale after accumulating (`dequantizedTo` in
 **The M1 Pro's Neural Engine is weight-bandwidth-bound even at prefill**: a
 palettized block runs 60% faster than fp16 and a per-channel int8 one 38%,
 with identical arithmetic.  And **blockwise int4 is accepted only with the
-activations resident** — the single-matmul row passes, the layer does not,
-and a model has live activations.  That is why the block test exists beside
-the GEMM one.  Both rows are true; the block's is the one a model sees.
+activations resident**: a single matmul over constant activations ran at
+8.6 TFLOPS, and neither the layer nor the gemm chain runs, because their
+activations are live, as a model's are.
 
 Attention is Core ML's fused `scaled_dot_product_attention` where the OS has
 it (spec 9), which is what a converted model carries.  The `fp16_explicit`
@@ -360,6 +412,9 @@ point's row instead of settling the variant.
   `coremlWeightBytes`, `coremlSpecForWeight`, `coremlWeightLabel`, and a
   variant row in `gemm.cpp`, `numeric_error.cpp` and `block.cpp` so the three
   tables stay in step.
+- Adding a model that multiplies by weight matrices → race their layouts
+  (`CoremlLayoutRace`) rather than picking one; which runs faster is the
+  unit's and the format's to decide.
 - Adding an ObjC helper → declare in `coreml_internal.h`; keep `coreml_session.h`
   free of Objective-C so the tests stay `.cpp`.
 - The `.mm` files build with `-fobjc-arc`; the compile call must stay

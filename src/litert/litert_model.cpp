@@ -740,14 +740,18 @@ TfQuant actQuant(const LitertPlan &p, float scale)
   return q;
 }
 
-// W [N, K] in the plan's weight format; returns the tensor index and,
-// when asked, the fill so a reference can recover the stored values.
-int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t seed, const Fill **fill)
+// W [N, K] in the plan's weight format -- or, for a 1x1 CONV_2D, the same
+// values as a [N, 1, 1, K] filter; returns the tensor index and, when asked,
+// the fill so a reference can recover the stored values.
+int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t seed, const Fill **fill,
+              bool filter = false)
 {
   const TfType wt = p.weight;
+  const std::vector<int32_t> shape = filter ? std::vector<int32_t>{(int32_t)N, 1, 1, (int32_t)K}
+                                            : std::vector<int32_t>{(int32_t)N, (int32_t)K};
   int tensor;
   if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
-    tensor = r.floatWeight(p, {(int32_t)N, (int32_t)K}, "W", N, K, seed, 1.0f);
+    tensor = r.floatWeight(p, shape, "W", N, K, seed, 1.0f);
   else if (wt == TfType::F8E4M3)
   {
     // One scale per row; codes span a comfortable part of the format's range
@@ -758,7 +762,7 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
     q.scale.assign((size_t)N, scale);
     q.zeroPoint.assign((size_t)N, 0);
     q.quantizedDim = 0;
-    tensor = r.m.addTensor(0, {(int32_t)N, (int32_t)K}, wt, "W", buf, q);
+    tensor = r.m.addTensor(0, shape, wt, "W", buf, q);
   }
   else
   {
@@ -782,7 +786,7 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
       q.zeroPoint.assign((size_t)N, 0);
       q.quantizedDim = 0;
     }
-    tensor = r.m.addTensor(0, {(int32_t)N, (int32_t)K}, wt, "W", buf, q);
+    tensor = r.m.addTensor(0, shape, wt, "W", buf, q);
   }
   if (fill)
     *fill = r.fills.back().get();
@@ -867,6 +871,55 @@ TfOptions mulOptions()
   return o;
 }
 
+int convVersion(const LitertPlan &p, bool depthwise)
+{
+  // op_version.cc: int8 in/out with int8 weights -> 3; int8 in with int4
+  // weights -> 7; float in with int8 per-channel weights -> 5 (conv) / 6
+  // (depthwise); else 1.
+  if (p.act == TfType::I8 && p.weight == TfType::I8)
+    return 3;
+  if (p.act == TfType::I8 && p.weight == TfType::I4)
+    return 7;
+  if (p.act == TfType::F32 && p.weight == TfType::I8)
+    return depthwise ? 6 : 5;
+  return 1;
+}
+
+// The zero bias a CONV_2D carries -- its kernels want one ("Tensor at index
+// 2 was optional but was expected"): int32 at the product of the input and
+// weight scales for an integer plan, the activation type otherwise.
+int addConvBias(Recipe &r, const LitertPlan &p, int64_t N, float aScale, float wScale)
+{
+  if (isInteger(p.act))
+    return addFcBias(r, N, aScale, wScale);
+  r.halfBuffers.push_back(std::vector<uint16_t>((size_t)N * 2, 0));   // zero in any width
+  return r.m.addTensor(0, {(int32_t)N}, p.act, "bias",
+                       r.m.addBuffer(r.halfBuffers.back().data(), litertElemBytes(p.act, N)));
+}
+
+// A matmul's M rows as the grid of positions a 1x1 CONV_2D runs over: H x W
+// = M, as square as a power-of-two M allows.  Row-major [1, H, W, C] holds
+// the same bytes as [1, M, C], so the host reads and writes either alike.
+std::vector<int32_t> convGrid(int64_t M, int64_t channels)
+{
+  int64_t h = 1, w = M;
+  while (h * h < M && w % 2 == 0)
+  {
+    h *= 2;
+    w /= 2;
+  }
+  return {1, (int32_t)h, (int32_t)w, (int32_t)channels};
+}
+
+TfOptions conv1x1Options()
+{
+  TfOptions o;
+  o.kind = TfOptions::Kind::Conv2d;
+  o.padding = TfPadding::Valid;
+  o.strideW = o.strideH = 1;
+  return o;
+}
+
 std::string describe(const LitertPlan &p, const char *what)
 {
   return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight);
@@ -908,23 +961,136 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   return r.m.build(describe(p, "matmul"));
 }
 
+TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, int64_t seedWidth,
+                                   bool conv1x1)
+{
+  Recipe r;
+  r.halfRounded = p.halfRounded;
+  const int64_t sw = std::min(seedWidth, D);
+  r.m.reserveBytes(litertElemBytes(litertConstantType(p), D * sw) + litertWeightBytes(p, D, sw) +
+                   (uint64_t)layers * litertWeightBytes(p, D, D));
+  const bool integer = isInteger(p.act);
+  const int abits = bitsOf(p.act);
+  const int qmax = integer ? qmaxOf(p.act) : 0;
+  const float xScale = integer ? litertActScale(abits) : 1.0f;
+  // Uniform over +/-sqrt(3/K) once scaled from [-0.5, 0.5): variance 1/K, so
+  // a K-deep product returns the magnitude it was handed.
+  auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
+  auto shape = [&](int64_t cols) {
+    return conv1x1 ? convGrid(D, cols) : std::vector<int32_t>{1, (int32_t)D, (int32_t)cols};
+  };
+
+  const TfQuant xq = actQuant(p, xScale);
+  const int x0 = r.actConstant(p, shape(sw), "X0", D, sw, 0x243f6a88u, 1.0f, xScale, qmax, xq);
+  const int s = addScalar(r, p);
+  const int x = r.m.addTensor(0, shape(sw), p.act, "X", 0, xq);
+  r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
+
+  // W [N, K] at `mag` in the plan's weight format; `wScale` gets the scale
+  // an integer weight is stored at, which its layer's int32 bias needs.
+  auto weight = [&](const std::string &name, int64_t N, int64_t K, uint32_t seed, float mag,
+                    float &wScale) -> int {
+    const TfType wt = p.weight;
+    const std::vector<int32_t> wShape = conv1x1 ? std::vector<int32_t>{(int32_t)N, 1, 1, (int32_t)K}
+                                                : std::vector<int32_t>{(int32_t)N, (int32_t)K};
+    wScale = 1.0f;
+    if (wt == TfType::F32 || wt == TfType::F16 || wt == TfType::BF16)
+      return r.floatWeight(p, wShape, name, N, K, seed, mag);
+    TfQuant q;
+    q.quantizedDim = 0;
+    if (wt == TfType::F8E4M3)
+    {
+      // litertMatMulModel's 1/16 at magnitude 1: the same codes, rescaled.
+      const float scale = mag / 16.0f;
+      q.scale.assign((size_t)N, scale);
+      q.zeroPoint.assign((size_t)N, 0);
+      return r.m.addTensor(0, wShape, wt, name, r.constant(N, K, wt, seed, mag, scale), q);
+    }
+    wScale = litertWeightScale(bitsOf(wt)) * mag;
+    const int buf = r.constant(N, K, wt, seed, mag, wScale, qmaxOf(wt));
+    if (p.weightBlock > 0)
+    {
+      const int64_t nb = K / p.weightBlock;
+      const int sbuf = r.halves(std::vector<uint16_t>((size_t)(N * nb), litertFloatToHalf(wScale)));
+      q.blockSize = p.weightBlock;
+      q.scalesTensor = r.m.addTensor(0, {(int32_t)N, (int32_t)nb}, TfType::F16, name + "_s", sbuf);
+    }
+    else
+    {
+      q.scale.assign((size_t)N, wScale);
+      q.zeroPoint.assign((size_t)N, 0);
+    }
+    return r.m.addTensor(0, wShape, wt, name, buf, q);
+  };
+
+  // One FULLY_CONNECTED -- or 1x1 CONV_2D -- from `in` (quantized at
+  // `inScale`) to a tensor quantized at `outScale`; the scales mean nothing
+  // to a float plan.
+  const bool bias = fcHasBias(p);
+  auto layer = [&](const std::string &name, int in, float inScale, int64_t K, uint32_t seed,
+                   float mag, float outScale) -> int {
+    float wScale = 1.0f;
+    const int w = weight(name + "_w", D, K, seed, mag, wScale);
+    const int b = conv1x1 ? addConvBias(r, p, D, inScale, wScale)
+                          : (bias ? addFcBias(r, D, inScale, wScale) : -1);
+    const int out = r.m.addTensor(0, shape(D), p.act, name, 0, actQuant(p, outScale));
+    if (conv1x1)
+      r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {in, w, b}, {out}, conv1x1Options());
+    else
+      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {in, w, b}, {out}, fcOptions(p));
+    return out;
+  };
+
+  // Integer scales, four sigma of what each tensor holds onto the widest
+  // code: the widened seed has the [-0.5, 0.5) inputs' variance (1/12), and
+  // every layer's product the first layer's, litertOutScale(D).
+  const float aScale = integer ? (float)(4.0 * std::sqrt(1.0 / 12.0) / qmax) : 1.0f;
+  const float cScale = integer ? litertOutScale(D, abits) : 1.0f;
+  int t = layer("A", x, xScale, sw, 0x3c6ef372u, keep(sw), aScale);
+  float tScale = aScale;
+  for (int l = 0; l < layers; l++)
+  {
+    t = layer("C" + std::to_string(l), t, tScale, D, 0x85a308d3u + 0x9e3779b9u * (uint32_t)l,
+              l == 0 ? 1.0f : keep(D), cScale);
+    tScale = cScale;
+  }
+
+  // A maximum, not a sum, as in litertMatMulModel -- over the grid's two
+  // axes for the convolutions.
+  const int ax = conv1x1 ? r.m.addTensor(0, {2}, TfType::I32, "axes", r.ints({1, 2}))
+                         : r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
+  const int out = r.m.addTensor(0, conv1x1 ? std::vector<int32_t>{1, 1, 1, (int32_t)D}
+                                           : std::vector<int32_t>{1, 1, (int32_t)D},
+                                p.act, "out", 0, actQuant(p, cScale));
+  r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {t, ax}, {out}, reduceOptions());
+  r.m.setInputs(0, {s});
+  r.m.setOutputs(0, {out});
+  return r.m.build(describe(p, conv1x1 ? "conv1x1 chain" : "matmul chain"));
+}
+
 TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
-                                   std::vector<float> *weights, uint32_t seedW)
+                                   std::vector<float> *weights, uint32_t seedW, bool conv1x1)
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
   r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
+  const float wScale = isInteger(p.weight) ? litertWeightScale(bitsOf(p.weight)) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
-  const int x = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "x", 0, aq);
+  const int x = r.m.addTensor(0, conv1x1 ? convGrid(M, K) : std::vector<int32_t>{1, (int32_t)M, (int32_t)K},
+                              p.act, "x", 0, aq);
   const Fill *wf = nullptr;
-  const int w = addWeight(r, p, N, K, seedW, &wf);
+  const int w = addWeight(r, p, N, K, seedW, &wf, conv1x1);
   const bool bias = fcHasBias(p);
-  const int b = bias ? addFcBias(r, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
+  const int b = conv1x1 ? addConvBias(r, p, N, aScale, wScale) : (bias ? addFcBias(r, N, aScale, wScale) : -1);
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
-  const int y = r.m.addTensor(0, {1, (int32_t)M, (int32_t)N}, p.act, "y", 0, yq);
-  r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
+  const int y = r.m.addTensor(0, conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N},
+                              p.act, "y", 0, yq);
+  if (conv1x1)
+    r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {x, w, b}, {y}, conv1x1Options());
+  else
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
   r.m.setInputs(0, {x});
   r.m.setOutputs(0, {y});
   if (weights && wf)
@@ -1115,24 +1281,10 @@ int addFilter(Recipe &r, const LitertPlan &p, int64_t channels, int64_t kernel, 
   return r.m.addTensor(0, shape, wt, "W", buf, q);
 }
 
-int convVersion(const LitertPlan &p, bool depthwise)
-{
-  // op_version.cc: int8 in/out with int8 weights -> 3; int8 in with int4
-  // weights -> 7; float in with int8 per-channel weights -> 5 (conv) / 6
-  // (depthwise); else 1.
-  if (p.act == TfType::I8 && p.weight == TfType::I8)
-    return 3;
-  if (p.act == TfType::I8 && p.weight == TfType::I4)
-    return 7;
-  if (p.act == TfType::F32 && p.weight == TfType::I8)
-    return depthwise ? 6 : 5;
-  return 1;
-}
-
 } // namespace
 
 TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial, int64_t kernel,
-                            bool depthwise)
+                            int64_t stride, bool depthwise)
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
@@ -1149,35 +1301,20 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
 
   const int w = addFilter(r, p, channels, kernel, depthwise);
-  // The convolution kernels want their bias ("Tensor at index 2 was optional
-  // but was expected"): zeros, int32 at the product of the two scales for the
-  // integer plan, the activation type otherwise.
-  int bias;
-  if (isInteger(p.act))
-  {
-    const float wScale = litertWeightScale(bitsOf(p.weight)) *
-                         (2.0f / std::sqrt((float)((depthwise ? 1 : channels) * kernel * kernel)));
-    TfQuant bq;
-    bq.scale.assign((size_t)channels, aScale * wScale);
-    bq.zeroPoint.assign((size_t)channels, 0);
-    bq.quantizedDim = 0;
-    bias = r.m.addTensor(0, {(int32_t)channels}, TfType::I32, "bias",
-                         r.ints(std::vector<int32_t>((size_t)channels, 0)), bq);
-  }
-  else
-  {
-    r.halfBuffers.push_back(std::vector<uint16_t>((size_t)channels * 2, 0));   // zero in any width
-    bias = r.m.addTensor(0, {(int32_t)channels}, p.act, "bias",
-                         r.m.addBuffer(r.halfBuffers.back().data(), litertElemBytes(p.act, channels)));
-  }
+  const float wScale = isInteger(p.act)
+                           ? litertWeightScale(bitsOf(p.weight)) *
+                                 (2.0f / std::sqrt((float)((depthwise ? 1 : channels) * kernel * kernel)))
+                           : 1.0f;
+  const int bias = addConvBias(r, p, channels, aScale, wScale);
   // The output's scale: a fan-in-deep dot product of the activations and
   // the shrunk weights lands within the activations' own range.
   const TfQuant yq = actQuant(p, aScale);
-  const int y = r.m.addTensor(0, shape, p.act, "Y", 0, yq);
+  const int32_t outSide = (int32_t)(spatial / stride);
+  const int y = r.m.addTensor(0, {1, outSide, outSide, (int32_t)channels}, p.act, "Y", 0, yq);
   TfOptions co;
   co.kind = depthwise ? TfOptions::Kind::DepthwiseConv2d : TfOptions::Kind::Conv2d;
   co.padding = TfPadding::Same;
-  co.strideW = co.strideH = 1;
+  co.strideW = co.strideH = (int32_t)stride;
   co.depthMultiplier = 1;
   r.m.addOp(0, depthwise ? TfOp::DepthwiseConv2d : TfOp::Conv2d, convVersion(p, depthwise), {x, w, bias}, {y}, co);
 
@@ -1222,11 +1359,13 @@ std::vector<uint8_t> sdpaAttributes(double scale)
   return out;
 }
 
-// The activation scale for a quantized projection input: four sigma of a
-// d-deep dot product of [-0.25, 0.25) operands, the ONNX backend's
-// blockQdqScale.  One scale for all seven projections; the feed-forward's
-// second input runs larger and saturates, which costs nothing here (int8
-// saturation is finite) -- this row measures rate.
+// The activation scale for a quantized projection, in and out: four sigma of
+// a d-deep dot product of [-1, 1] operands, the ONNX backend's
+// blockQdqScale(d).  One scale for all seven projections; the feed-forward
+// runs larger and saturates -- in the int8 graph at 512 tokens, a third of
+// the down projection's output and 0.2% of the SwiGLU product it reads --
+// which costs nothing here (int8 saturation is finite) -- this row measures
+// rate.
 float blockActScale(int64_t d)
 {
   return (float)(4.0 * std::sqrt((double)d) / 3.0 / 127.0);
@@ -1243,7 +1382,10 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   const int64_t ctx = decode ? sh.kvLen : S;
   // Weights and activations in [-0.25, 0.25): the SwiGLU squares magnitudes
   // and the down projection sums thousands of terms, which overflowed fp16
-  // at the [-0.5, 0.5) the GEMM rows use.
+  // at the [-0.5, 0.5) the GEMM rows use.  At the halved range the largest
+  // value anywhere in the block is 2073, at the 64-token prompt (1523 at 512
+  // tokens and 1054 at 2048, whose input is a seed's rank-64 widening), 31x
+  // under fp16's 65504.
   const float mag = 0.5f;
   // The quantized (int8_qdq) block keeps everything but the projections in
   // float: TFLite's QUANTIZE takes float32, and attention, the softmax and
@@ -1258,20 +1400,49 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   fp.dynamicQuant = false;
 
   const TfType stored = litertConstantType(fp);   // the float constants' stored type
+  const int64_t sw = sh.seedWidth;
   r.m.reserveBytes(4 * litertWeightBytes(p, d, d) + 2 * litertWeightBytes(p, ffn, d) +
                    litertWeightBytes(p, d, ffn) +
                    (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : stored, H * ctx * Dh) : 0) +
-                   litertElemBytes(stored, S * d));
+                   litertElemBytes(stored, sw > 0 ? (S + d) * sw : S * d));
 
   auto tensor = [&](const std::vector<int32_t> &shape, const std::string &name) {
     return r.m.addTensor(0, shape, act, name, 0);
   };
   const std::vector<int32_t> xShape = {1, (int32_t)S, (int32_t)d};
 
-  const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
-  const int s = addScalar(r, fp);
-  const int x = tensor(xShape, "X");
-  r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
+  // The activations are a resident constant scaled by the runtime scalar,
+  // and the result leaves as one reduced row (see onnxBlockModel for why).
+  // A long prompt scales a [1, S, seedWidth] seed rather than its whole
+  // input, and one more FULLY_CONNECTED widens the seed into the [1, S, d]
+  // activations -- the ONNX block's way in, for the reason given there.  The
+  // widening is seedWidth / d of one projection, a quarter of a percent of
+  // the layer, and is not counted; it stays in the float parts' type in every
+  // format.  Its weights spread over [-a, a), a = sqrt(3 / seedWidth), so
+  // seedWidth products of the seed's [-0.25, 0.25) values sum to the plain
+  // input's rms of 0.144; the input is rank seedWidth all the same, which is
+  // what moves the magnitudes quoted above and at blockActScale.
+  int s, x;
+  if (sw > 0)
+  {
+    const std::vector<int32_t> seedShape = {1, (int32_t)S, (int32_t)sw};
+    const int x0 = r.actConstant(fp, seedShape, "X0", S, sw, 0xa5a5a5a5u, mag);
+    s = addScalar(r, fp);
+    const int xs = tensor(seedShape, "Xs");
+    r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {xs}, mulOptions());
+    // [d, seedWidth]: FULLY_CONNECTED's [N, K] weight layout.
+    const int xp = r.actConstant(fp, {(int32_t)d, (int32_t)sw}, "Xp", d, sw, 0x5eed5eedu,
+                                 2.0f * std::sqrt(3.0f / (float)sw));
+    x = tensor(xShape, "X");
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, false), {xs, xp, -1}, {x}, fcOptions(fp));
+  }
+  else
+  {
+    const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
+    s = addScalar(r, fp);
+    x = tensor(xShape, "X");
+    r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
+  }
 
   // ---- One projection, in whichever format the plan asks for -------------
   // Distinct seeds so no two projections share a matrix; a repeated weight

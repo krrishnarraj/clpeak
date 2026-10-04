@@ -29,9 +29,11 @@
 #include "onnx_probe.h"
 #include "onnx_session.h"
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -64,6 +66,16 @@ namespace
   // Prompt lengths for onnx-block-prefill.  The 512 rung is the one to quote on
   // its own; the other two are what show where the device saturates.
   const int64_t kPromptLadder[] = {64, 512, 2048};
+
+  // The width of the seed a prompt longer than it enters through
+  // (OnnxBlockShape::seedWidth), the GEMM chains' kSeedWidth.  A prompt no
+  // longer than the seed, and decode's one row, gain nothing from one: the
+  // seed's widening weights would be as large as the input they replace.  The
+  // 64-token prompt keeps the plain input for its magnitudes too -- seeded, its
+  // largest value would grow from 1954 to 2962 (blockWeights).  The fusion
+  // probes run there, without the seed, and the projections they judge are
+  // the same nodes either way.
+  constexpr int64_t kSeedWidth = 64;
 
   // Block size for the weight-only rows: one scale per 32 weights along the
   // reduction axis, the same grouping onnx-gemm's int4_weight row uses and the
@@ -139,8 +151,9 @@ namespace
        /*sweep=*/false, "ops",
        "8-bit weights and 8-bit arithmetic through the projections, quantized "
        "in and out -- what headline TOPS figures are quoted for, measured on a "
-       "whole layer.  Attention and the softmax stay 16-bit, as they do in "
-       "every real deployment."},
+       "whole layer.  Attention and the softmax stay in floating point, as "
+       "they do in every real deployment: 16-bit unless the row says "
+       "otherwise."},
 
       {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
        "Full precision, which nobody serves a language model in, here as a "
@@ -301,8 +314,16 @@ namespace
     return qkv + attn + proj + ff;
   }
 
-  // Did the projections run as quantized kernels, or did the provider unpack
-  // the weights and multiply in floating point?
+  // The matmuls a quantized block quantizes: the query, key, value and output
+  // projections and the feed-forward's gate, up and down.  A quantized-cache
+  // row quantizes attention's two instead.
+  constexpr size_t kProjections = 7;
+  constexpr size_t kAttentionMatmuls = 2;
+
+  // How many of the graph's `expected` quantized matmuls ran as quantized
+  // kernels, rather than as floating-point multiplies over weights the
+  // provider unpacked -- all of them when it compiled the graph into kernels
+  // of its own, where there is nothing to count.
   //
   // onnx_session.cpp's onnxOpsRanQuantizedMatMul cannot answer this one.  It
   // reads a failed fusion as "a plain MatMul beside the dequantize nodes", and a
@@ -310,22 +331,26 @@ namespace
   // attention is not quantized in any variant here -- so that test would reject
   // every block unconditionally.
   //
-  // The same inverted reasoning still works on this graph.  A provider that
-  // fused either names a quantized kernel (QLinearMatMul, MatMulNBits) or
-  // swallowed the subgraph into one kernel of its own, and in that case no
-  // DequantizeLinear kernel runs at all.  A provider that did not fuse has no
-  // choice but to execute DequantizeLinear as a real kernel -- a full pass over
-  // 101 MB of weights, on every single run -- and that is the reading worth
-  // refusing, because it is not a rate any four-bit deployment would ever see.
-  bool projectionsRanQuantized(const std::vector<std::string> &ops)
+  // So this counts.  A provider that fused names a quantized kernel for every
+  // quantized matmul (QLinearMatMul, MatMulNBits), or swallowed the subgraph
+  // into one kernel of its own, in which case no DequantizeLinear kernel runs
+  // at all.  A matmul it did not fuse has no choice but to execute its
+  // DequantizeLinear as a real kernel -- a full pass over its weights on every
+  // run -- and multiply in floating point, which is not a rate any quantized
+  // deployment would ever see.  Counting is what catches the partial case: on
+  // a Zen 2 without VNNI, signed int8 activations fused two of the seven
+  // projections and multiplied the other five in floating point, and asking
+  // only whether any quantized kernel ran passed that row as int8.
+  size_t quantizedMatmulsFused(const std::vector<std::string> &ops,
+                               size_t expected)
   {
     if (ops.empty())
-      return true; // no profile to judge by; do not reject on silence
+      return expected; // no profile to judge by; do not reject on silence
 
     for (const auto &op : ops)
       if (op == "DequantizeLinear" || op == "QuantizeLinear")
-        return !onnxQuantizedKernelName(ops).empty();
-    return true;
+        return std::min(expected, onnxCountQuantizedKernels(ops));
+    return expected;
   }
 
   struct BlockRun
@@ -374,8 +399,12 @@ namespace
     sh.qdq = v.qdq;
     sh.qActDtype = qActDtype;
     sh.kvDtype = v.kvDtype;
+    sh.seedWidth = sh.seq > kSeedWidth ? kSeedWidth : 0;
+    // The view of the output the provider is known to take (OnnxReduceView).
+    sh.reduceView = onnxPrefersRank4Reduce(rt, ep) ? OnnxReduceView::Rank4
+                                                   : OnnxReduceView::Rows;
 
-    {
+    auto create = [&]() -> OnnxSessionResult {
       std::string model = onnxBlockModel(sh);
       // Constant folding stays off for every variant, and it is the quantized
       // ones that need it: a weight DequantizeLinear has nothing but constants
@@ -399,20 +428,56 @@ namespace
       // 64-token layer on the CPU and sends the 512-token one to the Neural
       // Engine, and verifying the probe would refuse every point above it
       // (onnx_session.h).  The timed points verify.
+      // QDQ propagation stays off for every variant, and it is the int8 prompt
+      // with fp32 float parts that needs it.  There, nothing but a Reshape and
+      // a Transpose separates a projection's closing dequantize from
+      // attention, the propagation copies it across both, and ONNX Runtime's
+      // CPU provider then fused the scores matmul into MatMulIntegerToFloat --
+      // int8 attention, in a row that says attention stays floating point.
+      // The fp16 form's casts stop it on their own, and no other variant has a
+      // quantize or dequantize beside a node it crosses.
       auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true,
                                    profile, keepQdqUnfused,
-                                   /*verifyPlacement=*/!profile);
+                                   /*verifyPlacement=*/!profile,
+                                   /*keepQdqInPlace=*/true);
       // The model is the largest allocation in the process; drop it before
       // anything else is allocated on top of the session's own copy.
       model.clear();
       model.shrink_to_fit();
-      if (!ses.session)
+      return ses;
+    };
+    OnnxSessionResult ses = create();
+    // A provider can refuse the reduction that brings the block's row back
+    // while taking the block: the QNN Adreno backend took the one-token
+    // decode and refused every prompt length.  The fp16 reference row -- the
+    // first built -- tries the rank-4 view once; a provider that takes it
+    // keeps it for every row after (onnxPrefersRank4Reduce), and a row that
+    // fails for any other reason pays no second compile.
+    if (!ses.session && !ses.offDevice && &v == &kVariants[0] &&
+        sh.reduceView == OnnxReduceView::Rows &&
+        onnxFailureStatus(ses.error) == ResultStatus::Unsupported &&
+        !onnxReasonIsOutOfMemory(ses.error) && !clpeak::cancelRequested())
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: refused (%s); retrying the reduction "
+                  "through a rank-4 view\n",
+                  ep.providerKey.c_str(), v.label, ses.error.c_str());
+      sh.reduceView = OnnxReduceView::Rank4;
+      OnnxSessionResult r4 = create();
+      if (r4.session)
       {
-        r.error = ses.error;
-        return r;
+        onnxNoteRank4Reduce(rt, ep);
+        ses = r4;
       }
-      r.session = ses.session;
+      else
+        CLPEAK_VLOG("onnx-block[%s/%s]: refused with the rank-4 view too (%s)\n",
+                    ep.providerKey.c_str(), v.label, r4.error.c_str());
     }
+    if (!ses.session)
+    {
+      r.error = ses.error;
+      return r;
+    }
+    r.session = ses.session;
 
     // The only input is the scalar that scales the resident activations.
     const size_t es = (size_t)onnxElemBytes(v.actDtype, 1);
@@ -487,6 +552,32 @@ namespace
     return std::chrono::duration<double, std::micro>(t1 - t0).count() / n;
   }
 
+  // onnxNonFiniteReason over the row a run returned.  `yr` is ORT's own
+  // allocation, in host memory, so its size is read from it rather than
+  // assumed; empty when it cannot be read.
+  std::string nonFiniteRow(const OrtRuntime &rt, OrtValue *yr, int dtype,
+                           const std::string &where)
+  {
+    if (!yr)
+      return std::string();
+    OrtTensorTypeAndShapeInfo *info = nullptr;
+    size_t count = 0;
+    void *data = nullptr;
+    OrtStatus *st = rt.api->GetTensorTypeAndShape(yr, &info);
+    if (!st)
+      st = rt.api->GetTensorShapeElementCount(info, &count);
+    if (info)
+      rt.api->ReleaseTensorTypeAndShapeInfo(info);
+    if (!st)
+      st = rt.api->GetTensorMutableData(yr, &data);
+    if (st)
+    {
+      rt.api->ReleaseStatus(st);
+      return std::string();
+    }
+    return onnxNonFiniteReason(data, (int64_t)count, dtype, where);
+  }
+
   // Time one regime end to end.  Returns mean us/block, or negative with
   // `error` set.
   double measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
@@ -548,6 +639,25 @@ namespace
       error = r.error.empty() ? "run failed" : r.error;
       status = ResultStatus::Error;
     }
+    else
+    {
+      // What the timed runs computed, read once they are over.  A wrong
+      // answer withholds this point alone: each point is its own graph and
+      // its own row.
+      const std::string wrong = nonFiniteRow(
+          rt, r.outVals[0], v.actDtype,
+          decode ? "for one token against " + std::to_string(kvLen) +
+                       " of context"
+                 : "for a " + std::to_string(prefillSeq) + "-token prompt");
+      if (!wrong.empty())
+      {
+        CLPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(),
+                    v.label, wrong.c_str());
+        error = wrong;
+        status = ResultStatus::Error;
+        mean_us = -1.0;
+      }
+    }
     destroyRun(rt, r);
     return mean_us;
   }
@@ -572,14 +682,23 @@ namespace
     bool castedActs = false;
 
     std::map<int64_t, Point> prefill, decode;
+
+    // int8 QDQ only: the prompt ran with the layer's floating-point parts in
+    // fp32, which this provider took faster than fp16 -- what the fp16 form
+    // took, and the fp32 form's provenance (its fused kernel can differ).
+    bool prefillFp32 = false;
+    double prefillFp16Us = 0.0;
+    std::string prefillProv;
   };
 
   // Quantization schemes for the QDQ form, tried in order until one fuses.
   //
   // int8 has two spellings and no provider takes both: x86 MLAS without VNNI
-  // implements unsigned activations against signed weights and declines to fuse
-  // the signed form, while TensorRT rejects uint8 outright.  Trying is the only
-  // way to know, exactly as in gemm.cpp -- the fusion check is the selector.
+  // implements unsigned activations against signed weights and fuses the
+  // signed form only in part -- two of the seven projections on a Zen 2 --
+  // while TensorRT rejects uint8 outright.  Trying is the only way to know,
+  // exactly as in gemm.cpp -- the fusion check is the selector, and it asks
+  // for every projection.
   // The float8 formats have one spelling: activations and weights share the
   // type, and there is no signed/unsigned question because they are signed
   // floats.
@@ -630,6 +749,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // rather than by a list of provider names -- the point being that a
   // provider nobody here has run gets the same treatment.
   const double streamBps = onnxStreamBps(rt, ep);
+  // The one narrowing the probe can prove rather than suspect: fp32 held at
+  // half width (onnxFp32Narrowed).  Where it is proven the fp32 row is
+  // credited the bytes that move, instead of carrying a note beside a figure
+  // twice what the device streamed.
+  const bool fp32Narrowed = onnxFp32Narrowed(rt, ep);
 
   // What only a run can say: the kernel the provider fused to, the scheme it
   // settled on, and whether it converted the activations first.
@@ -655,19 +779,57 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // is the estimate: precisions differ by a factor of a few, not orders.
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
 
+  // A prompt row's provenance: the fp16 form's, or -- where the layer's
+  // floating-point parts ran in fp32 because that was faster -- the fp32
+  // form's, with a sentence saying so and what each form took.
+  auto prefillProvenance = [&](const Variant &v, const VariantResult &vr,
+                               int64_t seq) -> std::string
+  {
+    if (!vr.prefillFp32 || seq != kPrefillSeq)
+      return provenance(v, vr);
+    const auto it = vr.prefill.find(kPrefillSeq);
+    const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
+    char rates[96];
+    std::snprintf(rates, sizeof rates, "%.3g TOPS against %.3g",
+                  flops / it->second.us / 1.0e6,
+                  flops / vr.prefillFp16Us / 1.0e6);
+    std::string s = vr.prefillProv +
+                    "  Attention, the softmax and the residuals ran in fp32 "
+                    "here rather than fp16, because this provider takes the "
+                    "layer faster that way: " +
+                    std::string(rates) + ".";
+    if (fp32Narrowed)
+      s += "  It holds fp32 at 16 bits anyway, so the two forms do the same "
+           "arithmetic and differ in the conversions around each quantized "
+           "projection.";
+    return s;
+  };
+
+  // What a prompt row says about its way in, when it has a seed
+  // (kSeedWidth): the gemm rows say the same of theirs.
+  auto seedNote = [](int64_t seq) -> std::string
+  {
+    if (seq <= kSeedWidth)
+      return std::string();
+    return "  The prompt starts from a " + std::to_string(kSeedWidth) +
+           "-wide seed that takes a runtime value, and one more multiply, not "
+           "counted, widens it into the layer's input -- inside the figure, "
+           "a quarter of a percent of its arithmetic.";
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, const Variant &vv,
                            const VariantResult &vvr)
   {
-    const std::string prov = provenance(vv, vvr);
     for (int64_t sseq : promptsFor(vv))
     {
+      const std::string prov = prefillProvenance(vv, vvr, sseq);
       const std::string metric = std::string(vv.label) + "_s" + std::to_string(sseq);
       logger::EmitOptions o;
       o.description = std::string(vv.note) + "  A prompt of " +
                       std::to_string(sseq) +
                       " tokens in one pass, counting every multiply in the "
                       "layer." +
-                      prov;
+                      seedNote(sseq) + prov;
       if (vv.unit)
         o.unit = vv.unit;
       if (!vvr.usable)
@@ -767,6 +929,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (v.qdq || v.wBlock > 0 || v.kvDtype)
     {
       std::string tried, firstErr;
+      const size_t expected = v.kvDtype ? kAttentionMatmuls : kProjections;
+      size_t triedFused = 0;
       Scheme schemes[2];
       const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
       for (size_t si = 0; si < nSchemes; si++)
@@ -793,7 +957,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string joined = onnxJoinOps(ops);
         CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n",
                     ep.providerKey.c_str(), v.label, what, joined.c_str());
-        if (projectionsRanQuantized(ops))
+        const size_t fused = quantizedMatmulsFused(ops, expected);
+        if (fused < expected)
+          CLPEAK_VLOG("onnx-block[%s/%s]: %s fused %zu of %zu quantized "
+                      "matmuls\n", ep.providerKey.c_str(), v.label, what,
+                      fused, expected);
+        if (fused == expected)
         {
           vr.qActDtype = qAct;
           vr.schemeName = v.qdq ? schemes[si].name : "";
@@ -804,21 +973,30 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
         if (!ops.empty())
+        {
           tried = joined;
+          triedFused = fused;
+        }
       }
       if (vr.ranAs.empty())
       {
+        const std::string what = v.kvDtype ? "cache" : "weights";
+        const std::string how =
+            triedFused == 0
+                ? "provider did not fuse a quantized matmul -- it dequantized "
+                  "the " + what
+                : "provider fused only " + std::to_string(triedFused) +
+                      " of the " + std::to_string(expected) +
+                      " quantized matmuls -- it dequantized the rest of the " +
+                      what;
         vr.skipReason =
             tried.empty()
                 ? (firstErr.empty()
                        ? std::string("this provider accepted no session for ") + v.label
                        : firstErr)
-                : std::string("provider did not fuse a quantized matmul -- it "
-                              "dequantized the ") +
-                      (v.kvDtype ? "cache" : "weights") +
-                      " to full width and multiplied in floating point, a "
-                      "complete pass over them on every run, so this is not a " +
-                      v.label + " rate (ran: " + tried + ")";
+                : how + " to full width and multiplied in floating point, a "
+                        "complete pass over them on every run, so this is not "
+                        "a " + v.label + " rate (ran: " + tried + ")";
         return false;
       }
     }
@@ -952,6 +1130,56 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         vr.prefill[seq] = pt;
       }
+
+      // The layer's floating-point parts again, in fp32.  On a GPU an int8
+      // layer ships as int8 projections inside fp16 attention, and there that
+      // is the faster form: TensorRT on an RTX 5060 read 93 TOPS against 79
+      // with the float parts in fp32.  On a CPU, where W8A8 models ship with
+      // fp32 float parts, it is the other way round: ONNX Runtime's CPU
+      // provider read 0.73 TOPS against 0.33 on a Zen 2 Threadripper and 1.25
+      // against 1.18 on an M1 Pro.  No single width is right, so the prompt
+      // takes whichever this provider runs faster, and says which.  Both forms keep attention in floating point, the fp32 one
+      // because `create` holds QDQ propagation off.  Decode stays fp16: it is
+      // memory-bound, and its row counts the bytes the cache declares.
+      //
+      // The fp32 form is proven fused on its own (validateVariant) before it
+      // is timed: unfused it would be float arithmetic, which on the x86 CPU
+      // provider runs faster than its fused int8 and would win the race
+      // under the int8 label.
+      if (v.qdq && v.wDtype == ONNX_DT_INT8 && v.actDtype != ONNX_DT_FLOAT &&
+          !clpeak::cancelRequested())
+      {
+        auto it = vr.prefill.find(kPrefillSeq);
+        if (it != vr.prefill.end() && it->second.us > 0.0)
+        {
+          Variant v32 = v;
+          v32.actDtype = ONNX_DT_FLOAT;
+          VariantResult vr32;
+          if (validateVariant(v32, vr32))
+          {
+            Point pt32;
+            pt32.us = measure(rt, ep, v32, false, vr32.qActDtype, warmupCount,
+                              forceIters, specifiedIters, pt32.error,
+                              pt32.status, kDecodeKv, kPrefillSeq);
+            CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld %.1f us with fp16 "
+                        "float parts, %.1f us with fp32\n",
+                        ep.providerKey.c_str(), v.label,
+                        (long long)kPrefillSeq, it->second.us, pt32.us);
+            if (pt32.us > 0.0 && pt32.us < it->second.us)
+            {
+              vr.prefillFp32 = true;
+              vr.prefillFp16Us = it->second.us;
+              vr.prefillProv = provenance(v32, vr32);
+              it->second = pt32;
+            }
+          }
+          else
+            CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: "
+                        "%s\n",
+                        ep.providerKey.c_str(), v.label,
+                        vr32.skipReason.c_str());
+        }
+      }
       emitPrefillTo(testOps, v, vr);
     }
     testOps.end();
@@ -966,11 +1194,27 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
-      const uint64_t wBytes = weightBytes(v);
-      const uint64_t kvB = kvBytes(v, kDecodeKv);
+      uint64_t wBytes = weightBytes(v);
+      uint64_t kvB = kvBytes(v, kDecodeKv);
+      // fp32 tensors on a provider proven to hold them at half width move
+      // two bytes an element, and that is what the row is credited with.
+      const bool halfWidth =
+          fp32Narrowed && v.wBlock == 0 &&
+          (v.wDtype == ONNX_DT_FLOAT ||
+           (v.kvDtype ? v.kvDtype : v.actDtype) == ONNX_DT_FLOAT);
+      if (halfWidth && v.wDtype == ONNX_DT_FLOAT)
+        wBytes /= 2;
+      if (halfWidth && (v.kvDtype ? v.kvDtype : v.actDtype) == ONNX_DT_FLOAT)
+        kvB /= 2;
       const double bytes = (double)(wBytes + kvB);
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  One token with 2048 of context: " + std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " + std::to_string((unsigned long long)(kvB >> 20)) + " MB of cached context, read in full for one token." + provenance(v, vr);
+      if (halfWidth)
+        o.description += "  This provider holds fp32 tensors at 16 bits -- its "
+                         "fp32 results carry half-precision error, and it "
+                         "streams fp32 elements as fast as fp16 ones -- so the "
+                         "count above is the two bytes an element it moves, "
+                         "not the four fp32 declares.";
 
       // Prefill settled most variants already; validateVariant answers from
       // what it recorded and only probes the ones it has not seen -- the
@@ -1076,23 +1320,35 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note + prov;
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
+                                 seedNote(kPrefillSeq) +
+                                 prefillProvenance(v, vr, kPrefillSeq);
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
         else
         {
-          // Ensure prefill measurement exists; if not, measure inside latency so it streams
+          // The prompt test timed this pass or said why not -- too slow to
+          // measure, or a failure -- and its answer is this row's too.
+          // Timing it again here, as this did, spent passes the prompt test
+          // had judged unaffordable: 57, 343 and 413 s on the x64 QNN plugin,
+          // which ran on a host backend.  Only a pass the prompt ladder never
+          // reached is measured here, under the same budget.
           auto it = vr.prefill.find(kPrefillSeq);
-          if (it == vr.prefill.end() || it->second.us <= 0.0)
+          if (it == vr.prefill.end() && vr.usable)
           {
-            if (vr.usable) // already validated
+            Point pt;
+            const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
+            if (refPrefillRate > 0.0 && flops / refPrefillRate > (double)kBlockBudgetUs)
             {
-              Point pt; std::string err; ResultStatus st = ResultStatus::Ok;
-              double flops = blockFlops(kPrefillSeq, kPrefillSeq);
-              // affordability already seeded
-              pt.us = measure(rt, ep, v, false, vr.qActDtype, warmupCount, forceIters, specifiedIters, err, st, kDecodeKv, kPrefillSeq);
-              pt.error = err; pt.status = st;
-              vr.prefill[kPrefillSeq] = pt; it = vr.prefill.find(kPrefillSeq);
+              pt.status = ResultStatus::Error;
+              pt.error = "one pass would take about " +
+                         std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
+                         " s on this provider, too slow to measure";
             }
+            else
+              pt.us = measure(rt, ep, v, false, vr.qActDtype, warmupCount, forceIters,
+                              specifiedIters, pt.error, pt.status, kDecodeKv, kPrefillSeq);
+            vr.prefill[kPrefillSeq] = pt;
+            it = vr.prefill.find(kPrefillSeq);
           }
           if (it != vr.prefill.end())
           {
@@ -1108,8 +1364,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         const std::string note = "One generated token with " + std::to_string(kv) + " tokens of context behind it.  " + v.note + prov;
         if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); continue; }
+        // As for the prompt: a context the decode test answered keeps its
+        // answer, and only the lengths it does not measure are timed here.
         auto it = vr.decode.find(kv);
-        if (it == vr.decode.end() || it->second.us <= 0.0)
+        if (it == vr.decode.end())
         {
           if (vr.usable)
           {

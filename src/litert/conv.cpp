@@ -6,12 +6,14 @@
 // do anything else -- every NPU's headline TOPS figure is an int8
 // convolution -- and the gap between this and litert-gemm is an
 // architectural number in its own right.  Three shapes at a fixed 256
-// channels -- a 3x3, a 1x1 (arithmetically a matmul per pixel) and a
-// depthwise 3x3 (a fraction of the arithmetic per byte loaded) -- each swept
-// over feature-map size until the rate stops improving, in fp32, fp16 and
-// full-integer int8.  The recipe is the ONNX and Core ML backends'
-// (src/onnx/conv.cpp), so the ladders divide row for row; the int8 rows are
-// this backend's own, because TFLite is where int8 convolution ships.
+// channels -- a 3x3 at stride 2, a 1x1 (arithmetically a matmul per pixel)
+// and a depthwise 3x3 (a fraction of the arithmetic per byte loaded) -- each
+// swept over feature-map size until the rate stops improving, in fp32, fp16
+// and full-integer int8.  The recipe is the ONNX and Core ML backends'
+// (src/onnx/conv.cpp, whose kShapes says why the 3x3's stride is 2: at 1,
+// the GPU accelerator runs it as `convolution_winograd_3x3`, about a quarter
+// of the multiplies counted), so the ladders divide row for row; the int8 rows
+// are this backend's own, because TFLite is where int8 convolution ships.
 
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
@@ -46,6 +48,7 @@ struct Format
 struct Shape
 {
   int64_t kernel;
+  int64_t stride;
   bool depthwise;
   const char *label;
   const char *note;
@@ -62,14 +65,14 @@ const Format kFormats[] = {
 };
 
 const Shape kShapes[] = {
-    {3, false, "conv3x3",
-     "A 3x3 convolution over 256 channels, the shape vision networks are built "
-     "from, counted as direct multiplies (a Winograd kernel does fewer and can "
-     "read above the matmul peak)."},
-    {1, false, "conv1x1",
+    {3, 2, false, "conv3x3s2",
+     "A 3x3 convolution over 256 channels at stride 2, the layer vision "
+     "networks downsample with, which Winograd kernels cannot run, so every "
+     "multiply counted is one the accelerator did."},
+    {1, 1, false, "conv1x1",
      "A 1x1 convolution, arithmetically a matmul at every pixel, so it should "
      "land near the matmul rows."},
-    {3, true, "depthwise3x3",
+    {3, 1, true, "depthwise3x3",
      "A depthwise 3x3, each channel on its own: far less arithmetic per byte "
      "loaded, where hardware built around dense arrays collapses."},
 };
@@ -77,8 +80,8 @@ const Shape kShapes[] = {
 double convFlops(const Shape &v, int64_t spatial)
 {
   const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
-  return 2.0 * (double)kChannels * (double)spatial * (double)spatial * inPerGroup *
-         (double)(v.kernel * v.kernel);
+  const double out = (double)(spatial / v.stride);   // the output's side
+  return 2.0 * (double)kChannels * out * out * inPerGroup * (double)(v.kernel * v.kernel);
 }
 
 std::string convKernel(const std::vector<std::string> &ops)
@@ -101,10 +104,11 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
   auto test = currentDeviceScope->beginTest(
       {"litert_conv", "LiteRT convolution peak", "flops", Category::Compute,
-       "2-D convolution rate through LiteRT on this accelerator: a 3x3, a 1x1 "
-       "and a depthwise 3x3 at 256 channels, in fp32, fp16 and full-integer "
-       "int8, each swept over feature-map size.  Against the matmul rows it says "
-       "whether the accelerator was built for convolution, as mobile NPUs were.",
+       "2-D convolution rate through LiteRT on this accelerator: a 3x3 at "
+       "stride 2, a 1x1 and a depthwise 3x3 at 256 channels, in fp32, fp16 and "
+       "full-integer int8, each swept over feature-map size.  Against the matmul "
+       "rows it says whether the accelerator was built for convolution, as "
+       "mobile NPUs were.",
        TestShape::Heterogeneous, "format and shape"});
 
   for (const Format &fmt : kFormats)
@@ -146,9 +150,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       {
         if (clpeak::cancelRequested())
           break;
-        // The feature map, held three times (the constant as stored, the
-        // scaled copy, the result).
-        const uint64_t bytes = 3ull * (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
+        // The feature map, held twice (the constant as stored, the scaled
+        // copy), and the result, a quarter of it at stride 2.
+        const uint64_t map = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
+        const uint64_t bytes = 2 * map + map / (uint64_t)(v.stride * v.stride);
         if (bytes > maxTensorBytes())
         {
           CLPEAK_VLOG("litert-conv[%s/%s]: %lld needs %llu MB, stopping\n", dev.displayName.c_str(),
@@ -167,7 +172,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         if (rungs == 0 && kernel.empty())
         {
           std::string err;
-          auto ps = LitertSession::create(rt, dev, litertConvModel(plan, kChannels, sp, v.kernel, v.depthwise),
+          auto ps = LitertSession::create(rt, dev,
+                                          litertConvModel(plan, kChannels, sp, v.kernel, v.stride, v.depthwise),
                                           litertConfigFor(plan, true), err);
           if (ps && ps->onDevice() && litertBindScalar(*ps, plan, err))
           {
@@ -177,7 +183,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         }
 
         std::string err;
-        auto s = LitertSession::create(rt, dev, litertConvModel(plan, kChannels, sp, v.kernel, v.depthwise),
+        auto s = LitertSession::create(rt, dev,
+                                       litertConvModel(plan, kChannels, sp, v.kernel, v.stride, v.depthwise),
                                        litertConfigFor(plan), err);
         if (!s)
         {
@@ -204,6 +211,11 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           break;
         }
         auto m = litertMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+        const std::string wrong =
+            (m.meanUs > 0.0) ? litertNonFiniteReason(*s, plan.act,
+                                                     "on a " + std::to_string(sp) + "x" + std::to_string(sp) +
+                                                         " feature map")
+                             : std::string();
         s.reset();
         if (m.meanUs <= 0.0)
         {
@@ -212,6 +224,15 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             firstErr = m.error;
             errStatus = m.status;
           }
+          break;
+        }
+        // A wrong answer withholds the whole row, as in gemm.cpp.
+        if (!wrong.empty())
+        {
+          CLPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
+          best = 0.0;
+          firstErr = wrong;
+          errStatus = ResultStatus::Error;
           break;
         }
         rungs++;

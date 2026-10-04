@@ -153,36 +153,68 @@ namespace
 
     OrtSession *session = nullptr;
     {
-      std::string xRaw((size_t)rows * kCols * es, '\0');
-      {
-        float *f = reinterpret_cast<float *>(&xRaw[0]);
-        uint16_t *h = reinterpret_cast<uint16_t *>(&xRaw[0]);
-        uint32_t s = 0x9e3779b9u;
-        for (int64_t i = 0; i < rows * kCols; i++)
+      // Builds the graph and its session in `view`; the tensor is generated
+      // afresh each time so it never outlives the model built from it.
+      auto create = [&](OnnxReduceView view, double &createUs) {
+        std::string xRaw((size_t)rows * kCols * es, '\0');
         {
-          s ^= s << 13;
-          s ^= s >> 17;
-          s ^= s << 5;
-          const float v = (float)(s >> 8) / 16777216.0f - 0.5f;
-          if (dtype == ONNX_DT_FLOAT)
-            f[i] = v;
-          else
-            h[i] = floatToHalf(v);
+          float *f = reinterpret_cast<float *>(&xRaw[0]);
+          uint16_t *h = reinterpret_cast<uint16_t *>(&xRaw[0]);
+          uint32_t s = 0x9e3779b9u;
+          for (int64_t i = 0; i < rows * kCols; i++)
+          {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            const float v = (float)(s >> 8) / 16777216.0f - 0.5f;
+            if (dtype == ONNX_DT_FLOAT)
+              f[i] = v;
+            else
+              h[i] = floatToHalf(v);
+          }
+        }
+        std::string model =
+            onnxResidentActivationModel(rows, kCols, dtype, act, xRaw, view);
+        xRaw.clear();
+        xRaw.shrink_to_fit();
+
+        auto createStart = std::chrono::steady_clock::now();
+        auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+        createUs = std::chrono::duration<double, std::micro>(
+                       std::chrono::steady_clock::now() - createStart)
+                       .count();
+        CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s%s\n",
+                    ep.providerKey.c_str(), (long long)rows, createUs / 1.0e6,
+                    view == OnnxReduceView::Rank4 ? " (rank-4 reduction)" : "");
+        return ses;
+      };
+
+      const OnnxReduceView view = onnxPrefersRank4Reduce(rt, ep)
+                                      ? OnnxReduceView::Rank4
+                                      : OnnxReduceView::Rows;
+      double createUs = 0.0;
+      auto ses = create(view, createUs);
+      // The reduction that brings the row back can be refused where the
+      // operation is not: the QNN Adreno backend declined every graph here on
+      // its ReduceMax.  The reference graph -- the first built at each size,
+      // with no operation to fail on -- tries the rank-4 view once, and a
+      // provider that takes it keeps it for everything after
+      // (onnxPrefersRank4Reduce).
+      if (!ses.session && !ses.offDevice && act == OnnxActivation::None &&
+          view == OnnxReduceView::Rows &&
+          onnxFailureStatus(ses.error) == ResultStatus::Unsupported &&
+          !onnxReasonIsOutOfMemory(ses.error) && !clpeak::cancelRequested())
+      {
+        CLPEAK_VLOG("onnx-activation[%s]: refused (%s); retrying the reduction "
+                    "through a rank-4 view\n",
+                    ep.providerKey.c_str(), ses.error.c_str());
+        auto r4 = create(OnnxReduceView::Rank4, createUs);
+        if (r4.session)
+        {
+          onnxNoteRank4Reduce(rt, ep);
+          ses = r4;
         }
       }
-      std::string model = onnxResidentActivationModel(rows, kCols, dtype, act, xRaw);
-      xRaw.clear();
-      xRaw.shrink_to_fit();
-
-      auto createStart = std::chrono::steady_clock::now();
-      auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
-      auto createEnd = std::chrono::steady_clock::now();
-      double createUs = std::chrono::duration<double, std::micro>(
-                            createEnd - createStart).count();
-      CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s\n",
-                  ep.providerKey.c_str(), (long long)rows, createUs / 1.0e6);
-      model.clear();
-      model.shrink_to_fit();
       if (!ses.session)
       {
         r.error = ses.error;

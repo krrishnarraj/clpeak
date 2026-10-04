@@ -44,21 +44,25 @@
 // Normalising on values instead halves the independent-FMA count on hardware
 // that issues fp16 two per lane, which is the wrong direction: such hardware
 // also retires fp16 twice as fast, so it needs more chains in flight, not
-// fewer.  An Arc A380 (fp16 peak 10.04 TFLOPS) read 4.94 TFLOPS on all three
-// hp widths at 4 values -- flat across the sweep, because cutting MAD_CHAINS
-// in lockstep with the width meant the sweep never varied the ILP at all --
-// against 9.84 from oneAPI and 9.56 from OpenCL, whose sweeps reach half8/
-// half16 and so clear the bar.  Only compute_hp_v* is affected: mp and bf16
-// carry their chains in vec2/vec4 and are already at 4 registers.
+// fewer.  Only compute_hp_v* is affected: mp and bf16 carry their chains in
+// vec2/vec4 and are already at 4 registers.
 //
 // MAD_CHAIN_INTEGER selects a rotating second shape instead of the affine one;
 // integer shaders must set it, because an integer affine recurrence folds
 // legally and one compiler in the fleet does fold it.  See the block below.
 //
 // MAD_OP defaults to the fma() builtin.  Integer shaders redefine it before
-// including this file, since fma() is float-only.  The builtin costs nothing
-// against a contracted expression on any Vulkan driver measured, including
-// Adreno's -- unlike Qualcomm's OpenCL compiler, where it is 26x slower.
+// including this file, since fma() is float-only.  For fp32 the builtin costs
+// nothing against a contracted expression on any Vulkan driver measured,
+// including Adreno's -- unlike Qualcomm's OpenCL compiler, where it is 26x
+// slower.
+//
+// The fp16 shaders (compute_hp_v*) redefine it as the contracted a*b + c,
+// which SPIR-V carries as OpFMul + OpFAdd for the driver to fuse.  The
+// spelling is not what limits them: an Arc A380 read 4.94 TFLOPS both ways at
+// the SIMD16 Intel's driver picks, and 9.50 once the pipeline asked for SIMD32
+// (see runComputeKernel).  It stays contracted because that is the form measured
+// at full rate there, beside vkpeak's contracted chain at 9.49.
 
 #ifndef MAD_CHAIN_GLSL
 #define MAD_CHAIN_GLSL

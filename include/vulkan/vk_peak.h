@@ -91,6 +91,7 @@ struct vk_device_info_t {
   uint32_t subgroupSize;          // 0 = not reported
   uint32_t minSubgroupSize;       // 0 = no subgroup-size control
   uint32_t maxSubgroupSize;
+  uint32_t maxComputeWorkgroupSubgroups; // 0 = no subgroup-size control
   bool     subgroupSizeControl;   // requiredSubgroupSize usable on compute
 
   // Canonical cooperative-matrix tile selected per dtype from
@@ -138,7 +139,8 @@ static inline uint64_t targetVulkanGlobalThreads(const vk_device_info_t &info)
 // fix is to pin the stage's subgroup width to the work-group size wherever the
 // device allows it -- NVIDIA, RDNA and Arc all do.
 // Devices with no subgroup-size control, or whose subgroups can only be 64
-// (CDNA/GCN), return 0 and run unpinned as before.
+// (CDNA/GCN), return 0, and runComputeKernel falls back to the width the
+// device reports -- a no-op without size control.
 // The width one coopmat work-group runs at.  32 unless overridden: it is what
 // every device measured so far wants, and the shaders take it as a
 // specialization constant so an override changes the work-group and the pinned
@@ -295,7 +297,8 @@ struct vk_compute_desc_t
   uint32_t wgSize;           // local_size_x in the shader; 0 => use default 256.
                              // Cooperative-matrix shaders use 32 (one
                              // subgroup -- see coopmatRequiredSubgroupSize).
-  uint32_t requiredSubgroupSize; // pin the stage's subgroup width (0 = don't).
+  uint32_t requiredSubgroupSize; // the stage's subgroup width; 0 = the width the
+                                 // device reports (see runComputeKernel).
   uint32_t outElemsPerWG;    // number of output buffer elements the shader
                              // writes per work-group.  0 => defaults to wgSize
                              // (one element per WI).  Coopmat shaders write an

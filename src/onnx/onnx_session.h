@@ -7,6 +7,7 @@
 // the EP cannot run entirely fails session creation (and the row reports
 // Unsupported) instead of silently measuring the CPU.
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -57,13 +58,20 @@ struct OnnxSessionResult
 // Core ML sends anything that small to the CPU, and verifying it would
 // declare the provider dead on a machine whose Neural Engine takes every
 // 2048-cube it is offered.
+// `keepQdqInPlace` holds off QDQ propagation, which copies a quantize or a
+// dequantize across a Reshape, Transpose, Squeeze, Unsqueeze, Slice or
+// MaxPool, so that the quantized region grows past where the model ended it.
+// A graph whose float parts are meant to stay float needs it: without it,
+// ONNX Runtime's CPU provider ran the fp32 transformer block's attention
+// scores as MatMulIntegerToFloat, int8 arithmetic that no Q/DQ node asked for.
 OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
                                     const onnx_ep_info_t &ep,
                                     const std::string &modelBytes,
                                     bool keepConstantsUnfolded = false,
                                     bool profile = false,
                                     bool keepQdqUnfused = false,
-                                    bool verifyPlacement = true);
+                                    bool verifyPlacement = true,
+                                    bool keepQdqInPlace = false);
 
 // Names of the kernels a profiled session executed, one entry per kernel
 // launch in execution order -- so a kernel that ran twice appears twice.
@@ -115,8 +123,9 @@ std::string onnxJoinOps(const std::vector<std::string> &ops);
 // engine and calls it `TRTKernel_graph_clpeak_7216741020808563463_0`.
 //
 // So the test looks for the *failure* rather than the success: a bare
-// floating-point MatMul sitting beside the dequantize nodes, which is exactly
-// what a provider that declined to fuse leaves behind.  Anything else ran as
+// floating-point MatMul (or Conv, for the row spelled as convolutions)
+// sitting beside the dequantize nodes, which is exactly what a provider that
+// declined to fuse leaves behind.  Anything else ran as
 // the provider's own quantized kernel, and it cannot have quietly run on the
 // CPU instead, because the fallback guard would have failed the session.
 bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);
@@ -124,6 +133,10 @@ bool onnxOpsRanQuantizedMatMul(const std::vector<std::string> &ops);
 // The recognisable quantized kernel among `ops`, or an empty string when the
 // provider fused everything into a kernel of its own naming.
 std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
+
+// How many of `ops` are recognisable quantized kernels: one per launch, so a
+// graph of seven quantized matmuls that all fused counts seven.
+size_t onnxCountQuantizedKernels(const std::vector<std::string> &ops);
 // Empty when this runtime can be asked to run `dtype` at all; otherwise the
 // reason it cannot, phrased for a skip row.
 //
@@ -138,8 +151,9 @@ std::string onnxQuantizedKernelName(const std::vector<std::string> &ops);
 std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 
 // Empty when `ep` can be handed a `dtype` graph -- quantized in and out with
-// a per-tensor scale when `qdq` -- otherwise the reason it must not be,
-// phrased for a skip row.
+// a per-tensor scale when `qdq`, weight-only with one scale per `blockSize`
+// rows when that is positive -- otherwise the reason it must not be, phrased
+// for a skip row.
 //
 // Every other refusal in this backend is learned by asking: the provider
 // builds the graph or says why not, and the row reports its words.  This is
@@ -154,7 +168,7 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 // in the tree is listed in NOTES.md at the repository root, with what
 // lifting it takes.
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
-                                    bool qdq);
+                                    bool qdq, int64_t blockSize);
 
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
@@ -205,6 +219,13 @@ void onnxClearDeviceLost();
 // saying it has no kernel for this format.
 bool onnxReasonIsDeviceLoss(const std::string &reason);
 
+// True when `reason` says the provider ran out of memory building or running
+// a graph -- a statement about the size, not about any operator in it, so
+// rebuilding the same size another way cannot help.  QNN's HTP answered a
+// 16384-cube fp16 matmul with QNN_COMMON_ERROR_MEM_ALLOC after a six-minute
+// compile, and rebuilding it with a different reduction cost six more.
+bool onnxReasonIsOutOfMemory(const std::string &reason);
+
 // The status a refusal deserves.  ONNX's ordinary refusals *are* capability
 // facts -- a provider declining nodes under the CPU-fallback guard, a missing
 // bf16 kernel, the empty status ORT returns for a float4 graph -- so
@@ -217,5 +238,28 @@ bool onnxReasonIsDeviceLoss(const std::string &reason);
 // ladder failed for a reason of its own keeps its Error.
 ResultStatus onnxFailureStatus(const std::string &reason,
                                ResultStatus current = ResultStatus::Unsupported);
+
+// Why a ladder's timing is not a measurement of its graph, or empty when it
+// may be: the reason, when any of the `count` values of `dtype` (fp32, fp16
+// or bf16) at `data` -- the reduced row the timed runs returned, read once
+// they are over -- is NaN or infinite.  `where` names the size, with its
+// preposition ("at 1024-wide layers").
+//
+// Nothing in these graphs can overflow: the GEMM chains keep each layer's
+// magnitude (makeSetup, gemm_setup.cpp), a convolution is a single layer,
+// and the block's weights are halved so that its largest value sits 33x
+// under fp16's (blockWeights, onnx_model.cpp).  A NaN or an infinity coming
+// back is therefore a provider computing some other graph -- TensorRT
+// folding blocked int8 weights timed all-NaN chains at 47-75 TFLOPS -- and
+// the caller withholds the timing as Error, not Unsupported: the provider
+// took the graph rather than declining it, so this says nothing about
+// whether it has the format.
+//
+// It sees only the reduced row.  A column that is NaN throughout survives
+// the ReduceMax, and so does +inf, but a scattered NaN survives only where
+// the provider's max propagates it -- IEEE maxNum, which CUDA's fmaxf
+// follows, drops it -- and a wrong answer that stays finite passes.
+std::string onnxNonFiniteReason(const void *data, int64_t count, int dtype,
+                                const std::string &where);
 
 #endif // CLPEAK_ONNX_SESSION_H

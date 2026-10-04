@@ -163,9 +163,13 @@ class _BackendPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final devices = <CatalogDevice>[
-      for (final platform in backend.platforms) ...platform.devices,
+    final devices = <(CatalogDevice, String)>[
+      for (final platform in backend.platforms)
+        for (final d in platform.devices) (d, platform.name),
     ];
+    // As in the run picker: synthetic single platforms stay silent, several
+    // real ones (OpenCL) are shown per row.
+    final multiPlatform = backend.platforms.length > 1;
 
     return CPanel(
       child: Column(
@@ -184,7 +188,11 @@ class _BackendPanel extends StatelessWidget {
           for (var i = 0; i < devices.length; i++)
             CRow(
               rule: i != devices.length - 1,
-              child: _DeviceLine(device: devices[i]),
+              child: _DeviceLine(
+                device: devices[i].$1,
+                platform:
+                    multiPlatform ? devices[i].$2 : '',
+              ),
             ),
         ],
       ),
@@ -193,15 +201,18 @@ class _BackendPanel extends StatelessWidget {
 }
 
 class _DeviceLine extends StatelessWidget {
-  const _DeviceLine({required this.device});
+  const _DeviceLine({required this.device, this.platform = ''});
 
   final CatalogDevice device;
+  final String platform;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final specs = <String>[
       if (device.type.isNotEmpty) device.type,
+      if (platform.isNotEmpty) 'platform $platform',
+      if (device.origin.isNotEmpty) device.origin,
       if (device.computeUnits > 0) '${device.computeUnits} CU',
       if (device.clockMHz > 0) '${device.clockMHz} MHz',
       if (device.globalMemBytes > 0) formatBytes(device.globalMemBytes),

@@ -9,6 +9,7 @@
 #include <common/logger_text.h>
 #include <common/host_info.h>
 #include <common/keep_awake.h>
+#include <common/console_mute.h>
 #include <version.h>
 #include <iostream>
 #include <vector>
@@ -61,7 +62,13 @@ int main(int argc, char **argv)
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
+            {
+                // Mute vendor stderr during enumeration; the table is on stdout.
+                clpeak::ScopedConsoleMute mute(
+                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                    /*stderrOnly=*/true);
                 invs.push_back(be.enumerate());
+            }
         printInventory(invs, std::cout);
         return 0;
     }
@@ -108,7 +115,12 @@ int main(int argc, char **argv)
     if (opts.verbose && opts.enableOutput)
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
+            {
+                clpeak::ScopedConsoleMute mute(
+                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                    /*stderrOnly=*/true);
                 combined.inventory.push_back(be.enumerate());
+            }
 
     // Held until main returns: the run is compute with no user input, which
     // every OS idle timer counts as idle (include/common/keep_awake.h).
@@ -126,8 +138,8 @@ int main(int argc, char **argv)
             continue;
 
         auto peak = be.create();
-        // --verbose with -o: the base logger mirrors a canonical transcript
-        // of backend/device/test headers and metric rows onto the run's log,
+        // --verbose with -o: the base logger mirrors the metric rows onto the
+        // run's log beside the backend/device/test headers it always records,
         // so the file's `log` reads as the run looked live.
         const bool mirror = opts.verbose && opts.enableOutput;
         peak->log.reset(

@@ -46,6 +46,14 @@ const int64_t kKvLadder[] = {512, 2048, 8192};
 const int64_t kPromptLadder[] = {64, 512, 2048};
 constexpr unsigned int kBlockBudgetUs = 5000000;
 
+// The width of the seed a prompt longer than it enters through
+// (LitertBlockShape::seedWidth), the ONNX block's kSeedWidth.  A prompt no
+// longer than the seed, and decode's one row, gain nothing from one: the
+// seed's widening weights would be as large as the input they replace.  The
+// 64-token prompt keeps the plain input for its magnitudes too -- seeded, its
+// largest value would grow from 2073 to 3389 (litertBlockModel).
+constexpr int64_t kSeedWidth = 64;
+
 struct Variant
 {
   const char *label;
@@ -184,7 +192,19 @@ LitertBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
   sh.kvLen = decode ? kvLen : 0;
   sh.int8Kv = v.int8Kv;
   sh.composite = v.composite;
+  sh.seedWidth = sh.seq > kSeedWidth ? kSeedWidth : 0;
   return sh;
+}
+
+// What a prompt row says about its way in, when it has a seed (kSeedWidth).
+std::string seedNote(int64_t seq)
+{
+  if (seq <= kSeedWidth)
+    return std::string();
+  return "  The prompt starts from a " + std::to_string(kSeedWidth) +
+         "-wide seed that takes a runtime value, and one more multiply, not "
+         "counted, widens it into the layer's input -- inside the figure, "
+         "a quarter of a percent of its arithmetic.";
 }
 
 } // namespace
@@ -245,6 +265,20 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     {
       pt.error = m.error.empty() ? "run failed" : m.error;
       pt.status = m.status;
+      return;
+    }
+    // What the timed runs computed, in the float parts' type the block
+    // returns its row in.  A wrong answer withholds this point alone: each
+    // point is its own graph and its own row.
+    const std::string wrong = litertNonFiniteReason(
+        *s, sp.act,
+        decode ? "for one token against " + std::to_string(kvLen) + " of context"
+               : "for a " + std::to_string(prefillSeq) + "-token prompt");
+    if (!wrong.empty())
+    {
+      CLPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
+      pt.error = wrong;
+      pt.status = ResultStatus::Error;
       return;
     }
     pt.us = m.meanUs;
@@ -375,7 +409,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply.";
+                      " tokens in one pass, counting every multiply in the layer." + seedNote(seq);
       if (v.unit)
         o.unit = v.unit;
       if (!vr.usable)
@@ -517,7 +551,8 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note;
+        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
+                                 seedNote(kPrefillSeq);
         if (!vr.usable)
           test.skip(metric, vr.skipStatus, vr.skipReason, note);
         else

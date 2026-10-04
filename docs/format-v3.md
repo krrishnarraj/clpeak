@@ -256,6 +256,11 @@ What each level means, and when it is in the file:
 | `info` | a fact worth keeping, not worth printing | always |
 | `debug` | the trace a maintainer reads when a number looks wrong: working-set sizes, calibration decisions, chain comparisons, tile choices, the runtimes' own narration | `--verbose` only |
 
+Every run also records where it is: an `info` line as each backend, device
+and test starts (`Backend: …`, `Device 0: …`, the test's title). Under
+`--verbose` the readings join them, one line each as the terminal showed them,
+so the log is the run's transcript.
+
 The CLI prints its own warnings and errors inline with the results and
 everything else to stderr under `--verbose`; the GUI shows warnings and errors
 at the foot of a run's results and folds the rest beneath them. The file has
@@ -297,7 +302,8 @@ debugging question; in the CLI it costs an enumeration pass, which is why it
 is not on by default.
 
 Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
-`api`, `compute_units`, `clock_mhz`, `global_mem_bytes`, `max_alloc_bytes`,
+`api`, `origin` (ONNX plugin EPs only, e.g. `EP plugin (QNNExecutionProvider)`),
+`compute_units`, `clock_mhz`, `global_mem_bytes`, `max_alloc_bytes`,
 `fp16`, `fp64` the backend could answer. The keys are those of
 `include/common/inventory.h`, which is the one serializer for both uses.
 

@@ -43,12 +43,13 @@
 // terminal transcript, scoped, and the GUI sees the same lines the CLI
 // prints.
 //
-// With --verbose and -o, the logger also records a canonical transcript of
-// the structure/result lines (backend, device, test headers and metric rows)
-// onto the run's `log` as `info` entries, so a saved file reads as the run
-// looked live with diagnostics interleaved.  Device properties stay out --
-// they already live on `devices[]` -- and diagnostics are not mirrored here
-// because they were recorded before they were rendered.
+// Every run also records its structure on the run's `log` as `info`
+// entries -- a line as each backend, device and test starts -- so a sidecar
+// left behind by a crash ends where the run died.  With --verbose and -o the
+// metric rows join them, a canonical transcript, so a saved file reads as the
+// run looked live with diagnostics interleaved.  Device properties stay out
+// -- they already live on `devices[]` -- and diagnostics are not mirrored
+// here because they were recorded before they were rendered.
 
 // Same shape the document persists (run_document.h), so device metadata
 // reaches the file without a conversion step.
@@ -255,9 +256,10 @@ protected:
 
   virtual void onEvent(const LogEvent &e) = 0;
 
-  // --verbose with -o: record a canonical transcript of backend/device/test
-  // headers and metric rows onto the run's log.  Set by the host through the
-  // constructor; both CLI and GUI use it.
+  // --verbose with -o: record the readings onto the run's log beside the
+  // backend/device/test headers every run records, so the log is a canonical
+  // transcript.  Set by the host through the constructor; both CLI and GUI
+  // use it.
   bool mirrorToRunLog = false;
 
   // ── Context state ──────────────────────────────────────────────────────
@@ -300,9 +302,10 @@ private:
   /// Record a reading on the open test and return it.
   MetricResult &record(MetricResult m);
 
-  // Dispatch one event to the derived channel and, when mirroring is on, to
-  // the run's log as a canonical transcript line.  Every internal onEvent()
-  // call goes through here so both channels get the mirror automatically.
+  // Dispatch one event to the run's log (its structure always, its readings
+  // when mirroring is on) and then to the derived channel.  Every internal
+  // onEvent() call goes through here so both channels get the mirror
+  // automatically.
   void dispatchEvent(const LogEvent &e);
 
   // Mirror one event as a single readable line on the run's log.  Log events

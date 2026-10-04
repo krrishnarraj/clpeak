@@ -842,15 +842,33 @@ float dequantizedTo(float scale, float code, int dtype)
 
 std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
                              CoremlWeight w, int64_t K, int64_t N, uint32_t seed,
-                             float magnitude, std::vector<float> *dequantized)
+                             float magnitude, std::vector<float> *dequantized, bool transposed)
 {
   const int act = coremlActDtype(w);
-  const CoremlDims dims = {K, N};
+  const CoremlDims dims = transposed ? CoremlDims{N, K} : CoremlDims{K, N};
   const size_t count = (size_t)K * (size_t)N;
   if (dequantized)
     dequantized->assign(count, 0.0f);
 
   auto value = [&](int64_t i, int64_t j) { return coremlWeightAt(i, j, seed) * magnitude; };
+  // Where element (i, j) of W[K, N] is stored, and every element visited in
+  // storage order so a large fill writes forward.  `dequantized` stays
+  // W[K, N] either way.
+  auto at = [&](int64_t i, int64_t j) { return transposed ? (size_t)j * K + i : (size_t)i * N + j; };
+  auto each = [&](auto &&fn) {
+    if (transposed)
+    {
+      for (int64_t j = 0; j < N; j++)
+        for (int64_t i = 0; i < K; i++)
+          fn(i, j);
+    }
+    else
+    {
+      for (int64_t i = 0; i < K; i++)
+        for (int64_t j = 0; j < N; j++)
+          fn(i, j);
+    }
+  };
 
   switch (w)
   {
@@ -861,27 +879,25 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
     std::string raw((size_t)coremlElemBytes(act, (int64_t)count), '\0');
     float *f = reinterpret_cast<float *>(&raw[0]);
     uint16_t *h = reinterpret_cast<uint16_t *>(&raw[0]);
-    for (int64_t i = 0; i < K; i++)
-      for (int64_t j = 0; j < N; j++)
+    each([&](int64_t i, int64_t j) {
+      const float v = value(i, j);
+      const size_t k = at(i, j);
+      float stored = v;
+      if (act == CML_FP32)
+        f[k] = v;
+      else if (act == CML_BF16)
       {
-        const float v = value(i, j);
-        const size_t k = (size_t)i * N + j;
-        float stored = v;
-        if (act == CML_FP32)
-          f[k] = v;
-        else if (act == CML_BF16)
-        {
-          h[k] = coremlFloatToBf16(v);
-          stored = v; // no bf16 arithmetic exists to compare against
-        }
-        else
-        {
-          h[k] = coremlFloatToHalf(v);
-          stored = coremlHalfToFloat(h[k]);
-        }
-        if (dequantized)
-          (*dequantized)[k] = stored;
+        h[k] = coremlFloatToBf16(v);
+        stored = v; // no bf16 arithmetic exists to compare against
       }
+      else
+      {
+        h[k] = coremlFloatToHalf(v);
+        stored = coremlHalfToFloat(h[k]);
+      }
+      if (dequantized)
+        (*dequantized)[(size_t)i * N + j] = stored;
+    });
     return p.constTensor(outName, act, dims, raw);
   }
 
@@ -904,12 +920,12 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
       {
         int q = (int)std::lround(value(i, j) / scale);
         q = std::max(-127, std::min(127, q));
-        packed[(size_t)i * N + j] = (char)(int8_t)q;
+        packed[at(i, j)] = (char)(int8_t)q;
         if (dequantized)
           (*dequantized)[(size_t)i * N + j] = dequantizedTo(scale, (float)q, act);
       }
     }
-    p.affineDequantize({outName, act, dims}, CML_INT8, packed, scales, N, act, 1);
+    p.affineDequantize({outName, act, dims}, CML_INT8, packed, scales, N, act, transposed ? 0 : 1);
     return outName;
   }
 
@@ -930,18 +946,20 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
         for (int64_t i = b * B; i < (b + 1) * B; i++)
           m = std::max(m, std::fabs(value(i, j)));
         const float scale = storedScale(m > 0.0f ? (float)(m / top) : 1.0f, act);
-        std::memcpy(&scales[(size_t)coremlElemBytes(act, b * N + j)],
+        // The scale tensor follows the data's layout: [K / B, N], or [N, K / B].
+        const int64_t si = transposed ? j * nb + b : b * N + j;
+        std::memcpy(&scales[(size_t)coremlElemBytes(act, si)],
                     coremlFloatScalar(scale, act).data(), (size_t)coremlElemBytes(act, 1));
         for (int64_t i = b * B; i < (b + 1) * B; i++)
         {
-          const size_t k = (size_t)i * N + j;
+          const size_t k = at(i, j);
           const float v = value(i, j) / scale;
           if (fp8)
           {
             const uint8_t code = coremlFloatToFp8E4M3(v);
             packed[k] = (char)code;
             if (dequantized)
-              (*dequantized)[k] = dequantizedTo(scale, coremlFp8E4M3ToFloat(code), act);
+              (*dequantized)[(size_t)i * N + j] = dequantizedTo(scale, coremlFp8E4M3ToFloat(code), act);
           }
           else
           {
@@ -949,12 +967,12 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
             q = std::max(-8, std::min(7, q));
             storeNibble(packed, (int64_t)k, (uint8_t)(q & 0xf));
             if (dequantized)
-              (*dequantized)[k] = dequantizedTo(scale, (float)q, act);
+              (*dequantized)[(size_t)i * N + j] = dequantizedTo(scale, (float)q, act);
           }
         }
       }
     p.blockwiseDequantize({outName, act, dims}, fp8 ? CML_FP8E4M3 : CML_INT4, dims, packed,
-                          act, {nb, N}, scales);
+                          act, transposed ? CoremlDims{N, nb} : CoremlDims{nb, N}, scales);
     return outName;
   }
 
@@ -981,16 +999,13 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
         levels[q] = coremlHalfToFloat(coremlFloatToHalf(levels[q]));
     }
     std::string packed((count + 1) / 2, '\0');
-    for (int64_t i = 0; i < K; i++)
-      for (int64_t j = 0; j < N; j++)
-      {
-        const size_t k = (size_t)i * N + j;
-        int q = (int)std::lround(value(i, j) / scale);
-        q = std::max(-8, std::min(7, q));
-        storeNibble(packed, (int64_t)k, (uint8_t)(q + 8));
-        if (dequantized)
-          (*dequantized)[k] = levels[q + 8];
-      }
+    each([&](int64_t i, int64_t j) {
+      int q = (int)std::lround(value(i, j) / scale);
+      q = std::max(-8, std::min(7, q));
+      storeNibble(packed, (int64_t)at(i, j), (uint8_t)(q + 8));
+      if (dequantized)
+        (*dequantized)[(size_t)i * N + j] = levels[q + 8];
+    });
     p.lutToDense({outName, act, dims}, 4, packed, lut);
     return outName;
   }
@@ -1001,17 +1016,18 @@ std::string coremlEmitWeight(CoremlProgram &p, const std::string &outName,
 void coremlEmitProjection(CoremlProgram &p, const std::string &out,
                           const std::string &in, int64_t M, int64_t K, int64_t N,
                           CoremlWeight w, uint32_t seed, float magnitude,
-                          std::vector<float> *dequantized)
+                          std::vector<float> *dequantized, bool transposed)
 {
   const int act = coremlActDtype(w);
-  const std::string wName = coremlEmitWeight(p, out + "_w", w, K, N, seed, magnitude, dequantized);
+  const std::string wName =
+      coremlEmitWeight(p, out + "_w", w, K, N, seed, magnitude, dequantized, transposed);
 
   if (w != CoremlWeight::Int8Qdq)
   {
     p.op("matmul",
          {{"x", in}, {"y", wName},
           {"transpose_x", p.constBool(out + "_tx", false)},
-          {"transpose_y", p.constBool(out + "_ty", false)}},
+          {"transpose_y", p.constBool(out + "_ty", transposed)}},
          {out, act, {M, N}});
     return;
   }
@@ -1031,7 +1047,7 @@ void coremlEmitProjection(CoremlProgram &p, const std::string &out,
   p.op("matmul",
        {{"x", out + "_af"}, {"y", wName},
         {"transpose_x", p.constBool(out + "_tx", false)},
-        {"transpose_y", p.constBool(out + "_ty", false)}},
+        {"transpose_y", p.constBool(out + "_ty", transposed)}},
        {out + "_mm", act, {M, N}});
   p.op("quantize", {{"input", out + "_mm"}, {"scale", cScale}, {"zero_point", zp}, {"output_dtype", dt}},
        {out + "_cq", CML_INT8, {M, N}});
@@ -1059,39 +1075,113 @@ void reduceMax(CoremlProgram &p, const std::string &out, const std::string &in,
 
 } // namespace
 
-CoremlProgram coremlResidentMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                        CoremlWeight w, bool resultScaled)
+CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t seedWidth,
+                                     CoremlWeight w, bool transposed)
 {
   (void)spec;
   CoremlProgram p(coremlSpecNeeded(w));
   const int act = coremlActDtype(w);
   const bool qdq = (w == CoremlWeight::Int8Qdq);
-  // Bf16 has no arithmetic to scale in; the attempt fails at the multiply,
-  // which is the answer wanted.  Its scalar rides in as fp16.
-  const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
+  // Bf16 has no arithmetic to scale in, so its scalar rides in as fp16 and
+  // the seed is widened before it is scaled: the first operation the parser
+  // meets is then the matmul, and its refusal is the answer wanted.
+  const bool bf16 = (act == CML_BF16);
+  const int ioDtype = bf16 ? CML_FP16 : act;
+  const int64_t sw = std::min(seedWidth, D);
+  // Uniform over +/-sqrt(3/K) once scaled from [-0.5, 0.5): variance 1/K, so
+  // a K-deep product returns the magnitude it was handed.
+  auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
+  auto layerSeed = [](int l) { return 0x85a308d3u + 0x9e3779b9u * (uint32_t)l; };
+  const uint32_t kSeedProj = 0x3c6ef372u;
 
   p.input("s", ioDtype, {1});
-  p.constTensor("A", act, {M, K}, coremlFillFloats(act, M * K, 0x243f6a88u));
-  std::string x = "A";
-  if (!resultScaled || qdq)
+  p.constTensor("X0", act, {D, sw}, coremlFillFloats(act, D * sw, 0x243f6a88u));
+
+  auto weight = [&](const std::string &name, int64_t K, int64_t N, uint32_t seed, float mag) {
+    return coremlEmitWeight(p, name, w, K, N, seed, mag, nullptr, transposed);
+  };
+  auto matmul = [&](const std::string &out, const std::string &in, const std::string &wName,
+                    int64_t N) {
+    p.op("matmul",
+         {{"x", in}, {"y", wName},
+          {"transpose_x", p.constBool(out + "_tx", false)},
+          {"transpose_y", p.constBool(out + "_ty", transposed)}},
+         {out, act, {D, N}});
+  };
+
+  std::string x;
+  if (!qdq)
   {
-    p.op("mul", {{"x", "A"}, {"y", "s"}}, {"xs", act, {M, K}});
-    x = "xs";
-  }
-  coremlEmitProjection(p, "y", x, M, K, N, w, 0x85a308d3u, 1.0f);
-  if (resultScaled && !qdq)
-  {
-    reduceMax(p, "r", "y", {0}, true, act, {1, N});
-    p.op("mul", {{"x", "r"}, {"y", "s"}}, {"out", ioDtype, {1, N}});
+    const std::string pw = weight("P", sw, D, kSeedProj, keep(sw));
+    if (bf16)
+    {
+      matmul("A0", "X0", pw, D);
+      p.op("mul", {{"x", "A0"}, {"y", "s"}}, {"A", act, {D, D}});
+    }
+    else
+    {
+      p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {D, sw}});
+      matmul("A", "X", pw, D);
+    }
+    x = "A";
+    for (int l = 0; l < layers; l++)
+    {
+      const std::string out = "C" + std::to_string(l);
+      const std::string wn = weight(out + "_w", D, D, layerSeed(l), l == 0 ? 1.0f : keep(D));
+      matmul(out, x, wn, D);
+      x = out;
+    }
   }
   else
-    reduceMax(p, "out", "y", {0}, true, act, {1, N});
-  p.output("out", ioDtype, {1, N});
+  {
+    // W8A8: the seed is quantized and widened by a quantized multiply, and
+    // each layer dequantizes the codes the one before it quantized.  The
+    // widened activations have the [-0.5, 0.5) inputs' variance (1/12), so
+    // they quantize at four sigma of it; every layer's product has the first
+    // layer's, coremlQdqOutScale(D).
+    const std::string zp = p.constInt8("zp", 0);
+    const std::string dt = p.constString("dt", "int8");
+    auto q = [&](const std::string &out, const std::string &in, const std::string &scale,
+                 int64_t cols) {
+      p.op("quantize", {{"input", in}, {"scale", scale}, {"zero_point", zp}, {"output_dtype", dt}},
+           {out, CML_INT8, {D, cols}});
+    };
+    auto dq = [&](const std::string &out, const std::string &in, const std::string &scale,
+                  int64_t cols) {
+      p.op("dequantize", {{"input", in}, {"scale", scale}, {"zero_point", zp}}, {out, act, {D, cols}});
+    };
+    const std::string xS = p.constFloat("xs", act, coremlQdqActScale(1.0f));
+    const std::string aS = p.constFloat("as", act, (float)(4.0 * std::sqrt(1.0 / 12.0) / 127.0));
+    const std::string cS = p.constFloat("cs", act, coremlQdqOutScale(D, 1.0f));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {D, sw}});
+    q("X_q", "X", xS, sw);
+    dq("X_d", "X_q", xS, sw);
+    matmul("A", "X_d", weight("P", sw, D, kSeedProj, keep(sw)), D);
+    q("A_q", "A", aS, D);
+    std::string codes = "A_q", scale = aS;
+    for (int l = 0; l < layers; l++)
+    {
+      const std::string out = "C" + std::to_string(l);
+      dq(out + "_d", codes, scale, D);
+      matmul(out, out + "_d", weight(out + "_w", D, D, layerSeed(l), l == 0 ? 1.0f : keep(D)), D);
+      q(out + "_q", out, cS, D);
+      codes = out + "_q";
+      scale = cS;
+    }
+    dq("Y", codes, cS, D);
+    x = "Y";
+  }
+
+  // max, never sum: summed rows of a product are a product of summed rows,
+  // a rewrite that would turn the last multiply into a matrix-vector one.
+  reduceMax(p, "out", x, {0}, true, act, {1, D});
+  p.output("out", ioDtype, {1, D});
   return p;
 }
 
 CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
-                                     CoremlWeight w, std::vector<float> *dequantized)
+                                     CoremlWeight w, std::vector<float> *dequantized,
+                                     bool transposed)
 {
   (void)spec;
   CoremlProgram p(coremlSpecNeeded(w));
@@ -1104,7 +1194,7 @@ CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
     p.op("cast", {{"x", "x"}, {"dtype", p.constString("cast_dt", "bfloat16")}}, {"xb", act, {M, K}});
     in = "xb";
   }
-  coremlEmitProjection(p, "y", in, M, K, N, w, 0x85a308d3u, 1.0f, dequantized);
+  coremlEmitProjection(p, "y", in, M, K, N, w, 0x85a308d3u, 1.0f, dequantized, transposed);
   p.output("y", act == CML_BF16 ? act : ioDtype, {M, N});
   return p;
 }
@@ -1127,11 +1217,12 @@ CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
 }
 
 CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
-                              int64_t kernel, int64_t group, int dtype)
+                              int64_t kernel, int64_t stride, int64_t group, int dtype)
 {
   (void)spec;
   CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
   const int64_t inPerGroup = channels / group;
+  const int64_t outSide = spatial / stride;
   p.input("s", dtype, {1});
   p.constTensor("X0", dtype, {1, channels, spatial, spatial},
                 coremlFillFloats(dtype, channels * spatial * spatial, 0x9e3779b9u));
@@ -1147,12 +1238,12 @@ CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
   // always emits the zeros.
   p.op("conv",
        {{"x", "X"}, {"weight", "Wt"},
-        {"strides", p.constInts("strides", {1, 1})},
+        {"strides", p.constInts("strides", {(int32_t)stride, (int32_t)stride})},
         {"pad_type", p.constString("pad_type", "same")},
         {"pad", p.constInts("pad", {0, 0, 0, 0})},
         {"dilations", p.constInts("dilations", {1, 1})},
         {"groups", p.constInt("groups", (int32_t)group)}},
-       {"Y", dtype, {1, channels, spatial, spatial}});
+       {"Y", dtype, {1, channels, outSide, outSide}});
   reduceMax(p, "out", "Y", {2, 3}, false, dtype, {1, channels});
   p.output("out", dtype, {1, channels});
   return p;
@@ -1294,19 +1385,45 @@ CoremlProgram coremlBlockModel(int spec, const CoremlBlockShape &sh)
   const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
   // Weights and activations in [-0.25, 0.25): the SwiGLU squares magnitudes
   // and the down projection sums thousands of terms, which overflowed fp16
-  // at the [-0.5, 0.5) the GEMM rows use.
+  // at the [-0.5, 0.5) the GEMM rows use.  At the halved range the largest
+  // value anywhere in the block is 2059, at the 64-token prompt (1356 at 512
+  // tokens and 1187 at 2048, whose input is a seed's rank-64 widening), 31x
+  // under fp16's 65504.
   const float mag = 0.5f;
 
   // The activations are a constant scaled by a runtime scalar, and the result
-  // leaves as one reduced row (see onnxBlockModel for why).
+  // leaves as one reduced row (see onnxBlockModel for why).  A long prompt
+  // scales a [S, seedWidth] seed rather than its whole input, and one more
+  // multiply widens the seed into the [S, d] activations -- the ONNX block's
+  // way in, for the reason given there.  The widening is seedWidth / d of one
+  // projection, a quarter of a percent of the layer, and is not counted.  Its
+  // weights spread over [-a, a), a = sqrt(3 / seedWidth), so seedWidth
+  // products of the seed's [-0.25, 0.25) values sum to the plain input's rms
+  // of 0.144; the input is rank seedWidth all the same, which is what moves
+  // the magnitudes quoted above.
   p.input("s", ioDtype, {1});
-  p.constTensor("X0", act, {S, d}, coremlFillFloats(act, S * d, 0xa5a5a5a5u, mag));
-  p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {S, d}});
+  if (sh.seedWidth > 0)
+  {
+    const int64_t sw = sh.seedWidth;
+    p.constTensor("X0", act, {S, sw}, coremlFillFloats(act, S * sw, 0xa5a5a5a5u, mag));
+    p.constTensor("Xp", act, {sw, d},
+                  coremlFillFloats(act, sw * d, 0x5eed5eedu, 2.0f * std::sqrt(3.0f / (float)sw)));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"Xs", act, {S, sw}});
+    p.op("matmul",
+         {{"x", "Xs"}, {"y", "Xp"}, {"transpose_x", p.constBool("xp_tx", false)},
+          {"transpose_y", p.constBool("xp_ty", false)}},
+         {"X", act, {S, d}});
+  }
+  else
+  {
+    p.constTensor("X0", act, {S, d}, coremlFillFloats(act, S * d, 0xa5a5a5a5u, mag));
+    p.op("mul", {{"x", "X0"}, {"y", "s"}}, {"X", act, {S, d}});
+  }
 
   auto projection = [&](const std::string &out, const std::string &in, int64_t K, int64_t N,
                         uint32_t seed)
   {
-    coremlEmitProjection(p, out, in, S, K, N, w, seed, mag);
+    coremlEmitProjection(p, out, in, S, K, N, w, seed, mag, nullptr, sh.transposedWeights);
   };
 
   // ---- QKV projection ----------------------------------------------------

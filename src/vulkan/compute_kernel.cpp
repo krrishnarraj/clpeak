@@ -195,6 +195,22 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
 
   vkUpdateDescriptorSets(dev.device, 1, &write, 0, nullptr);
 
+  // Every pipeline here asks for a subgroup width: the desc's when it names
+  // one (coopmat names its tile's), else the width the device reports.  Left
+  // to choose, Intel's Windows driver compiles compute shaders at SIMD16, and
+  // Alchemist runs fp16 at double rate only at SIMD32: an Arc A380's half
+  // read 4.93 TFLOPS unpinned and at SIMD16, 2.47 at SIMD8 and 9.50 at SIMD32
+  // (half2/half4 9.46) against a 10.04 peak, whatever the chain shape, chain
+  // count, work-group size or MAD spelling.  vkpeak reads 9.49 because ncnn
+  // pins every pipeline to the reported width.  A no-op on NVIDIA, which
+  // offers only 32, and wherever the device has no subgroup-size control.  A
+  // group that would need more subgroups than the device allows runs unpinned.
+  uint32_t subgroup = d.requiredSubgroupSize ? d.requiredSubgroupSize
+                                             : dev.info.subgroupSize;
+  if (subgroup && dev.info.maxComputeWorkgroupSubgroups &&
+      (uint64_t)wgSize > (uint64_t)subgroup * dev.info.maxComputeWorkgroupSubgroups)
+    subgroup = 0;
+
   // Build + dispatch each variant's pipeline.  Variants failing pipeline
   // creation are skipped but don't abort the group -- some drivers accept
   // the v1 shader but choke on a wider packed variant.
@@ -212,18 +228,18 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   {
     VkPipeline pipeline;
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                       pipeline, d.specInfo, d.requiredSubgroupSize);
+                                       pipeline, d.specInfo, subgroup);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't compile the stage at that width, run it however it likes
     // rather than dropping the row.  Worth knowing about, though -- a coopmat
     // shader that lands on several subgroups per work-group has every one of
     // them recompute the same tile, so the reading comes out divided by that
     // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).
-    if (!*built && d.requiredSubgroupSize)
+    if (!*built && subgroup)
     {
       CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
                   "falling back to its own choice\n",
-                  d.resultTag, d.requiredSubgroupSize);
+                  d.resultTag, subgroup);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
     }

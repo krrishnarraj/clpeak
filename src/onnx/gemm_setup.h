@@ -30,6 +30,10 @@ constexpr int64_t kProbeDim = 32;
 // accident.
 constexpr float kNvfp4GlobalScale = 0.125f;
 
+// Width of the seed a chain's live pass runs over (OnnxLiveSeed): wide
+// enough for every matrix unit's tile, and 1/64 of a 4096-wide layer.
+constexpr int64_t kSeedWidth = 64;
+
 struct Variant
 {
   int dtype;         // element type of the graph's input/output
@@ -38,10 +42,11 @@ struct Variant
   const char *note;  // the row's description, after the sweep sentence
   int64_t blockSize; // >0: blocked, one scale per this many elements
   bool nvfp4;        // blocked on *both* operands, with a second scale
+  bool conv1x1 = false; // every layer a 1x1 Conv rather than a MatMul
 };
 
-// The rows, in the order they are measured and reported.  int8 QDQ is the
-// one integer row and carries its own unit (ops); everything else is flops.
+// The rows, in the order they are measured and reported.  The int8 QDQ rows
+// carry their own unit (ops); everything else is flops.
 extern const Variant kFpVariants[];
 extern const size_t  kFpVariantCount;
 extern const Variant kIntVariants[];
@@ -73,8 +78,19 @@ size_t schemesFor(const Variant &v, QuantScheme out[2]);
 std::vector<OnnxLiveShape> liveShapesFor(const Variant &v);
 
 // Bytes of operands the model for (variant, D, shape) embeds: what the size
-// ladder checks against the memory budget and the protobuf ceiling.
-uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape);
+// ladder checks against the memory budget and the protobuf ceiling.  A chain
+// of `layers` embeds one more weight matrix per layer after the first, and on
+// a live shape a seed and its widening weights in place of the activations.
+uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
+                      int layers = 1);
+
+// Whether a (shape, layers) build enters through a seed (OnnxLiveSeed): chains
+// on the live shapes do; a single multiply and a result-scaled chain hold the
+// activations whole.
+inline bool usesSeed(OnnxLiveShape shape, int layers)
+{
+  return layers > 1 && shape != OnnxLiveShape::ResultScaled;
+}
 
 size_t dtypeSize(int dtype);
 
@@ -82,7 +98,10 @@ size_t dtypeSize(int dtype);
 // Floats land in [-0.5, 0.5) and int8 in [-127, 127]: small magnitudes keep
 // fp16 accumulation over a 4096-deep dot product far from overflow, and
 // avoid the NaN/denormal slow paths raw random bit patterns would hit.
-void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed);
+// `floatScale` multiplies the floating-point values only; the quantized types
+// always spend their whole code range.
+void fillTensor(std::string &raw, int dtype, int64_t count, uint32_t seed,
+                float floatScale = 1.0f);
 
 // Output scale for the QDQ form: four sigma of a K-deep dot product mapped
 // onto the widest code the output type has.
@@ -97,6 +116,7 @@ struct GemmSetup
   OrtValue *zaVal = nullptr;  // Add forms only: the literal zero ZA
   OrtValue *outVal = nullptr; // reduced row
   std::vector<uint8_t> inBuf, zaBuf, outBuf;
+  int outDtype = 0;           // outBuf's element type: fp32, fp16 or bf16
   std::string error;
 
   // Not copyable, and the compiler has to enforce it: inVal and outVal are
@@ -117,11 +137,14 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // `actDtype`/`wgtDtype` apply to the QDQ form; `reduceInFloat` to the plain
 // one.  On failure `error` is set and `session` is null.  `verifyPlacement`
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
-// ladder times.
+// ladder times.  `view` is how the product is reduced to the row that leaves
+// (OnnxReduceView); `layers` chains that many D x D multiplies in one graph
+// (every row but NVFP4, which ignores it).
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
-                    OnnxLiveShape shape, bool verifyPlacement = true);
+                    OnnxLiveShape shape, bool verifyPlacement = true,
+                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1);
 
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);
