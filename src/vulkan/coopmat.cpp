@@ -108,11 +108,43 @@ namespace
     // multiple of the subgroup width for every advertised tile, and the MulAdd
     // count is the trip count the shader was handed times the trip size.
     d.workPerWI = (uint32_t)((volume * 2 * mmas) / wgSize);
-    CLPEAK_VLOG("%s: %ux%ux%u at subgroup %u, %llu trips x %u MulAdds, "
+    CLPEAK_VLOG("%s %s: %ux%ux%u at subgroup %u, %llu trips x %u MulAdds, "
                 "%u ops/WI\n",
-                d.resultTag, t.M, t.N, t.K, wgSize,
+                d.resultTag, d.metricLabel, t.M, t.N, t.K, wgSize,
                 (unsigned long long)trips, COOPMAT_MMA_PER_TRIP, d.workPerWI);
   }
+
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC
+  // Why the fp16 x fp16 + fp16 row cannot be sent to this driver, or nullptr.
+  // A crash gate: the driver takes the process down where it should decline,
+  // so asking is itself the fault.  NOTES.md has the entry and what lifting it
+  // takes; lifting it is deleting the `if`.
+  //
+  // Qualcomm's driver dies inside vkCreateComputePipelines on this module -- a
+  // null-pointer SIGSEGV in its shader compiler (libllvm-qgl.so), at the
+  // 64x64x16 tile an Adreno 840 advertises for it, driver 0842.44.1, compiler
+  // E031.50.19.29.  The module is valid.  What the compiler cannot take is the
+  // fp16 accumulator reaching OpCooperativeMatrixMulAddKHR through an OpPhi,
+  // which is how the loop carries it once glslc -O has run spirv-opt's SSA
+  // rewrite.  Left in a Function variable (-O0) the same tile is declined with
+  // VK_ERROR_UNKNOWN, so building it unoptimised would buy a refusal, not a
+  // reading, and change the module every other driver compiles.  The other
+  // rows carry their accumulator through the same OpPhi and are still sent:
+  // that driver builds the fp32 one and declines fp16 + fp32 and int8 itself.
+  //
+  // Keyed on the driver, not the vendor -- Mesa's Turnip drives the same GPUs
+  // with a compiler of its own -- and on every release of it, since one has
+  // been seen to crash and none is known to be fixed.
+  const char *f16AccumulatorFence(const vk_device_info_t &info)
+  {
+    if (info.driverID == VK_DRIVER_ID_QUALCOMM_PROPRIETARY)
+      return "Qualcomm's Vulkan driver crashes the process building this "
+             "pipeline -- a segfault in its shader compiler (Adreno 840, driver "
+             "0842.44.1) where it should decline -- so this row is not sent to "
+             "that driver; the other data types still are";
+    return nullptr;
+  }
+#endif
 
 } // namespace
 
@@ -225,17 +257,22 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
                             "AI figure is usually this one; server parts run both alike.";
 
       d.elemSize = sizeof(float);
-      if (dev.info.float16Supported && dev.info.coopmatFP16F16.supported)
+      if (!dev.info.float16Supported || !dev.info.coopmatFP16F16.supported)
+      {
+        d.skip = true;
+        d.skipMsg = "No fp16xfp16+fp16 coopmat support (shaderFloat16 or property)! Skipped";
+      }
+      else if (const char *fence = f16AccumulatorFence(dev.info))
+      {
+        d.skip = true;
+        d.skipMsg = fence;
+      }
+      else
       {
         d.spirv = vk_shaders::coopmat_fp16_f16acc;
         d.spirvSize = vk_shaders::coopmat_fp16_f16acc_size;
         d.requiredSubgroupSize = tileSub(dev.info.coopmatFP16F16);
         bindCoopTile(r, d, dev.info.coopmatFP16F16, tileWG(dev.info.coopmatFP16F16));
-      }
-      else
-      {
-        d.skip = true;
-        d.skipMsg = "No fp16xfp16+fp16 coopmat support (shaderFloat16 or property)! Skipped";
       }
       runComputeKernel(dev, cfg, d);
     }

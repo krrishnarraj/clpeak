@@ -208,3 +208,43 @@ full account of each.
 - **To lift**: set the constant to 0 (no limit) and run a full
   `clpeak --litert` on Apple silicon: more than 32 compiled models in one
   environment without the assert is a fixed release.
+
+## Vulkan backend
+
+### Qualcomm's driver: the cooperative matrix with a 16-bit total (`fp16 f16acc`)
+
+- **Gate**: `f16AccumulatorFence()` in `src/vulkan/coopmat.cpp`, on
+  `VK_DRIVER_ID_QUALCOMM_PROPRIETARY` (`vk_device_info_t::driverID`).
+- **Withheld**: the `coopmat` row `fp16 f16acc` (fp16 x fp16 + fp16).  The
+  other rows are still put to the driver, which answered for them in the
+  isolation below: it builds the fp32 tile and declines the fp16 (fp32
+  total) and int8 ones with `VK_ERROR_UNKNOWN`, the fp16 one logging
+  "Cannot find dst function body".
+- **Fault**: `vkCreateComputePipelines` ends the process with a SIGSEGV
+  (SEGV_MAPERR at 0x8, a null pointer) in the driver's shader compiler,
+  `libllvm-qgl.so` +0xcbc240, under `runCoopMatrix`.  The backtrace does
+  not name the row; isolating it outside clpeak does.  fp16 x fp16 + fp16
+  at the 64x64x16 tile the device advertises crashes the compiler only
+  when the accumulator reaches `OpCooperativeMatrixMulAddKHR` through an
+  `OpPhi`, which is how the loop carries it once `glslc -O`
+  (`CompileShaders.cmake`) has run spirv-opt's SSA rewrite; the module is
+  valid (`spirv-val --target-env vulkan1.2`).  Left in a Function variable
+  (no `--ssa-rewrite`) the same tile is declined with `VK_ERROR_UNKNOWN`;
+  fp32 x fp32 + fp32 at 64x64x8 builds with the same two phis; and the
+  fp16 x fp16 + fp16 tile through the QCOM register path builds with six.
+  So building without `-O` would trade the crash for a refusal, not a
+  reading, and change the module every other driver compiles.
+- **Seen**: Adreno 840 (SM8850, Xiaomi 17 Pro), Android 17, Adreno Vulkan
+  driver 0842.44.1, shader compiler E031.50.19.29, clpeak 3.0.1,
+  2026-10-04.  Nothing after it ran.
+- **Wider than the fault, and why**: every release of Qualcomm's driver, on
+  every Adreno it drives.  One release has been seen and none is known to
+  be fixed, and a version bound guessed wrong takes the run down.  Keyed on
+  the driver rather than the vendor ID because Mesa's Turnip drives the
+  same GPUs with its own compiler.
+- **To lift**: delete the `if` and run `clpeak --vulkan --matrix-compute
+  --verbose` on an Adreno (in the app, the same selection with verbose
+  logging on).  The dump names the driver build and its compiler version,
+  and the line before each pipeline names the row and its tile.  A measured
+  `fp16 f16acc` row, or one failed as "Pipeline creation failed" -- the
+  driver declining -- is a fixed compiler; a run that ends there is not.

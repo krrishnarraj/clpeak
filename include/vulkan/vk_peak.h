@@ -46,6 +46,11 @@ struct vk_device_info_t {
   std::string deviceName;
   std::string driverVersion;
   std::string apiVersion;
+  // Which driver this is (VkPhysicalDeviceDriverProperties::driverID), 0 when
+  // it does not say.  Not the vendor ID: one Adreno runs under Qualcomm's
+  // driver or Mesa's Turnip, two different shader compilers, and a crash gate
+  // (NOTES.md) keys on the compiler that crashes.
+  VkDriverId driverID = (VkDriverId)0;
 
   unsigned int numCUs;            // 0 unless a vendor property reports it
   unsigned int maxWGSize;

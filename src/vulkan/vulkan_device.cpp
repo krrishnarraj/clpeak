@@ -86,6 +86,35 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
 }
 
 // ---------------------------------------------------------------------------
+// Step 1, continued: which driver.  Core from Vulkan 1.2 and an extension
+// before it, so asked of a device that reports 1.2 or lists
+// VK_KHR_driver_properties: a 1.2 driver need not list an extension it has
+// promoted.  Needs the extension list, which step 1 runs before.
+// ---------------------------------------------------------------------------
+static void queryDriverInfo(VulkanDevice *self, VkPhysicalDevice physDev,
+                            const std::function<bool(const char*)> &hasExt)
+{
+  self->info.driverID = (VkDriverId)0;
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(physDev, &props);
+  if (props.apiVersion < VK_API_VERSION_1_2 &&
+      !hasExt(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+    return;
+
+  VkPhysicalDeviceDriverProperties drv = {};
+  drv.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+  VkPhysicalDeviceProperties2 p2 = {};
+  p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  p2.pNext = &drv;
+  vkGetPhysicalDeviceProperties2(physDev, &p2);
+  self->info.driverID = drv.driverID;
+  // driverInfo is where a driver names its build -- Qualcomm's carries its
+  // shader compiler's version -- which a crash in that compiler is filed by.
+  CLPEAK_VLOG("Vulkan: %s: %s (%s)\n", self->info.deviceName.c_str(),
+              drv.driverName, drv.driverInfo);
+}
+
+// ---------------------------------------------------------------------------
 // Step 2: probe vendor extension properties for CU/SM count
 // ---------------------------------------------------------------------------
 static void probeComputeUnitCount(VulkanDevice *self, VkPhysicalDevice physDev,
@@ -617,6 +646,8 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
       if (strcmp(e.extensionName, name) == 0) return true;
     return false;
   };
+
+  queryDriverInfo(this, physDev, hasExt);
 
   // Step 2: probe CU/SM count from vendor extensions
   probeComputeUnitCount(this, physDev, hasExt);
