@@ -15,7 +15,7 @@
 //
 //   CLPEAK_SHOTS_OUT      where the raw PNGs go (required)
 //   CLPEAK_SHOTS_REPO     the repository root (required)
-//   CLPEAK_SHOTS_VERSION  the version label on the shots (default: 3.0.0)
+//   CLPEAK_SHOTS_VERSION  the version label on the shots (default: 3.0.1)
 import 'dart:convert';
 import 'dart:ffi' hide Size;
 import 'dart:io';
@@ -44,7 +44,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 final _env = Platform.environment;
 final _outDir = _env['CLPEAK_SHOTS_OUT'] ?? '';
 final _repo = _env['CLPEAK_SHOTS_REPO'] ?? '';
-final _version = _env['CLPEAK_SHOTS_VERSION'] ?? '3.0.0';
+final _version = _env['CLPEAK_SHOTS_VERSION'] ?? '3.0.1';
 
 /// The desktop app's default window (app/AGENTS.md), captured at 2x.
 const _desktop = Size(1280, 860);
@@ -236,11 +236,11 @@ void main() {
     final catalog = BackendCatalog.fromJson(catalogJson);
     final bindings = _StubBindings(catalogJson);
 
-    final m1 = _run('results/Apple/M1_Pro.json', '20260925_120924');
+    final m1 = _run('results/Apple/M1_Pro.json', '20261004_115444');
     final rtx =
-        _run('results/Nvidia/GeForce_RTX_5060.json', '20260924_152237');
+        _run('results/Nvidia/GeForce_RTX_5060.json', '20261004_115639');
     final tr = _run('results/AMD/Ryzen_Threadripper_PRO_3955WX_16_Cores.json',
-        '20260924_153931');
+        '20261004_124441');
 
     BenchmarkService svc(
             [({RunDocument document, RunSummary summary})? run]) =>
