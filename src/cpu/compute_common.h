@@ -70,14 +70,64 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
                            opts(mtNote));
 }
 
+// Why `slot` has no variant on this host.  `cpuLacks` is the call site's
+// reason, right when the CPU lacks every feature that would give one; when the
+// CPU has one but this binary cannot run it (clpeak_cpu::MissingKernel), the
+// skip names whose gap it is instead -- one clause per cause:
+//   "this CPU has FEAT_SME, but this build has no kernel for it (its compiler
+//    could not build one)"
+[[maybe_unused]] static std::string unsupportedReason(const clpeak_cpu::MenuSlot &slot,
+                                                      const char *cpuLacks)
+{
+  using clpeak_cpu::MissingKernel;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+  const char *arch = "x86";
+#else
+  const char *arch = "Arm";
+#endif
+  std::string out;
+  for (MissingKernel::Why why : {MissingKernel::NotBuilt, MissingKernel::TileStateRefused,
+                                 MissingKernel::NotWritten})
+  {
+    std::vector<const char *> feats;
+    for (const MissingKernel &k : slot.missing)
+      if (k.why == why) feats.push_back(k.feature);
+    if (feats.empty()) continue;
+
+    std::string list = feats[0];
+    for (size_t i = 1; i < feats.size(); i++)
+      list += std::string(i + 1 < feats.size() ? ", " : " and ") + feats[i];
+    const bool one = feats.size() == 1;
+    const char *it = one ? "it" : "them";
+
+    if (!out.empty()) out += "; ";
+    out += "this CPU has " + list + ", but ";
+    switch (why)
+    {
+    case MissingKernel::NotBuilt:
+      out += std::string("this build has no kernel for ") + it +
+             " (its compiler could not build " + (one ? "one" : "any") + ")";
+      break;
+    case MissingKernel::TileStateRefused:
+      out += std::string("the OS refused ") + (one ? "its" : "their") + " tile state";
+      break;
+    case MissingKernel::NotWritten:
+      out += std::string("clpeak has no ") + arch + " kernel for " + it + " yet";
+      break;
+    }
+  }
+  return out.empty() ? std::string(cpuLacks) : out;
+}
+
 // Run EVERY supported ISA variant of one compute kernel.  Each ISA is its own
 // test -- comparing SSE2 against AVX-512 is the point of running both -- but
 // they share one tag and are told apart by `variant`, so the ISA never gets
 // slugged into the tag.  That keeps the tag identical across machines, which
-// is what makes `--compare` work between them.
+// is what makes `--compare` work between them.  `unsupReason` is the skip when
+// the CPU lacks the kernel's feature (see unsupportedReason()).
 [[maybe_unused]] static void emitVariants(CpuPeak &peak, const logger::TestSpec &base,
                          const std::string &metric,
-                         const std::vector<clpeak_cpu::IsaVariant> &vars,
+                         const clpeak_cpu::MenuSlot &slot,
                          const char *unsupReason, benchmark_config_t &cfg)
 {
   logger::TestSpec spec = base;
@@ -96,15 +146,15 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
   spec.shape = TestShape::Homogeneous;
   if (spec.axis.empty()) spec.axis = "threads";
 
-  if (vars.empty())
+  if (slot.vars.empty())
   {
     auto test = peak.currentDeviceScope->beginTest(spec);
     // No thread-count suffix: there is no ST/MT pair to distinguish when the
     // kernel does not exist on this host at all.
-    test.skip(metric, ResultStatus::Unsupported, unsupReason);
+    test.skip(metric, ResultStatus::Unsupported, unsupportedReason(slot, unsupReason));
     return;
   }
-  for (const auto &iv : vars)
+  for (const auto &iv : slot.vars)
   {
     spec.variant = iv.isa;
     auto test = peak.currentDeviceScope->beginTest(spec);
@@ -116,8 +166,8 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
 struct FamilyRow {
   const char *metric;        // "bf16", "fdiv fp32"
   const char *description;   // what this row measures, beyond the family
-  const char *unsupReason;   // shown when this host has no variant for it
-  const std::vector<clpeak_cpu::IsaVariant> *vars;
+  const char *unsupReason;   // shown when the CPU lacks every variant of it
+  const clpeak_cpu::MenuSlot *slot;
   const char *unit = nullptr;  // nullptr = the test's unit
 };
 
@@ -130,7 +180,8 @@ struct FamilyRow {
 // what makes two readings incomparable: bf16 on AMX and bf16 on SME are
 // different hardware, while bf16 and fp16 on the same AMX are the same unit
 // asked for a different format.  A row the host cannot run at all still
-// appears, as a skip, so the reader sees which formats the engine lacks.
+// appears, as a skip, so the reader sees which formats the engine lacks; a
+// row another ISA runs skips in this ISA's test naming that ISA instead.
 [[maybe_unused]] static void emitFamily(CpuPeak &peak, const logger::TestSpec &base,
                        const std::vector<FamilyRow> &rows,
                        benchmark_config_t &cfg)
@@ -159,11 +210,23 @@ struct FamilyRow {
     return o;
   };
 
+  // Why row `r` has no reading in the `isa` test.  One that runs under another
+  // ISA is missing here because this ISA has no form of it, not because the
+  // CPU lacks it, which is all the row's own reason can say.
+  auto rowReason = [](const FamilyRow &r, const char *isa) {
+    if (r.slot->vars.empty())
+      return unsupportedReason(*r.slot, r.unsupReason);
+    std::string runs;
+    for (const auto &iv : r.slot->vars)
+      runs += (runs.empty() ? "" : ", ") + std::string(iv.isa);
+    return std::string(isa) + " has no " + r.metric + " form; this CPU runs it as " + runs;
+  };
+
   // Ordered union of the ISAs any row supports, first-seen order (the menus
   // are built baseline-first, so this stays low-ISA to high-ISA).
   std::vector<const char *> isas;
   for (const FamilyRow &r : rows)
-    for (const auto &iv : *r.vars)
+    for (const auto &iv : r.slot->vars)
     {
       bool known = false;
       for (const char *seen : isas)
@@ -177,7 +240,8 @@ struct FamilyRow {
   {
     auto test = peak.currentDeviceScope->beginTest(spec);
     for (const FamilyRow &r : rows)
-      test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason, rowOpts(r));
+      test.skip(r.metric, ResultStatus::Unsupported,
+                unsupportedReason(*r.slot, r.unsupReason), rowOpts(r));
     return;
   }
 
@@ -188,12 +252,12 @@ struct FamilyRow {
     for (const FamilyRow &r : rows)
     {
       const clpeak_cpu::IsaVariant *match = nullptr;
-      for (const auto &iv : *r.vars)
+      for (const auto &iv : r.slot->vars)
         if (std::string(iv.isa) == isa) { match = &iv; break; }
 
       if (!match)
       {
-        test.skip(r.metric, ResultStatus::Unsupported, r.unsupReason, rowOpts(r));
+        test.skip(r.metric, ResultStatus::Unsupported, rowReason(r, isa), rowOpts(r));
         continue;
       }
       emitCompute(peak, test, r.metric, match->v.opsPerIter, match->v.fn, cfg,

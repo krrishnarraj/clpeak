@@ -39,7 +39,8 @@ int CpuPeak::runCryptoSha256(benchmark_config_t &cfg)
 int CpuPeak::runCryptoSha512(benchmark_config_t &cfg)
 {
   // The x86 SHA512 EVEX extension (Arrow/Lunar Lake) is detected but has no
-  // kernel yet, so x86 always reports the Unsupported row here.
+  // kernel yet, so x86 always reports the Unsupported row here -- saying so,
+  // rather than blaming the CPU, on one that has the extension.
   emitVariants(*this, {"sha512_hash", "SHA-512 hash", "bps", Category::Crypto,
                        "How many bytes per second the CPU hashes with SHA-512, the "
                        "wider member of the same family.  Only Arm cores have an "

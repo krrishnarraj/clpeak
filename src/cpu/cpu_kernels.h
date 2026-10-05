@@ -129,21 +129,39 @@ struct IsaVariant {
   const char  *isa = "";
 };
 
+// A kernel the running CPU has the feature for, but this binary cannot run --
+// recorded so a skip names whose gap it is instead of blaming the CPU.
+struct MissingKernel {
+  enum Why {
+    NotBuilt,          // CMake skipped the TU, or the TU compiled without it
+    TileStateRefused,  // AMX: the OS did not grant the tile state
+    NotWritten,        // clpeak has no kernel for it on this architecture
+  } why;
+  const char *feature;   // "FEAT_SME", "AMX-FP16", "SHA512"
+};
+
+// One compute kernel's menu: every variant this host runs, and the kernels it
+// cannot run although the CPU has their feature (one entry per feature).
+struct MenuSlot {
+  std::vector<IsaVariant>    vars;
+  std::vector<MissingKernel> missing;
+};
+
 // ALL supported variants of each compute kernel for THIS host, baseline-first
 // (low ISA -> high ISA).  The compute tests run every entry so the user can
 // compare instruction sets, rather than only the widest one (see kernels()).
 struct CpuKernelMenu {
-  std::vector<IsaVariant> fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
+  MenuSlot fp32, fp64, int32, fp16, bf16, mp, int8dp, mat_int8, mat_fp;
   // Pushed beside each non-streaming fp32 entry under the same ISA label, so
   // the SMT scaling test can pair them by label.
-  std::vector<IsaVariant> fp32lat;
-  std::vector<IsaVariant> mat_fp16, mat_fp8, bf16fma;
-  std::vector<IsaVariant> int16dp, fp8dp, mat_fp32, mat_fp64;
-  std::vector<IsaVariant> aes, sha256, sha512, crc32c;
+  MenuSlot fp32lat;
+  MenuSlot mat_fp16, mat_fp8, bf16fma;
+  MenuSlot int16dp, fp8dp, mat_fp32, mat_fp64;
+  MenuSlot aes, sha256, sha512, crc32c;
   // String tests: the PCMPISTRI kernel rides in the strscan menu as its own
   // ISA row ("SSE4.2 PCMPISTRI"), next to the compare+movemask variants.
-  std::vector<IsaVariant> strscan, utf8;
-  std::vector<IsaVariant> div32, div64, sqrt32, sqrt64;
+  MenuSlot strscan, utf8;
+  MenuSlot div32, div64, sqrt32, sqrt64;
   // (the SME streaming-SVE fp32/fp64 chains ride in the fp32/fp64 menus above,
   //  labeled "SSVE" -- they are just another ISA variant of those tests.
   //  The scalar u64 intdiv has no per-ISA variants: it is read directly from

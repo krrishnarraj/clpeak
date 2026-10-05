@@ -39,7 +39,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, per-instance **and aggregate** cache sizes, ISA flags from the `cpu_dispatch.cpp` probe |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
-| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests) |
+| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run) |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
 | `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains (plus `fp32lat`, the one-accumulator fp32 chain only the SMT test runs), fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
 | `kernels/crypto_compute.h` | AES-128, SHA-256, SHA-512, CRC32-C. `opsPerIter` counts BYTES so `emitCompute()` lands in GB/s. SHA-512 is ARM-only: x86 SHA512 is *detected* but has no kernel, so that row is Unsupported there |
@@ -50,8 +50,8 @@ local memory, DRAM ↔ global memory.
 | `kernels/sme_compute.h` | SME ZA outer products (fp32/fp64/bf16/fp16/int8) + streaming-SVE vector chains. Gated on `__ARM_FEATURE_SME`; owns the one `#include <arm_sme.h>` |
 | `cpu_tu_registry.h` | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `clpeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
-| `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
+| `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels, reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or clpeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -147,8 +147,11 @@ TU tags (`cpu_tu_registry.h`):
 3. **CMake** — add a `clpeak_add_isa_tu(<tag> <flags>)` call, guarded by
    `check_cxx_compiler_flag`.
 4. **Dispatch** — a `#if CLPEAK_TU_<tag>` merge in `kernels()` (bandwidth) *and*
-   a push in `kernelMenu()` (with the feature predicate + canonical ISA label)
-   so the ISA shows up as its own compute test.
+   a push in `kernelMenu()` so the ISA shows up as its own compute test:
+   `if (<predicate>) add(m.<slot>, TU(<tag>)-><slot>, "<label>", "<feature>")`,
+   **not** `#if`-guarded. The predicate has to run in every build, so a build
+   whose compiler could not make the TU names the feature in the skip instead
+   of reporting that the CPU lacks it.
 
 ## Gotchas
 
