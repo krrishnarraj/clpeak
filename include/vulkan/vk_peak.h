@@ -220,6 +220,15 @@ public:
                              const VkSpecializationInfo *specInfo = nullptr,
                              uint32_t requiredSubgroupSize = 0);
 
+  // Whether createComputePipeline will pin a stage to this subgroup width
+  // rather than drop the request: size control on compute, and the width
+  // inside the device's range.
+  bool canPinSubgroupSize(uint32_t width) const
+  {
+    return width && info.subgroupSizeControl &&
+           width >= info.minSubgroupSize && width <= info.maxSubgroupSize;
+  }
+
   // Submit a command buffer and wait.  Returns the worst VkResult seen
   // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
   // out-of-spec drivers (e.g. Adreno/Turnip silently losing the device on

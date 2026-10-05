@@ -742,9 +742,7 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   // subgroup" silently runs several subgroups per group instead.
   VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT sgSizeCI = {};
   sgSizeCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
-  if (requiredSubgroupSize && info.subgroupSizeControl &&
-      requiredSubgroupSize >= info.minSubgroupSize &&
-      requiredSubgroupSize <= info.maxSubgroupSize)
+  if (canPinSubgroupSize(requiredSubgroupSize))
   {
     sgSizeCI.requiredSubgroupSize = requiredSubgroupSize;
     stageCI.pNext = &sgSizeCI;

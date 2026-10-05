@@ -221,32 +221,36 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
-
-  // Phase markers.  A driver that faults inside its own shader compiler or on
-  // submit takes the process with it, so the last line printed is the only
-  // evidence of where it went -- which of the two below appears last says
-  // whether pipeline creation or the dispatch was fatal.
-  auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
-                       uint32_t width, bool *built) -> float
+  auto timeShape = [&](const char *label, const uint32_t *spirv,
+                       size_t spirvSize, uint32_t width, bool *built) -> float
   {
     VkPipeline pipeline;
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                        pipeline, d.specInfo, width);
     // A pinned subgroup width is a preference, not a requirement: if the
-    // driver won't compile the stage at that width, run it however it likes
-    // rather than dropping the row.  Worth knowing about, though -- a coopmat
-    // shader that lands on several subgroups per work-group has every one of
-    // them recompute the same tile, so the reading comes out divided by that
-    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).  The half-width
-    // contender (below) is the exception: unpinned it would only time another
-    // case, so a refusal there just drops it.
-    if (!*built && width && width == subgroup)
+    // driver won't build the stage pinned, build it unpinned and let it
+    // choose rather than drop the row.  Worth knowing about, though -- a
+    // coopmat shader that lands on several subgroups per work-group has every
+    // one of them recompute the same tile, so the reading comes out divided
+    // by that factor (see coopmatRequiredSubgroupSize() in vk_peak.h).  The
+    // half-width contender (below) is the exception: unpinned it would only
+    // time another case, so a refusal there just drops it.
+    //
+    // Only where unpinned can differ, though: the pin has to have been
+    // applied (createComputePipeline drops one the device cannot take) and
+    // the device has to have another width to choose.  An Adreno 840 offers
+    // 64 alone, so retrying there built the same pipeline twice.  And a
+    // refusal of a pinned build does not say the width was refused -- only
+    // what the retry does says anything about that.
+    if (!*built && width == subgroup && dev.canPinSubgroupSize(width) &&
+        dev.info.minSubgroupSize < dev.info.maxSubgroupSize)
     {
-      CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
-                  "falling back to its own choice\n",
-                  d.resultTag, width);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
+      CLPEAK_VLOG("%s %s: the driver refused the pipeline pinned to subgroup "
+                  "%u and %s\n",
+                  d.resultTag, label, width,
+                  *built ? "built it unpinned" : "unpinned as well");
     }
     if (!*built)
       return -1.0f;
@@ -288,7 +292,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   for (const auto &v : variants)
   {
     bool built = false;
-    float timed = timeShape(v.spirv, v.spirvSize, subgroup, &built);
+    float timed = timeShape(v.label, v.spirv, v.spirvSize, subgroup, &built);
     if (!built)
     {
       test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
@@ -315,7 +319,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
         if (!widthRace.runs(f == 1))
           continue;
         bool altBuilt = false;
-        float altTimed = timeShape(v.altSpirv, v.altSpirvSize, altWidth[f], &altBuilt);
+        float altTimed = timeShape(v.label, v.altSpirv, v.altSpirvSize,
+                                   altWidth[f], &altBuilt);
         if (altBuilt && altTimed > 0.0f)
           altValue[f] = toValue(altTimed);
         else if (f == 1)
