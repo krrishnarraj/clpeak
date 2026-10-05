@@ -112,7 +112,11 @@ char *clpeak_copy_onnx_status_json(void)
         json += e.lib.named ? "true" : "false";
         json += ",\"registered\":";
         json += e.registered ? "true" : "false";
-        json += ",\"error\":\"" + jsonEscape(e.error) + "\"}";
+        json += ",\"error\":\"" + jsonEscape(e.error) + "\"";
+        json += ",\"replaces\":[";
+        for (size_t k = 0; k < e.replaces.size(); k++)
+            json += (k ? ",\"" : "\"") + jsonEscape(e.replaces[k]) + "\"";
+        json += "]}";
     }
     json += "]";
     json += ",\"winml\":{\"enabled\":";

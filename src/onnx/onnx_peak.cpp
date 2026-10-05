@@ -80,6 +80,8 @@ bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
 // off-chance (`named == false`) only under --verbose, where a registered
 // library is also confirmed with its path.  A registered library with no
 // device here, and an uncertified Windows ML provider, are verbose-only.
+// A Windows ML provider left out for a library added by hand is said out
+// loud: the catalog was asked for, and that provider of it is not there.
 static void pluginNotes(const OrtRuntime &rt,
                         std::vector<std::string> &loud,
                         std::vector<std::string> &quiet)
@@ -87,6 +89,9 @@ static void pluginNotes(const OrtRuntime &rt,
   const std::vector<onnx_ep_info_t> devices = onnxPluginDevices(rt);
   for (const auto &st : onnxEpLibraryStatus())
   {
+    for (const auto &p : st.replaces)
+      loud.push_back("Windows ML: the " + p + " execution provider is left out for the " +
+                     st.lib.name + " plugin library added by hand (" + st.lib.path + ")");
     if (!st.registered)
     {
       (st.lib.named ? loud : quiet)

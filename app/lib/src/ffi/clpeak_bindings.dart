@@ -231,6 +231,7 @@ class OnnxEpLibraryStatus {
     required this.named,
     required this.registered,
     required this.error,
+    this.replaces = const [],
   });
 
   final String name;
@@ -239,6 +240,10 @@ class OnnxEpLibraryStatus {
   final bool registered;
   final String error; // when !registered
 
+  /// The Windows ML providers left out for this library, which provides the
+  /// same one: `"<name> <version>"`.
+  final List<String> replaces;
+
   factory OnnxEpLibraryStatus.fromJson(Map<String, dynamic> m) =>
       OnnxEpLibraryStatus(
         name: m['name'] as String? ?? '',
@@ -246,6 +251,10 @@ class OnnxEpLibraryStatus {
         named: m['named'] as bool? ?? true,
         registered: m['registered'] as bool? ?? false,
         error: m['error'] as String? ?? '',
+        replaces: [
+          for (final r in (m['replaces'] as List<dynamic>? ?? const []))
+            r as String,
+        ],
       );
 }
 

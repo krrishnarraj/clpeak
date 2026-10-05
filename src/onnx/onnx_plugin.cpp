@@ -12,7 +12,6 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
-#include <set>
 #include <string>
 
 #ifdef _WIN32
@@ -36,13 +35,34 @@ std::mutex g_cfgMutex;
 std::vector<OnnxEpLibrary> g_libs;
 uint64_t g_generation = 1;
 
+// One library on the environment: how it fared, where it came from, and
+// the devices registering it added.  Those are the runtime's own
+// OrtEpDevices, owned by the registration until it is unregistered (the
+// list GetEpDevices returns is rebuilt then; the devices are not), so they
+// say exactly which library serves a device.  The provider name a device
+// reports does not: a library registers under whatever name it was given
+// (OpenVINO's ignores it), can serve more than one provider name
+// ("OpenVINOExecutionProvider.AUTO" beside "OpenVINOExecutionProvider"),
+// and two libraries can serve the same one.
+struct Registration
+{
+  OnnxEpLibraryStatus st;
+  bool catalog = false;                       // resolved by the Windows ML catalog
+  std::vector<const OrtEpDevice *> devices;   // in the runtime's order
+};
+
+// A provider the Windows ML catalog made ready, as a library to register.
+struct CatalogLibrary
+{
+  OnnxEpLibrary lib;
+  std::string version;   // the catalog's, for the status and notes
+};
+
 // What the environment has registered, and against which generation.
 std::mutex g_envMutex;
-std::vector<OnnxEpLibraryStatus> g_status;
-std::set<std::string> g_builtinEpNames;   // provider names listed before any plugin
-bool g_builtinCaptured = false;           // g_builtinEpNames holds g_statusEnv's
+std::vector<Registration> g_regs;         // the configured libraries, then the catalog's
 const OrtEnv *g_statusEnv = nullptr;
-uint64_t g_statusGeneration = 0;          // the configuration g_status answers for
+uint64_t g_statusGeneration = 0;          // the configuration g_regs answers for
 
 std::string describeType(OrtHardwareDeviceType t)
 {
@@ -124,52 +144,61 @@ const std::vector<OnnxEpLibrary> &onnxEpLibraries()
   return g_libs;
 }
 
-std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt)
+static std::vector<OnnxEpLibrary> configuredLibraries()
 {
-  std::vector<OnnxEpLibrary> libs;
-  {
-    std::lock_guard<std::mutex> lock(g_cfgMutex);
-    libs = g_libs;
-  }
-  if (!onnxWinmlEnabled())
-    return libs;
+  std::lock_guard<std::mutex> lock(g_cfgMutex);
+  return g_libs;
+}
 
-  // The catalog's providers join the configured ones.  A provider the
-  // catalog lists but could not make ready carries its reason in the
-  // resolution (reported by the status and the run notes) and registers
-  // nothing here.  One entry per registration name: a library named on the
-  // command line as well wins, since that path is the one asked for.
+// The providers the Windows ML catalog made ready, when it is on.  One it
+// lists but could not make ready carries its reason in the resolution
+// (reported by the status and the run notes) and registers nothing.
+static std::vector<CatalogLibrary> catalogLibraries(const OrtRuntime &rt)
+{
+  std::vector<CatalogLibrary> out;
+  if (!onnxWinmlEnabled())
+    return out;
   const OnnxWinmlResolution &res = onnxWinmlResolve(&rt, onnxWinmlPathHint());
   for (const auto &p : res.providers)
   {
     if (!p.ready || p.libraryPath.empty())
       continue;
-    bool dup = false;
-    for (const auto &l : libs)
-      if (l.name == p.name)
-        dup = true;
-    if (dup)
-      continue;
-    OnnxEpLibrary lib;
-    lib.name  = p.name;
-    lib.path  = p.libraryPath;
-    lib.named = true;
-    libs.push_back(std::move(lib));
+    CatalogLibrary c;
+    c.lib.name  = p.name;
+    c.lib.path  = p.libraryPath;
+    c.lib.named = true;
+    c.version   = p.version;
+    out.push_back(std::move(c));
   }
-  return libs;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
-// Register one library on `env`: its status, registered or the runtime's
-// reason.
-static OnnxEpLibraryStatus registerLibrary(const OrtRuntime &rt, OrtEnv *env,
-                                           const OnnxEpLibrary &lib)
+// The devices the environment lists now.
+static std::vector<const OrtEpDevice *> epDevices(const OrtRuntime &rt, OrtEnv *env)
 {
-  OnnxEpLibraryStatus st;
-  st.lib = lib;
+  const OrtEpDevice *const *devs = nullptr;
+  size_t n = 0;
+  if (OrtStatus *st = rt.api->GetEpDevices(env, &devs, &n))
+  {
+    CLPEAK_VLOG("onnx: GetEpDevices failed: %s\n", onnxStatusText(rt, st).c_str());
+    return {};
+  }
+  return std::vector<const OrtEpDevice *>(devs, devs + n);
+}
+
+// Register one library on `env`: its status, registered or the runtime's
+// reason, and the devices registering it added.
+static Registration registerLibrary(const OrtRuntime &rt, OrtEnv *env,
+                                    const OnnxEpLibrary &lib, bool catalog)
+{
+  Registration r;
+  r.st.lib  = lib;
+  r.catalog = catalog;
+  const std::vector<const OrtEpDevice *> before = epDevices(rt, env);
   OrtStatus *status = nullptr;
   {
     // A vendor DLL can print below any log level; the status keeps the reason.
@@ -194,106 +223,179 @@ static OnnxEpLibraryStatus registerLibrary(const OrtRuntime &rt, OrtEnv *env,
                                                        lib.path.c_str());
 #endif
   }
-  st.registered = (status == nullptr);
+  r.st.registered = (status == nullptr);
   if (status)
-    st.error = onnxStatusText(rt, status);
+    r.st.error = onnxStatusText(rt, status);
+  else
+    for (const OrtEpDevice *d : epDevices(rt, env))
+      if (std::find(before.begin(), before.end(), d) == before.end())
+        r.devices.push_back(d);
   CLPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(),
               lib.path.c_str(),
-              st.registered ? "registered" : st.error.c_str());
-  return st;
+              r.st.registered ? "registered" : r.st.error.c_str());
+  return r;
+}
+
+static void unregisterLibrary(const OrtRuntime &rt, OrtEnv *env, const Registration &r)
+{
+  if (!r.st.registered)
+    return;
+  OrtStatus *status = rt.api->UnregisterExecutionProviderLibrary(env, r.st.lib.name.c_str());
+  const std::string err = status ? onnxStatusText(rt, status) : std::string();
+  CLPEAK_VLOG("onnx: plugin library %s (%s): unregistered%s%s\n", r.st.lib.name.c_str(),
+              r.st.lib.path.c_str(), err.empty() ? "" : ": ", err.c_str());
+}
+
+static bool sameLibrary(const OnnxEpLibrary &a, const OnnxEpLibrary &b)
+{
+  return a.name == b.name && a.path == b.path;
 }
 
 void onnxSyncEpLibraries(const OrtRuntime &rt, OrtEnv *env)
 {
-  const std::vector<OnnxEpLibrary> libs = onnxEffectiveEpLibraries(rt);
+  std::vector<OnnxEpLibrary> libs;
+  uint64_t generation = 0;
+  {
+    std::lock_guard<std::mutex> cfg(g_cfgMutex);
+    libs       = g_libs;
+    generation = g_generation;
+  }
 
-  std::lock_guard<std::mutex> lock(g_envMutex);
+  std::unique_lock<std::mutex> lock(g_envMutex);
   if (g_statusEnv != env)
   {
-    g_status.clear();
-    g_builtinEpNames.clear();
-    g_builtinCaptured = false;
+    g_regs.clear();
     g_statusEnv = env;
   }
-  g_statusGeneration = onnxEpConfigGeneration();
 
   if (rt.apiVersion < kMinPluginApiVersion)
   {
-    g_status.clear();
-    for (const auto &lib : libs)
+    std::vector<OnnxEpLibrary> all = libs;
+    lock.unlock();   // resolving can install a provider (below)
+    for (const auto &c : catalogLibraries(rt))
+      all.push_back(c.lib);
+    lock.lock();
+    g_regs.clear();
+    for (const auto &lib : all)
     {
-      OnnxEpLibraryStatus st;
-      st.lib   = lib;
-      st.error = "plugin execution providers need ONNX Runtime 1." +
-                 std::to_string(kMinPluginApiVersion) +
-                 " or newer; this runtime is " + rt.versionString;
-      g_status.push_back(std::move(st));
+      Registration r;
+      r.st.lib   = lib;
+      r.st.error = "plugin execution providers need ONNX Runtime 1." +
+                   std::to_string(kMinPluginApiVersion) +
+                   " or newer; this runtime is " + rt.versionString;
+      g_regs.push_back(std::move(r));
     }
+    g_statusGeneration = generation;
     return;
+  }
+
+  // The configured libraries go in ahead of the catalog's, as they do in a
+  // new process -- which every desktop enumeration and run is.  Whether one
+  // stands for a catalog provider (below) is decided by the providers it
+  // serves, which only registering it tells; and a dependency is resolved
+  // by module name, so one a catalog provider had already loaded is the one
+  // it would get, whatever folder it came from.  A library new to this
+  // sync therefore sends the catalog's registrations out first, and those
+  // still wanted come back after it.
+  bool newConfigured = false;
+  for (const auto &lib : libs)
+  {
+    bool had = false;
+    for (const auto &r : g_regs)
+      had = had || (!r.catalog && sameLibrary(r.st.lib, lib));
+    newConfigured = newConfigured || !had;
   }
 
   // What stays as it is: the same registration name from the same file,
   // with the answer it had -- registered, or refused (asking again would
   // only repeat it; removing and re-adding a library does ask again).
   // Everything else registered on the environment is unregistered, which
-  // unloads it; the Windows ML providers, fixed for the process, are
-  // never among them.
-  auto wanted = [&](const OnnxEpLibraryStatus &st) {
+  // unloads it.
+  std::vector<Registration> kept;
+  for (auto &r : g_regs)
+  {
+    bool want = r.catalog && !newConfigured;
     for (const auto &lib : libs)
-      if (lib.name == st.lib.name && lib.path == st.lib.path)
+      want = want || (!r.catalog && sameLibrary(r.st.lib, lib));
+    if (want)
+      kept.push_back(std::move(r));
+    else
+      unregisterLibrary(rt, env, r);
+  }
+  g_regs.clear();
+
+  auto takeKept = [&](const OnnxEpLibrary &lib, bool catalog, Registration &out) {
+    for (auto it = kept.begin(); it != kept.end(); ++it)
+      if (it->catalog == catalog && sameLibrary(it->st.lib, lib))
+      {
+        out = std::move(*it);
+        kept.erase(it);
         return true;
+      }
     return false;
   };
-  std::vector<OnnxEpLibraryStatus> kept;
-  for (auto &st : g_status)
-  {
-    if (wanted(st))
-    {
-      kept.push_back(std::move(st));
-      continue;
-    }
-    if (!st.registered)
-      continue;
-    OrtStatus *status = rt.api->UnregisterExecutionProviderLibrary(env, st.lib.name.c_str());
-    const std::string err = status ? onnxStatusText(rt, status) : std::string();
-    CLPEAK_VLOG("onnx: plugin library %s (%s): unregistered%s%s\n", st.lib.name.c_str(),
-                st.lib.path.c_str(), err.empty() ? "" : ": ", err.c_str());
-  }
-
-  // The provider names present before any plugin: the built-in providers
-  // that implement device enumeration (the CPU provider always, DirectML
-  // on Windows, ...).  A name that appears only after registering belongs
-  // to a plugin.  Names, not pointers: the runtime may rebuild its list.
-  // Taken once per environment, before its first plugin registers.
-  if (!g_builtinCaptured && !libs.empty())
-  {
-    const OrtEpDevice *const *devs = nullptr;
-    size_t n = 0;
-    if (OrtStatus *st = rt.api->GetEpDevices(env, &devs, &n))
-      rt.api->ReleaseStatus(st);
-    else
-      for (size_t i = 0; i < n; i++)
-        if (const char *name = rt.api->EpDevice_EpName(devs[i]))
-          g_builtinEpNames.insert(name);
-    g_builtinCaptured = true;
-  }
 
   // In the configured order, the kept answers and the new ones.
-  g_status.clear();
   for (const auto &lib : libs)
   {
-    bool found = false;
-    for (auto &st : kept)
-      if (st.lib.name == lib.name && st.lib.path == lib.path)
-      {
-        st.lib.named = lib.named;
-        g_status.push_back(st);
-        found = true;
-        break;
-      }
-    if (!found)
-      g_status.push_back(registerLibrary(rt, env, lib));
+    Registration r;
+    if (takeKept(lib, false, r))
+    {
+      r.st.lib.named = lib.named;
+      r.st.replaces.clear();
+      g_regs.push_back(std::move(r));
+    }
+    else
+      g_regs.push_back(registerLibrary(rt, env, lib, false));
   }
+  const size_t configured = g_regs.size();
+
+  // Resolving the catalog can install a provider from the Store, which
+  // takes minutes the first time: not with the status locked.  Nothing
+  // reads the half-synced set meanwhile -- the status is not answered for
+  // until the generation is set below, and everything else that reads it
+  // goes through onnxEnv(), which this sync is holding.
+  lock.unlock();
+  const std::vector<CatalogLibrary> catalog = catalogLibraries(rt);
+  lock.lock();
+
+  // The catalog's providers, in its order, except one a configured library
+  // stands for: registered under its name, or serving a provider of that
+  // name.  The library named is the one asked for (the catalog fills in
+  // what was not), and two builds of one provider in a process share what
+  // loaded first: their dependencies, resolved by module name, and the
+  // environment's shared allocator, keyed by memory-info name -- ORT skips
+  // creating the second copy's (seen with two builds of its example plugin).
+  for (const auto &c : catalog)
+  {
+    size_t by = configured;
+    for (size_t i = 0; i < configured && by == configured; i++)
+    {
+      if (g_regs[i].st.lib.name == c.lib.name)
+        by = i;
+      for (const OrtEpDevice *d : g_regs[i].devices)
+      {
+        const char *name = rt.api->EpDevice_EpName(d);
+        if (name && c.lib.name == name)
+          by = i;
+      }
+    }
+    Registration r;
+    const bool had = takeKept(c.lib, true, r);
+    if (by < configured)
+    {
+      g_regs[by].st.replaces.push_back(c.lib.name +
+                                       (c.version.empty() ? "" : " " + c.version));
+      if (had)
+        unregisterLibrary(rt, env, r);
+      continue;
+    }
+    g_regs.push_back(had ? std::move(r) : registerLibrary(rt, env, c.lib, true));
+  }
+  // The catalog cannot change within a process, so nothing should be left.
+  for (const auto &r : kept)
+    unregisterLibrary(rt, env, r);
+  g_statusGeneration = generation;
 }
 
 std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus()
@@ -304,15 +406,18 @@ std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus()
   std::lock_guard<std::mutex> lock(g_envMutex);
   if (g_statusGeneration != onnxEpConfigGeneration())
     return {};
-  return g_status;
+  std::vector<OnnxEpLibraryStatus> out;
+  for (const auto &r : g_regs)
+    out.push_back(r.st);
+  return out;
 }
 
 std::string onnxEpLibraryPath(const std::string &registrationName)
 {
   std::lock_guard<std::mutex> lock(g_envMutex);
-  for (const auto &st : g_status)
-    if (st.registered && st.lib.name == registrationName)
-      return st.lib.path;
+  for (const auto &r : g_regs)
+    if (r.st.registered && r.st.lib.name == registrationName)
+      return r.st.lib.path;
   return std::string();
 }
 
@@ -325,7 +430,9 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
   std::vector<onnx_ep_info_t> out;
   if (rt.apiVersion < kMinPluginApiVersion)
     return out;
-  if (onnxEffectiveEpLibraries(rt).empty())
+  // Whether anything is wanted, without resolving the catalog: that is the
+  // sync's to do, after the configured libraries have registered.
+  if (configuredLibraries().empty() && !onnxWinmlEnabled())
   {
     // A set that just became empty leaves the environment's registrations
     // standing until something syncs it -- and with every probe memoized
@@ -349,50 +456,28 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
     return out;
 
   std::lock_guard<std::mutex> lock(g_envMutex);
-  bool any = false;
-  for (const auto &st : g_status)
-    any = any || st.registered;
-  if (!any || g_statusEnv != env)
+  if (g_statusEnv != env)
     return out;
 
-  const OrtEpDevice *const *devs = nullptr;
-  size_t n = 0;
-  if (OrtStatus *st = rt.api->GetEpDevices(env, &devs, &n))
-  {
-    CLPEAK_VLOG("onnx: GetEpDevices failed: %s\n", onnxStatusText(rt, st).c_str());
-    return out;
-  }
-
-  // Which registration a provider name belongs to.  The name a plugin's
-  // factory reports is usually its registration name (QNN requires it);
-  // a lone registered library owns whatever else appeared.
-  std::string soleLibrary;
-  int registered = 0;
-  for (const auto &st : g_status)
-    if (st.registered)
-    {
-      registered++;
-      soleLibrary = st.lib.name;
-    }
-  if (registered != 1)
-    soleLibrary.clear();
+  // Each device under the registration that added it, in the order the
+  // libraries were configured (then the catalog's).
+  std::vector<std::pair<const OrtEpDevice *, std::string>> devices;
+  for (const auto &r : g_regs)
+    for (const OrtEpDevice *d : r.devices)
+      devices.emplace_back(d, r.st.lib.name);
 
   std::map<std::string, int> seen;   // providerKey + type -> count, for labels
-  for (size_t i = 0; i < n; i++)
+  for (const auto &dl : devices)
   {
-    const OrtEpDevice *d = devs[i];
+    const OrtEpDevice *d = dl.first;
     const char *epName = rt.api->EpDevice_EpName(d);
-    if (!epName || !*epName || g_builtinEpNames.count(epName))
+    if (!epName || !*epName)
       continue;
 
     onnx_ep_info_t ep;
     ep.providerKey = epName;
     ep.epDevicePtr = d;
-    for (const auto &st : g_status)
-      if (st.registered && st.lib.name == ep.providerKey)
-        ep.library = st.lib.name;
-    if (ep.library.empty())
-      ep.library = soleLibrary;
+    ep.library     = dl.second;
 
     const OrtHardwareDevice *hw = rt.api->EpDevice_Device(d);
     const OrtHardwareDeviceType hwType =

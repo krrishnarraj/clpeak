@@ -203,6 +203,10 @@ struct OnnxEpLibraryStatus
   OnnxEpLibrary lib;
   bool registered = false;
   std::string error; // when !registered
+  // The Windows ML providers left out because this library, added by hand,
+  // provides the same execution provider or took its registration name:
+  // each "<name> <version>", the version when the catalog gave one.
+  std::vector<std::string> replaces;
 };
 std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus();
 

@@ -184,17 +184,22 @@ place:
   bumps `onnxEpConfigGeneration()` -- `onnxSyncEpLibraries()` unregisters
   (and so unloads) what went and registers what came, and a library that
   stays keeps its answer, registered or refused.  The environment itself is
-  never rebuilt (above), so the Windows ML providers, fixed with the
-  runtime setup, are never touched by a change of the manual set.  Every
-  session must be gone by then: a library a session uses cannot be
-  unregistered.  The status a settings screen reads
+  never rebuilt (above).  The configured libraries register ahead of the
+  Windows ML providers, so a library newly added between runs sends the
+  catalog's registrations out first and they come back after it, minus any
+  it stands for (below).  Every session must be gone by then: a library a
+  session uses cannot be unregistered.  The status a settings screen reads
   (`onnxEpLibraryStatus()`) is what the environment registered and is empty
   after a change until the next enumeration; and a set that became empty is
   synced on the next enumeration even though nothing else would ask, or the
   old registrations would stand behind a status that no longer names them.
 - **The devices come from the runtime, not from a table.**  A plugin's
-  devices are the `OrtEpDevice`s whose provider name was not there before
-  registering (names, not pointers: the runtime may rebuild its list).
+  devices are the `OrtEpDevice`s registering its library added -- pointers,
+  which the registration owns until it is unregistered, so each device's
+  `library` is exact.  The provider name a device reports does not say
+  which library serves it: a library registers under whatever name it is
+  given (OpenVINO's ignores it), can serve more than one provider name, and
+  two libraries can serve the same one.
   Each becomes one `onnx_ep_info_t` with `epDevicePtr` set, the hardware
   type from `HardwareDevice_Type` (NPU → Accelerator, GPU, CPU), the vendor
   and metadata the runtime reports, and `epDevice` a label ("NPU", "GPU#2")
@@ -243,11 +248,18 @@ executable -- and every certified provider it makes ready joins the
 plugin set under the catalog's own name (which is the registration name
 Qualcomm's plugin requires, "QNNExecutionProvider").  Uncertified
 providers are listed in the status and not registered, as Windows ML
-itself does.  The DLL is not shipped with clpeak: `tools/fetch_winml.ps1`
-downloads Microsoft's NuGet package and stages its `runtimes/win-<arch>/
-native/` DLLs under `build/winml/<arch>/`, and with a directory given to
-`--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll` beside the
-catalog becomes the runtime (`winmlDefaultRuntime()` in
+itself does.  **A library added by hand stands for the catalog's copy of
+its provider**: a catalog provider is left out when a configured library
+took its name or serves a provider of that name, whatever name it was
+registered under -- so the CLI and the GUI, whose registration dialog
+suggests the catalog's names, list the same devices (`onnxSyncEpLibraries`
+says why one copy).  The replacing library's status carries `replaces`;
+the listing's info line and a run's notes say it, and the GUI shows it on
+that library's row.  The DLL is not shipped with clpeak:
+`tools/fetch_winml.ps1` downloads Microsoft's NuGet package and stages its
+`runtimes/win-<arch>/native/` DLLs under `build/winml/<arch>/`, and with a
+directory given to `--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll`
+beside the catalog becomes the runtime (`winmlDefaultRuntime()` in
 `onnx_runtime.cpp`) -- which is why the catalog is part of the runtime
 setup.  `DirectML.dll` is staged too: that runtime delay-loads
 it the moment its DirectML provider is attached, which the viability probe

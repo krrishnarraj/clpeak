@@ -87,7 +87,7 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // State of the ONNX Runtime, for a settings screen to report back with:
 //   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
 //    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
-//                    "error":str}],
+//                    "error":str,"replaces":[str]}],
 //    "winml":{"enabled":bool,"path":str,"error":str},
 //    "pendingRuntime"?:{"path":str,"winml":{"enabled":bool,"path":str}}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
@@ -96,7 +96,9 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // statically linked).  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
 // `epLibraries` is what the environment registered, so a library set since
-// the last enumeration is absent until the next one; `winml.path` is
+// the last enumeration is absent until the next one; an entry's `replaces`
+// names the Windows ML providers ("<name> <version>") left out because that
+// library, added by hand, provides the same one.  `winml.path` is
 // the catalog DLL that answered and `winml.error` why it did not.  When
 // enabled but nothing has resolved the catalog yet both are empty --
 // pending until the next enumeration or run, like `epLibraries`.
