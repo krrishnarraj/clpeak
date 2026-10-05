@@ -110,19 +110,39 @@ void OnnxGraph::output(const std::string &name, int dtype, const OnnxDims &dims)
   m_outputs += g.b;
 }
 
+// The ModelProto header -- ir_version, producer_name and the graph field's
+// tag and length, 21 bytes at most -- is written in front of the
+// initializers by build(), so they never move to another buffer.
+constexpr size_t kHeaderRoom = 32;
+
+OnnxGraph::OnnxGraph() : m_inits(kHeaderRoom, '\0') {}
+
 void OnnxGraph::initializer(const std::string &name, int dtype,
                             const OnnxDims &dims, const std::string &raw)
 {
-  Pb t;
+  // Written straight into the graph rather than built as a message of its
+  // own and copied in, so raw_data is copied once.
+  Pb t;                             // everything but raw_data's bytes
   for (int64_t d : dims)
     t.vint(1, (uint64_t)d);         // TensorProto.dims
   t.vint(2, (uint64_t)dtype);       // data_type
   t.str(8, name);                   // name
-  t.str(9, raw);                    // raw_data
+  t.tag(9, 2);                      // raw_data, length-delimited
+  t.varint(raw.size());
 
   Pb g;
-  g.str(5, t.b);                    // GraphProto.initializer
+  g.tag(5, 2);                      // GraphProto.initializer
+  g.varint(t.b.size() + raw.size());
   m_inits += g.b;
+  m_inits += t.b;
+  m_inits += raw;
+}
+
+void OnnxGraph::reserveInitializers(uint64_t bytes)
+{
+  // The slack covers each initializer's own fields and what build() appends
+  // after them: the nodes, the inputs and outputs, the opset.
+  m_inits.reserve(m_inits.size() + (size_t)bytes + (64u << 10));
 }
 
 void OnnxGraph::node(const std::string &opType,
@@ -239,17 +259,21 @@ void OnnxGraph::reduceRows(const std::string &in, const std::string &out,
   reduceMax(in, out, {0});
 }
 
-std::string OnnxGraph::build() const
+std::string OnnxGraph::build()
 {
-  // A block's initializers run to hundreds of megabytes, so the graph body is
-  // never materialised as its own string: its length is computed up front and
-  // the pieces are appended straight into the output.  Assembling graph-then-
-  // model the obvious way would hold three copies of the weights at once.
+  // A chain's initializers run to a gigabyte, so they are never copied: the
+  // model is assembled in their own storage, the header written into the
+  // room kept in front of them and the rest of the graph appended after.
+  // Field order means nothing to protobuf, so the graph carries its
+  // initializers first.  Copied out into a model of its own, the weights sat
+  // in memory three times over -- the caller's operands, here, and the model
+  // -- and on a Threadripper's CPU provider that, not ONNX Runtime, set a
+  // gemm rung's peak.
   Pb gname;
   gname.str(2, "clpeak");           // GraphProto.name
 
-  const size_t graphSize = m_nodes.size() + gname.b.size() + m_inits.size() +
-                           m_inputs.size() + m_outputs.size();
+  const size_t graphSize = (m_inits.size() - kHeaderRoom) + m_nodes.size() +
+                           gname.b.size() + m_inputs.size() + m_outputs.size();
 
   Pb opset;
   opset.vint(2, (uint64_t)m_opset); // OperatorSetIdProto.version (default domain)
@@ -264,19 +288,27 @@ std::string OnnxGraph::build() const
                            : (m_opset >= 19) ? 9
                                              : 8;
 
-  Pb m;
-  m.b.reserve(graphSize + 64);
-  m.vint(1, irVersion);             // ModelProto.ir_version
-  m.str(2, "clpeak");               // producer_name
-  m.tag(7, 2);                      // ModelProto.graph, length-delimited
-  m.varint(graphSize);
-  m.b += m_nodes;
-  m.b += gname.b;
-  m.b += m_inits;
-  m.b += m_inputs;
-  m.b += m_outputs;
-  m.str(8, opset.b);                // opset_import
-  return m.b;
+  Pb head;
+  head.vint(1, irVersion);          // ModelProto.ir_version
+  head.str(2, "clpeak");            // producer_name
+  head.tag(7, 2);                   // ModelProto.graph, length-delimited
+  head.varint(graphSize);
+  Pb tail;
+  tail.str(8, opset.b);             // opset_import
+
+  // Right-aligned in the room, the unused front dropped -- a move of the
+  // buffer's contents within itself, not a second buffer.
+  const size_t unused = kHeaderRoom - head.b.size();
+  std::memcpy(&m_inits[unused], head.b.data(), head.b.size());
+  m_inits.reserve(m_inits.size() + m_nodes.size() + gname.b.size() + m_inputs.size() +
+                  m_outputs.size() + tail.b.size());
+  m_inits.erase(0, unused);
+  m_inits += m_nodes;
+  m_inits += gname.b;
+  m_inits += m_inputs;
+  m_inits += m_outputs;
+  m_inits += tail.b;
+  return std::move(m_inits);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +319,7 @@ std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                             const std::string &weightRaw)
 {
   OnnxGraph g;
+  g.reserveInitializers(weightRaw.size());
   g.setOpset(onnxOpsetForDtype(dtype));
   g.input("A", dtype, {M, K});
   g.initializer("B", dtype, {K, N}, weightRaw);
@@ -468,6 +501,8 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
+  g.reserveInitializers(aPacked.size() + aBlockScales.size() + bPacked.size() +
+                        bBlockScales.size());
   g.setOpset(onnxOpsetForDtype(ONNX_DT_FLOAT4E2M1));
   g.input("S", ONNX_DT_FLOAT, {});
 
@@ -506,6 +541,13 @@ std::string onnxResidentWeightOnlyMatMulModel(
     const OnnxLiveSeed *seed)
 {
   OnnxGraph g;
+  uint64_t bytes = aRaw.size() + wPacked.size() + wScalesRaw.size();
+  if (chain)
+    for (const auto &l : *chain)
+      bytes += l.first.size() + l.second.size();
+  if (seed)
+    bytes += seed->proj.size() + seed->projScales.size();
+  g.reserveInitializers(bytes);
   // The blocked DequantizeLinear (block_size) is opset 21 whatever the
   // weight type: int4 and float4 arrive there anyway, int8 does not.
   g.setOpset(std::max(onnxOpsetForDtype(wDtype), 21));
@@ -574,6 +616,11 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
                                      const OnnxLiveSeed *seed)
 {
   OnnxGraph g;
+  uint64_t bytes = aRaw.size() + bRaw.size() + (seed ? seed->proj.size() : 0);
+  if (chain)
+    for (const std::string &w : *chain)
+      bytes += w.size();
+  g.reserveInitializers(bytes);
   g.setOpset(onnxOpsetForDtype(dtype));
   const bool live = (shape == OnnxLiveShape::OperandScaled);
   const bool seeded = live && seed;
@@ -661,6 +708,13 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
 
   OnnxGraph g;
+  // The float-scaled form holds A as fp32 values rather than codes.
+  uint64_t bytes = (shape == OnnxLiveShape::OperandScaled ? 4 : 1) * aRaw.size() + bRaw.size() +
+                   (seed ? seed->proj.size() : 0);
+  if (chain)
+    for (const std::string &w : *chain)
+      bytes += w.size();
+  g.reserveInitializers(bytes);
   // Every quantization scale is a build-time constant, and the runtime
   // dependency enters elsewhere.  A runtime scale looks tidier, since it keeps
   // the dequantize out of constant folding's reach without disabling anything,
@@ -819,6 +873,7 @@ std::string onnxResidentConvModel(int64_t channels, int64_t spatial,
   const int64_t inPerGroup = channels / group;
 
   OnnxGraph g;
+  g.reserveInitializers(xRaw.size() + wRaw.size());
   g.setOpset(onnxOpsetForDtype(dtype));
   g.input("S", dtype, {});
   g.initializer("X0", dtype, {1, channels, spatial, spatial}, xRaw);
@@ -846,6 +901,7 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
                                         OnnxReduceView view)
 {
   OnnxGraph g;
+  g.reserveInitializers(xRaw.size());
   // The runtime scalar scales the resident tensor *before* the operation.
   // Scaling the reduced result instead leaves everything up to the reduction
   // a constant expression, and a vendor compiler evaluates it at build time

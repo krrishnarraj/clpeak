@@ -112,22 +112,24 @@ namespace
   // against 1.47 -- at the price of iterations of up to half a minute there.
   constexpr double kMaxIterUs = 2.0e6; // one multiply, predicted
 
-  // Every layer's weights together, capped at a quarter of physical memory.
-  // A fixed ceiling here would be a crash on a phone and a needless limit on
-  // a workstation; see clpeak::memoryBudget.
-  //
-  // And capped again by protobuf.  An ONNX model is a protobuf message, whose
-  // serialized size cannot exceed 2 GiB, and the weights live inside it as
-  // initializers -- so a size the machine has memory for can still be
-  // unbuildable.  fp32 at 16384 needs exactly 2 GiB of operands and ORT answers
-  // "Model data size exceeds maximum supported size (2GB)", which is a property
-  // of the format rather than of the device and does not belong in a memory
+  // Everything a rung holds at once (onnxHeldBytes: the operands, and every
+  // layer's output), capped at a quarter of physical memory -- a fixed
+  // ceiling here would be a crash on a phone and a needless limit on a
+  // workstation; see clpeak::memoryBudget -- and at 8 GB, which still admits
+  // the 8192-wide integer and 4-bit chains CPU providers peak at.  On a
+  // Threadripper's CPU provider the 4096-wide fp32 chain, 1 GB of weights,
+  // peaked 3.2 GB above them, and a count of the operands alone admitted it
+  // on the 15.8 GB phone the same rung through LiteRT had killed.
+  static uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
+
+  // And the operands alone are capped by protobuf.  An ONNX model is a
+  // protobuf message, whose serialized size cannot exceed 2 GiB, and the
+  // weights live inside it as initializers -- so a size the machine has
+  // memory for can still be unbuildable.  Operands of 2 GiB draw ORT's "Model
+  // data size exceeds maximum supported size (2GB)", which is a property of
+  // the format rather than of the device and does not belong in a memory
   // budget.  The slack leaves room for the graph around the weights.
-  static uint64_t maxWeightBytes()
-  {
-    const uint64_t protobufCeiling = (2ull << 30) - (64ull << 20);
-    return std::min(clpeak::memoryBudget(3ull << 30), protobufCeiling);
-  }
+  constexpr uint64_t kProtobufCeiling = (2ull << 30) - (64ull << 20);
 
   // Per-size budget for the timed phase.  Lower than the 5 s a single-size test
   // would use, since the ladder measures several.
@@ -259,12 +261,22 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // as fp32 -- and on a phone an under-estimate here is an out-of-memory
       // kill rather than a slow row.
       const uint64_t weightBytes = operandBytes(v, D, shape, layers);
-      if (weightBytes > maxWeightBytes())
+      const uint64_t held = onnxHeldBytes(
+          ep, weightBytes, (uint64_t)(layers + 1) * layerOutputBytes(v, D));
+      const uint64_t budget = maxRungBytes();
+      if (weightBytes > kProtobufCeiling || held > budget)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
-                    "stopping\n",
-                    ep.providerKey.c_str(), tag,
-                    (long long)D, (unsigned long long)(weightBytes >> 20));
+        if (weightBytes > kProtobufCeiling)
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
+                      "past protobuf's 2 GB, stopping\n",
+                      ep.providerKey.c_str(), tag,
+                      (long long)D, (unsigned long long)(weightBytes >> 20));
+        else
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of a %llu MB "
+                      "budget, stopping\n",
+                      ep.providerKey.c_str(), tag, (long long)D,
+                      (unsigned long long)(held >> 20),
+                      (unsigned long long)(budget >> 20));
         endedOnWork = true;
         break;
       }

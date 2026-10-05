@@ -311,16 +311,19 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     }
 
-    // Three times the weight matrix is what exists at peak: the raw values and
-    // the model embedding them overlap while the model is built, and the model
-    // and ORT's copy overlap while the session is created.  The first three
-    // rungs are otherwise unconditional, and on a phone an over-optimistic
-    // estimate is a kill rather than a failed allocation.
-    if ((uint64_t)s.dim * (uint64_t)s.dim * 2ull * 3ull >
-        clpeak::memoryBudget(2ull << 30))
+    // The weight matrix is held as any constant is (onnxHeldBytes); the
+    // vector it multiplies is nothing beside it.  The first three rungs are
+    // otherwise unconditional, and on a phone an over-optimistic estimate is
+    // a kill rather than a failed allocation.
+    const uint64_t held =
+        onnxHeldBytes(ep, (uint64_t)s.dim * (uint64_t)s.dim * 2ull, 0);
+    const uint64_t budget = clpeak::memoryBudget(2ull << 30);
+    if (held > budget)
     {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s exceeds this machine's memory "
-                  "budget, stopping\n", ep.providerKey.c_str(), s.label);
+      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s needs %llu MB of a %llu MB budget, "
+                  "stopping\n", ep.providerKey.c_str(), s.label,
+                  (unsigned long long)(held >> 20),
+                  (unsigned long long)(budget >> 20));
       break;
     }
 

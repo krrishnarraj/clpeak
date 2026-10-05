@@ -84,6 +84,11 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v);
 uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
                       int layers = 1);
 
+// One D-by-D product as the graph holds it between layers: codes for the QDQ
+// rows that fuse, fp32 for the ones that cannot and for NVFP4's single
+// product, fp16 for the weight-only rows, the row's own type otherwise.
+uint64_t layerOutputBytes(const Variant &v, int64_t D);
+
 // Whether a (shape, layers) build enters through a seed (OnnxLiveSeed): chains
 // on the live shapes do; a single multiply and a result-scaled chain hold the
 // activations whole.

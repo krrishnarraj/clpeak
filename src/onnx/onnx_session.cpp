@@ -49,6 +49,20 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
   return std::string();
 }
 
+bool onnxProviderHasOwnMemory(const onnx_ep_info_t &ep)
+{
+  return ep.providerKey == "TensorrtExecutionProvider" ||
+         ep.providerKey == "NvTensorRTRTXExecutionProvider" ||
+         ep.providerKey == "CUDAExecutionProvider" ||
+         ep.providerKey == "MIGraphXExecutionProvider" ||
+         ep.providerKey == "ROCMExecutionProvider";
+}
+
+uint64_t onnxHeldBytes(const onnx_ep_info_t &ep, uint64_t constants, uint64_t activations)
+{
+  return 3 * constants + (onnxProviderHasOwnMemory(ep) ? 0 : activations);
+}
+
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
                                     bool qdq, int64_t blockSize)
 {

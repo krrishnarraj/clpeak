@@ -34,7 +34,7 @@ backend.
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
-| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned |
+| `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxHeldBytes()` — what a session holds, every memory gate's count |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
@@ -1691,15 +1691,19 @@ protects a small one. **This backend runs on phones, not only on desktops with
 an NPU**, which is what makes every one of these checks load-bearing rather
 than defensive.
 
-**Count the copies, not the tensor.** A graph's weights exist about three times
-over at peak: the raw values and the model embedding them overlap while the
-model is built, and the model and ORT's own copy overlap while the session is
-created. A check against the tensor alone under-estimates by 3x, and on a phone
-that is the difference between a skipped row and a killed process. It matters
-most where a rung list is *fixed* rather than swept — `onnx-activation` and
-`onnx-tensor-bw` both always attempt 8 / 32 / 128 MB, so their budget check is
-the only thing that declines the large one, and both multiply by three before
-asking.
+**Count what a session holds, not the tensor** (`onnxHeldBytes()`). A graph's
+constants exist three times over at peak — the model's bytes, ORT's parsed
+copy and initializers, and the provider's own — and the intermediate tensors
+come on top, every one of them, since the runtimes keep each rather than
+reusing two; a provider with memory of its own (`onnxProviderHasOwnMemory()`)
+keeps those there. A 4096-wide fp32 chain holds 1 GB of weights and peaks
+3-4 GB above them on a CPU provider, so a check against the operands alone
+admits it on a 16 GB phone that kills the process for it. The writer is part
+of the count: `OnnxGraph::build()` assembles the model in its initializers'
+storage, so building one holds the caller's operands and the model and nothing
+more. It matters most where a rung list is *fixed* rather than swept —
+`onnx-activation` and `onnx-tensor-bw` both always attempt 8 / 32 / 128 MB, so
+their budget check is the only thing that declines the large one.
 
 Where a size *is* fixed, it is fixed because it defines the workload rather
 than because it was convenient, and it is meant to stay fixed forever:

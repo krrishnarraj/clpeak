@@ -107,6 +107,8 @@ enum class OnnxReduceView
 class OnnxGraph
 {
 public:
+  OnnxGraph();
+
   void input(const std::string &name, int dtype, const OnnxDims &dims);
   void output(const std::string &name, int dtype, const OnnxDims &dims);
 
@@ -114,6 +116,12 @@ public:
   // data, exactly as ONNX raw_data expects.
   void initializer(const std::string &name, int dtype, const OnnxDims &dims,
                    const std::string &raw);
+
+  // Room for `bytes` more of initializer data, so a large graph's constants
+  // are stored once: appended into storage that outgrows its buffer, a
+  // gigabyte of weights briefly sits in the old buffer beside the new one.
+  // Capacity only -- what the model holds is still what is added.
+  void reserveInitializers(uint64_t bytes);
 
   void node(const std::string &opType,
             const std::vector<std::string> &inputs,
@@ -143,10 +151,16 @@ public:
   // Convenience for the int64 shape tensors Reshape takes as an input.
   void shapeInitializer(const std::string &name, const OnnxDims &shape);
 
-  std::string build() const;   // ModelProto bytes
+  // ModelProto bytes.  The model is assembled in the initializers' own
+  // storage rather than copied out of it, which consumes the graph: call it
+  // once, last.
+  std::string build();
 
 private:
-  std::string m_nodes, m_inits, m_inputs, m_outputs;
+  std::string m_nodes, m_inputs, m_outputs;
+  // GraphProto.initializer entries, behind room for the model's header
+  // (kHeaderRoom in onnx_model.cpp), which build() writes there.
+  std::string m_inits;
   int         m_nodeCount = 0;
   int         m_opset     = 17;
 };

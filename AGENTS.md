@@ -98,6 +98,7 @@ run and the result document all share.
 - **Emitting a diagnostic, or reading one back?** → `CLPEAK_LOG` / `CLPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
+- **Gating a test's sizes on memory?** → `clpeak::memoryBudget()` (`include/common/common.h`) for the budget, and the backend's count of what a session holds (`litertHeldBytes()`, `coremlHeldBytes()`, `onnxHeldBytes()`): every copy of the constants and every intermediate tensor, not the tensor
 - **Withholding a graph a runtime crashes on rather than declines?** → the narrowest existing fence that covers it (a format everywhere: `onnxProviderFenceReason()`, `litertPlanFor()`; one test's graph: `variantFence` / `decodeFence` in that test), the fault in the row's reason, and an entry in `NOTES.md` saying what lifting it takes
 
 ## AGENTS.md System

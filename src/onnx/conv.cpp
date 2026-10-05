@@ -45,7 +45,10 @@ namespace
   // same self-scaling bounds the matmul ladder uses, so a faster device climbs
   // further without the number changing meaning.
   constexpr int64_t kMaxSpatial = 4096;
-  static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+  // Everything a rung holds at once (onnxHeldBytes), capped at a quarter of
+  // physical memory and at 4 GB: three copies of a 1024-square fp32 map,
+  // the largest a provider with memory of its own is given.
+  static uint64_t maxRungBytes() { return clpeak::memoryBudget(4ull << 30); }
 
   constexpr double kMaxIterUs = 2.0e6;
   constexpr unsigned int kSizeBudgetUs = 2000000;
@@ -332,16 +335,26 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         if (clpeak::cancelRequested())
           break;
+        // The feature map and the filter are constants (onnxHeldBytes); the
+        // scaled copy of the map and the result, a quarter of it at stride
+        // 2, are activations.
         const uint64_t elemBytes = (uint64_t)onnxElemBytes(dt.dtype, 1);
-        const uint64_t tensorBytes =
+        const uint64_t map =
             (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
-        if (tensorBytes > maxTensorBytes())
+        const uint64_t filter = (uint64_t)kChannels *
+                                (uint64_t)(v.depthwise ? 1 : kChannels) *
+                                (uint64_t)(v.kernel * v.kernel) * elemBytes;
+        const uint64_t bytes = onnxHeldBytes(
+            ep, map + filter, map + map / (uint64_t)(v.stride * v.stride));
+        const uint64_t budget = maxRungBytes();
+        if (bytes > budget)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB per tensor, "
-                      "stopping\n",
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB of a %llu MB "
+                      "budget, stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
                       (long long)sp, (long long)sp,
-                      (unsigned long long)(tensorBytes >> 20));
+                      (unsigned long long)(bytes >> 20),
+                      (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)

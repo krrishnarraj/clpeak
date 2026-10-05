@@ -188,6 +188,18 @@ uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
   return act + (uint64_t)layers * weights(D);
 }
 
+uint64_t layerOutputBytes(const Variant &v, int64_t D)
+{
+  const uint64_t elems = (uint64_t)D * (uint64_t)D;
+  // A QDQ type QLinearMatMul cannot carry keeps its products as the fp32 a
+  // DequantizeLinear hands the multiply.
+  if (v.nvfp4 || (v.qdq && !onnxQdqFusionIsLegal(v.dtype)))
+    return elems * 4;
+  if (v.blockSize > 0)
+    return elems * 2;
+  return onnxElemBytes(v.dtype, (int64_t)elems);
+}
+
 size_t dtypeSize(int dtype)
 {
   switch (dtype)

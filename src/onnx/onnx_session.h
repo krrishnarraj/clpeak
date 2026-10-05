@@ -170,6 +170,22 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype);
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
                                     bool qdq, int64_t blockSize);
 
+// What one session over a graph of resident constants takes of the host's
+// memory at its peak, for a test's memory gate: three copies of the
+// constants -- the model's bytes, ONNX Runtime's parsed copy and its
+// initializers, and the provider's own (MLAS's prepacked weights; an NPU's,
+// which on a phone is the same memory) -- and every intermediate tensor, which
+// the runtimes keep rather than reusing two (src/litert/litert_bench.h).  A
+// provider with memory of its own (onnxProviderHasOwnMemory) keeps the
+// tensors there.  The writer builds the model in place, so its own copies
+// stop at the caller's operands and the model (onnx_model.cpp, build()).
+uint64_t onnxHeldBytes(const onnx_ep_info_t &ep, uint64_t constants, uint64_t activations);
+
+// Whether `ep` computes in memory of its own -- a discrete GPU's -- rather
+// than the host's: the providers that only run on one.  DirectML and WebGPU
+// also drive integrated GPUs, so they are counted as the host's.
+bool onnxProviderHasOwnMemory(const onnx_ep_info_t &ep);
+
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
 // provider accepts clpeak's options for this target (an OpenVINO target
