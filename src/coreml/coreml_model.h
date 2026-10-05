@@ -140,6 +140,13 @@ public:
   void lutToDense(const Out &out, int nbits, const std::string &packedIndices,
                   const std::string &lutRaw);
 
+  // Room for `bytes` more of tensor data in the weight blob, so a large one
+  // is allocated once: grown by appending, a 2 GB blob held twice that while
+  // it was built (the buffer it outgrew beside the new one, which macOS kept
+  // resident after the free).  Capacity only -- what the blob holds is still
+  // what is appended.
+  void reserveWeights(uint64_t bytes);
+
   // ---- Serialization -----------------------------------------------------
   std::string buildModel() const;             // Model.proto bytes
   const std::string &weightBytes() const { return m_blob; }

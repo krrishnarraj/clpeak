@@ -89,10 +89,11 @@ constexpr double kMaxIterUs = 2.0e6;
 // Per-size budget for the timed phase.
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
-// Everything the chain holds, capped at a quarter of physical memory: a
-// fixed ceiling would be a crash on a phone and a needless limit on a Mac
-// Studio.
-uint64_t maxOperandBytes() { return clpeak::memoryBudget(3ull << 30); }
+// Everything a rung holds at once (rungBytes), capped at a quarter of
+// physical memory -- a fixed ceiling would be a crash on a phone and a
+// needless limit on a Mac Studio -- and at 8 GB, which still admits the
+// 8192-wide fp16 chain the GPU peaks at.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
 
 struct Variant
 {
@@ -165,13 +166,16 @@ std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2
   return s + ".";
 }
 
-// What the chain holds: the seed and the weights that widen it, then every
-// layer's weights.
-uint64_t operandBytes(CoremlWeight w, int64_t D)
+// The chain's constants -- the seed and the weights that widen it, then
+// every layer's weights -- held as coremlHeldBytes says, and every layer's
+// output.
+uint64_t rungBytes(CoremlWeight w, int64_t D)
 {
   const int64_t sw = std::min(kSeedWidth, D);
-  return coremlElemBytes(coremlActDtype(w), D * sw) + coremlWeightBytes(w, sw, D) +
-         (uint64_t)kChainLayers * coremlWeightBytes(w, D, D);
+  const int act = coremlActDtype(w);
+  const uint64_t constants = coremlElemBytes(act, D * sw) + coremlWeightBytes(w, sw, D) +
+                             (uint64_t)kChainLayers * coremlWeightBytes(w, D, D);
+  return coremlHeldBytes(constants, (uint64_t)(kChainLayers + 1) * coremlElemBytes(act, D * D));
 }
 
 } // namespace
@@ -253,12 +257,12 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       if (clpeak::cancelRequested())
         break;
 
-      const uint64_t bytes = operandBytes(v.w, D);
-      if (bytes > maxOperandBytes())
+      const uint64_t bytes = rungBytes(v.w, D), budget = maxRungBytes();
+      if (bytes > budget)
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of operands, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D,
-                    (unsigned long long)(bytes >> 20));
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
+                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
+                    (unsigned long long)(budget >> 20));
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;

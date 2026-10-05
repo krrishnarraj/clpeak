@@ -33,7 +33,10 @@ constexpr int kMaxStrikes = 2;
 constexpr double kMaxIterUs = 2.0e6;
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+// Everything a rung holds at once (coremlHeldBytes), capped at a quarter of
+// physical memory and at 3 GB, which still admits the 1024-square fp16 map
+// the GPU's depthwise row is fastest at.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(3ull << 30); }
 
 struct DType
 {
@@ -124,12 +127,19 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
       {
         if (clpeak::cancelRequested())
           break;
-        // The feature map, held twice (the constant and the scaled copy).
-        const uint64_t bytes = 2ull * (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
-        if (bytes > maxTensorBytes())
+        // The feature map and the filter are constants (coremlHeldBytes);
+        // the scaled copy of the map and the result, a quarter of it at
+        // stride 2, are activations.
+        const uint64_t map = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
+        const uint64_t filter = (uint64_t)kChannels * (uint64_t)(kChannels / group) *
+                                (uint64_t)(v.kernel * v.kernel) * elemBytes;
+        const uint64_t bytes = coremlHeldBytes(map + filter, map + map / (uint64_t)(v.stride * v.stride));
+        const uint64_t budget = maxRungBytes();
+        if (bytes > budget)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB, stopping\n", dev.displayName.c_str(),
-                      row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20));
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
+                      (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)

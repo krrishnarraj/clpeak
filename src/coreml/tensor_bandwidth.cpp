@@ -177,8 +177,9 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
       break;
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
-    // The weights exist twice while the model is built and written.
-    if (bytes * 2 > clpeak::memoryBudget(3ull << 30))
+    // The weights are held as any constant is (coremlHeldBytes); the
+    // vector they multiply is nothing beside them.
+    if (coremlHeldBytes(bytes, 0) > clpeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
         test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note);

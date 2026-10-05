@@ -294,6 +294,12 @@ CoremlProgram::CoremlProgram(int specVersion) : m_spec(specVersion)
   std::memcpy(&m_blob[4], &version, 4);
 }
 
+void CoremlProgram::reserveWeights(uint64_t bytes)
+{
+  // Each blob also takes 64 bytes of metadata and up to 63 of alignment.
+  m_blob.reserve(m_blob.size() + (size_t)(bytes + bytes / 64) + (64u << 10));
+}
+
 void CoremlProgram::input(const std::string &name, int dtype, const CoremlDims &dims)
 {
   m_inputs.push_back({name, dtype, dims});
@@ -1093,6 +1099,8 @@ CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t se
   auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
   auto layerSeed = [](int l) { return 0x85a308d3u + 0x9e3779b9u * (uint32_t)l; };
   const uint32_t kSeedProj = 0x3c6ef372u;
+  p.reserveWeights(coremlElemBytes(act, D * sw) + coremlWeightBytes(w, sw, D) +
+                   (uint64_t)layers * coremlWeightBytes(w, D, D));
 
   p.input("s", ioDtype, {1});
   p.constTensor("X0", act, {D, sw}, coremlFillFloats(act, D * sw, 0x243f6a88u));
@@ -1206,6 +1214,7 @@ CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
   // Uniform over +/-sqrt(3/d) so the result keeps the vector's magnitude: a
   // d-deep fp16 dot product of larger values would saturate.
   const float lim = std::sqrt(3.0f / (float)d);
+  p.reserveWeights(coremlElemBytes(CML_FP16, d * cols));
   p.input("x", CML_FP16, {1, d});
   p.constTensor("W", CML_FP16, {d, cols}, coremlFillFloats(CML_FP16, d * cols, seed, 2.0f * lim));
   p.op("matmul",
@@ -1223,6 +1232,8 @@ CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
   CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
   const int64_t inPerGroup = channels / group;
   const int64_t outSide = spatial / stride;
+  p.reserveWeights(coremlElemBytes(dtype, channels * spatial * spatial) +
+                   coremlElemBytes(dtype, channels * inPerGroup * kernel * kernel));
   p.input("s", dtype, {1});
   p.constTensor("X0", dtype, {1, channels, spatial, spatial},
                 coremlFillFloats(dtype, channels * spatial * spatial, 0x9e3779b9u));

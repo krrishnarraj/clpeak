@@ -23,6 +23,18 @@
 #include <string>
 #include <vector>
 
+// What one session of a program over resident constants holds at once, for
+// a test's memory gate: two copies of the constants -- the program's weight
+// blob, alive until the session has compiled and loaded it, and the compute
+// unit's own; Core ML maps the compiled weights from disk, and the Neural
+// Engine's compiler runs in a process of its own, so there is no third --
+// and every intermediate tensor, which the runtimes behind the other
+// backends keep rather than reusing two (src/litert/litert_bench.h).
+inline uint64_t coremlHeldBytes(uint64_t constants, uint64_t activations)
+{
+  return 2 * constants + activations;
+}
+
 struct CoremlMeasurement
 {
   double meanUs = -1.0;     // mean per prediction; negative on failure
