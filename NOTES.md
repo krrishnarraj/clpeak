@@ -215,11 +215,13 @@ full account of each.
 
 - **Gate**: `f16AccumulatorFence()` in `src/vulkan/coopmat.cpp`, on
   `VK_DRIVER_ID_QUALCOMM_PROPRIETARY` (`vk_device_info_t::driverID`).
-- **Withheld**: the `coopmat` row `fp16 f16acc` (fp16 x fp16 + fp16).  The
-  other rows are still put to the driver, which answered for them in the
-  isolation below: it builds the fp32 tile and declines the fp16 (fp32
-  total) and int8 ones with `VK_ERROR_UNKNOWN`, the fp16 one logging
-  "Cannot find dst function body".
+- **Withheld**: the `coopmat` row `fp16 f16acc` (fp16 x fp16 + fp16), at
+  every tile -- the smaller ones it advertises (64x32x16, 64x16x16) carry
+  the same `OpPhi`, and the coopmat tile fallback moves on from a refusal,
+  not a crash.  The other rows are still put to the driver: on the 840 it
+  builds and runs `fp32`, and declines `int8`'s 64x64x32 tile, which sends
+  that row down to the smaller int8 tiles it advertises.  It advertises no
+  fp16 x fp16 + fp32 tile, so `fp16` is unsupported without being asked.
 - **Fault**: `vkCreateComputePipelines` ends the process with a SIGSEGV
   (SEGV_MAPERR at 0x8, a null pointer) in the driver's shader compiler,
   `libllvm-qgl.so` +0xcbc240, under `runCoopMatrix`.  The backtrace does

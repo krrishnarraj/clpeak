@@ -25,13 +25,12 @@ struct BackendInventory; // forward decl
 #define VK_HAS_ANY_COOPMAT 1
 #endif
 
-// One cooperative-matrix tile (subgroup scope) selected for a given dtype.
-// M/N/K are whatever the driver advertised via
+// One cooperative-matrix tile (subgroup scope) the driver advertised for a
+// given dtype.  M/N/K are whatever it reported via
 // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR -- the shaders take these
 // as specialization constants, so a single SPIR-V module runs any advertised
 // shape (NVIDIA 8-bit types use K=32, fp16/bf16 use K=16, etc.).
 struct coopmat_tile_t {
-  bool     supported = false;
   uint32_t M = 0, N = 0, K = 0;
   // Subgroup width this tile was advertised at, or 0 when the device only has
   // the width-agnostic KHR query and we have no way to know.  The KHR list is
@@ -40,6 +39,23 @@ struct coopmat_tile_t {
   // VK_EXT_cooperative_matrix_maintenance1 in vk_peak.cpp.
   uint32_t subgroupSize = 0;
 };
+
+// Every tile advertised for one input/accumulator combination, best first
+// (rankTiles in vk_peak.cpp).  The first is the one that runs; the rest are
+// what runCoopMatrix falls back to, in order, when the driver refuses to
+// build it.  Empty: none advertised.
+using coopmat_tiles_t = std::vector<coopmat_tile_t>;
+
+// "64x32x32", plus the width when the tile was advertised at one -- how a
+// tile is named in notes and logs.
+static inline std::string coopmatTileName(const coopmat_tile_t &t)
+{
+  std::string name = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" +
+                     std::to_string(t.K);
+  if (t.subgroupSize)
+    name += " at subgroup " + std::to_string(t.subgroupSize);
+  return name;
+}
 
 // Vulkan device info (mirrors OpenCL device_info_t for display)
 struct vk_device_info_t {
@@ -99,23 +115,23 @@ struct vk_device_info_t {
   uint32_t maxComputeWorkgroupSubgroups; // 0 = no subgroup-size control
   bool     subgroupSizeControl;   // requiredSubgroupSize usable on compute
 
-  // Canonical cooperative-matrix tile selected per dtype from
-  // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.  We don't assume a
-  // fixed shape: whatever subgroup-scope tile the driver advertises for an
-  // input/accumulator combination is recorded here, and the coopmat shaders
-  // take M/N/K as specialization constants so one SPIR-V module runs it.
-  // This is how fp8/int8 land on NVIDIA's K=32 tiles while fp16/bf16 stay at
-  // K=16 -- no per-K shader variants needed.  .supported == false means no
-  // matching subgroup-scope property was advertised.
-  coopmat_tile_t coopmatFP32;     // fp32 A/B,    fp32 C
-  coopmat_tile_t coopmatFP16;     // fp16 A/B,    fp32 C
-  coopmat_tile_t coopmatFP16F16;  // fp16 A/B,    fp16 C -- a separate property,
+  // The cooperative-matrix tiles advertised per dtype by
+  // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, best first.  We don't
+  // assume a fixed shape: every subgroup-scope tile the driver advertises for
+  // an input/accumulator combination is recorded here, and the coopmat
+  // shaders take M/N/K as specialization constants so one SPIR-V module runs
+  // any of them.  This is how fp8/int8 land on NVIDIA's K=32 tiles while
+  // fp16/bf16 stay at K=16 -- no per-K shader variants needed.  Empty means
+  // no matching subgroup-scope property was advertised.
+  coopmat_tiles_t coopmatFP32;    // fp32 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP16;    // fp16 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP16F16; // fp16 A/B,    fp16 C -- a separate property,
                                   // and on GeForce a separate rate: consumer
                                   // parts run fp32 accumulation at half speed
-  coopmat_tile_t coopmatBF16;     // bf16 A/B,    fp32 C
-  coopmat_tile_t coopmatFP8E4M3;  // fp8 E4M3 A/B, fp32 C
-  coopmat_tile_t coopmatFP8E5M2;  // fp8 E5M2 A/B, fp32 C
-  coopmat_tile_t coopmatINT8;     // int8 A/B,    int32 C
+  coopmat_tiles_t coopmatBF16;    // bf16 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP8E4M3; // fp8 E4M3 A/B, fp32 C
+  coopmat_tiles_t coopmatFP8E5M2; // fp8 E5M2 A/B, fp32 C
+  coopmat_tiles_t coopmatINT8;    // int8 A/B,    int32 C
 };
 
 // Dispatch-sizing helper used by runComputeKernel and several benchmark
@@ -346,6 +362,11 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
+  // Single-variant path only.  When set, a pipeline the driver refuses to
+  // build is reported here and no row is emitted, because the caller has
+  // another shape to offer -- runCoopMatrix walks the tiles the driver
+  // advertised.  nullptr: a refusal is the row's error.
+  bool *refused;
 };
 
 // Top-level Vulkan benchmark runner

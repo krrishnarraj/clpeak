@@ -41,22 +41,28 @@ static const char *coopmatComponentName(VkComponentTypeKHR t)
   }
 }
 
-// One line per dtype for the --verbose dump: which tile pickTile settled on,
-// and the subgroup width it will actually run at.  "advertised at N" means the
-// device named that width for this tile; "width unknown" means only the
-// width-agnostic KHR query was available and the default is a guess.
-static void logPickedTile(const char *label, const coopmat_tile_t &t,
-                          const vk_device_info_t &info)
+// One line per dtype for the --verbose dump: the tile rankTiles put first, the
+// subgroup width it will actually run at, and the tiles behind it that a
+// refusal to build falls back to.  "advertised at N" means the device named
+// that width for this tile; "width unknown" means only the width-agnostic KHR
+// query was available and the default is a guess.
+static void logPickedTiles(const char *label, const coopmat_tiles_t &tiles,
+                           const vk_device_info_t &info)
 {
-  if (!t.supported)
+  if (tiles.empty())
   {
     CLPEAK_VLOG("  picked %-8s (none)\n", label);
     return;
   }
-  CLPEAK_VLOG("  picked %-8s %ux%ux%u, running subgroup %u (%s)\n", label,
+  const coopmat_tile_t &t = tiles.front();
+  std::string then;
+  for (size_t i = 1; i < tiles.size(); i++)
+    then += (i == 1 ? "; then " : ", ") + coopmatTileName(tiles[i]);
+  CLPEAK_VLOG("  picked %-8s %ux%ux%u, running subgroup %u (%s)%s\n", label,
               t.M, t.N, t.K,
               coopmatSubgroupWidth(info, t.subgroupSize),
-              t.subgroupSize ? "advertised at this width" : "width unknown");
+              t.subgroupSize ? "advertised at this width" : "width unknown",
+              then.c_str());
 }
 #endif
 
@@ -455,19 +461,24 @@ int vkPeak::runAll()
         }
       }
 
-      // Pick one tile per input/accumulator dtype.  We don't assume a shape --
-      // among the advertised tiles prefer a square 16x16 face (fewer, larger
-      // MMAs per output element), then the largest volume (M*N*K) to minimize
-      // loop overhead.  Whatever K the hardware wants (16 for fp16/bf16, 32 for
-      // 8-bit types, ...) flows through to the shader as a specialization
-      // constant, and so does the width.
+      // Rank every tile advertised for one input/accumulator dtype, best
+      // first.  We don't assume a shape -- among the advertised tiles prefer
+      // a square 16x16 face (fewer, larger MMAs per output element), then the
+      // largest volume (M*N*K) to minimize loop overhead.  Whatever K the
+      // hardware wants (16 for fp16/bf16, 32 for 8-bit types, ...) flows
+      // through to the shader as a specialization constant, and so does the
+      // width.
       //
       // Among widths for the same shape, prefer the device's native subgroup
       // size, then the widest available: native is what every device measured
       // so far wants, and falling to a narrower one is what lets a tile run at
       // all when the driver does not offer it at the native width.
-      auto pickTile = [&](VkComponentTypeKHR ab, VkComponentTypeKHR acc) {
-        coopmat_tile_t best;
+      //
+      // The first tile is the one that runs.  The rest are kept because a
+      // driver can advertise a tile and then refuse to build it -- an Adreno
+      // 840 declines int8's 64x64x32 -- and runCoopMatrix then falls back
+      // through them in this order.  Equal ranks keep the order advertised.
+      auto rankTiles = [&](VkComponentTypeKHR ab, VkComponentTypeKHR acc) {
         auto rank = [&](const coopmat_tile_t &t) {
           bool square16 = (t.M == 16 && t.N == 16);
           bool native   = (t.subgroupSize == dev.info.subgroupSize);
@@ -476,31 +487,42 @@ int vkPeak::runAll()
                                  native ? 0 : 1,
                                  -(int64_t)t.subgroupSize);
         };
+        coopmat_tiles_t tiles;
         for (auto &p : cands)
         {
           if (p.a != ab || p.b != ab) continue;
           if (p.c != acc || p.d != acc) continue;
-          coopmat_tile_t cand{true, p.M, p.N, p.K, p.width};
-          if (!best.supported || rank(cand) < rank(best)) best = cand;
+          coopmat_tile_t t{p.M, p.N, p.K, p.width};
+          // The same tile twice is one question asked twice.
+          bool seen = std::any_of(tiles.begin(), tiles.end(),
+                                  [&](const coopmat_tile_t &u) {
+                                    return u.M == t.M && u.N == t.N && u.K == t.K &&
+                                           u.subgroupSize == t.subgroupSize;
+                                  });
+          if (!seen) tiles.push_back(t);
         }
-        return best;
+        std::stable_sort(tiles.begin(), tiles.end(),
+                         [&](const coopmat_tile_t &x, const coopmat_tile_t &y) {
+                           return rank(x) < rank(y);
+                         });
+        return tiles;
       };
 
-      dev.info.coopmatFP32    = pickTile(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
-      dev.info.coopmatFP16    = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
-      dev.info.coopmatFP16F16 = pickTile(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT16_KHR);
-      dev.info.coopmatBF16    = pickTile(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
-      dev.info.coopmatFP8E4M3 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
-      dev.info.coopmatFP8E5M2 = pickTile(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
-      dev.info.coopmatINT8    = pickTile(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
+      dev.info.coopmatFP32    = rankTiles(VK_COMPONENT_TYPE_FLOAT32_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP16    = rankTiles(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP16F16 = rankTiles(VK_COMPONENT_TYPE_FLOAT16_KHR,     VK_COMPONENT_TYPE_FLOAT16_KHR);
+      dev.info.coopmatBF16    = rankTiles(VK_COMPONENT_TYPE_BFLOAT16_KHR,    VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP8E4M3 = rankTiles(VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatFP8E5M2 = rankTiles(VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR);
+      dev.info.coopmatINT8    = rankTiles(VK_COMPONENT_TYPE_SINT8_KHR,       VK_COMPONENT_TYPE_SINT32_KHR);
 
-      logPickedTile("fp32",    dev.info.coopmatFP32,    dev.info);
-      logPickedTile("fp16",    dev.info.coopmatFP16,    dev.info);
-      logPickedTile("fp16+f16", dev.info.coopmatFP16F16, dev.info);
-      logPickedTile("bf16",    dev.info.coopmatBF16,    dev.info);
-      logPickedTile("fp8e4m3", dev.info.coopmatFP8E4M3, dev.info);
-      logPickedTile("fp8e5m2", dev.info.coopmatFP8E5M2, dev.info);
-      logPickedTile("int8",    dev.info.coopmatINT8,    dev.info);
+      logPickedTiles("fp32",    dev.info.coopmatFP32,    dev.info);
+      logPickedTiles("fp16",    dev.info.coopmatFP16,    dev.info);
+      logPickedTiles("fp16+f16", dev.info.coopmatFP16F16, dev.info);
+      logPickedTiles("bf16",    dev.info.coopmatBF16,    dev.info);
+      logPickedTiles("fp8e4m3", dev.info.coopmatFP8E4M3, dev.info);
+      logPickedTiles("fp8e5m2", dev.info.coopmatFP8E5M2, dev.info);
+      logPickedTiles("int8",    dev.info.coopmatINT8,    dev.info);
 
       CLPEAK_VLOG("  subgroup: device reports %u, range %u..%u, size control %s\n",
                   dev.info.subgroupSize, dev.info.minSubgroupSize,

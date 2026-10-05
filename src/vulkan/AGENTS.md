@@ -59,7 +59,11 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   named by its data type alone;
   the driver-advertised tile goes in its NOTE, appended by `bindCoopTile`,
   because a shape in the name would differ between a device that measured the
-  reading and one that skipped it — the same reading under two ids.  The prose
+  reading and one that skipped it — the same reading under two ids.  A data
+  type runs at the first advertised tile the driver will build: `rankTiles`
+  (`vk_peak.cpp`) keeps every tile, best first, and a refusal to build
+  (`vk_compute_desc_t::refused`, set by `runComputeKernel`) moves
+  `runCoopMatrix` on to the next; the note names any it refused.  The prose
   goes on `metricDescription` — the test's own description covers the family.
   int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.

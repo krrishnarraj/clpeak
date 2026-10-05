@@ -295,8 +295,13 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     float timed = timeShape(v.label, v.spirv, v.spirvSize, subgroup, &built);
     if (!built)
     {
-      test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
-                emitOpts(v.description));
+      // A caller with another shape to offer -- coopmat's next tile -- takes
+      // the refusal itself; otherwise it is this reading's error.
+      if (d.refused)
+        *d.refused = true;
+      else
+        test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
+                  emitOpts(v.description));
       continue;
     }
     if (timed <= 0.0f)
