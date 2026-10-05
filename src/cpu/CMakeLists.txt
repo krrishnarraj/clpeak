@@ -155,11 +155,12 @@ set(CLPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. CLPEAK_CORE_ONLY for MSVC
 
 # A -march/-m flag check alone doesn't prove a bleeding-edge TU can build: SME
 # also needs <arm_sme.h> + the ACLE streaming/ZA keywords (clang >= ~18), FP8 the
-# fpm_t/mfloat8 intrinsics (clang >= ~20), and on x86 the driver can accept an
-# -mamx-* flag whose instruction the *assembler* then refuses -- that is how
-# AMX-TF32 broke gcc + binutils 2.47 builds (#193, #195) before Intel deleted the
-# ISA.  These probes compile the exact constructs the kernels use, so such a
-# toolchain skips the TU (-> Unsupported rows) instead of failing the build.
+# fpm_t/mfloat8 intrinsics and their ACLE macro (clang >= 21), and on x86 the
+# driver can accept an -mamx-* flag whose instruction the *assembler* then
+# refuses -- that is how AMX-TF32 broke gcc + binutils 2.47 builds (#193, #195)
+# before Intel deleted the ISA.  These probes compile the exact constructs the
+# kernels use, so such a toolchain skips the TU (-> Unsupported rows) instead of
+# failing the build.
 # Compile+link only: they never run, so no AMX XSTATE permission is involved.
 #
 # When adding one, mind what goes into CMAKE_REQUIRED_FLAGS.  It is a space-
@@ -209,12 +210,22 @@ function(clpeak_check_sme_f64 outvar)
     set(${outvar} ${${outvar}} PARENT_SCOPE)
 endfunction()
 
+# The fp8 probes also demand the ACLE macro each kernel is #if-gated on, so they
+# never pass for a TU that would compile empty.  Clang 20 and the NDK r30 clang
+# (an LLVM 21 snapshot) ship the intrinsics without __ARM_FEATURE_FP8DOT4, and a
+# CLPEAK_SME_F64F64-style define would not rescue them: both predate LLVM
+# dropping repeated FPMR writes (r30 issues msr FPMR before every fdot), so the
+# row would measure FPMR writes, not FDOT.  Upstream clang 21 has the macro and
+# the FPMR fix.
 function(clpeak_check_neon_fp8 outvar)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
     list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_neon.h>
+        #if !defined(__ARM_FEATURE_FP8DOT4)
+        #error no __ARM_FEATURE_FP8DOT4
+        #endif
         static double f() {
           fpm_t fpm = __arm_fpm_init();
           mfloat8x16_t a = vreinterpretq_mf8_u8(vdupq_n_u8(0x38));
@@ -233,6 +244,9 @@ function(clpeak_check_sve_fp8 outvar)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sve.h>
+        #if !defined(__ARM_FEATURE_FP8DOT4) || !defined(__ARM_FEATURE_SVE2)
+        #error no __ARM_FEATURE_FP8DOT4 / __ARM_FEATURE_SVE2
+        #endif
         static double f() {
           fpm_t fpm = __arm_fpm_init();
           svbool_t pg = svptrue_b32();

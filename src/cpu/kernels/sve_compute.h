@@ -334,15 +334,15 @@ static double runSveMatInt8Chain(uint64_t outer)
 #endif // __ARM_FEATURE_SVE_MATMUL_INT8
 
 // SVE2 FP8: 4-way fp8 dot -> fp32 lanes (FEAT_FP8DOT4 SVE form; NVIDIA Vera).
-// Same FPMR/fpm_t setup as the NEON fp8 kernel in lowp_compute.h; the msr is
-// hoisted out of the loop (verified via objdump).
+// Same FPMR/fpm_t setup, loop shape (one msr FPMR per pass of the unrolled inner
+// loop) and macro-only gate as the NEON fp8 kernel in lowp_compute.h.
 #if defined(__ARM_FEATURE_FP8DOT4) && defined(__ARM_FEATURE_SVE2)
 #define CPU_HAS_SVE_FP8DP_KERNEL 1
 static double runSveFp8DpChain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b32();
   const fpm_t fpm = __arm_fpm_init();
-  const svmfloat8_t a = svreinterpret_mf8_u8(svdup_u8(0x38));  // 0.5 in e4m3
+  const svmfloat8_t a = svreinterpret_mf8_u8(svdup_u8(0x38));  // 0.5 in e5m2
   const svmfloat8_t b = a;
 #define DECL(i) svfloat32_t acc##i = svdup_f32(0.0f);
   SVE_REP16(DECL)

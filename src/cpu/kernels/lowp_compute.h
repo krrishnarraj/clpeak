@@ -359,11 +359,15 @@ static double runInt16DpChain(uint64_t outer)
 
 // ---- FP8 dot product (ARM FEAT_FP8DOT4) --------------------------------------
 // Native fp8 4-way dot -> fp32 (FDOT), first shipped by NVIDIA Vera.  The fpm_t
-// operand programs the FPMR format register; the compiler hoists the msr out of
-// the loop (verified), so the hot loop is back-to-back fdot.  Inputs are a
-// nonzero constant (0x38 = 0.5 in e4m3); throughput is format-independent, and
-// like the int8/bf16 dot chains the intrinsic is opaque enough that the
-// accumulate loop isn't scalar-evolved -- re-verify with objdump on new clangs.
+// operand programs the FPMR format register.  Clang 21 writes it once per pass
+// of the unrolled inner loop, then issues FP8_NACC x CPU_UNROLL_K back-to-back
+// fdot (verified; the msr is not hoisted out of the loop).  The clangs without
+// the ACLE macro below set it before every fdot, so the CMake probe demands the
+// macro (see src/cpu/CMakeLists.txt).  Inputs are the nonzero constant 0x38
+// (0.5 in e5m2, the format __arm_fpm_init() selects); throughput is
+// format-independent, and like the int8/bf16 dot chains the intrinsic is opaque
+// enough that the accumulate loop isn't scalar-evolved -- re-verify with
+// objdump on new clangs.
 #if defined(__ARM_FEATURE_FP8DOT4)
 #define CPU_HAS_FP8DP_KERNEL 1
 static constexpr int FP8_NACC = 16, FP8_OPS_PER_INSTR = 32;  // 4 lanes x (4 mul + 4 add)
