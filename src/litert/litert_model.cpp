@@ -936,7 +936,6 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), M * K) + litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
@@ -967,8 +966,6 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
   Recipe r;
   r.halfRounded = p.halfRounded;
   const int64_t sw = std::min(seedWidth, D);
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), D * sw) + litertWeightBytes(p, D, sw) +
-                   (uint64_t)layers * litertWeightBytes(p, D, D));
   const bool integer = isInteger(p.act);
   const int abits = bitsOf(p.act);
   const int qmax = integer ? qmaxOf(p.act) : 0;
@@ -1073,7 +1070,6 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const float wScale = isInteger(p.weight) ? litertWeightScale(bitsOf(p.weight)) : 1.0f;
@@ -1107,7 +1103,6 @@ TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t 
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float xScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant xq = actQuant(p, xScale);
@@ -1128,7 +1123,6 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), rows * cols));
   const std::vector<int32_t> shape = {1, (int32_t)rows, (int32_t)cols};
   // Magnitude 4: softmax and the normalisation need a spread to work on.
   const int x0 = r.actConstant(p, shape, "X0", rows, cols, 0x6a09e667u, 4.0f);
@@ -1288,7 +1282,6 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), channels * spatial * spatial));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
@@ -1399,12 +1392,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   fp.weightBlock = 0;
   fp.dynamicQuant = false;
 
-  const TfType stored = litertConstantType(fp);   // the float constants' stored type
   const int64_t sw = sh.seedWidth;
-  r.m.reserveBytes(4 * litertWeightBytes(p, d, d) + 2 * litertWeightBytes(p, ffn, d) +
-                   litertWeightBytes(p, d, ffn) +
-                   (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : stored, H * ctx * Dh) : 0) +
-                   litertElemBytes(stored, sw > 0 ? (S + d) * sw : S * d));
 
   auto tensor = [&](const std::vector<int32_t> &shape, const std::string &name) {
     return r.m.addTensor(0, shape, act, name, 0);

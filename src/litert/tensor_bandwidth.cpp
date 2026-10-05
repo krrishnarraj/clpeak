@@ -147,8 +147,9 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
     // every accelerator (the GPU's stores them as half under its fp16
     // policy, and the model now carries them as half too).
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
-    // The weights exist in the model and again in the accelerator's copy.
-    const uint64_t peak = litertWeightBytes(plan, s.dim, s.dim) + bytes;
+    // The weights are held as any constant is (litertHeldBytes); the
+    // vector they multiply is nothing beside them.
+    const uint64_t peak = litertHeldBytes(litertWeightBytes(plan, s.dim, s.dim), 0);
     if (peak > clpeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)

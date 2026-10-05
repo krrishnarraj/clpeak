@@ -94,18 +94,19 @@ constexpr int64_t kFloorDim = 64;
 // cost, before it counts as having computed anything.
 constexpr double kFoldWorkFloor = 0.15;
 
-// Everything a rung holds at once, capped at a quarter of physical memory
-// (a fixed ceiling would be a crash on a phone and a needless limit on a
-// workstation): the model's own copy of the seed and every layer's weights
-// in their stored types, the accelerator's packed copy of the weights, and a
-// layer's input and output.
-uint64_t maxRungBytes() { return clpeak::memoryBudget(3ull << 30); }
+// Everything a rung holds at once (litertHeldBytes: the seed and every
+// layer's weights, and every layer's output), capped at a quarter of
+// physical memory (a fixed ceiling would be a crash on a phone and a
+// needless limit on a workstation) and at 8 GB, which still admits the
+// 8192-wide integer rungs XNNPACK and the Metal accelerator peak at.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
 
 uint64_t rungBytes(const LitertPlan &p, int64_t D)
 {
   const int64_t sw = std::min(kSeedWidth, D);
-  const uint64_t w = litertWeightBytes(p, D, sw) + (uint64_t)kChainLayers * litertWeightBytes(p, D, D);
-  return litertElemBytes(litertConstantType(p), D * sw) + 2 * w + 2 * litertElemBytes(p.act, D * D);
+  const uint64_t constants = litertElemBytes(litertConstantType(p), D * sw) + litertWeightBytes(p, D, sw) +
+                             (uint64_t)kChainLayers * litertWeightBytes(p, D, D);
+  return litertHeldBytes(constants, (uint64_t)(kChainLayers + 1) * litertElemBytes(p.act, D * D));
 }
 
 struct Variant
@@ -323,11 +324,12 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       if (clpeak::cancelRequested())
         break;
 
-      const uint64_t bytes = rungBytes(plan, D);
-      if (bytes > maxRungBytes())
+      const uint64_t bytes = rungBytes(plan, D), budget = maxRungBytes();
+      if (bytes > budget)
       {
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide layers need %llu MB, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20));
+        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
+                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
+                    (unsigned long long)(budget >> 20));
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;

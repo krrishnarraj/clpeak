@@ -32,6 +32,24 @@
 #include <string>
 #include <vector>
 
+// What one session of a graph over resident constants holds at once, for a
+// test's memory gate: three copies of the constants in their stored types --
+// the model's bytes, which a session keeps because LiteRT runs a model in
+// place; the accelerator's own (XNNPACK's packed weights, the GPU's buffers,
+// on a phone the same memory); and the host-side graph the GPU accelerator
+// compiles from, which leaves XNNPACK a copy of headroom -- and every
+// intermediate tensor, since the accelerators keep each one rather than
+// reusing two.  On an M1 Pro, the gemm test's 4096-wide fp32 chain grew
+// XNNPACK's process by the model, its packed copy and fifteen 64 MB
+// activations, and the Metal accelerator's by more; int8_weight's float
+// activations come to four times its weights.  Counted as two copies and two
+// activations, that rung was let onto a 15.8 GB phone, which killed the
+// process.
+inline uint64_t litertHeldBytes(uint64_t constants, uint64_t activations)
+{
+  return 3 * constants + activations;
+}
+
 // A kernel that declines a type at prepare time ("input->type !=
 // kTfLiteFloat32", "failed to prepare") is the runtime saying it has no
 // kernel for the format, which is a capability and not a failure.

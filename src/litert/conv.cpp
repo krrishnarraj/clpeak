@@ -36,7 +36,10 @@ constexpr int kMaxStrikes = 2;
 constexpr double kMaxIterUs = 2.0e6;
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+// Everything a rung holds at once (litertHeldBytes), capped at a quarter of
+// physical memory and at 2 GB, which still admits the 1024-square int8 maps
+// XNNPACK is fastest at.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(2ull << 30); }
 
 struct Format
 {
@@ -150,14 +153,21 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       {
         if (clpeak::cancelRequested())
           break;
-        // The feature map, held twice (the constant as stored, the scaled
-        // copy), and the result, a quarter of it at stride 2.
-        const uint64_t map = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
-        const uint64_t bytes = 2 * map + map / (uint64_t)(v.stride * v.stride);
-        if (bytes > maxTensorBytes())
+        // The feature map and the filter are constants (litertHeldBytes);
+        // the scaled copy of the map and the result, a quarter of it at
+        // stride 2, are activations.
+        const uint64_t pixels = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp;
+        const uint64_t filter = litertElemBytes(plan.weight, kChannels * (v.depthwise ? 1 : kChannels) *
+                                                                 v.kernel * v.kernel);
+        const uint64_t act = litertElemBytes(plan.act, 1);
+        const uint64_t bytes = litertHeldBytes(pixels * elemBytes + filter,
+                                               pixels * act + pixels * act / (uint64_t)(v.stride * v.stride));
+        const uint64_t budget = maxRungBytes();
+        if (bytes > budget)
         {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld needs %llu MB, stopping\n", dev.displayName.c_str(),
-                      row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20));
+          CLPEAK_VLOG("litert-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
+                      (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)
