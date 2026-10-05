@@ -42,7 +42,12 @@ val clpeakNpuStaged = file("src/main/jniLibs/arm64-v8a").isDirectory
 android {
     namespace = "kr.clpeak"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // NDK r30 (clang 21), not flutter.ndkVersion (r28c, clang 19): clang 19
+    // fails the CPU backend's SME probes (src/cpu/CMakeLists.txt), so an APK
+    // built with it carries no SME kernels and an SME phone (Snapdragon 8
+    // Elite Gen 5) reports those matrix rows unsupported.  Drop the pin once
+    // Flutter's default reaches r30.
+    ndkVersion = "30.0.16248370"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
