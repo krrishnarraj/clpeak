@@ -47,23 +47,24 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
 int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
-  // v1 = single dp4a chain (serial through REPACK; dep-stall bound).
-  // v2 = two parallel dp4a chains (double the independent work for the
-  //       instruction issue queue to pipeline).
-  // v4 = four parallel chains (enough to saturate dp4a issue rate on
-  //       NVIDIA Turing+ / AMD RDNA2+ / Intel Xe+).
+  // v1 = one dp4a chain per thread, v2/v4 = two/four independent ones.  Each
+  // is raced in both of shaders/dp4a_chain.glsl's shapes, the second at two
+  // subgroup widths too.
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
-      "One chain of dot products, each waiting on the one before it." },
+      "One chain of dot products, each waiting on the one before it.",
+      VK_ALT_SHADER(compute_int8_dp_v1) },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
       "Two independent chains, so the device has a second dot product to get on "
-      "with while the first is still finishing." },
+      "with while the first is still finishing.",
+      VK_ALT_SHADER(compute_int8_dp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
     { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size,
       "Four independent chains -- usually enough to keep the dot-product "
-      "hardware busy with no waiting at all." },
+      "hardware busy with no waiting at all.",
+      VK_ALT_SHADER(compute_int8_dp_v4) },
 #endif
   };
   int32_t A = 4;
@@ -84,6 +85,7 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.elemSize    = sizeof(int32_t);
   d.pushData    = &A;
   d.pushSize    = sizeof(A);
+  d.raceHalfSubgroup = true;
   d.skip        = !dev.info.int8DotProductSupported;
   d.skipMsg     = "VK_KHR_shader_integer_dot_product / shaderInt8 not supported! Skipped";
   return runComputeKernel(dev, cfg, d);

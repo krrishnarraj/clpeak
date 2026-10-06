@@ -43,6 +43,14 @@ layout(constant_id = 2) const uint K = 16u;
 #define CM_AB     float16_t
 #define CM_ACC    float16_t
 #define CM_VAL(i) float16_t(pc.A + float(i))
+#define CM_STORE(mat, slot)                                                   \
+    {                                                                         \
+        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> out32 = \
+            coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(mat); \
+        coopMatStore(out32, outputBuf.data,                                   \
+                     (gl_WorkGroupID.x * CM_TILES + (slot)) * M * N, N,       \
+                     gl_CooperativeMatrixLayoutRowMajor);                     \
+    }
 #include "coopmat_chain.glsl"
 
 void main()
@@ -54,8 +62,5 @@ void main()
         CM_MMA_TRIP
     }
 
-    coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> out32 =
-        coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>(matC);
-    coopMatStore(out32, outputBuf.data, gl_WorkGroupID.x * M * N, N,
-                 gl_CooperativeMatrixLayoutRowMajor);
+    CM_STORE_ALL
 }

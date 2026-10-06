@@ -313,9 +313,13 @@ struct vk_compute_desc_t
   const char *metricDescription;
   const char *metricUnit;
 
-  // Single-variant shader (used when variants == nullptr)
+  // Single-variant shader (used when variants == nullptr), and the second
+  // build raced against it the way a variant's alt is -- coopmat's four-
+  // accumulator run.  nullptr: nothing to race.
   const uint32_t *spirv;
   size_t spirvSize;
+  const uint32_t *altSpirv;
+  size_t altSpirvSize;
 
   // Multi-variant shader list (takes precedence over single-variant fields)
   const vk_compute_variant_t *variants;
@@ -345,9 +349,10 @@ struct vk_compute_desc_t
 
   // Also time the variants' alt build pinned to half the subgroup width the
   // pipelines are pinned to, where the device offers it, and keep the faster
-  // (see runComputeKernel).  The floating-point families set it: Alchemist
+  // (see runComputeKernel).  The floating-point families set it -- Alchemist
   // runs their affine chain up to a third faster at SIMD16 than at the SIMD32
-  // that fp16 needs.
+  // that fp16 needs -- and so does int8_dp, whose dot chain an A380 ran ~23%
+  // faster at the SIMD16 its driver picks unpinned.
   bool raceHalfSubgroup;
 
 
@@ -480,9 +485,10 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v4_alt_size;
 #endif
 
-// -- affine-build selection -------------------------------------------------
-// A shader that includes shaders/mad_chain.glsl is compiled a second time with
-// the affine chain shape; CompileShaders.cmake then defines
+// -- second-build selection -------------------------------------------------
+// A shader that includes one of the shared chain headers (shaders/
+// mad_chain.glsl, coopmat_chain.glsl, dp4a_chain.glsl) is compiled a second
+// time with that header's other shape; CompileShaders.cmake then defines
 // VK_HAS_<NAME>_ALT.  VK_ALT_SHADER(name) expands to that build's
 // (pointer, size) pair, or to (nullptr, 0) when the second build was skipped,
 // so a variant table entry reads the same either way.  The #ifdefs cannot live
@@ -578,6 +584,56 @@ namespace vk_shaders {
   #define VK_ALT_compute_bf16_v4 vk_shaders::compute_bf16_v4_alt, vk_shaders::compute_bf16_v4_alt_size
 #else
   #define VK_ALT_compute_bf16_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
+  #define VK_ALT_compute_int8_dp_v1 vk_shaders::compute_int8_dp_v1_alt, vk_shaders::compute_int8_dp_v1_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
+  #define VK_ALT_compute_int8_dp_v2 vk_shaders::compute_int8_dp_v2_alt, vk_shaders::compute_int8_dp_v2_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
+  #define VK_ALT_compute_int8_dp_v4 vk_shaders::compute_int8_dp_v4_alt, vk_shaders::compute_int8_dp_v4_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP32_ALT
+  #define VK_ALT_coopmat_fp32 vk_shaders::coopmat_fp32_alt, vk_shaders::coopmat_fp32_alt_size
+#else
+  #define VK_ALT_coopmat_fp32 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_ALT
+  #define VK_ALT_coopmat_fp16 vk_shaders::coopmat_fp16_alt, vk_shaders::coopmat_fp16_alt_size
+#else
+  #define VK_ALT_coopmat_fp16 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC_ALT
+  #define VK_ALT_coopmat_fp16_f16acc vk_shaders::coopmat_fp16_f16acc_alt, vk_shaders::coopmat_fp16_f16acc_alt_size
+#else
+  #define VK_ALT_coopmat_fp16_f16acc nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_BF16_ALT
+  #define VK_ALT_coopmat_bf16 vk_shaders::coopmat_bf16_alt, vk_shaders::coopmat_bf16_alt_size
+#else
+  #define VK_ALT_coopmat_bf16 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP8_E4M3_ALT
+  #define VK_ALT_coopmat_fp8_e4m3 vk_shaders::coopmat_fp8_e4m3_alt, vk_shaders::coopmat_fp8_e4m3_alt_size
+#else
+  #define VK_ALT_coopmat_fp8_e4m3 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP8_E5M2_ALT
+  #define VK_ALT_coopmat_fp8_e5m2 vk_shaders::coopmat_fp8_e5m2_alt, vk_shaders::coopmat_fp8_e5m2_alt_size
+#else
+  #define VK_ALT_coopmat_fp8_e5m2 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_INT8_ALT
+  #define VK_ALT_coopmat_int8 vk_shaders::coopmat_int8_alt, vk_shaders::coopmat_int8_alt_size
+#else
+  #define VK_ALT_coopmat_int8 nullptr, 0
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V1
   extern const uint32_t compute_hp_v1[];
@@ -675,13 +731,25 @@ namespace vk_shaders {
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;
 #endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
+  extern const uint32_t compute_int8_dp_v1_alt[];
+  extern const size_t   compute_int8_dp_v1_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
   extern const uint32_t compute_int8_dp_v2[];
   extern const size_t   compute_int8_dp_v2_size;
 #endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
+  extern const uint32_t compute_int8_dp_v2_alt[];
+  extern const size_t   compute_int8_dp_v2_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
   extern const uint32_t compute_int8_dp_v4[];
   extern const size_t   compute_int8_dp_v4_size;
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
+  extern const uint32_t compute_int8_dp_v4_alt[];
+  extern const size_t   compute_int8_dp_v4_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V1
   extern const uint32_t compute_mp_v1[];
@@ -735,29 +803,57 @@ namespace vk_shaders {
   extern const uint32_t coopmat_fp16[];
   extern const size_t   coopmat_fp16_size;
 #endif
+#ifdef VK_HAS_COOPMAT_FP16_ALT
+  extern const uint32_t coopmat_fp16_alt[];
+  extern const size_t   coopmat_fp16_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP16_F16ACC
   extern const uint32_t coopmat_fp16_f16acc[];
   extern const size_t   coopmat_fp16_f16acc_size;
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC_ALT
+  extern const uint32_t coopmat_fp16_f16acc_alt[];
+  extern const size_t   coopmat_fp16_f16acc_alt_size;
 #endif
 #ifdef VK_HAS_COOPMAT_BF16
   extern const uint32_t coopmat_bf16[];
   extern const size_t   coopmat_bf16_size;
 #endif
+#ifdef VK_HAS_COOPMAT_BF16_ALT
+  extern const uint32_t coopmat_bf16_alt[];
+  extern const size_t   coopmat_bf16_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_INT8
   extern const uint32_t coopmat_int8[];       // M/N/K bound via spec constants
   extern const size_t   coopmat_int8_size;
+#endif
+#ifdef VK_HAS_COOPMAT_INT8_ALT
+  extern const uint32_t coopmat_int8_alt[];
+  extern const size_t   coopmat_int8_alt_size;
 #endif
 #ifdef VK_HAS_COOPMAT_FP8_E4M3
   extern const uint32_t coopmat_fp8_e4m3[];
   extern const size_t   coopmat_fp8_e4m3_size;
 #endif
+#ifdef VK_HAS_COOPMAT_FP8_E4M3_ALT
+  extern const uint32_t coopmat_fp8_e4m3_alt[];
+  extern const size_t   coopmat_fp8_e4m3_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP8_E5M2
   extern const uint32_t coopmat_fp8_e5m2[];
   extern const size_t   coopmat_fp8_e5m2_size;
 #endif
+#ifdef VK_HAS_COOPMAT_FP8_E5M2_ALT
+  extern const uint32_t coopmat_fp8_e5m2_alt[];
+  extern const size_t   coopmat_fp8_e5m2_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP32
   extern const uint32_t coopmat_fp32[];
   extern const size_t   coopmat_fp32_size;
+#endif
+#ifdef VK_HAS_COOPMAT_FP32_ALT
+  extern const uint32_t coopmat_fp32_alt[];
+  extern const size_t   coopmat_fp32_alt_size;
 #endif
 }
 

@@ -51,6 +51,23 @@ namespace
     int32_t trips;
   };
 
+  // The most accumulator a lane may carry for the four-accumulator build to be
+  // raced at all: 32 registers.  Four of Alchemist's 8x8 int32 tiles come to
+  // 32 bytes a lane and four 16x16 fp32 tiles on a 32-wide subgroup to 128;
+  // four of the 64x64 tiles an Adreno advertises would be 1 KB, which could
+  // only spill -- or take down a compiler already known to fault on less.
+  // Counted in output elements, which are the accumulator's or wider, so it
+  // errs on the side of not racing.
+  const uint32_t kAltAccumulatorBytesPerLane = 128;
+
+  // A desc's second build: VK_ALT_SHADER(name) is its (pointer, size), or
+  // (nullptr, 0) where glslc did not build one.
+  void setAlt(vk_compute_desc_t &d, const uint32_t *spirv, size_t spirvSize)
+  {
+    d.altSpirv = spirv;
+    d.altSpirvSize = spirvSize;
+  }
+
   // Spec-constant storage for one tile.  Must outlive the runComputeKernel call
   // that consumes specInfo and pushData, so callers declare it in the
   // dispatching scope.
@@ -77,10 +94,22 @@ namespace
   // d.metricLabel / d.metricDescription to what this reading is.  `refused`
   // names the tiles the driver refused to build before this one, if any, so
   // a reading taken at a fallback says so.
+  //
+  // d.altSpirv, the four-accumulator build (shaders/coopmat_chain.glsl), is
+  // kept for this tile only where four accumulators fit the lane budget
+  // above; it stores four tiles per work-group, so the buffer is sized for
+  // four whenever it runs.
   void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
                     const coopmat_tile_t &t, uint32_t wgSize,
                     const std::string &refused)
   {
+    if (d.altSpirv &&
+        4ull * t.M * t.N * d.elemSize > (uint64_t)kAltAccumulatorBytesPerLane * wgSize)
+    {
+      d.altSpirv = nullptr;
+      d.altSpirvSize = 0;
+    }
+
     const uint64_t volume = (uint64_t)t.M * t.N * t.K; // MACs per coopMatMulAdd
     uint64_t mmas = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
     uint64_t trips = mmas / COOPMAT_MMA_PER_TRIP;
@@ -107,7 +136,7 @@ namespace
     d.specInfo = &r.specInfo;
     d.metricDescription = r.note.c_str();
     d.wgSize = wgSize;
-    d.outElemsPerWG = t.M * t.N;
+    d.outElemsPerWG = t.M * t.N * (d.altSpirv ? 4 : 1);
     d.pushData = &r.push;
     d.pushSize = sizeof(r.push);
     // Reported work per WI = 2*MACs*MulAdds / subgroup-size; exact since M*N is a
@@ -256,6 +285,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_fp32;
         d.spirvSize = vk_shaders::coopmat_fp32_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_fp32));
       }
       else
       {
@@ -285,6 +315,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_fp16;
         d.spirvSize = vk_shaders::coopmat_fp16_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_fp16));
       }
       else
       {
@@ -323,6 +354,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_fp16_f16acc;
         d.spirvSize = vk_shaders::coopmat_fp16_f16acc_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_fp16_f16acc));
       }
       runTiles(d, dev.info.coopmatFP16F16, fill);
     }
@@ -345,6 +377,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_bf16));
       }
       else
       {
@@ -374,6 +407,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_fp8_e4m3;
         d.spirvSize = vk_shaders::coopmat_fp8_e4m3_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_fp8_e4m3));
       }
       else
       {
@@ -401,6 +435,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       {
         d.spirv = vk_shaders::coopmat_fp8_e5m2;
         d.spirvSize = vk_shaders::coopmat_fp8_e5m2_size;
+        setAlt(d, VK_ALT_SHADER(coopmat_fp8_e5m2));
       }
       else
       {
@@ -437,6 +472,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     {
       d.spirv = vk_shaders::coopmat_int8;
       d.spirvSize = vk_shaders::coopmat_int8_size;
+      setAlt(d, VK_ALT_SHADER(coopmat_int8));
     }
     else
     {

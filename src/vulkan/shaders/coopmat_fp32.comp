@@ -37,6 +37,5 @@ void main()
         CM_MMA_TRIP
     }
 
-    coopMatStore(matC, outputBuf.data, gl_WorkGroupID.x * M * N, N,
-                 gl_CooperativeMatrixLayoutRowMajor);
+    CM_STORE_ALL
 }

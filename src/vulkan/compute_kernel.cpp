@@ -68,7 +68,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     // Single-variant tests: one reading, documented by d.metricDescription.
     // Coopmat uses this path once per data type, all into the same test.
     variants.push_back({d.metricLabel, d.spirv, d.spirvSize,
-                        d.metricDescription, nullptr, 0});
+                        d.metricDescription, d.altSpirv, d.altSpirvSize});
   }
 
   auto note = [](const char *text)

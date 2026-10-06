@@ -284,9 +284,10 @@ static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 // same way -- one STEP is two dots into a pair of accumulators that feed each
 // other -- and every variant issues 512 STEPs, so 1024 dots * 8 ops = 8192 per
 // WI (1 chain = 64 iters * 8 steps, 8 chains = 64 * 1 * 8; OpenCL's v16 is
-// 32 * 1 * 16).  Read the comment at the top of any of those files for why the
-// chain has to be shaped that way; a different shape silently reports a wrong
-// number.
+// 32 * 1 * 16).  Vulkan also races a second shape, four accumulators in a
+// cycle, over the same 1024 dots.  Read the comment at the top of any of those
+// files (Vulkan's is shaders/dp4a_chain.glsl) for why the chain has to be
+// shaped that way; a different shape silently reports a wrong number.
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
 // coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup

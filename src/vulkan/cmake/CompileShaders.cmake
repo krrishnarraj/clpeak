@@ -157,16 +157,26 @@ function(compile_shaders)
     endif()
     target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER})
 
-    # A shader that pulls in mad_chain.glsl gets a second build with the
-    # affine chain shape, embedded as <name>_alt.  runComputeKernel times both
-    # and reports the faster -- neither shape reaches peak on every vendor.
+    # A shader that pulls in one of the shared chain headers gets a second
+    # build with that header's other shape, embedded as <name>_alt:
+    # mad_chain.glsl's affine chain, coopmat_chain.glsl's four accumulators,
+    # dp4a_chain.glsl's four-accumulator cycle.  runComputeKernel times both
+    # and reports the faster -- no one shape reaches peak on every vendor.
     # Adopting the shared chain in a shader is the only step needed; this is
     # detected from the source rather than listed anywhere.  Match the #include
-    # and not the bare filename: shaders that only mention mad_chain.glsl in a
+    # and not the bare filename: shaders that only mention a header in a
     # comment were getting a second build they never use.
     file(READ "${SHADER}" _CS_SRC)
+    set(_CS_ALT_DEFINE "")
     if(_CS_SRC MATCHES "#[ \t]*include[ \t]*\"mad_chain\\.glsl\"")
-      _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "-DMAD_CHAIN_AFFINE")
+      set(_CS_ALT_DEFINE "-DMAD_CHAIN_AFFINE")
+    elseif(_CS_SRC MATCHES "#[ \t]*include[ \t]*\"coopmat_chain\\.glsl\"")
+      set(_CS_ALT_DEFINE "-DCM_CHAIN_ALT")
+    elseif(_CS_SRC MATCHES "#[ \t]*include[ \t]*\"dp4a_chain\\.glsl\"")
+      set(_CS_ALT_DEFINE "-DDP4A_CHAIN_ALT")
+    endif()
+    if(_CS_ALT_DEFINE)
+      _cs_embed("${SHADER}" "${SHADER_NAME}_alt" "${_CS_ALT_DEFINE}")
       if(_CS_OK)
         target_compile_definitions(${CS_TARGET} PUBLIC VK_HAS_${SHADER_NAME_UPPER}_ALT)
       endif()
