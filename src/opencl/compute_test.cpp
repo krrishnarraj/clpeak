@@ -100,7 +100,22 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     bool hasSg16[5] = {false, false, false, false, false};
     // Looked up by name first: some runtimes (Apple's) print an error for
     // every clCreateKernel on a name the program lacks, and most families lack
-    // the twins.
+    // the twins.  But never on a program with no kernels at all: NVIDIA's
+    // driver (610.57) builds one whose every kernel was preprocessed out, says
+    // it has none, and then segfaults inside clGetProgramInfo when asked for
+    // their names.  A family with no kernels is one the device's compiler did
+    // not build, which the catch below reports -- int8_dp on a device that
+    // advertises the dot product but defines none of its macros.
+    size_t programKernelCount = 1;
+    try
+    {
+      programKernelCount = prog.getInfo<CL_PROGRAM_NUM_KERNELS>();
+    }
+    catch (cl::Error &)
+    {
+    }
+    if (programKernelCount == 0)
+      throw cl::Error(CL_INVALID_KERNEL_NAME, "clCreateKernel");
     std::string programKernels;
     try
     {
