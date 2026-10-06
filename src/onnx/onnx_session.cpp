@@ -284,14 +284,18 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   // for RTX plugin's pool allocator does the same per *run*: a
   // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
   // Run(), which over a ladder is tens of thousands of lines saying the
-  // output buffer came and went.  Everything else INFO says (provider
+  // output buffer came and went.  The CPU provider's arena does it too: a
+  // "Reserving memory in BFCArena" per allocation per Run() was 44,373 of a
+  // Galaxy S24's verbose lines, 3.3 of the log's 4 MiB, and pushed the
+  // run's last 8,452 entries out.  Everything else INFO says (provider
   // registration, partitioning, the session options, the pool's creation
   // and the arena's growth) is kept.
   if (level == clpeak::LogLevel::Debug && message &&
       (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
        std::strncmp(message, "Running graph optimizations", 27) == 0 ||
        std::strncmp(message, "CudaMempoolAllocator::DoAlloc", 29) == 0 ||
-       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0))
+       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0 ||
+       std::strncmp(message, "Reserving memory in BFCArena", 28) == 0))
     return;
   std::string text;
   if (category && *category && std::strcmp(category, "onnxruntime") != 0)
