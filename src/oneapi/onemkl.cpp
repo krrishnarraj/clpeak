@@ -5,6 +5,9 @@
 #include <sycl/sycl.hpp>
 #include <algorithm>
 #include <chrono>
+#include <functional>
+#include <string>
+#include <vector>
 
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
@@ -17,9 +20,10 @@
 
 // oneMKL GEMM peak — analog of rocBLAS / cuBLAS / MPSGraph.  FP category
 // reports flops for FP32, FP64, FP16, BF16 (each gated by device aspect);
-// INT category reports ops for INT8 (s8 x u8 -> s32 via gemm_bias).  This
-// mirrors the datatype coverage of the joint_matrix microbenchmark so every
-// SDK-supported GEMM dtype is measured by both the raw and the library path.
+// INT category reports ops for INT8 (32-bit totals, through gemm_bias or
+// gemm's int8 overload, whichever runs faster).  This mirrors the datatype
+// coverage of the joint_matrix microbenchmark so every SDK-supported GEMM
+// dtype is measured by both the raw and the library path.
 //
 // Sizing matches the ROCm rocBLAS benchmark: D = round_up_256(2048 + 128*CUs),
 // clamped to [2048, 16384], halved while 3*D*D*8 > totalGlobalMem/4.
@@ -48,7 +52,9 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
                          "full-size one would take long enough to trip the "
                          "driver's watchdog.";
   const char *fp16Note = "16-bit inputs -- the everyday precision of AI "
-                         "inference, and usually the fastest row here.";
+                         "inference, and usually the fastest row here.  The "
+                         "result is written as fp16 or as fp32, whichever "
+                         "the library runs faster.";
   const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, "
                          "trading digits of accuracy for the number range of a "
                          "full float.";
@@ -85,6 +91,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   return 0;
 #else
   namespace mkl = oneapi::mkl;
+  using mkl::transpose;
   const std::int64_t D = pickOnemklGemmDim(dev.info);
 
   // fp64 throughput on most GPUs is a small fraction of fp32 (often 1/16..1/64+,
@@ -95,6 +102,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   // budget, so the measured peak is unaffected (a 3584^3 GEMM still saturates).
   const std::int64_t fp64Dim = std::max<std::int64_t>(1024, D / 4);
 
+  // One way to put a dtype's GEMM to oneMKL: an overload and a layout.
+  // issue(q, dA, dB, dC, dCo, dim) issues one square dim*dim*dim GEMM (dCo is
+  // the int8 bias buffer, unused by the other forms).  Buffers are sized at
+  // fp64 width and reinterpreted per form.
+  using GemmIssue = std::function<void(sycl::queue &, void *, void *, void *, void *, std::int64_t)>;
+  struct GemmForm
+  {
+    std::string name;
+    GemmIssue issue;
+  };
+
   // Run ONE GEMM dtype in full isolation: its own context + queue + buffers,
   // all torn down before the next dtype.  Two reasons:
   //  1. A faulting GEMM (e.g. fp64 returning a *sticky* CL_OUT_OF_RESOURCES on
@@ -103,13 +121,18 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   //  2. Per-dtype isolation means each dtype reports its own pass/fail instead
   //     of one bad dtype poisoning all the rest — a precise signal for the
   //     driver team about exactly which GEMM dtype faults.
-  // gemmFn(q, dA, dB, dC, dCo, dim) issues one square dim*dim*dim GEMM (dCo is
-  // the int8 bias buffer, unused by the FP paths).  `dim` lets fp64 use a
-  // smaller tile than the other dtypes.  Buffers are sized at fp64 width and
-  // reinterpreted per dtype.
-  auto measure = [&](const char *label, const char *note, std::int64_t dim, auto gemmFn) {
+  //
+  // A dtype with several forms races them, as cuBLASLt's and hipBLASLt's
+  // candidate algorithms are raced (cuda_blas.cpp): each form runs its warm-up
+  // -- the first call builds its kernel, so it is never timed -- and then a
+  // short probe, and the fastest is timed over the 5 s budget.  oneMKL picks
+  // the kernel, and nothing in its interface says which overload and layout
+  // reach its fastest one on a given GPU.
+  auto measure = [&](const char *label, std::int64_t dim, const std::vector<GemmForm> &forms,
+                     logger::EmitOptions opts) {
     const size_t cells = (size_t)dim * (size_t)dim;
     const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
+    const char *unit = opts.unit.empty() ? "flops" : opts.unit.c_str();
     sycl::queue q = [&]() -> sycl::queue {
       try
       {
@@ -136,7 +159,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
     };
     if (!dA || !dB || !dC || !dCo)
     {
-      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", mklOpts(note));
+      test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", opts);
       freeAll();
       return;
     }
@@ -145,12 +168,13 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
     try { q.memset(dC,  0,    cells * sizeof(double)).wait(); } catch (...) {}
     try { q.memset(dCo, 0,    sizeof(std::int32_t)).wait();   } catch (...) {}
 
-    auto runBatch = [&](unsigned int n) -> double {
+    // Mean microseconds per call over n calls of one form, or -1 when it throws.
+    auto runBatch = [&](const GemmForm &form, unsigned int n) -> double {
       try
       {
         auto t0 = std::chrono::high_resolution_clock::now();
         for (unsigned int i = 0; i < n; i++)
-          gemmFn(q, dA, dB, dC, dCo, dim);
+          form.issue(q, dA, dB, dC, dCo, dim);
         q.wait_and_throw();
         auto t1 = std::chrono::high_resolution_clock::now();
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -159,56 +183,110 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       catch (const std::exception &e)
       {
         // Contained to this dtype's private context (see above).
-        CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
+        CLPEAK_VLOG("oneMKL %s as %s failed: %s\n", label, form.name.c_str(), e.what());
         return -1.0;
       }
     };
 
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
-    double probeUs = runBatch(warm);
-    if (probeUs <= 0.0)
-      test.skip(label, ResultStatus::Error, "timing probe failed", mklOpts(note));
+    const unsigned int probeIters = 4;
+    size_t best = forms.size();
+    double bestUs = 0.0;
+    for (size_t f = 0; f < forms.size(); f++)
+    {
+      if (runBatch(forms[f], warm) <= 0.0)
+        continue;
+      double us = runBatch(forms[f], probeIters);
+      if (us <= 0.0)
+        continue;
+      if (forms.size() > 1)
+        CLPEAK_VLOG("oneMKL %s as %s: %.1f %s over a %u-call probe\n", label,
+                    forms[f].name.c_str(), flops * 1.0e6 / us, unit, probeIters);
+      if (best == forms.size() || us < bestUs)
+      {
+        best = f;
+        bestUs = us;
+      }
+    }
+    if (best == forms.size())
+      test.skip(label, ResultStatus::Error, "timing probe failed", opts);
     else
     {
-      unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
-      double meanUs = runBatch(iters);
+      unsigned int iters = pickIters(bestUs, 5000000u, forceIters ? specifiedIters : 0);
+      double meanUs = runBatch(forms[best], iters);
       if (meanUs <= 0.0)
-        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", mklOpts(note));
+        test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", opts);
       else
-        test.emit(label, (float)(flops * 1.0e6 / meanUs), mklOpts(note));
+      {
+        if (forms.size() > 1)
+          opts.description += "  Ran as " + forms[best].name +
+                              ", the fastest of the forms raced.";
+        test.emit(label, (float)(flops * 1.0e6 / meanUs), opts);
+      }
     }
     freeAll();
     // q and its private context are destroyed here.
   };
 
-  measure("fp32", fp32Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                         std::int64_t n) {
-    mkl::blas::row_major::gemm(
-      q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-      n, n, n, 1.0f,
-      (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
-  });
+  // Both layouts of one overload, for a dtype on the matrix engine: NN, and
+  // TN, A stored transposed so both inputs keep K contiguous -- the layout
+  // cuBLASLt's tensor-core kernels are tuned around (cuda_blas.cpp).  How
+  // oneMKL picks its kernel is not public, but oneDNN's GEMM catalog
+  // (src/gpu/intel/gemm/jit/selector/db/kernel.db there) keeps separate
+  // matrix-engine kernels per layout, and for DG2 its cost model ranks NN
+  // first for fp16 and bf16 and TN first for int8.
+  using LayoutGemm = std::function<void(sycl::queue &, transpose, void *, void *, void *, void *,
+                                        std::int64_t)>;
+  auto layouts = [](std::vector<GemmForm> &forms, const std::string &what, LayoutGemm gemm) {
+    for (transpose ta : {transpose::nontrans, transpose::trans})
+      forms.push_back({what + (ta == transpose::trans ? ", TN" : ", NN"),
+                       [=](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo, std::int64_t n) {
+                         gemm(q, ta, dA, dB, dC, dCo, n);
+                       }});
+  };
+
+  measure("fp32", D,
+          {{"NN", [](sycl::queue &q, void *dA, void *dB, void *dC, void *, std::int64_t n) {
+             mkl::blas::column_major::gemm(
+               q, transpose::nontrans, transpose::nontrans, n, n, n, 1.0f,
+               (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
+           }}},
+          mklOpts(fp32Note));
 
   if (dev.info.fp64Supported)
-    measure("fp64", fp64Note, fp64Dim, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                                 std::int64_t n) {
-      mkl::blas::row_major::gemm(
-        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        n, n, n, 1.0,
-        (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
-    });
+    measure("fp64", fp64Dim,
+            {{"NN", [](sycl::queue &q, void *dA, void *dB, void *dC, void *, std::int64_t n) {
+               mkl::blas::column_major::gemm(
+                 q, transpose::nontrans, transpose::nontrans, n, n, n, 1.0,
+                 (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
+             }}},
+            mklOpts(fp64Note));
   else
     test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", mklOpts(fp64Note));
 
+  // fp16 writes its result either as fp16 or as fp32.  That catalog lists no
+  // matrix-engine kernel for DG2 that takes fp16 in to fp16 out -- its four
+  // for that run on the vector units -- and an Arc A380 (driver 8993) read
+  // this row at 8.77 TFLOPS with fp16 out: 90% of its vector fp16 rate,
+  // where its matrix engine reads 15.5 through joint_matrix.
   if (dev.info.fp16Supported)
-    measure("fp16", fp16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                           std::int64_t n) {
-      mkl::blas::row_major::gemm(
-        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        n, n, n, sycl::half(1.0f),
+  {
+    std::vector<GemmForm> forms;
+    layouts(forms, "fp16 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
+                                  std::int64_t n) {
+      mkl::blas::column_major::gemm(
+        q, ta, transpose::nontrans, n, n, n, sycl::half(1.0f),
         (const sycl::half *)dA, n, (const sycl::half *)dB, n,
         sycl::half(0.0f), (sycl::half *)dC, n);
     });
+    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
+                                  std::int64_t n) {
+      mkl::blas::column_major::gemm(
+        q, ta, transpose::nontrans, n, n, n, 1.0f,
+        (const sycl::half *)dA, n, (const sycl::half *)dB, n, 0.0f, (float *)dC, n);
+    });
+    measure("fp16", D, forms, mklOpts(fp16Note));
+  }
   else
     test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", mklOpts(fp16Note));
 
@@ -216,108 +294,50 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
 #if defined(CLPEAK_ONEMKL_HAS_BF16)
   if (dev.info.bf16Supported)
-    measure("bf16", bf16Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *,
-                           std::int64_t n) {
-      using bfloat16 = sycl::ext::oneapi::bfloat16;
-      mkl::blas::row_major::gemm(
-        q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-        n, n, n, 1.0f,
+  {
+    using bfloat16 = sycl::ext::oneapi::bfloat16;
+    std::vector<GemmForm> forms;
+    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
+                                  std::int64_t n) {
+      mkl::blas::column_major::gemm(
+        q, ta, transpose::nontrans, n, n, n, 1.0f,
         (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
     });
+    measure("bf16", D, forms, mklOpts(bf16Note));
+  }
   else
     test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", mklOpts(bf16Note));
 #else
   test.skip("bf16", ResultStatus::Unsupported,
             "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note));
 #endif
-  // INT8: s8 x u8 -> s32 via gemm_bias
+
+  // INT8 through both of oneMKL's int8 entry points: gemm_bias (s8 x u8, its
+  // A and B offsets zero) and gemm's int8 overload (s8 x s8, which takes no
+  // offsets).  A nonzero offset needs row and column sums, and for NN the
+  // catalog's two fastest DG2 int8 kernels compute none.  An Arc A380 (driver
+  // 8993) read gemm_bias NN at 11.7 TOPS, where joint_matrix reads 31.0.
+  if (!dev.info.xmxSupported)
+    test.skip("int8", ResultStatus::Unsupported,
+              "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note));
+  else
   {
-    auto intMeasure = [&](const char *label, const char *note, std::int64_t dim, auto gemmFn) {
-      const size_t cells = (size_t)dim * (size_t)dim;
-      const double flops = 2.0 * (double)dim * (double)dim * (double)dim;
-      sycl::queue q = [&]() -> sycl::queue {
-        try
-        {
-          return sycl::queue(sycl::context(dev.dev), dev.dev,
-                             sycl::property::queue::in_order{});
-        }
-        catch (const std::exception &e)
-        {
-          CLPEAK_VLOG("oneMKL %s: private context create failed (%s); shared queue\n",
-                      label, e.what());
-          return dev.stream;
-        }
-      }();
-
-      void *dA  = sycl::malloc_device(cells * sizeof(double), q);
-      void *dB  = sycl::malloc_device(cells * sizeof(double), q);
-      void *dC  = sycl::malloc_device(cells * sizeof(double), q);
-      void *dCo = sycl::malloc_device(sizeof(std::int32_t), q);
-      auto freeAll = [&]() {
-        if (dA)  { try { sycl::free(dA,  q); } catch (...) {} }
-        if (dB)  { try { sycl::free(dB,  q); } catch (...) {} }
-        if (dC)  { try { sycl::free(dC,  q); } catch (...) {} }
-        if (dCo) { try { sycl::free(dCo, q); } catch (...) {} }
-      };
-      if (!dA || !dB || !dC || !dCo)
-      {
-        test.skip(label, ResultStatus::Error, "Failed to allocate GEMM buffers", intOpts(note));
-        freeAll();
-        return;
-      }
-      try { q.memset(dA,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-      try { q.memset(dB,  0x3f, cells * sizeof(double)).wait(); } catch (...) {}
-      try { q.memset(dC,  0,    cells * sizeof(double)).wait(); } catch (...) {}
-      try { q.memset(dCo, 0,    sizeof(std::int32_t)).wait();   } catch (...) {}
-
-      auto runBatch = [&](unsigned int n) -> double {
-        try
-        {
-          auto t0 = std::chrono::high_resolution_clock::now();
-          for (unsigned int i = 0; i < n; i++)
-            gemmFn(q, dA, dB, dC, dCo, dim);
-          q.wait_and_throw();
-          auto t1 = std::chrono::high_resolution_clock::now();
-          auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-          return (double)ns / 1000.0 / (double)n;
-        }
-        catch (const std::exception &e)
-        {
-          CLPEAK_VLOG("oneMKL %s failed: %s\n", label, e.what());
-          return -1.0;
-        }
-      };
-
-      const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
-      double probeUs = runBatch(warm);
-      if (probeUs <= 0.0)
-        test.skip(label, ResultStatus::Error, "timing probe failed", intOpts(note));
-      else
-      {
-        unsigned int iters = pickIters(probeUs, 5000000u, forceIters ? specifiedIters : 0);
-        double meanUs = runBatch(iters);
-        if (meanUs <= 0.0)
-          test.skip(label, ResultStatus::Error, "oneMKL GEMM failed", intOpts(note));
-        else
-          test.emit(label, (float)(flops * 1.0e6 / meanUs), intOpts(note));
-      }
-      freeAll();
-    };
-    if (!dev.info.xmxSupported)
-      test.skip("int8", ResultStatus::Unsupported,
-                "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note));
-    else
-      intMeasure("int8", int8Note, D, [&](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
-                             std::int64_t n) {
-        mkl::blas::row_major::gemm_bias(
-          q, mkl::transpose::nontrans, mkl::transpose::nontrans,
-          mkl::offset::fix,
-          n, n, n, 1.0f,
-          (const std::int8_t *)dA, n, (std::int8_t)0,
-          (const std::uint8_t *)dB, n, (std::uint8_t)0,
-          0.0f,
-          (std::int32_t *)dC, n, (const std::int32_t *)dCo);
-      });
+    std::vector<GemmForm> forms;
+    layouts(forms, "gemm_bias s8 x u8", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC,
+                                           void *dCo, std::int64_t n) {
+      mkl::blas::column_major::gemm_bias(
+        q, ta, transpose::nontrans, mkl::offset::fix, n, n, n, 1.0f,
+        (const std::int8_t *)dA, n, (std::int8_t)0,
+        (const std::uint8_t *)dB, n, (std::uint8_t)0,
+        0.0f, (std::int32_t *)dC, n, (const std::int32_t *)dCo);
+    });
+    layouts(forms, "gemm s8 x s8", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
+                                      std::int64_t n) {
+      mkl::blas::column_major::gemm(
+        q, ta, transpose::nontrans, n, n, n, 1.0f,
+        (const std::int8_t *)dA, n, (const std::int8_t *)dB, n, 0.0f, (std::int32_t *)dC, n);
+    });
+    measure("int8", D, forms, intOpts(int8Note));
   }
 
   return 0;
