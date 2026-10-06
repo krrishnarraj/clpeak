@@ -14,7 +14,7 @@ local memory, DRAM ↔ global memory.
 ## Quick Lookups
 
 - Main class / orchestrator / `runAll()` / `runWorkload()`? → `cpu_peak.cpp`
-- CPU detection (name, cores, cache sizes, ISA flags)? → `cpu_device.cpp`
+- CPU detection (name, cores, cache sizes, ISA flags), which core is fastest? → `cpu_device.cpp`
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers, `NACC`, unroll macros)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
@@ -35,9 +35,9 @@ local memory, DRAM ↔ global memory.
 
 | File | Purpose |
 |------|---------|
-| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch), `runWorkload` (warmup → MT clock settle → probe → `pickIters` timed batch), `enumerate` |
-| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, per-instance **and aggregate** cache sizes, ISA flags from the `cpu_dispatch.cpp` probe |
-| `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, per-core pinning |
+| `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch, device header), `runWorkload` (ST: warmup → probe → `pickIters` timed batch; MT: warmup → deadline settle that doubles as the probe → work claimed from a shared counter, timed until it runs dry; returns a rate), `enumerate` |
+| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates |
+| `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, pinning worker i to the i-th id it is given (the main pool: `info.cores`, fastest first), re-applied at every job |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
 | `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run) |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
@@ -58,7 +58,7 @@ local memory, DRAM ↔ global memory.
 | `string.cpp` | `runStringScan/Utf8Validate` — `Category::String` in GB/s, own `--string` flag |
 | `cpu_matrix.cpp` | `runCpuMatrix` — AMX / SMMLA / BFMMLA / SME under `Benchmark::MatrixCompute` (`--matrix-compute`) |
 | `apple_blas.cpp` | `runAppleBlas` (`--gemm`, Apple-only) — Accelerate `cblas_?gemm` over a size sweep + `BNNSMatMul` fp16/bf16. **Library calls, not feature TUs**, and the only sanctioned route to Apple's AMX on M1–M3 (where the `matrix_*` ISA rows are correctly Unsupported). Single rows, no ST/MT split: Accelerate threads internally |
-| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width) |
+| `bandwidth.cpp` | `runDramBandwidth` (STREAM read/copy/triad) + `runCacheBandwidth` (per-level read, ST+MT, plus the L1 write/copy rows that expose the store-port width; `mtSlices` sizes each MT thread for its own core) |
 | `latency.cpp` | `runMemoryLatency` — random pointer-chase per cache level, plus the `DRAM linear`, MLP (`DRAM x8`/`x32`) and TLB-miss rows |
 | `microarch.cpp` | `runAtomics`, `runBranchPenalty`, `runStoreForward` (seconds-per-op cost probes) and `runSmtScaling` (flops at 1 thread/core vs all logical threads, for the full fp32 chain and its one-accumulator `fp32lat` twin, paired by ISA label) |
 
@@ -203,16 +203,20 @@ changing a kernel.
   margin covers both; `pickStreamFloats` (`bandwidth.cpp`) and the DRAM
   pointer-chase (`latency.cpp`) both use it. Single-threaded init puts every
   page on one NUMA node and collapses the number.
-- **An MT cache row splits the AGGREGATE of its level, and never below the
-  level under it.** Two ways it degenerates into re-measuring the faster cache.
-  Dividing the *per-instance* size by every thread shrinks the slice by the
-  instance count twice over — on a 4-CCX Threadripper the L3 MT slice came out
-  at 256 KB per thread, inside the 512 KB per-core L2, and "L3 MT" read 1758
-  GB/s against "L2 MT" at 1744. Two levels reporting the same bandwidth is the
-  tell. And whether a level is shared at all is a question for the topology
-  (`l2Total < l2PerInstance × cores`), not for the vendor string: Apple is not
-  the only one with a cluster L2 — Qualcomm's Oryon and Intel's E-core modules
-  share theirs too. `mtFloor` in `bandwidth.cpp` is the backstop for both.
+- **An MT cache row sizes each thread for the core it is pinned to**: half its
+  share of the instance that core reads (the instance over the workers reading
+  it, an SMT sibling included), and never below twice its share of the level
+  under it. One size for every thread cannot fit a chip whose cores differ —
+  sized for the fastest core a little core's L1/L2 overflows, sized for the
+  little one a big core's "L2" slice sits in its L1 — and dividing a
+  *per-instance* size by every thread shrinks the slice by the instance count
+  twice over (on a 4-CCX Threadripper "L3 MT" read 1758 GB/s against "L2 MT"
+  at 1744: two levels reporting the same bandwidth is the tell). Unpinned
+  (macOS) or without per-core sizes, the uniform split of the AGGREGATE
+  stands, with `mtFloor` as its backstop; whether a level is shared is then a
+  question for the topology (`l2Total < l2PerInstance × cores`), not the
+  vendor string — Qualcomm's Oryon and Intel's E-core modules share an L2 as
+  Apple's clusters do. `mtSlices` in `bandwidth.cpp`.
 - **No L3 is a real answer — never fabricate one.** `detectCpuInfo` leaves
   `l3CacheBytes` at 0 when the OS reports no L3, and the L3 cache-bandwidth and
   latency rows skip as Unsupported rather than measure a made-up working set
@@ -220,10 +224,28 @@ changing a kernel.
   header of every Apple part, reported an L3 *faster* than the L2 next to it,
   and undersized the STREAM arrays. Apple additionally needs its L2 total
   summed over `hw.perflevel*.cpusperl2` — one sysctl reports one cluster.
-- **macOS has no hard thread affinity**, so `ST` numbers vary run-to-run as the
-  kernel lands on a P- or E-core; `MT` is stable. Pinning is real on
-  Linux/Windows. This is also why SMT scaling reports Unsupported on macOS —
-  it needs one-thread-per-physical-core placement.
+  "No L3" is concluded only after every CPU's sysfs and the device tree have
+  none; an L3 listed without a size (`l3Unsized`) skips with that reason.
+- **A size the OS never gave is not printed.** arm64 kernels list cache levels
+  without a `size` file when their device tree carries none — Android does,
+  and the emulator reproduces it — so the L1/L2 working sets fall back to
+  32 KB / 512 KB (`l1dAssumed` / `l2Assumed`, logged under `--verbose`) and the
+  header omits those levels instead of presenting the fallback as the phone's.
+- **Single-thread rows run on the fastest core, not on cpu0.** `info.cores`
+  lists the CPUs the process may run on (its affinity: an Android cpuset,
+  taskset, a container) fastest first, ties to the lowest id so a homogeneous
+  machine keeps cpu0; the pool pins worker i to `cores[i]`, and every
+  single-thread row — compute, cache, latency, branch, store-forward, atomics —
+  runs on worker 0. The header's Clock and per-core cache sizes are that
+  core's, with an `ST core` line where the cores differ. On Android cpu0 is a
+  little core: pinned there, a Galaxy S24's ST rows measure an A520 (fp32 31
+  GFLOPS against the X4's ~100). Windows uses processor group 0, like the
+  pinning, and keeps the plain order on a machine with several groups.
+- **macOS has no hard thread affinity.** Its scheduler gives a lone busy
+  thread a P-core (fp32 ST reads a P-core's rate run after run), which is why
+  the per-core sizes are perf level 0's. Pinning is real on Linux/Windows. No
+  affinity is also why SMT scaling reports Unsupported on macOS — it needs
+  one-thread-per-physical-core placement.
 - **MSVC does not define the GCC/Clang ISA macros**, and its architecture macros
   are its own (`_M_X64`, `_M_ARM64` — never `__aarch64__` or `__SSE*`). A new
   `cpu_simd.h` branch without an MSVC alias silently degrades to scalar; a bare
@@ -255,8 +277,8 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
 - **`NACC` must hide the FMA latency** (`min(pipes, NACC/latency)`), so it needs
   to be ≥ `pipes × latency`. NACC=16 left M1 Pro fp32 at ~62% of peak. Re-sweep
   when validating on a new x86 host or on real SVE silicon.
-- Expect write MT to scale far worse than read MT on Apple (~2.5× vs ~7.7×):
-  the store path has a shared ceiling, reproduced outside clpeak.
+- Expect write MT to scale far worse than read MT on Apple (~3–4× vs ~8× on
+  an M1 Pro): the store path has a shared ceiling, reproduced outside clpeak.
 - **DRAM `read` above the memory's rated peak is always a sizing bug**, never a
   win — the arrays are partly cache-resident. `--verbose` prints the array size
   and the total cache it has to clear. `copy`/`triad` landing well *below*
@@ -272,10 +294,16 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
 
 ## Metrics
 
-Compute and cache-bandwidth tests emit an `ST` (one pinned core) and an `MT`
-(all logical cores) variant — labelled `ST`/`MT` rather than literal thread
-counts, so results compare across machines with different core counts. DRAM
-bandwidth emits `read`/`copy`/`triad`; memory latency is `ST` only.
+Compute and cache-bandwidth tests emit an `ST` (one thread, pinned to the
+fastest core) and an `MT` (one thread per usable logical core) variant —
+labelled `ST`/`MT` rather than literal thread counts, so results compare across
+machines with different core counts. `MT` is what the cores do together: the
+threads claim work about a millisecond of their own at a time from a shared
+counter, so a fast core does more of it, and the clock stops when the counter
+runs dry (`runWorkload`). An equal share per thread would read the slowest
+core times the thread count, and let one thread the OS holds up drag down the
+whole row. DRAM bandwidth emits `read`/`copy`/`triad`; memory latency is `ST`
+only.
 
 Crypto and string tests report B/s with unit `bps` **and the category passed
 explicitly** in the `TestSpec` — `categoryFromUnit("bps")` would otherwise file

@@ -56,20 +56,20 @@ int CpuPeak::runAtomics(benchmark_config_t &cfg)
 
   const int maxT = pool->maxThreads();
   unsigned int forced = forceIters ? specifiedIters : 0;
-  double us1 = runWorkload(1,    body, cfg.targetTimeUs, forced);
-  double usN = runWorkload(maxT, body, cfg.targetTimeUs, forced);
+  double ops1 = runWorkload(1,    body, cfg.targetTimeUs, forced);   // fetch-adds per second
+  double opsN = runWorkload(maxT, body, cfg.targetTimeUs, forced);
 
   const char *unNote = "One thread updating a counter nobody else touches, so it "
                        "stays in that core's own cache.";
   const char *coNote = "Every core fighting over the same counter, which has to be "
                        "handed from core to core -- the time between completed "
                        "updates anywhere on the chip.";
-  if (us1 > 0) test.emit("uncontended ST", (float)(us1 * 1e-6), unNote);
-  else         test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote);
-  // Each of the maxT threads completes one op per mean iteration, so the
-  // system-wide time between completions is wall / maxT.
-  if (usN > 0) test.emit("contended MT", (float)(usN * 1e-6 / (double)maxT), coNote);
-  else         test.skip("contended MT", ResultStatus::Error, "workload failed", coNote);
+  if (ops1 > 0) test.emit("uncontended ST", (float)(1.0 / ops1), unNote);
+  else          test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote);
+  // The rate counts every thread's completions, so its inverse is the
+  // system-wide time between completed updates.
+  if (opsN > 0) test.emit("contended MT", (float)(1.0 / opsN), coNote);
+  else          test.skip("contended MT", ResultStatus::Error, "workload failed", coNote);
   return 0;
 }
 
@@ -408,26 +408,26 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   // One worker per physical core, pinned to the primary sibling.  The main
   // pool pins worker i to logical CPU i, which lands sibling pairs on the
   // same core on most enumerations -- hence the dedicated pool.
-  double usPhys, usPhysLat = 0.0;
+  double ipsPhys, ipsPhysLat = 0.0;     // iterations per second, all threads
   {
     CpuThreadPool physPool(nPhys, primaries);
     CpuThreadPool *saved = pool;
     pool = &physPool;                    // runWorkload dispatches via `pool`
-    usPhys = runWorkload(nPhys, body, cfg.targetTimeUs, forced);
-    if (lat) usPhysLat = runWorkload(nPhys, bodyOf(lat->v.fn), cfg.targetTimeUs, forced);
+    ipsPhys = runWorkload(nPhys, body, cfg.targetTimeUs, forced);
+    if (lat) ipsPhysLat = runWorkload(nPhys, bodyOf(lat->v.fn), cfg.targetTimeUs, forced);
     pool = saved;
   }
-  double usAll    = runWorkload(nAll, body, cfg.targetTimeUs, forced);
-  double usAllLat = lat ? runWorkload(nAll, bodyOf(lat->v.fn), cfg.targetTimeUs, forced) : 0.0;
+  double ipsAll    = runWorkload(nAll, body, cfg.targetTimeUs, forced);
+  double ipsAllLat = lat ? runWorkload(nAll, bodyOf(lat->v.fn), cfg.targetTimeUs, forced) : 0.0;
 
   volatile double keep = 0.0;
   for (double s : sink) keep += s;
   (void)keep;
 
   auto emitRow = [&](const char *id, const clpeak_cpu::ChainVariant &v,
-                     int n, double us, const char *note) {
-    if (us > 0) test.emit(id, (float)(v.opsPerIter * (double)n / (us * 1e-6)), note);
-    else        test.skip(id, ResultStatus::Error, "workload failed", note);
+                     double ips, const char *note) {
+    if (ips > 0) test.emit(id, (float)(v.opsPerIter * ips), note);
+    else         test.skip(id, ResultStatus::Error, "workload failed", note);
   };
   const char *physNote = "One thread per physical core, with the extra hardware "
                          "threads left idle.  Each thread keeps enough independent "
@@ -443,12 +443,12 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
                             "second thread on each core fills the idle time the "
                             "first leaves, which is the case SMT is built for: "
                             "expect close to twice the one-thread-per-core chain.";
-  emitRow("1T/core", chain->v, nPhys, usPhys, physNote);
-  emitRow("SMT MT",  chain->v, nAll,  usAll,  smtNote);
+  emitRow("1T/core", chain->v, ipsPhys, physNote);
+  emitRow("SMT MT",  chain->v, ipsAll,  smtNote);
   if (lat)
   {
-    emitRow("1T/core 1 chain", lat->v, nPhys, usPhysLat, physLatNote);
-    emitRow("SMT MT 1 chain",  lat->v, nAll,  usAllLat,  smtLatNote);
+    emitRow("1T/core 1 chain", lat->v, ipsPhysLat, physLatNote);
+    emitRow("SMT MT 1 chain",  lat->v, ipsAllLat,  smtLatNote);
   }
   else
   {

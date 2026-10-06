@@ -247,7 +247,8 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
      "Reading from main memory at random -- the worst case."},
   };
 
-  // Run pinned on core 0 for a stable measurement.
+  // Run on worker 0 -- pinned to the fastest core, whose caches the levels
+  // above are sized from.
   std::vector<double> ns(4, -1.0);
   for (int i = 0; i < 4; i++)
   {
@@ -260,7 +261,9 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   for (int i = 0; i < 4; i++)
   {
     if (!levels[i].bytes)
-      test.skip(levels[i].name, ResultStatus::Unsupported, "no L3 on this CPU",
+      test.skip(levels[i].name, ResultStatus::Unsupported,
+                info.l3Unsized ? "the OS lists an L3 but gives no size for it"
+                               : "no L3 on this CPU",
                 levels[i].note);
     else if (ns[(size_t)i] > 0)
       test.emit(levels[i].name, (float)(ns[(size_t)i] * 1e-9), levels[i].note);

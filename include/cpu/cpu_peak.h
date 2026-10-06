@@ -8,9 +8,11 @@
 #include <common/logger.h>
 #include <common/peak.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -19,11 +21,30 @@
 struct CliOptions;
 
 // ---------------------------------------------------------------------------
+// One logical CPU the pool runs a worker on, as the OS describes it (Linux /
+// Android sysfs and device tree, Windows CPU sets).  The cache fields are the
+// instance this CPU reads at each level: its size, and how many of the pool's
+// workers read the same instance -- an SMT sibling counts, so two threads on
+// one core each own half of its L1.  0 bytes = no such level, or no size for it.
+// ---------------------------------------------------------------------------
+struct cpu_core_t {
+  int      id     = -1;     // OS logical CPU number -- what the worker pins to
+  uint64_t rank   = 0;      // higher = faster; equal across a homogeneous chip
+  int      maxMHz = 0;      // 0 when the OS does not say
+  uint64_t l1dBytes = 0, l2Bytes = 0, l3Bytes = 0;
+  int      l1dSharers = 1, l2Sharers = 1, l3Sharers = 1;
+};
+
+// ---------------------------------------------------------------------------
 // Backend-neutral description of the host CPU, filled by detectCpuInfo().
 // Cache sizes drive the cache-bandwidth / memory-latency working-set sizing,
 // and the ISA flags gate the advanced compute tests (bf16 dot, int8 VNNI/
 // dotprod, AMX).  Unknown fields are left at 0/false and the consumer falls
 // back to sane defaults.
+//
+// The per-instance cache sizes and the clock describe the ST core -- the
+// fastest one, which every single-thread row runs on -- not cpu0, which on a
+// phone is a little core.
 // ---------------------------------------------------------------------------
 struct cpu_device_info_t {
   std::string name   = "Unknown CPU";
@@ -34,14 +55,27 @@ struct cpu_device_info_t {
   int physicalCores = 0;
   int perfCores     = 0;            // P-cores (0 when homogeneous / unknown)
   int effCores      = 0;            // E-cores
-  int clockMHz      = 0;
+  int clockMHz      = 0;            // the ST core's maximum clock
 
-  uint64_t l1dCacheBytes  = 0;       // per-core L1 data cache
+  // The CPUs this process may run on, fastest first: pool worker i pins to
+  // cores[i].id, so worker 0 -- and with it every single-thread row -- runs on
+  // the fastest core, and the all-core rows get one worker per usable CPU.
+  // Empty where threads cannot be pinned (macOS): the scheduler places them.
+  std::vector<cpu_core_t> cores;
+  std::string stCore;               // names the ST core when the cores differ ("Cortex-X4, cpu7")
+
+  uint64_t l1dCacheBytes  = 0;       // the ST core's L1 data cache
   uint64_t l1dTotalBytes  = 0;       // aggregate L1d across all cores
-  uint64_t l2CacheBytes   = 0;       // per-core (or per-cluster) L2
+  uint64_t l2CacheBytes   = 0;       // the L2 instance the ST core reads (per-core or per-cluster)
   uint64_t l2TotalBytes   = 0;       // aggregate L2 across all instances
-  uint64_t l3CacheBytes   = 0;       // one L3 instance (per-CCX/CCD on AMD)
+  uint64_t l3CacheBytes   = 0;       // the L3 instance the ST core reads (per-CCX/CCD on AMD)
   uint64_t l3TotalBytes   = 0;       // aggregate L3 across all instances (= l3CacheBytes on a single-LLC chip)
+  // Every distinct instance of each level on the chip, so the header can say
+  // "12 MB x 2 + 4 MB" where the instances differ; the totals are their sums.
+  std::vector<uint64_t> l1dSizes, l2Sizes, l3Sizes;
+  bool l1dAssumed = false;           // the OS gave no L1d / L2 size: the working sets
+  bool l2Assumed  = false;           // use clpeak's fallback, and the header omits it
+  bool l3Unsized  = false;           // the OS lists an L3 but gives no size for it
   uint64_t totalMemBytes = 0;
 
   // ISA capability flags (best-effort runtime detection).
@@ -71,14 +105,16 @@ void detectCpuInfo(cpu_device_info_t &info);
 // ---------------------------------------------------------------------------
 // Persistent pinned thread pool (thread_pool.cpp).  Workers park on a
 // condition variable between jobs so the timed region excludes thread-creation
-// cost.  Each worker pins itself to its own core index (best-effort; advisory
-// on macOS / Apple Silicon).
+// cost.  Each worker pins itself to its own core, again at every job: Android
+// can drop an affinity when it pauses a core (best-effort; advisory on macOS /
+// Apple Silicon).
 // ---------------------------------------------------------------------------
 class CpuThreadPool {
 public:
-  // `cpuIds` optionally pins worker i to logical CPU cpuIds[i] instead of the
-  // default core i -- used by the SMT-scaling test to place one worker per
-  // physical core.  Must have >= maxThreads entries when non-empty.
+  // `cpuIds` pins worker i to logical CPU cpuIds[i] instead of the default
+  // core i -- the main pool passes the fastest core first, and the SMT-scaling
+  // test one worker per physical core.  Must have >= maxThreads entries when
+  // non-empty.
   explicit CpuThreadPool(int maxThreads, std::vector<int> cpuIds = {});
   ~CpuThreadPool();
 
@@ -87,11 +123,17 @@ public:
   // Run body(tid) on worker threads [0, n) and block until all finish.
   void run(int n, const std::function<void(int)> &body);
 
+  // Workers whose last pin attempt failed, as "cpuN (error)" -- for a
+  // --verbose line.  Empty where pinning is advisory.
+  std::vector<std::string> pinFailures() const;
+
 private:
   void workerLoop(int tid);
+  int  pinTarget(int tid) const;
 
   int                       nMax = 0;
   std::vector<int>          pinIds;      // empty -> worker i pins to core i
+  std::unique_ptr<std::atomic<int>[]> pinError;   // per worker: 0 = pinned
   std::vector<std::thread>  workers;
   std::mutex                mtx;
   std::condition_variable   cvStart;
@@ -117,14 +159,24 @@ public:
 
   static BackendInventory enumerate();
 
-  // Timed launcher: runs body(tid, iters) across nThreads (warmups + one probe
-  // + pickIters() timed batch) and returns the mean wall-clock microseconds per
-  // outer iteration, or a negative value on failure.  `body` must loop `iters`
-  // times internally so a single dispatch covers the whole timed batch (one
-  // barrier per batch, not per iteration).
+  // Timed launcher: runs body(tid, iters) across nThreads and returns the rate
+  // -- outer iterations completed per second, summed over the threads -- or a
+  // negative value on failure.  With `weight`, an iteration of thread t counts
+  // weight[t] (bytes, when each thread streams its own working set), so the
+  // rate comes back in those units.  `body` must loop `iters` times internally
+  // so one call covers many iterations.
+  //
+  // One thread: warmups, a probe, then one pickIters() timed batch.  Several:
+  // warmups, a settle that keeps every core busy until a deadline (and
+  // measures each thread's rate), then a batch the threads claim from a shared
+  // counter about a millisecond of their own work at a time, so a fast core
+  // does more of it than a slow one.  The clock stops when the counter runs
+  // dry; what counts is the work finished by then, and the share of each slice
+  // still running that fell inside that window.
   using Workload = std::function<void(int tid, uint64_t iters)>;
   double runWorkload(int nThreads, const Workload &body,
-                     unsigned int targetTimeUsLocal, unsigned int forcedIters);
+                     unsigned int targetTimeUsLocal, unsigned int forcedIters,
+                     const std::vector<double> *weight = nullptr);
 
   // ---- benchmarks ----
   int runComputeSP(benchmark_config_t &cfg);

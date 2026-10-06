@@ -10,13 +10,13 @@
 #include <string>
 #include <vector>
 
-// Run one compute variant single-threaded (1T) and across all logical cores
-// (NT), emitting both metrics.  `chain(iters)` performs `iters` outer
-// iterations of the kernel and returns a sink value (kept live so the compiler
-// can't elide the work); `opsPerIterPerThread` is the op count one thread
-// performs in one outer iteration (flops for FP, ops for INT).  `unit`, when
-// non-empty, overrides the test's for these two readings -- what lets an int8
-// row live inside an otherwise floating-point test.
+// Run one compute variant single-threaded (1T, on the fastest core) and across
+// all logical cores (NT), emitting both metrics.  `chain(iters)` performs
+// `iters` outer iterations of the kernel and returns a sink value (kept live so
+// the compiler can't elide the work); `opsPerIterPerThread` is the op count one
+// thread performs in one outer iteration (flops for FP, ops for INT).  `unit`,
+// when non-empty, overrides the test's for these two readings -- what lets an
+// int8 row live inside an otherwise floating-point test.
 template <class ChainFn>
 static void emitCompute(CpuPeak &peak, logger::TestScope &test,
                         const std::string &label,
@@ -33,25 +33,21 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
   };
 
   unsigned int forced = peak.forceIters ? peak.specifiedIters : 0;
-  double us1 = peak.runWorkload(1,    body, cfg.targetTimeUs, forced);
-  double usN = peak.runWorkload(maxT, body, cfg.targetTimeUs, forced);
+  double ips1 = peak.runWorkload(1,    body, cfg.targetTimeUs, forced);
+  double ipsN = peak.runWorkload(maxT, body, cfg.targetTimeUs, forced);
 
   // Keep the accumulated work observable so -O3 can't delete the kernels.
   volatile double keep = 0.0;
   for (int t = 0; t < maxT; t++) keep += sink[(size_t)t];
   (void)keep;
 
-  auto rate = [](double opsPerIter, int n, double meanUs) -> float {
-    if (meanUs <= 0.0) return -1.0f;
-    return (float)(opsPerIter * (double)n / (meanUs * 1e-6));
-  };
-
   // ST/MT mean the same thing in every test routed through this runner, so the
   // notes live here rather than at each call site.  A reading that names a
   // data type as well ("bf16 ST") keeps that in its label; the note only has
   // to explain the thread count.
-  static const char *stNote = "One thread, running on a single core.";
-  static const char *mtNote = "Every hardware thread at once -- the whole chip.";
+  static const char *stNote = "One thread, on the fastest core.";
+  static const char *mtNote = "Every hardware thread at once -- the whole chip, each core "
+                              "doing as much as it can.";
 
   auto opts = [&](const char *threadNote) {
     logger::EmitOptions o;
@@ -61,13 +57,13 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
     return o;
   };
 
-  if (us1 > 0.0) test.emit(label + " ST", rate(opsPerIterPerThread, 1, us1), opts(stNote));
-  else           test.skip(label + " ST", ResultStatus::Error, "workload failed",
-                           opts(stNote));
+  if (ips1 > 0.0) test.emit(label + " ST", (float)(opsPerIterPerThread * ips1), opts(stNote));
+  else            test.skip(label + " ST", ResultStatus::Error, "workload failed",
+                            opts(stNote));
 
-  if (usN > 0.0) test.emit(label + " MT", rate(opsPerIterPerThread, maxT, usN), opts(mtNote));
-  else           test.skip(label + " MT", ResultStatus::Error, "workload failed",
-                           opts(mtNote));
+  if (ipsN > 0.0) test.emit(label + " MT", (float)(opsPerIterPerThread * ipsN), opts(mtNote));
+  else            test.skip(label + " MT", ResultStatus::Error, "workload failed",
+                            opts(mtNote));
 }
 
 // Why `slot` has no variant on this host.  `cpuLacks` is the call site's

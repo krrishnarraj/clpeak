@@ -5,6 +5,7 @@
 #include <common/options.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iomanip>
 #include <locale>
@@ -38,13 +39,51 @@ static std::string fmtBytes(uint64_t b)
   ss.imbue(std::locale::classic());
   ss << std::fixed;
   if (b >= (1ull << 30))      ss << std::setprecision(1) << b / (double)(1ull << 30) << " GB";
-  else if (b >= (1ull << 20)) ss << std::setprecision(0) << b / (double)(1ull << 20) << " MB";
+  else if (b >= (1ull << 20)) ss << std::setprecision(b % (1ull << 20) ? 1 : 0)
+                                 << b / (double)(1ull << 20) << " MB";
   else                        ss << std::setprecision(0) << b / (double)(1ull << 10) << " KB";
   return ss.str();
 }
 
+// A cache level for the header: the total, then each instance size with its
+// count, largest first -- "1.1 MB (128 KB x 8 + 64 KB x 2)".  "x N" of one
+// size would misdescribe every chip whose cores differ, as the M1 Pro's L1d
+// line once did with "128 KB x 10".  `total` stands alone where the OS listed
+// no instances.
+static std::string fmtCacheLevel(const std::vector<uint64_t> &sizes, uint64_t total)
+{
+  if (sizes.empty())
+    return fmtBytes(total);
+  std::vector<std::pair<uint64_t, int>> bySize;   // largest first
+  uint64_t sum = 0;
+  for (uint64_t sz : sizes)
+  {
+    sum += sz;
+    auto it = std::find_if(bySize.begin(), bySize.end(),
+                           [sz](const std::pair<uint64_t, int> &p) { return p.first == sz; });
+    if (it != bySize.end()) it->second++;
+    else bySize.push_back({sz, 1});
+  }
+  std::sort(bySize.begin(), bySize.end(),
+            [](const std::pair<uint64_t, int> &a, const std::pair<uint64_t, int> &b) {
+              return a.first > b.first;
+            });
+  std::string out = fmtBytes(sum);
+  if (sizes.size() < 2)
+    return out;
+  out += " (";
+  for (size_t i = 0; i < bySize.size(); i++)
+  {
+    if (i) out += " + ";
+    out += fmtBytes(bySize[i].first);
+    if (bySize[i].second > 1) out += " x " + std::to_string(bySize[i].second);
+  }
+  return out + ")";
+}
+
 double CpuPeak::runWorkload(int nThreads, const Workload &body,
-                            unsigned int targetTimeUsLocal, unsigned int forcedIters)
+                            unsigned int targetTimeUsLocal, unsigned int forcedIters,
+                            const std::vector<double> *weight)
 {
   if (nThreads < 1) nThreads = 1;
   if (pool && nThreads > pool->maxThreads()) nThreads = pool->maxThreads();
@@ -53,9 +92,76 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
   auto usSince = [](clock::time_point a, clock::time_point b) {
     return (double)std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count() / 1000.0;
   };
+  auto weightOf = [weight](int tid) {
+    return weight && (size_t)tid < weight->size() ? (*weight)[(size_t)tid] : 1.0;
+  };
 
   for (unsigned int w = 0; w < warmupCount; w++)
     pool->run(nThreads, [&](int tid) { body(tid, 1); });
+
+  if (nThreads == 1)
+  {
+    // Adaptive probe: a single outer iteration of a cheap kernel is dominated
+    // by the fixed pool-dispatch overhead (~tens of µs), which would inflate
+    // the per-iter estimate and under-size the timed batch.  Grow the probe
+    // batch until it runs long enough (>=2 ms) that the dispatch overhead is
+    // amortized, then derive an accurate per-iteration time from it.
+    double perIterUs = 1.0;  // unused when forced; pickIters short-circuits
+    if (!forcedIters)
+    {
+      uint64_t probeIters = 1;
+      double probeUs;
+      for (;;)
+      {
+        auto p0 = clock::now();
+        pool->run(1, [&](int tid) { body(tid, probeIters); });
+        probeUs = usSince(p0, clock::now());
+        if (probeUs >= 2000.0 || probeIters >= (1ull << 24))
+          break;
+        probeIters *= 4;
+      }
+      perIterUs = probeUs / (double)probeIters;
+      if (perIterUs <= 0.0) perIterUs = 0.01;
+    }
+
+    // No per-dispatch command-buffer limit on the CPU, so allow far more than
+    // the GPU default of 10000 — otherwise a cheap kernel (small per-iter
+    // time) hits that cap and stops well short of the time budget, finishing
+    // in ~100 ms.
+    unsigned int iters = pickIters(perIterUs, targetTimeUsLocal, forcedIters,
+                                   /*max_iters=*/100000000u);
+
+    auto t0 = clock::now();
+    pool->run(1, [&](int tid) { body(tid, iters); });
+    double totalUs = usSince(t0, clock::now());
+    return totalUs > 0.0 ? (double)iters * weightOf(0) / (totalUs * 1e-6) : -1.0;
+  }
+
+  // ---- Several threads ----------------------------------------------------
+  // An equal share each, timed to the slowest thread, measures the slowest
+  // core times the thread count.  On a heterogeneous chip that is the whole
+  // row: a Galaxy S24's fp32 MT read 144 GFLOPS -- eight threads at the pace
+  // of its two A520s, which share one vector unit -- against ~390 for the
+  // cores together.  And one thread the OS holds up drags every other one
+  // down with it.  So each thread claims a slice of the work at a time, sized
+  // to about `chunkUs` of its own core's time, until none is left: a fast
+  // core takes more slices than a slow one, and a stalled thread just takes
+  // fewer.
+  const double chunkUs =
+      std::min(std::max((double)targetTimeUsLocal / 2000.0, 100.0), 1000.0);
+
+  // One cache line per thread, so no thread's bookkeeping shares a line with
+  // another's: the shared claim counter below is the only line they contend.
+  struct alignas(64) Slot
+  {
+    uint64_t chunk = 1;                 // iterations per claim
+    uint64_t measIters = 0, allIters = 0;
+    double   measUs = 0.0, allUs = 0.0;
+    std::atomic<uint64_t> done{0};      // iterations finished in the timed batch
+    uint64_t lastK = 0;                 // the thread's last slice, and when it ran
+    double   lastStartUs = 0.0, lastEndUs = 0.0;
+  };
+  std::vector<Slot> slot((size_t)nThreads);
 
   // Settle the package into the clock/power state that belongs to THIS thread
   // count before timing.  On parts whose boost tracks core residency this is
@@ -67,64 +173,127 @@ double CpuPeak::runWorkload(int nThreads, const Workload &body,
   // 16 threads alone measured 1967.  A 32-thread result below the 16-thread
   // one cannot be caused by SMT, so the short-warmup row was the wrong number.
   // The `body(tid,1)` warmup above is microseconds and cannot do this job.
-  // Single-thread runs need no settling (they are already the low-residency
-  // case), so this costs nothing on the ST rows.
-  if (nThreads > 1)
+  //
+  // Scale with the measurement budget: AMD's boost limits move on moving
+  // averages measured in hundreds of ms, so a fixed 100 ms was far too short
+  // (it recovered only ~1.4% of an 11% error on a 3955WX).  A quarter of the
+  // budget, capped at 500 ms, keeps the cost proportional (~10% of total run
+  // time) and scales down when the user lowers --max-time-cpu.
+  //
+  // Every thread runs until the deadline rather than through a fixed share, so
+  // no core idles at a barrier while the package settles, and each one sizes
+  // its chunk and reports its rate over the second half: that is the probe.
+  const double settleUs =
+      std::min(std::max((double)targetTimeUsLocal / 4.0, 100000.0), 500000.0);
   {
-    // Scale with the measurement budget: AMD's boost limits move on moving
-    // averages measured in hundreds of ms, so a fixed 100 ms was far too
-    // short (it recovered only ~1.4% of an 11% error on a 3955WX).  A quarter
-    // of the budget, capped at 500 ms, keeps the cost proportional (~10% of
-    // total run time) and scales down when the user lowers --max-time-cpu.
-    const double settleUs =
-        std::min(std::max((double)targetTimeUsLocal / 4.0, 100000.0), 500000.0);
-    auto w0 = clock::now();
-    uint64_t wIters = 1;
-    while (usSince(w0, clock::now()) < settleUs)
-    {
-      pool->run(nThreads, [&](int tid) { body(tid, wIters); });
-      if (wIters < (1ull << 32)) wIters *= 2;   // amortize dispatch overhead
-    }
+    const auto s0 = clock::now();
+    const auto deadline = s0 + std::chrono::microseconds((int64_t)settleUs);
+    const auto half     = s0 + std::chrono::microseconds((int64_t)(settleUs / 2.0));
+    pool->run(nThreads, [&](int tid) {
+      Slot &s = slot[(size_t)tid];
+      for (;;)
+      {
+        const auto c0 = clock::now();
+        if (c0 >= deadline)
+          break;
+        body(tid, s.chunk);
+        const double us = usSince(c0, clock::now());
+        s.allIters += s.chunk;
+        s.allUs    += us;
+        if (c0 >= half)
+        {
+          s.measIters += s.chunk;
+          s.measUs    += us;
+        }
+        if (us < chunkUs / 2.0 && s.chunk < (1ull << 32))
+          s.chunk *= 2;
+      }
+    });
   }
 
-  // Adaptive probe: a single outer iteration of a cheap kernel is dominated by
-  // the fixed pool-dispatch overhead (~tens of µs), which would inflate the
-  // per-iter estimate and under-size the timed batch.  Grow the probe batch
-  // until it runs long enough (>=2 ms) that the dispatch overhead is amortized,
-  // then derive an accurate per-iteration time from it.
-  double perIterUs;
+  // Total work for the timed batch: the threads' summed rate over the budget.
+  uint64_t total;
   if (forcedIters)
   {
-    perIterUs = 1.0;  // unused; pickIters short-circuits on forced
+    total = (uint64_t)forcedIters * (uint64_t)nThreads;
   }
   else
   {
-    uint64_t probeIters = 1;
-    double probeUs;
-    for (;;)
+    double perUs = 0.0;   // iterations per µs, all threads together
+    for (const Slot &s : slot)
     {
-      auto p0 = clock::now();
-      pool->run(nThreads, [&](int tid) { body(tid, probeIters); });
-      probeUs = usSince(p0, clock::now());
-      if (probeUs >= 2000.0 || probeIters >= (1ull << 24))
-        break;
-      probeIters *= 4;
+      if (s.measUs > 0.0)     perUs += (double)s.measIters / s.measUs;
+      else if (s.allUs > 0.0) perUs += (double)s.allIters / s.allUs;
     }
-    perIterUs = probeUs / (double)probeIters;
-    if (perIterUs <= 0.0) perIterUs = 0.01;
+    const double want = perUs * (double)(targetTimeUsLocal ? targetTimeUsLocal : 5000000u);
+    const double cap  = 1e8 * (double)nThreads;
+    total = (uint64_t)std::min(std::max(want, (double)nThreads), cap);
   }
 
-  // No per-dispatch command-buffer limit on the CPU, so allow far more than the
-  // GPU default of 10000 — otherwise a cheap kernel (small per-iter time) hits
-  // that cap and stops well short of the time budget, finishing in ~100 ms.
-  unsigned int iters = pickIters(perIterUs, targetTimeUsLocal, forcedIters,
-                                 /*max_iters=*/100000000u);
+  // The timed batch.  Unforced, the clock stops the moment the counter runs
+  // dry: after that point some cores have nothing left to do, and a thread the
+  // OS parked mid-slice can no longer stretch the window everyone else already
+  // finished in.  The work counted is what finished by then, plus the share of
+  // each slice still running that fell inside the window -- prorated by time,
+  // since leaving those slices out reads low by half a slice per thread, and a
+  // DRAM pass can be tens of milliseconds.  A forced batch (--iters) is a
+  // fixed amount of work, so it is timed to the end, one iteration a claim.
+  std::atomic<uint64_t> next{0};
+  std::atomic<bool> dry{false};
+  double dryUs = -1.0;
+  double dryWork = 0.0;
+  auto finished = [&]() {
+    double w = 0.0;
+    for (int t = 0; t < nThreads; t++)
+      w += (double)slot[(size_t)t].done.load(std::memory_order_acquire) * weightOf(t);
+    return w;
+  };
+  const auto t0 = clock::now();
+  pool->run(nThreads, [&](int tid) {
+    Slot &s = slot[(size_t)tid];
+    const uint64_t claim = forcedIters ? 1 : s.chunk;
+    for (;;)
+    {
+      const uint64_t start = next.fetch_add(claim, std::memory_order_relaxed);
+      if (start >= total)
+      {
+        // The first thread to find nothing left reads what is finished, then
+        // the clock -- in that order, so a slice that ends in between is left
+        // out rather than counted against a window it fell outside.
+        if (!forcedIters && !dry.exchange(true))
+        {
+          dryWork = finished();
+          dryUs   = usSince(t0, clock::now());
+        }
+        break;
+      }
+      const uint64_t k = std::min(claim, total - start);
+      const double b = usSince(t0, clock::now());
+      body(tid, k);
+      const double e = usSince(t0, clock::now());
+      s.done.fetch_add(k, std::memory_order_release);
+      s.lastK       = k;
+      s.lastStartUs = b;
+      s.lastEndUs   = e;
+    }
+  });
+  const double wallUs = usSince(t0, clock::now());
 
-  auto t0 = clock::now();
-  pool->run(nThreads, [&](int tid) { body(tid, iters); });
-  double totalUs = usSince(t0, clock::now());
-
-  return totalUs / (double)iters;
+  if (!forcedIters && dryUs > 0.0 && dryWork > 0.0)
+  {
+    double work = dryWork;
+    for (int t = 0; t < nThreads; t++)
+    {
+      const Slot &s = slot[(size_t)t];
+      if (s.lastK && s.lastStartUs < dryUs && s.lastEndUs > dryUs)
+        work += (double)s.lastK * weightOf(t) * (dryUs - s.lastStartUs) /
+                (s.lastEndUs - s.lastStartUs);
+    }
+    return work / (dryUs * 1e-6);
+  }
+  // Forced, or a batch too small for anything to finish before the counter
+  // ran dry: everything, timed to the end.
+  return wallUs > 0.0 ? finished() / (wallUs * 1e-6) : -1.0;
 }
 
 int CpuPeak::runAll()
@@ -135,7 +304,30 @@ int CpuPeak::runAll()
 
   detectCpuInfo(info);
   if (!pool)
-    pool = new CpuThreadPool(info.logicalCores);
+  {
+    // Fastest core first: worker 0 runs every single-thread row.
+    std::vector<int> ids;
+    for (const cpu_core_t &c : info.cores)
+      ids.push_back(c.id);
+    pool = new CpuThreadPool(ids.empty() ? info.logicalCores : (int)ids.size(), ids);
+  }
+  if (clpeak::verboseEnabled())
+  {
+    std::string order;
+    for (const cpu_core_t &c : info.cores)
+      order += " cpu" + std::to_string(c.id);
+    if (!order.empty())
+      CLPEAK_VLOG("[cpu] workers pinned fastest first:%s\n", order.c_str());
+    // Every worker pins on its first job; say which ones the OS refused.
+    pool->run(pool->maxThreads(), [](int) {});
+    for (const std::string &f : pool->pinFailures())
+      CLPEAK_VLOG("[cpu] could not pin a worker to %s\n", f.c_str());
+    if (info.l1dAssumed || info.l2Assumed)
+      CLPEAK_VLOG("[cpu] the OS gives no %s size; working sets assume L1d %llu KB, L2 %llu KB\n",
+                  info.l1dAssumed && info.l2Assumed ? "L1d or L2" : info.l1dAssumed ? "L1d" : "L2",
+                  (unsigned long long)(info.l1dCacheBytes >> 10),
+                  (unsigned long long)(info.l2CacheBytes >> 10));
+  }
 
   auto backendScope = log->beginBackend("CPU");
 
@@ -153,40 +345,28 @@ int CpuPeak::runAll()
     if (info.perfCores > 0 && info.effCores > 0)
       cores += " (" + std::to_string(info.perfCores) + "P+" +
                std::to_string(info.effCores) + "E)";
+    // An Android app's cpuset, taskset or a container: the all-core rows run
+    // on what this process may use, not on the whole chip.
+    if (!info.cores.empty() && (int)info.cores.size() < info.logicalCores)
+      cores += ", " + std::to_string(info.cores.size()) + " usable";
     props.push_back({"Cores", cores});
   }
+  // Which core the single-thread rows ran on, where the cores differ.  The
+  // clock and the per-core cache sizes below are that core's.
+  if (!info.stCore.empty())
+    props.push_back({"ST core", info.stCore});
   if (info.clockMHz > 0)
     props.push_back({"Clock", std::to_string(info.clockMHz) + " MHz"});
-  {
-    std::string l1d = fmtBytes(info.l1dTotalBytes);
-    if (info.l1dTotalBytes > info.l1dCacheBytes)
-      l1d += " (" + fmtBytes(info.l1dCacheBytes) + " x " +
-             std::to_string(info.l1dTotalBytes / info.l1dCacheBytes) + ")";
-    props.push_back({"L1d", l1d});
-  }
-  {
-    // The "x N" breakdown only holds when every instance is the same size.
-    // Apple's clusters are not: an M1 Pro is 12 MB x 2 (P) + 4 MB (E) = 28 MB,
-    // and "28 MB (12 MB x 2)" would be a wrong reading of a right total.
-    std::string l2 = fmtBytes(info.l2TotalBytes);
-    if (info.l2TotalBytes > info.l2CacheBytes &&
-        info.l2TotalBytes % info.l2CacheBytes == 0)
-      l2 += " (" + fmtBytes(info.l2CacheBytes) + " x " +
-            std::to_string(info.l2TotalBytes / info.l2CacheBytes) + ")";
-    props.push_back({"L2", l2});
-  }
-  // Show aggregate L3; note the per-instance size on multi-LLC chips (AMD CCX).
+  // A level the OS gave no size for is left out: the working sets still need
+  // one, but clpeak's fallback is not this CPU's cache.
+  if (!info.l1dAssumed)
+    props.push_back({"L1d", fmtCacheLevel(info.l1dSizes, info.l1dTotalBytes)});
+  if (!info.l2Assumed)
+    props.push_back({"L2", fmtCacheLevel(info.l2Sizes, info.l2TotalBytes)});
   // Omitted entirely on the many CPUs that have no L3 at all (Apple Silicon,
   // Snapdragon X, most phone SoCs) — see the fallbacks in cpu_device.cpp.
   if (info.l3TotalBytes)
-  {
-    std::string l3 = fmtBytes(info.l3TotalBytes);
-    if (info.l3TotalBytes > info.l3CacheBytes &&
-        info.l3TotalBytes % info.l3CacheBytes == 0)
-      l3 += " (" + fmtBytes(info.l3CacheBytes) + " x " +
-            std::to_string(info.l3TotalBytes / info.l3CacheBytes) + ")";
-    props.push_back({"L3", l3});
-  }
+    props.push_back({"L3", fmtCacheLevel(info.l3Sizes, info.l3TotalBytes)});
   if (info.totalMemBytes)
     props.push_back({"RAM", fmtBytes(info.totalMemBytes)});
 
