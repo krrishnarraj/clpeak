@@ -109,6 +109,26 @@ const char *litertAccelName(LitertAccel a)
 namespace
 {
 
+// LiteRT's location marker, "ERROR: [file.cc:12]", wherever it sits: at the
+// head of a line, and inside a message that quotes an error passed up to it
+// ("Failed to initialize Dispatch API: ERROR: [dispatch_delegate.cc:176]").
+// What went wrong follows on a line of its own (below), when it was said.
+std::string withoutLocations(std::string s)
+{
+  for (const char *sev : {"ERROR: [", "WARNING: [", "INFO: [", "VERBOSE: [", "DEBUG: ["})
+    for (size_t at; (at = s.find(sev)) != std::string::npos;)
+    {
+      const size_t end = s.find(']', at);
+      if (end == std::string::npos)
+        break;
+      s.erase(at, end + 1 - at);
+    }
+  const size_t from = s.find_first_not_of(' ');
+  if (from == std::string::npos)
+    return std::string();
+  return s.substr(from, s.find_last_not_of(' ') + 1 - from);
+}
+
 // The last error or warning lines of what the runtime said -- its sink log
 // and whatever it printed to the console -- for a row reason.  LiteRT's own
 // lines look like "ERROR: [file.cc:12] text"; TFLite's kernel errors reach
@@ -117,7 +137,14 @@ namespace
 // letter.  Only the sentence survives.
 std::string lastLines(const std::string &log, int keep = 3)
 {
+  // An error LiteRT passes up keeps its cause on the next line, after "└ "
+  // (litert_macros.h); one cause can hold another.  The cause is what says
+  // what went wrong -- `dlopen failed: library "libQnnIr.so" not found`
+  // under "Failed to load plugin at: ... with error:" -- and it carries no
+  // severity of its own, so it joins the line it belongs to.
+  static const char kCause[] = "\xE2\x94\x94";   // U+2514
   std::vector<std::string> lines;
+  bool open = false;   // the line before was kept: a cause continues it
   size_t pos = 0;
   while (pos < log.size())
   {
@@ -126,6 +153,16 @@ std::string lastLines(const std::string &log, int keep = 3)
       nl = log.size();
     std::string l = log.substr(pos, nl - pos);
     pos = nl + 1;
+    if (l.rfind(kCause, 0) == 0)
+    {
+      const std::string cause = withoutLocations(l.substr(sizeof(kCause) - 1));
+      if (!open || cause.empty())
+        continue;
+      std::string &line = lines.back();
+      line += line.empty() ? cause : (line.back() == ':' ? " " : ": ") + cause;
+      continue;
+    }
+    open = false;
     const bool glogBad = (l.size() > 5 && (l[0] == 'E' || l[0] == 'W') && l[1] == '0');
     if (levelOf(l) == clpeak::LogLevel::Debug && !glogBad)
       continue;
@@ -155,16 +192,25 @@ std::string lastLines(const std::string &log, int keep = 3)
           l = l.substr(sp + 1);
       }
     }
-    if (!l.empty() && (lines.empty() || lines.back() != l))
-      lines.push_back(l);
+    lines.push_back(withoutLocations(l));   // kept even when empty: its cause may follow
+    open = true;
+  }
+  std::vector<std::string> said;
+  for (std::string &l : lines)
+  {
+    // A location with no cause after it leaves its colon behind.
+    while (!l.empty() && (l.back() == ':' || l.back() == ' '))
+      l.pop_back();
+    if (!l.empty() && (said.empty() || said.back() != l))
+      said.push_back(std::move(l));
   }
   std::string out;
-  const size_t from = lines.size() > (size_t)keep ? lines.size() - keep : 0;
-  for (size_t i = from; i < lines.size(); i++)
+  const size_t from = said.size() > (size_t)keep ? said.size() - keep : 0;
+  for (size_t i = from; i < said.size(); i++)
   {
     if (!out.empty())
       out += "; ";
-    out += lines[i];
+    out += said[i];
   }
   return out;
 }
@@ -431,6 +477,8 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   std::string console;   // what the runtime printed while creating
   auto fail = [&](const std::string &what, LiteRtStatus st) -> std::unique_ptr<LitertSession> {
     s->creationLog = console + litertDrainLog(rt);
+    if (!console.empty() && clpeak::verboseEnabled())
+      CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
     error = what + ": " + litertStatusText(rt, st);
     const std::string why = lastLines(s->creationLog);
     if (!why.empty())

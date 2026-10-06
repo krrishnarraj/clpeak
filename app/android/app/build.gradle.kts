@@ -4,40 +4,51 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Qualcomm's QNN (QAIRT) runtime for the Hexagon NPU, opt-in:
-// `clpeakQnn=true` in android/gradle.properties (which `flutter build` and
-// `flutter run` read), or `-PclpeakQnn=true` on a direct gradlew call.
-//
-// It is 67 MB compressed / 200 MB installed (libQnnHtpPrepare.so alone is
-// 86 MB; one Skel per Hexagon generation v68..v81), only a Snapdragon can
-// use it, and Qualcomm publishes it on Maven Central under its AI Hub Model
-// License (com.qualcomm.qti:qnn-runtime), so it is not in the default APK.
-// Two stacks reach the NPU through it, and the flag brings both:
+// NPU libraries staged by tools/fetch_android_npu.sh -- none, one vendor's,
+// or every vendor's -- which the build packages as it finds them: there is
+// no switch beside the staging.  Qualcomm's set serves two stacks, one QNN
+// runtime under both:
 //  - LiteRT, through its Qualcomm shims (libLiteRtDispatch_Qualcomm.so and
-//    the compiler plugin, from tools/fetch_litert_npu.sh) which must sit
-//    beside it -- built against QAIRT 2.47 for LiteRT 2.2.0 (the release's
-//    fetch_qualcomm_library.sh names it);
+//    the compiler plugin), built against QAIRT 2.47 for LiteRT 2.2.0;
 //  - ONNX Runtime, through Qualcomm's plugin execution provider
-//    (com.qualcomm.qti:onnxruntime-android-qnn, 4 MB: one
-//    libonnxruntime_providers_qnn.so that a stock onnxruntime-android 1.24.1+
-//    registers at run time; the app does so by its bare soname, see
-//    SettingsService.effectiveOnnxEpLibraries) -- validated by Qualcomm
-//    against QAIRT 2.50.
-// One QNN runtime serves both: 2.50, the newer of the two.  LiteRT's
-// QnnManager accepts a runtime whose API minor version is newer than the
-// one its shims were built against, with a warning (a major mismatch is
-// refused); the ONNX plugin gets exactly what it was tested with.
-// Unverified on a Snapdragon: the first tester's run is the proof.
-val clpeakQnn = (project.findProperty("clpeakQnn")?.toString() ?: "false") == "true"
+//    (libonnxruntime_providers_qnn.so, which the app registers on the
+//    packaged onnxruntime at run time by its bare soname, see
+//    SettingsService.effectiveOnnxEpLibraries), validated by Qualcomm
+//    against QAIRT 2.50, the runtime staged.
+// It is 67 MB compressed / 200 MB installed (libQnnHtpPrepare.so alone is
+// 86 MB; one Skel per Hexagon generation v68..v81), and only a Snapdragon
+// can use it.  LiteRT finds a dispatch library by listing the directory it
+// is told (litert_dispatch.cc), as the backend does to pick a vendor, and
+// an APK's internal lib/ path is not a directory anyone can list, so an app
+// carrying NPU libraries has them extracted at install; the Qualcomm
+// runtime needs that anyway (see below).
+val npuLibDir = file("src/main/jniLibs/arm64-v8a")
+val npuStaged = npuLibDir.list()?.any { it.endsWith(".so") } == true
 
-// NPU shims staged by tools/fetch_litert_npu.sh (any vendor, or all: the
-// backend picks the SoC's vendor at launch and stages its shims in a
-// directory of their own).  LiteRT finds a dispatch library by listing the
-// directory it is told (litert_dispatch.cc), as the backend does to pick,
-// and an APK's internal lib/ path is not a directory anyone can list, so an
-// app carrying shims has its native libraries extracted at install; the
-// Qualcomm runtime needs that anyway (see below).
-val clpeakNpuStaged = file("src/main/jniLibs/arm64-v8a").isDirectory
+// Why the Qualcomm libraries staged cannot reach a Hexagon NPU, or null.
+// The shims and the ONNX plugin run nothing on their own: they open the
+// QNN runtime at run time (libQnnHtp and libQnnSystem, through them
+// libQnnHtpPrepare and the Skel/Stub of the phone's Hexagon generation),
+// and LiteRT's compiler plugin is also linked against libQnnIr.so and
+// libQnnSaver.so -- it never calls either, but Android's linker refuses a
+// library one of whose DT_NEEDED entries it cannot find, and without the
+// plugin LiteRT compiles nothing for the NPU.  A partial set builds an APK
+// that installs, runs and lists no Hexagon NPU on any Snapdragon (the Play
+// build of 3.0.1 on a Galaxy S24 Ultra carried the shims alone), so the
+// build stops instead.
+val qualcommStagingProblem: String? = run {
+    val staged = npuLibDir.list()?.toSet() ?: emptySet()
+    val qualcomm = staged.any {
+        it.contains("Qualcomm") || it.startsWith("libQnn") || it == "libonnxruntime_providers_qnn.so"
+    }
+    val missing = listOf(
+        "libQnnHtp.so", "libQnnSystem.so", "libQnnHtpPrepare.so", "libQnnIr.so", "libQnnSaver.so",
+    ).filter { it !in staged }
+    if (!qualcomm || missing.isEmpty()) null
+    else "Qualcomm's NPU libraries in app/src/main/jniLibs/arm64-v8a are incomplete " +
+        "(${missing.joinToString()} missing), so no Snapdragon would list a Hexagon NPU. " +
+        "Stage them again with tools/fetch_android_npu.sh qualcomm (or all)."
+}
 
 android {
     namespace = "kr.clpeak"
@@ -105,7 +116,7 @@ android {
             // Hexagon-side libraries (libQnnHtpV*Skel.so) are opened by the
             // DSP's loader from ADSP_LIBRARY_PATH, which LiteRT points at
             // that same directory -- both need real files.
-            useLegacyPackaging = clpeakQnn || clpeakNpuStaged
+            useLegacyPackaging = npuStaged
         }
     }
 
@@ -131,20 +142,23 @@ dependencies {
     // needs on Android 12+ (libOpenCL, Qualcomm's libcdsprpc, the Google
     // Tensor and MediaTek NPU system libraries) and the merger brings them
     // into ours.  NPU dispatch libraries are not on Maven: see
-    // tools/fetch_litert_npu.sh, which stages them under src/main/jniLibs.
+    // tools/fetch_android_npu.sh, which stages them under src/main/jniLibs.
     // The AAR's Kotlin/Java surface (and the `litert-api` it depends on,
     // which declares the same namespace and trips AGP 9's uniqueness
     // check) is unused: only the .so files are wanted.
     implementation("com.google.ai.edge.litert:litert:2.2.0") {
         exclude(group = "com.google.ai.edge.litert", module = "litert-api")
     }
-
-    // See `clpeakQnn` at the top of this file.
-    if (clpeakQnn) {
-        implementation("com.qualcomm.qti:qnn-runtime:2.50.0")
-        implementation("com.qualcomm.qti:onnxruntime-android-qnn:2.6.0")
-    }
 }
+
+// Ahead of every variant's build, so a build that could not reach the NPU
+// it carries libraries for stops before compiling anything, saying why
+// (qualcommStagingProblem above).
+val checkNpuStaging = tasks.register("checkNpuStaging") {
+    val problem = qualcommStagingProblem
+    doLast { problem?.let { throw GradleException(it) } }
+}
+tasks.named("preBuild") { dependsOn(checkNpuStaging) }
 
 kotlin {
     compilerOptions {

@@ -18,6 +18,7 @@
 #include <ostream>
 
 #if defined(__ANDROID__)
+#include <dlfcn.h>
 #include <sys/system_properties.h>
 #endif
 
@@ -57,7 +58,7 @@ const NpuVendor kNpuVendors[] = {
 // Android app's libraries stay inside the APK ("base.apk!/lib/arm64-v8a",
 // which the linker opens but no directory iterator can) -- each vendor's
 // library is tried by name, the way LiteRT itself will open it.  More than
-// one is normal: tools/fetch_litert_npu.sh stages every vendor's shim, and
+// one is normal: tools/fetch_android_npu.sh stages every vendor's shim, and
 // only the one for the silicon underneath will bring up a device.
 std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
 {
@@ -107,6 +108,40 @@ bool nameCarriesTag(const std::string &name, const std::string &tag)
   };
   return squash(name).find(squash(tag)) != std::string::npos;
 }
+
+#if defined(__ANDROID__)
+// Why one vendor's shims in `dir` would not load, or empty.  LiteRT does
+// say, but as the cause of an error several layers up, beside whatever
+// failed after it; the linker's own sentence is the reason a person needs
+// -- an APK carrying Qualcomm's compiler plugin without a QNN library it is
+// linked against reads `dlopen failed: library "libQnnIr.so" not found` --
+// so each is opened here first, with the flags LiteRT opens it with on
+// Android (litert_dispatch.cc, compiler_plugin.cc).  The handles stay open:
+// LiteRT opens the same files next and is handed them.  Android only:
+// elsewhere LiteRT opens a compiler plugin RTLD_DEEPBIND, which only the
+// first load of a library decides.
+std::string npuShimLoadFailure(const std::string &dir, const NpuVendor &v)
+{
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec), end;
+  for (; !ec && it != end; it.increment(ec))
+  {
+    const std::string name = it->path().filename().string();
+    const bool dispatch = name.rfind("libLiteRtDispatch_", 0) == 0;
+    const bool plugin = name.rfind("libLiteRtCompilerPlugin_", 0) == 0;
+    if ((!dispatch && !plugin) || !nameCarriesTag(name, v.fileTag))
+      continue;
+    const int flags = dispatch ? RTLD_NOW | RTLD_LOCAL : RTLD_LAZY | RTLD_LOCAL | RTLD_NODELETE;
+    if (!dlopen(it->path().c_str(), flags))
+    {
+      const char *why = dlerror();
+      return std::string(dispatch ? "the dispatch library " : "the compiler plugin ") + name +
+             " does not load: " + (why ? why : "the linker gave no reason");
+    }
+  }
+  return std::string();
+}
+#endif
 
 // Which vendor's NPU this device carries, from the system's own answer.
 // `ro.soc.manufacturer` (Android 12+, Build.SOC_MANUFACTURER) says "Google",
@@ -326,7 +361,14 @@ std::vector<litert_device_info_t> litertUsableDevices(
         dev.vendor = vendors.front()->vendor;
         dev.displayName = vendors.front()->display;
         std::string reason, log;
+#if defined(__ANDROID__)
+        // With one vendor's shims they are the ones LiteRT will open.
+        if (vendors.size() == 1)
+          reason = npuShimLoadFailure(litertNpuDir(), *vendors.front());
+        const bool ok = reason.empty() && probeAccel(rt, dev, reason, log);
+#else
         const bool ok = probeAccel(rt, dev, reason, log);
+#endif
         // Which shim LiteRT actually loaded, from its own log line.
         const std::string envLog = litertEnvironmentLog(LitertAccel::Npu);
         for (const auto &v : kNpuVendors)

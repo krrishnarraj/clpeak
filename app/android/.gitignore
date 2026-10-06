@@ -13,6 +13,7 @@ key.properties
 **/*.keystore
 **/*.jks
 
-# LiteRT NPU dispatch / compiler-plugin shims and vendor runtimes staged by
-# tools/fetch_litert_npu.sh: fetched per release, never committed.
+# NPU libraries -- LiteRT's vendor shims, Qualcomm's QNN runtime and ONNX
+# Runtime plugin -- staged by tools/fetch_android_npu.sh: fetched per
+# release, never committed.
 /app/src/main/jniLibs/

@@ -190,6 +190,23 @@ static std::vector<const OrtEpDevice *> epDevices(const OrtRuntime &rt, OrtEnv *
   return std::vector<const OrtEpDevice *>(devs, devs + n);
 }
 
+// Whether a library bundled on the off-chance (`named == false`) is missing
+// from the package.  Only the Android app adds one -- Qualcomm's QNN plugin,
+// which an APK carries only when tools/fetch_android_npu.sh staged
+// Qualcomm's libraries for it -- by bare file name, which the runtime
+// resolves beside itself, so that is where it is looked for.  Without the
+// check a build without it asked the runtime to load it anyway, and the
+// loader's "not found" read like a broken package.
+static bool bundledLibraryMissing(const OrtRuntime &rt, const OnnxEpLibrary &lib)
+{
+  if (lib.named || rt.path.empty() || lib.path.find_first_of("/\\") != std::string::npos)
+    return false;
+  std::error_code ec;
+  const bool there =
+      std::filesystem::exists(std::filesystem::path(rt.path).parent_path() / lib.path, ec);
+  return !there && !ec;
+}
+
 // Register one library on `env`: its status, registered or the runtime's
 // reason, and the devices registering it added.
 static Registration registerLibrary(const OrtRuntime &rt, OrtEnv *env,
@@ -198,6 +215,13 @@ static Registration registerLibrary(const OrtRuntime &rt, OrtEnv *env,
   Registration r;
   r.st.lib  = lib;
   r.catalog = catalog;
+  if (bundledLibraryMissing(rt, lib))
+  {
+    r.st.error = "not packaged with this app";
+    CLPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(), lib.path.c_str(),
+                r.st.error.c_str());
+    return r;
+  }
   const std::vector<const OrtEpDevice *> before = epDevices(rt, env);
   OrtStatus *status = nullptr;
   {

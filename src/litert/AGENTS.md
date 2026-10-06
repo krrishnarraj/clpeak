@@ -463,12 +463,14 @@ budgets.
   `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
   entries merge into ours.  NPU dispatch and compiler-plugin shims come from
   the release's `litert_npu_runtime_libraries_jit.zip` via
-  `tools/fetch_litert_npu.sh qualcomm|google_tensor|all` into
-  `src/main/jniLibs/` (git-ignored).  LiteRT lists the dispatch directory
-  and loads the first `libLiteRtDispatch_*` it finds (`litert_dispatch.cc`,
-  still so on main), so with `all` staged the lib dir is not what it is
-  handed: `litertStageNpuVendor()` (`litert_peak.cpp`) reads
-  `ro.soc.manufacturer` ("Google", "QTI", "Mediatek", "Samsung"), links the
+  `tools/fetch_android_npu.sh qualcomm|google_tensor|all` into
+  `src/main/jniLibs/` (git-ignored), and the build packages whatever is
+  staged there -- there is no other switch.  LiteRT lists the dispatch
+  directory and loads the first `libLiteRtDispatch_*` it finds
+  (`litert_dispatch.cc`, still so on main), so with `all` staged the lib
+  dir is not what it is handed: `litertStageNpuVendor()`
+  (`litert_peak.cpp`) reads `ro.soc.manufacturer` ("Google", "QTI",
+  "Mediatek", "Samsung"), links the
   matching vendor's shims into `<support dir>/litert-npu/<Vendor>/` (the
   app passes the directory through `clpeak_set_litert_npu_stage_dir`; links,
   remade at every launch, because the lib dir moves with every install) and
@@ -484,24 +486,43 @@ budgets.
   not listed.  Google's zip gates the Tensor module to G3–G6 (Pixel 8 and
   later); a Tensor G2 (Pixel 7a) is not served.  MediaTek and Google
   Tensor runtimes are system libraries on the device.  Qualcomm's is
-  bundled: `clpeakQnn=true` pulls `com.qualcomm.qti:qnn-runtime:2.50.0`
-  from Maven Central (every Hexagon generation's Skel/Stub plus
-  `libQnnHtp`, `libQnnSystem` and the 86 MB `libQnnHtpPrepare` the JIT
-  needs; 67 MB compressed, arm64 only) together with Qualcomm's ONNX Runtime
-  QNN plugin (`onnxruntime-android-qnn:2.6.0`, 4 MB, which the app registers
-  by soname).  2.50 is newer than the 2.47 LiteRT 2.2.0's shims were built
-  against (the zip's `fetch_qualcomm_library.sh` names it): `QnnManager`
-  accepts a newer API minor with a warning and refuses only a major
-  mismatch, and the ONNX plugin was validated against 2.50 -- one runtime
-  for both stacks, to be confirmed on a Snapdragon.  The DSP's loader
-  finds the Skel through `ADSP_LIBRARY_PATH`, which LiteRT points at the
-  dispatch directory (prepending when the variable is already set); with
+  bundled, and the script stages it with the shims, one QNN build for both
+  backends: `com.qualcomm.qti:qnn-runtime:2.50.0` from Maven Central (every
+  Hexagon generation's Skel/Stub plus `libQnnHtp`, `libQnnSystem` and the
+  86 MB `libQnnHtpPrepare` the JIT needs; 67 MB compressed, arm64 only),
+  Qualcomm's ONNX Runtime QNN plugin (`onnxruntime-android-qnn:2.6.0`, 4 MB,
+  which the app registers by soname when the APK carries it), and
+  `libQnnIr.so` / `libQnnSaver.so`, which the Maven package lacks and the
+  compiler plugin is linked against (DT_NEEDED, no symbol bound):
+  `QnnManager` opens libQnnIr only for the IR backend (`qnn_backend`, or a
+  `dlc_dir`) and libQnnSaver only for `saver_output_dir`, none of which
+  clpeak sets, but bionic refuses a library one of whose DT_NEEDED entries
+  is missing, and with no plugin LiteRT compiles nothing for the NPU ("No
+  compiler plugin found").  Those two come from the QAIRT SDK of the Maven
+  package's build (2.50.0.260828: the same `v2.50.0.260828221209` build
+  id, the same LICENSE.pdf and NOTICE.txt), read out of the 2.6 GB zip on
+  Qualcomm's software center by HTTP range (python3, about 3 MB).
+  `build.gradle.kts` refuses a Qualcomm set with any QNN library missing
+  (`qualcommStagingProblem`), and on Android `litertUsableDevices()` opens
+  a single vendor's shims itself before the probe, so a library an APK
+  lacks is the device's skip reason in the linker's words (`dlopen failed:
+  library "libQnnIr.so" not found`).  2.50 is newer than the 2.47 LiteRT
+  2.2.0's shims were built against (the zip's `fetch_qualcomm_library.sh`
+  names it): `QnnManager` accepts a newer API minor with a warning and
+  refuses only a major mismatch, and the ONNX plugin was validated against
+  2.50 -- one runtime for both stacks, to be confirmed on a Snapdragon.
+  The DSP's loader finds the Skel through `ADSP_LIBRARY_PATH`, which
+  LiteRT points at the dispatch directory (prepending when the variable is
+  already set); with
   the shims in a directory of their own, `litertStageNpuVendor()` sets it
   to the lib dir first.  A Play release would carry the zip's
   per-generation dynamic feature modules instead, delivered by device
   group.  NPU needs API 31+ and arm64.  Unverified on Snapdragon and
-  Tensor silicon: the APK builds and packages (136 MB with QNN and both
-  vendors' shims); the testers' runs are the proof.
+  Tensor silicon: the APK builds and packages (137 MB with QNN and both
+  vendors' shims), every staged shim's DT_NEEDED resolves to a library in
+  it or the platform's, and on an arm64 emulator the Qualcomm plugin loads
+  and its `QnnManager` takes the 2.50 runtime as far as "No Snapdragon SOC
+  detected"; the testers' runs are the proof.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
 - **Verified on Android** with the CLI built against the NDK (root
