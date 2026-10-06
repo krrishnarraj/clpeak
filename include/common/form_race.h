@@ -7,9 +7,10 @@
 // next chip.  A test times both, point by point, and reports the faster,
 // saying which.  Core ML races the two orders a weight can be stored in
 // (src/coreml/coreml_bench.h), LiteRT the two operators an int8 layer can be
-// written as (src/litert/gemm.cpp), and the Vulkan and OpenCL compute peaks
-// the two sub-group widths their affine chain can be built at, across the
-// vector widths (src/vulkan/compute_kernel.cpp, src/opencl/compute_test.cpp).
+// written as (src/litert/gemm.cpp), and the Vulkan, OpenCL and oneAPI compute
+// peaks the two sub-group widths their affine chain can be built at, across
+// the vector widths (src/vulkan/compute_kernel.cpp, src/opencl/compute_test.cpp,
+// src/oneapi/compute_float.cpp).
 //
 // Each point a race stays open costs a second build and a second
 // measurement, so a race closes as soon as its readings allow: once one form

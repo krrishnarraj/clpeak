@@ -98,11 +98,13 @@ Gates:
   unsupported combination. Launch only tile shapes the device's
   `matrix_combinations` table advertises.
 - **A work-group is not one sub-group on Intel**, so per-sub-group ops
-  accounting cannot assume it is. `reqd_sub_group_size` cannot pin it (IGC
-  internal compiler error on DG2), and IGC may compile a 32-wide work-group as
-  four SIMD8 sub-groups, each running the whole chain. `joint_matrix.cpp`
-  measures the real count in-kernel and reports it back — read
-  `JM_SG_COUNT_NOTE` there before writing another sub-group-collective test.
+  accounting cannot assume it is. On a `joint_matrix` kernel
+  `reqd_sub_group_size` cannot pin it (IGC internal compiler error on DG2, whose
+  DPAS is SIMD8), and IGC may compile a 32-wide work-group as four SIMD8
+  sub-groups, each running the whole chain. `joint_matrix.cpp` measures the
+  real count in-kernel and reports it back — read `JM_SG_COUNT_NOTE` there
+  before writing another sub-group-collective test. Plain vector kernels do
+  pin 16 (the compute twins below).
 
 ## Test documentation
 
@@ -130,8 +132,13 @@ folds legally and one compiler in the fleet folds it.  The float families
 (and mp, bf16) race a third kernel too: the affine chain with a uniform `b`,
 128 deep for fp32/fp16, which is what Alchemist's register banks and these
 rolled loops want but which loses to the second shape on Intel's CPU runtime
-at widths 2-4 -- so it races instead of replacing it (`compute_float.cpp`).  This backend runs on
-Intel GPUs, where the squaring chain alone reports half rate on Alchemist.
+at widths 2-4 -- so it races instead of replacing it.  Where the device offers
+a sub-group of 16 they race a fourth: the affine chain with a per-lane `b`,
+pinned to 16 (`reqd_sub_group_size`), as Vulkan and OpenCL time theirs at two
+sub-group widths; across a family's vector widths that race is a
+`clpeak::FormRace` that drops only a clear loser (`compute_float.cpp`).  This
+backend runs on Intel GPUs, where the squaring chain alone reports half rate
+on Alchemist.
 Each shape needs its own SYCL kernel-name type.  Why: the MAD chain block in
 `include/common/common.h`.
 

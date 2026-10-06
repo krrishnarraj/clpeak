@@ -2,11 +2,13 @@
 
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
+#include <common/form_race.h>
 
 #include <sycl/sycl.hpp>
 #if defined(CLPEAK_ONEAPI_HAS_BF16) || __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
 #endif
+#include <algorithm>
 
 namespace clpeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
@@ -56,7 +58,25 @@ float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 // 783/1546 and cost double2 and half2-half8 30-54%, while lifting float16 and
 // double4-16 by 38-90%: SYCL's vectors compile differently enough there that
 // neither form wins everywhere.
+//
+// A fourth races wherever the device offers a sub-group of 16: the second
+// shape's per-lane b at the third shape's depth, pinned to 16 lanes.  Vulkan
+// and OpenCL time their affine chain at that width too, because at SIMD32 an
+// Alchemist fp32 value spans four registers in both banks and the allocator
+// lays the three sources of a mad out to collide; at SIMD16 they mostly do
+// not.  An Arc A380 (driver 8993) read oneAPI's mp at 3.42 TFLOPS with the
+// second shape and 3.89 with the third, at the width the compiler picks, where
+// Vulkan and OpenCL read 4.60-4.89 pinned to 16.  Packed fp16 needs SIMD32 for
+// its double rate, so the half rows drop the pinned build again.  The widths
+// race as a clpeak::FormRace that drops only a clear loser
+// (include/common/form_race.h), as in those two backends.
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
+
+static bool offersSubGroup16(const oneapi_device_info_t &info)
+{
+  return std::find(info.subGroupSizes.begin(), info.subGroupSizes.end(), (size_t)16) !=
+         info.subGroupSizes.end();
+}
 
 // Four-chain affine, for the families whose accumulator round-trips through a
 // narrow type once per outer iteration (mp, bf16).  The chains earn their keep:
@@ -82,17 +102,21 @@ namespace { struct SpTag; struct HpTag; struct DpTag; }
 template <typename Tag, typename T, int W> class compute_fp_vec_kernel;
 template <typename Tag, typename T, int W> class compute_fp_aff_kernel;
 template <typename Tag, typename T, int W> class compute_fp_affu_kernel;
+template <typename Tag, typename T, int W> class compute_fp_aff16_kernel;
 
 // One vector-width variant of an FP compute test.  Builds sycl::vec<T,W>
 // with distinct per-lane seeds (so the compiler can't collapse the vector to
 // a scalar broadcast), runs the FMA dependency chain, reduces lanes into the
-// output, times via runKernel, and emits the metric.
+// output, times via runKernel, and emits the metric.  `widthRace` carries the
+// sub-group race from one vector width to the next: form `false` is the
+// compiler's width, `true` the pinned 16.
 template <typename Tag, typename T, int W, int D>
 static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
                        logger::TestScope &test, const char *label,
                        T *out, uint64_t totalThreads, uint32_t blockSize,
                        int baseIters, double scalarA, uint32_t workPerWI,
-                       unsigned int targetTimeUs, unsigned int forced)
+                       unsigned int targetTimeUs, unsigned int forced,
+                       clpeak::FormRace &widthRace)
 {
   using VecT = sycl::vec<T, W>;
   int iters = baseIters / W;
@@ -218,6 +242,49 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     });
   };
 
+  // Fourth shape: the second's per-lane b at the third's depth, pinned to a
+  // sub-group of 16.  Submitted only where the device offers 16.
+  auto submitAff16 = [=](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_fp_aff16_kernel<Tag, T, W>>(
+        sycl::nd_range<1>(totalThreads, blockSize),
+        [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] {
+          VecT xs[NCHAIN], a, b;
+          #pragma unroll
+          for (int k = 0; k < W; k++)
+          {
+            a[k] = (T)it.get_local_id(0) + (T)k;
+            b[k] = a[k] + (T)2;
+          }
+          #pragma unroll
+          for (int n = 0; n < NCHAIN; n++)
+          {
+            #pragma unroll
+            for (int k = 0; k < W; k++) xs[n][k] = A + (T)k + (T)(n * W);
+          }
+
+          #pragma unroll 1
+          for (int i = 0; i < itersU; i++)
+          {
+            #pragma unroll
+            for (int m = 0; m < 16 * D / NCHAIN; m++)
+            {
+              #pragma unroll
+              for (int n = 0; n < NCHAIN; n++) xs[n] = sycl::fma(a, xs[n], b);
+            }
+          }
+
+          VecT r = xs[0];
+          #pragma unroll
+          for (int n = 1; n < NCHAIN; n++) r += xs[n];
+          T acc = (T)0;
+          #pragma unroll
+          for (int k = 0; k < W; k++) acc += r[k];
+          out[it.get_global_id(0)] = acc;
+        });
+    });
+  };
+
   const char *note = oneapiWidthNote(W);
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f)
@@ -225,35 +292,51 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     test.skip(label, ResultStatus::Error, "kernel launch failed", note);
     return;
   }
-  float value = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
+  const float squaring = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
+  float value = squaring;
 
-  // Race the affine chain and keep the faster reading.  A failure here is not
-  // an error -- the squaring chain already produced one.
-  float affUs = peak.runKernel(dev, submitAff, targetTimeUs, forced);
-  if (affUs > 0.0f)
+  // Time a second shape against the squaring reading: its rate, or 0 when it
+  // failed to launch or the fold guard rejects it.  A failure here is not an
+  // error -- the squaring chain already produced a reading.
+  auto timeShape = [&](const OneapiPeak::KernelSubmitter &shape, const char *what) -> double {
+    float shapeUs = peak.runKernel(dev, shape, targetTimeUs, forced);
+    if (shapeUs <= 0.0f)
+      return 0.0;
+    float rate = clpeak_oneapi::computeFlops(totalThreads, workPerWI, shapeUs);
+    CLPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
+    if (rate > squaring * MAX_ALT_CHAIN_RATIO)
+    {
+      CLPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
+                  label, what, rate / squaring);
+      return 0.0;
+    }
+    return rate;
+  };
+
+  CLPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
+  const bool sg16 = offersSubGroup16(dev.info);
+  double raced[2] = {0.0, 0.0};
+  if (widthRace.runs(false))
   {
-    float affValue = clpeak_oneapi::computeFlops(totalThreads, workPerWI, affUs);
-    CLPEAK_VLOG("%s: squaring chain %.1f, alt chain %.1f flops\n",
-                label, value, affValue);
-    if (affValue > value * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("%s: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  label, affValue / value);
-    else if (affValue > value)
-      value = affValue;
+    raced[0] = timeShape(submitAff, "alt chain");
+    raced[0] = std::max(raced[0], timeShape(submitAffU, "uniform-b alt chain"));
   }
+  if (sg16 && widthRace.runs(true))
+    raced[1] = timeShape(submitAff16, "alt chain at sub-group 16");
+  value = std::max(value, (float)std::max(raced[0], raced[1]));
 
-  // And the uniform-b shape, against the squaring reading the same way.
-  float squaring = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
-  float affUUs = peak.runKernel(dev, submitAffU, targetTimeUs, forced);
-  if (affUUs > 0.0f)
+  if (sg16)
   {
-    float affUValue = clpeak_oneapi::computeFlops(totalThreads, workPerWI, affUUs);
-    CLPEAK_VLOG("%s: uniform-b alt chain %.1f flops\n", label, affUValue);
-    if (affUValue > squaring * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("%s: uniform-b alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  label, affUValue / squaring);
-    else if (affUValue > value)
-      value = affUValue;
+    if (widthRace.runs(true) && raced[1] <= 0.0)
+      widthRace.drop(true);
+    if (widthRace.runs(false) && widthRace.runs(true))
+    {
+      widthRace.dropTrailing(raced);
+      if (!widthRace.runs(false) || !widthRace.runs(true))
+        CLPEAK_VLOG("%s: alt chain at the %s sub-group trails by %.1fx -- dropped from here\n",
+                    label, widthRace.runs(true) ? "compiler's" : "16",
+                    widthRace.runs(true) ? raced[1] / raced[0] : raced[0] / raced[1]);
+    }
   }
 
   test.emit(label, value, note);
@@ -269,14 +352,15 @@ static void runFpSweep(OneapiPeak &peak, OneapiDevice &dev,
                        unsigned int targetTimeUs, unsigned int forced)
 {
   const std::string b(baseLabel);
-  runFpWidth<Tag, T, 1, D>(peak, dev, test, b.c_str(),          out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced);
-  runFpWidth<Tag, T, 2, D>(peak, dev, test, (b + "2").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced);
-  runFpWidth<Tag, T, 4, D>(peak, dev, test, (b + "4").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced);
-  runFpWidth<Tag, T, 8, D>(peak, dev, test, (b + "8").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced);
+  clpeak::FormRace widthRace;
+  runFpWidth<Tag, T, 1, D>(peak, dev, test, b.c_str(),          out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
+  runFpWidth<Tag, T, 2, D>(peak, dev, test, (b + "2").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
+  runFpWidth<Tag, T, 4, D>(peak, dev, test, (b + "4").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
+  runFpWidth<Tag, T, 8, D>(peak, dev, test, (b + "8").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
   // 16-wide keeps one MAD_16 a trip -- already 256 lane-FMAs -- like OpenCL's
   // float16, which as one straight-line trip Intel's CPU runtime stopped
   // vectorising across work-items.
-  runFpWidth<Tag, T, 16, 1>(peak, dev, test, (b + "16").c_str(), out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced);
+  runFpWidth<Tag, T, 16, 1>(peak, dev, test, (b + "16").c_str(), out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
 }
 
 // --------------------------------------------------------------------------
@@ -392,6 +476,39 @@ int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
   return 0;
 }
 
+// The scalar families' race (mp, bf16), from the squaring chain's time: the
+// affine chain, its uniform-b twin and, where the device offers a sub-group
+// of 16, the affine chain pinned to it.  The fastest reading the fold guard
+// accepts wins.
+static float raceScalarShapes(OneapiPeak &peak, OneapiDevice &dev, const char *label,
+                              uint64_t totalThreads, float squaringUs,
+                              const OneapiPeak::KernelSubmitter &alt,
+                              const OneapiPeak::KernelSubmitter &altU,
+                              const OneapiPeak::KernelSubmitter &alt16,
+                              unsigned int targetTimeUs, unsigned int forced)
+{
+  const float squaring = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, squaringUs);
+  CLPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
+  float value = squaring;
+  auto race = [&](const OneapiPeak::KernelSubmitter &shape, const char *what) {
+    float shapeUs = peak.runKernel(dev, shape, targetTimeUs, forced);
+    if (shapeUs <= 0.0f)
+      return;
+    float rate = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, shapeUs);
+    CLPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
+    if (rate > squaring * MAX_ALT_CHAIN_RATIO)
+      CLPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
+                  label, what, rate / squaring);
+    else if (rate > value)
+      value = rate;
+  };
+  race(alt, "alt chain");
+  race(altU, "uniform-b alt chain");
+  if (offersSubGroup16(dev.info))
+    race(alt16, "alt chain at sub-group 16");
+  return value;
+}
+
 // --------------------------------------------------------------------------
 // Mixed precision (fp16 multiply -> fp32 accumulate).  Mirrors compute_mp.hip:
 // round-trip through half to force the lower-precision multiply, accumulate
@@ -400,6 +517,7 @@ int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
 class compute_mp_kernel;
 class compute_mp_alt_kernel;
 class compute_mp_altu_kernel;
+class compute_mp_alt16_kernel;
 
 int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -448,25 +566,34 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
     });
   };
 
+  // The affine chain, built twice: at the compiler's sub-group size and
+  // pinned to 16.
+  auto altChain = [=](sycl::nd_item<1> it) {
+    float a = (float)(sycl::half)(float)it.get_local_id(0);
+    float b = a + 2.0f;
+    float x0 = (float)(sycl::half)A;
+    float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
+    #pragma unroll 1
+    for (int i = 0; i < 16; i++) {
+      // MAD_128 = 8 * MAD_16_AFF4 = 256 ops
+      MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+      MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+      x0 = (float)(sycl::half)x0; x1 = (float)(sycl::half)x1;
+      x2 = (float)(sycl::half)x2; x3 = (float)(sycl::half)x3;
+    }
+    out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
+  };
   auto submitAlt = [&](sycl::queue &q) -> sycl::event {
     return q.submit([&](sycl::handler &h) {
       h.parallel_for<compute_mp_alt_kernel>(
+        sycl::nd_range<1>(totalThreads, blockSize), altChain);
+    });
+  };
+  auto submitAlt16 = [&](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_mp_alt16_kernel>(
         sycl::nd_range<1>(totalThreads, blockSize),
-        [=](sycl::nd_item<1> it) {
-          float a = (float)(sycl::half)(float)it.get_local_id(0);
-          float b = a + 2.0f;
-          float x0 = (float)(sycl::half)A;
-          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
-          #pragma unroll 1
-          for (int i = 0; i < 16; i++) {
-            // MAD_128 = 8 * MAD_16_AFF4 = 256 ops
-            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
-            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
-            x0 = (float)(sycl::half)x0; x1 = (float)(sycl::half)x1;
-            x2 = (float)(sycl::half)x2; x3 = (float)(sycl::half)x3;
-          }
-          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
-        });
+        [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] { altChain(it); });
     });
   };
 
@@ -500,33 +627,9 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
     sycl::free(out, dev.stream);
     return 0;
   }
-  float value = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
-
-  // Race the affine chain and keep the faster reading.
-  float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (altUs > 0.0f)
-  {
-    float altValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs);
-    CLPEAK_VLOG("mp: squaring chain %.1f, alt chain %.1f flops\n", value, altValue);
-    if (altValue > value * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("mp: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  altValue / value);
-    else if (altValue > value)
-      value = altValue;
-  }
-  float squaring = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
-  float altUUs = runKernel(dev, submitAltU, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (altUUs > 0.0f)
-  {
-    float altUValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUUs);
-    CLPEAK_VLOG("mp: uniform-b alt chain %.1f flops\n", altUValue);
-    if (altUValue > squaring * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("mp: uniform-b alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  altUValue / squaring);
-    else if (altUValue > value)
-      value = altUValue;
-  }
-  test.emit("mp", value);
+  test.emit("mp", raceScalarShapes(*this, dev, "mp", totalThreads, us, submitAlt, submitAltU,
+                                   submitAlt16, cfg.targetTimeUs,
+                                   forceIters ? specifiedIters : 0));
 
   sycl::free(out, dev.stream);
   return 0;
@@ -541,6 +644,7 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 class compute_bf16_kernel;
 class compute_bf16_alt_kernel;
 class compute_bf16_altu_kernel;
+class compute_bf16_alt16_kernel;
 
 int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -591,24 +695,33 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
     });
   };
 
+  // The affine chain, built twice: at the compiler's sub-group size and
+  // pinned to 16.
+  auto altChain = [=](sycl::nd_item<1> it) {
+    float a = (float)bfloat16((float)it.get_local_id(0));
+    float b = a + 2.0f;
+    float x0 = (float)bfloat16(A);
+    float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
+    #pragma unroll 1
+    for (int i = 0; i < 16; i++) {
+      MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+      MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
+      x0 = (float)bfloat16(x0); x1 = (float)bfloat16(x1);
+      x2 = (float)bfloat16(x2); x3 = (float)bfloat16(x3);
+    }
+    out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
+  };
   auto submitAlt = [&](sycl::queue &q) -> sycl::event {
     return q.submit([&](sycl::handler &h) {
       h.parallel_for<compute_bf16_alt_kernel>(
+        sycl::nd_range<1>(totalThreads, blockSize), altChain);
+    });
+  };
+  auto submitAlt16 = [&](sycl::queue &q) -> sycl::event {
+    return q.submit([&](sycl::handler &h) {
+      h.parallel_for<compute_bf16_alt16_kernel>(
         sycl::nd_range<1>(totalThreads, blockSize),
-        [=](sycl::nd_item<1> it) {
-          float a = (float)bfloat16((float)it.get_local_id(0));
-          float b = a + 2.0f;
-          float x0 = (float)bfloat16(A);
-          float x1 = x0 + 1.0f, x2 = x0 + 2.0f, x3 = x0 + 3.0f;
-          #pragma unroll 1
-          for (int i = 0; i < 16; i++) {
-            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
-            MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b) MAD_16_AFF4(a, b)
-            x0 = (float)bfloat16(x0); x1 = (float)bfloat16(x1);
-            x2 = (float)bfloat16(x2); x3 = (float)bfloat16(x3);
-          }
-          out[it.get_global_id(0)] = (x0 + x1) + (x2 + x3);
-        });
+        [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] { altChain(it); });
     });
   };
 
@@ -641,33 +754,9 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
     sycl::free(out, dev.stream);
     return 0;
   }
-  float value = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
-
-  // Race the affine chain and keep the faster reading.
-  float altUs = runKernel(dev, submitAlt, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (altUs > 0.0f)
-  {
-    float altValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUs);
-    CLPEAK_VLOG("bf16: squaring chain %.1f, alt chain %.1f flops\n", value, altValue);
-    if (altValue > value * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("bf16: alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  altValue / value);
-    else if (altValue > value)
-      value = altValue;
-  }
-  float squaring = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, us);
-  float altUUs = runKernel(dev, submitAltU, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-  if (altUUs > 0.0f)
-  {
-    float altUValue = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, altUUs);
-    CLPEAK_VLOG("bf16: uniform-b alt chain %.1f flops\n", altUValue);
-    if (altUValue > squaring * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("bf16: uniform-b alt chain %.1fx faster -- rejecting it as a compiler fold\n",
-                  altUValue / squaring);
-    else if (altUValue > value)
-      value = altUValue;
-  }
-  test.emit("bf16", value);
+  test.emit("bf16", raceScalarShapes(*this, dev, "bf16", totalThreads, us, submitAlt, submitAltU,
+                                     submitAlt16, cfg.targetTimeUs,
+                                     forceIters ? specifiedIters : 0));
 
   sycl::free(out, dev.stream);
   return 0;
