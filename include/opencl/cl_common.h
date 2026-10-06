@@ -28,6 +28,11 @@ struct device_info_t
     bool doubleSupported;
     bool int8DotProductSupported;
     bool int8DotProductPackedSupported;
+    // The compiler takes -cl-std=CL3.0 (OpenCL C 3.0 among
+    // CL_DEVICE_OPENCL_C_ALL_VERSIONS).  Without it a compiler builds OpenCL C
+    // 1.2, where the 3.0 feature macros the int8 dot builtins hang off are
+    // never defined.
+    bool openclC30;
     cl_device_type clDeviceType; // original OpenCL device type
     DeviceType deviceType;       // neutral equivalent
 

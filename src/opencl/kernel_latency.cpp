@@ -39,6 +39,10 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
 

@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
+                           const std::string &buildError,
                            device_info_t &devInfo, benchmark_config_t &cfg,
                            Benchmark which,
                            const std::string &displayName, const std::string &resultTag,
@@ -65,6 +66,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                  "integer dot product (4x8) not supported");
     return 0;
   }
+  if (!buildError.empty())
+  {
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Error, buildError);
+    return -1;
+  }
 
   try
   {
@@ -81,6 +88,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     // the float families on a device that offers it compute_*_alt_sg16_v*,
     // the same affine chain pinned to sub-group 16.  A family that defines
     // neither simply races nothing.
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM --
+    // which the catch below reads as the family not having been built.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Kernel kernels[5];
     cl::Kernel altKernels[5];
     cl::Kernel sg16Kernels[5];

@@ -3,9 +3,10 @@
 
 #define MSTRINGIFY(...) #__VA_ARGS__
 
-// mad_chain.cl first: it defines the AF*/RT*/M24_* macros the compute_*_alt_v*
-// kernels expand.  See it for why every compute family carries two chain
-// shapes.  Each family below is self-contained after it.
+// mad_chain.cl goes in front of every compute family: it defines the
+// AF*/RT*/M24_* macros the compute_*_alt_v* kernels expand.  See it for why
+// every compute family carries two chain shapes.  Each family is its own
+// program (clGetTestKernels).
 static const std::string chainKernels =
 #include "kernels/mad_chain.cl"
     ;
@@ -58,40 +59,36 @@ static const std::string stringifiedInt8DpKernels =
 #include "kernels/compute_int8_dp_kernels.cl"
     ;
 
-std::string clGetMainKernels(const std::function<bool(Benchmark)> &selected)
+std::string clGetTestKernels(Benchmark which)
 {
-  struct Part
+  switch (which)
   {
-    Benchmark which;
-    const std::string *source;
-  };
-  static const Part parts[] = {
-    {Benchmark::GlobalBW, &globalBandwidthKernels},
-    {Benchmark::KernelLatency, &globalBandwidthKernels},
-    {Benchmark::ComputeSP, &spKernels},
-    {Benchmark::ComputeHP, &hpKernels},
-    {Benchmark::ComputeMP, &mpKernels},
-    {Benchmark::ComputeDP, &dpKernels},
-    {Benchmark::ComputeIntFast, &int24Kernels},
-    {Benchmark::ComputeInt, &integerKernels},
-    {Benchmark::ComputeChar, &charKernels},
-    {Benchmark::ComputeShort, &shortKernels},
-  };
-
-  std::string src;
-  const std::string *last = nullptr;
-  for (const Part &p : parts)
-  {
-    // The latency test borrows a global-bandwidth kernel, so that source can
-    // be wanted twice in a row; it goes in once.
-    if (!selected(p.which) || p.source == last)
-      continue;
-    src += *p.source;
-    last = p.source;
+  case Benchmark::GlobalBW:
+  case Benchmark::KernelLatency:
+    return globalBandwidthKernels;
+  case Benchmark::LocalBW:
+    return stringifiedLocalKernels;
+  case Benchmark::ImageBW:
+    return stringifiedImageKernels;
+  case Benchmark::ComputeInt8DP:
+    return stringifiedInt8DpKernels;
+  case Benchmark::ComputeSP:
+    return chainKernels + spKernels;
+  case Benchmark::ComputeHP:
+    return chainKernels + hpKernels;
+  case Benchmark::ComputeMP:
+    return chainKernels + mpKernels;
+  case Benchmark::ComputeDP:
+    return chainKernels + dpKernels;
+  case Benchmark::ComputeIntFast:
+    return chainKernels + int24Kernels;
+  case Benchmark::ComputeInt:
+    return chainKernels + integerKernels;
+  case Benchmark::ComputeChar:
+    return chainKernels + charKernels;
+  case Benchmark::ComputeShort:
+    return chainKernels + shortKernels;
+  default:
+    return std::string();
   }
-  return src.empty() ? src : chainKernels + src;
 }
-
-const std::string& clGetLocalKernels()   { return stringifiedLocalKernels; }
-const std::string& clGetImageKernels()   { return stringifiedImageKernels; }
-const std::string& clGetInt8DpKernels()  { return stringifiedInt8DpKernels; }

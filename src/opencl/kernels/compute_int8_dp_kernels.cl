@@ -10,7 +10,11 @@ MSTRINGIFY(
 // without ever defining cl_khr_integer_dot_product.  Checking only the
 // extension macro compiled the kernels out on Intel's CPU runtime even though
 // the device advertised the extension and reported the 4x8-bit capability,
-// leaving clCreateKernel to fail with CL_INVALID_KERNEL_NAME.
+// leaving clCreateKernel to fail with CL_INVALID_KERNEL_NAME.  And a feature
+// macro exists only in OpenCL C 3.0, which a compiler builds only when asked:
+// Intel's (GPU and CPU alike) defaults to 1.2, defines neither macro, and
+// compiled these kernels out until runAll passed -cl-std=CL3.0 to every
+// device that lists OpenCL C 3.0.
 
 // The chain shape.  Three constraints have to hold at once, and each one has
 // already produced a wrong reading in another backend:

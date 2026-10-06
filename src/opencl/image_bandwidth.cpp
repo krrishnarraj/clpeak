@@ -52,6 +52,10 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     cl::ImageFormat imgFmt(CL_RGBA, CL_FLOAT);

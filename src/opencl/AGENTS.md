@@ -19,7 +19,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | File | Purpose |
 |------|---------|
 | `cl_peak.cpp` | `clPeak` class: constructor, `runAll()` (devices numbered consecutively across platforms), `run_kernel()`, `enumerate()` |
-| `cl_kernels.cpp` | Kernel source strings (stringified .cl includes) + accessor functions; `clGetMainKernels(selected)` assembles the main program from only the families the selected tests use |
+| `cl_kernels.cpp` | Kernel source strings (stringified .cl includes); `clGetTestKernels(which)` is the source of one test's program -- `runAll` builds one program per selected test, side by side on worker threads |
 | `compute_test.cpp` | `runComputeTest()` — shared compute-peak driver for float/int/char/short/etc. |
 | `cl_common.cpp` | `device_info_t` struct, device capability queries |
 | `cl_utils.cpp` | OpenCL-only helpers (`roundToMultipleOf`, `trimString`) — `include/opencl/cl_utils.h` |

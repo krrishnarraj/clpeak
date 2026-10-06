@@ -5,7 +5,6 @@
 #include <opencl/cl_common.h>
 #include <opencl/cl_utils.h>
 #include <common/inventory.h>
-#include <functional>
 #include <string>
 #include <memory>
 #include <vector>
@@ -28,15 +27,14 @@ static inline const char *clWidthNote(int width)
   }
 }
 
-// Kernel string accessors (defined in cl_kernels.cpp).  The main program is
-// assembled from the compute families and the global-bandwidth kernels the
-// selected tests use, so a run compiles only those: on a cold driver cache the
-// compile is most of a device's setup -- an Arc A380 spends ~40 s on all of
-// them.
-std::string clGetMainKernels(const std::function<bool(Benchmark)> &selected);
-const std::string& clGetLocalKernels();
-const std::string& clGetImageKernels();
-const std::string& clGetInt8DpKernels();
+// The source of the program a test runs (defined in cl_kernels.cpp): a
+// compute family behind the chain macros it expands, the global-bandwidth
+// kernels the latency test borrows, or one of the local, image and int8
+// programs.  Empty for a test with no kernel of its own.  One program per test,
+// and only the selected tests', because on a cold driver cache the compile is
+// most of a device's setup -- an Arc A380 spent ~45 s on all of them as one --
+// and separate programs build side by side (runAll).
+std::string clGetTestKernels(Benchmark which);
 
 class clPeak : public Peak
 {
@@ -82,8 +80,11 @@ public:
     // Unified compute benchmark helper — replaces 7 nearly-identical runCompute* methods.
     // `description` is the plain-language explanation of the test for
     // non-expert readers (logger::TestSpec::description); the per-width
-    // readings are documented by clWidthNote() inside the helper.
+    // readings are documented by clWidthNote() inside the helper.  A
+    // non-empty `buildError` says `prog` failed to build where it should
+    // have, and every reading becomes that error.
     int runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
+                       const std::string &buildError,
                        device_info_t &devInfo, benchmark_config_t &cfg,
                        Benchmark which, const std::string &displayName,
                        const std::string &resultTag,

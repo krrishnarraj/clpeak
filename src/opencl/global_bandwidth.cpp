@@ -37,6 +37,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     arr = new float[numItems];
     populate(arr, numItems);
 

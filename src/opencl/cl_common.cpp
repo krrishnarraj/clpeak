@@ -18,6 +18,38 @@
 #define CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR (1 << 0)
 #endif
 
+namespace
+{
+
+// Whether OpenCL C 3.0 is among the device's CL_DEVICE_OPENCL_C_ALL_VERSIONS,
+// an OpenCL 3.0 query the headers clpeak targets (1.2) do not declare.  The
+// entries are cl_name_version: a packed version (major in the top 10 bits)
+// and a 64-byte name.  A device that predates the query fails it, which
+// reads as no.
+bool offersOpenclC30(cl::Device &d)
+{
+    const cl_device_info kOpenclCAllVersions = 0x1066;
+    struct NameVersion
+    {
+        cl_uint version;
+        char name[64];
+    };
+    size_t bytes = 0;
+    if (clGetDeviceInfo(d(), kOpenclCAllVersions, 0, nullptr, &bytes) != CL_SUCCESS ||
+        bytes < sizeof(NameVersion))
+        return false;
+    std::vector<NameVersion> versions(bytes / sizeof(NameVersion));
+    if (clGetDeviceInfo(d(), kOpenclCAllVersions, versions.size() * sizeof(NameVersion),
+                        versions.data(), nullptr) != CL_SUCCESS)
+        return false;
+    for (const NameVersion &v : versions)
+        if ((v.version >> 22) == 3)
+            return true;
+    return false;
+}
+
+} // namespace
+
 device_info_t getDeviceInfo(cl::Device &d)
 {
     device_info_t devInfo;
@@ -52,6 +84,7 @@ device_info_t getDeviceInfo(cl::Device &d)
     devInfo.doubleSupported = false;
     devInfo.halfSupported = false;
     devInfo.int8DotProductSupported = false;
+    devInfo.int8DotProductPackedSupported = false;
 
     std::string extns = d.getInfo<CL_DEVICE_EXTENSIONS>();
 
@@ -79,6 +112,8 @@ device_info_t getDeviceInfo(cl::Device &d)
                 (dpCaps & CL_DEVICE_INTEGER_DOT_PRODUCT_INPUT_4x8BIT_PACKED_KHR) != 0;
         }
     }
+
+    devInfo.openclC30 = offersOpenclC30(d);
 
     devInfo.clDeviceType = d.getInfo<CL_DEVICE_TYPE>();
 
