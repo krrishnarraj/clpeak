@@ -105,7 +105,7 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 | `cancelled` | present and `true` only for a run stopped part-way. **A cancelled run is a partial one** — without this flag every test it never reached would read as hardware that lacks the feature |
 | `build` | what the binary is made of: `backends` lists every backend compiled into it, in run order. The first question on a "backend X is missing" report is whether it was ever there. `config` is the CMake configuration it was built in (`Release`, `Debug`, ...) when the build stamped it: a debug build's host-side work runs unoptimised, and a slow run from one is not the device's fault |
 | `host` | the machine, not its owner: no hostname, username, serial or MAC |
-| `invocation` | how clpeak was asked to run. Every number is sensitive to it — a shorter `--max-time` measures a different thing, and a selective run is not a full one even though the file is the same shape |
+| `invocation` | how clpeak was asked to run. Every number is sensitive to it — a shorter `--max-time-gpu` measures a different thing, and a selective run is not a full one even though the file is the same shape |
 | `devices` | one entry per benchmarked device |
 | `inventory` | `--verbose` only: what `--list-devices` would have shown (see *Inventory*) |
 | `log` | the diagnostic stream, in order (see *Log*). The warnings in it are usually the only record of *why* something is absent |

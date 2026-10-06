@@ -246,11 +246,13 @@ static std::string helpText()
   s += " GLOBAL OPTIONS:\n";
   helpLine(s, "-h, --help", "display help message");
   helpLine(s, "-v, --version", "display version");
-  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time calibration)");
+  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time-gpu calibration)");
   helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
-  helpLine(s, "--max-time ms", "per-test time budget for the timed phase, every backend\n"
-                               "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
-                               "so set it lower if you hit a GPU watchdog");
+  helpLine(s, "--max-time-gpu ms", "how long a GPU may be kept busy in one go (default:\n"
+                                   "1500 ms): every backend but CPU sizes a test's timed\n"
+                                   "phase to it, and ONNX Runtime and LiteRT stop a GPU's\n"
+                                   "size sweep before one run would take longer.  Set it\n"
+                                   "lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
   helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
                            "with -o, record them in the file's log, with the device\n"
@@ -531,7 +533,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       out.warmupCount = parsed;
       continue;
     }
-    if (!strcmp(a, "--max-time") || !strcmp(a, "--max-time-cpu"))
+    if (!strcmp(a, "--max-time-gpu") || !strcmp(a, "--max-time-cpu"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -540,7 +542,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
         return invalidValue(err, a, v);
-      if (!strcmp(a, "--max-time"))
+      if (!strcmp(a, "--max-time-gpu"))
         out.targetTimeUs = parsed * 1000u; // ms -> us
       else
         out.targetTimeUsCpu = parsed * 1000u;

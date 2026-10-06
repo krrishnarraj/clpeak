@@ -601,7 +601,11 @@ fire for the GPU that just died while the CPU provider is running.
 
 Note what this guard does *not* do.  It does not rescue the run -- there is
 nothing to rescue, the device is gone -- it makes the report say so once,
-honestly, instead of 52 times in the wrong vocabulary.
+honestly, instead of 52 times in the wrong vocabulary.  What was measured
+before the loss stands: the S24's fp32 gemm row came from rungs timed before
+its 4096 rung was reset.  The run a reset cuts short can still return success,
+though -- the S24's did, and only the run after it failed -- so the ladders
+(gemm, conv, the block) drop a size or point timed while the latch went up.
 
 ## What the numeric-error rows are for
 
@@ -1624,6 +1628,17 @@ one after the timing. `gemm.cpp` holds both to one multiply rather than one
 dispatch: a chain's sixteen summed stopped CPU providers at a quarter of the
 width their kernels peak at.
 
+**On a GPU, one run is bounded as well** — the same pair again, at
+`--max-time-gpu` (`gpuRunCapUs()`, `include/common/common.h`), in `gemm.cpp`,
+`conv.cpp` and the block's affordability gate. A runtime can hand a GPU a whole
+graph as one submission, and a driver resets a GPU one submission holds too
+long: ONNX Runtime's WebGPU provider submits every sixteen dispatches, so a
+Galaxy S24 got a 4096-wide fp32 chain as 7.4 s of work, which the per-multiply
+cap had allowed, and lost the device. Only a GPU: those watchdogs guard a
+device that also drives a display, and an NPU drives none. A ladder's first rung has no rate to predict
+from, so on a GPU `gemm.cpp` first times one run of a 512-wide chain
+(`kScoutDim`) and predicts from that; the scout is not a rung.
+
 ## Report asymptotes, not readings at a size someone picked
 
 A number tied to a fixed problem size has an expiry date. Whatever size looks
@@ -1640,8 +1655,8 @@ rung for its working set, which does not expire either:
   "The best this device can do at any size" means the same thing in ten years
   as it does now; "the rate at 4096" does not. The search is bounded by an
   operand-memory ceiling, by a per-iteration time predicted before each rung
-  and re-checked against what the rung measured (see above), and by a
-  session-creation cap (`kOnnxMaxCreateUs`) checked the same two ways —
+  and re-checked against what the rung measured (see above) — on a GPU also
+  one run's — and by a session-creation cap (`kOnnxMaxCreateUs`) checked the same two ways —
   `onnxPredictCreateUs()` before the build, the measured compile after. All
   of them scale themselves — hardware fast enough to make a bigger size cheap
   is exactly the hardware that should try it. A slow provider plateaus after

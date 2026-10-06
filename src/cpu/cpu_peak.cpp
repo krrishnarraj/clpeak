@@ -23,7 +23,7 @@ CpuPeak::~CpuPeak()
 void CpuPeak::applyOptions(const CliOptions &opts)
 {
   Peak::applyOptions(opts);
-  // The CPU backend ignores --max-time (a GPU-watchdog budget) and uses its
+  // The CPU backend ignores --max-time-gpu (a GPU-watchdog budget) and uses its
   // own, longer --max-time-cpu budget so the timed phases don't finish in a
   // few ms and fluctuate with turbo / scheduler jitter.
   targetTimeUs = opts.targetTimeUsCpu;

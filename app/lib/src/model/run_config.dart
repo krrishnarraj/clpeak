@@ -8,7 +8,7 @@ enum RunPreset { full, custom }
 /// index.  For single-platform backends platformIndex is the synthetic 0.
 typedef DeviceRef = ({int platformIndex, int deviceIndex});
 
-const int kDefaultMaxTimeMs = 500;
+const int kDefaultMaxTimeMs = 1500;
 const int kDefaultMaxTimeCpuMs = 2000;
 
 /// User-selected run configuration → CLI argv.
@@ -114,7 +114,7 @@ class RunConfig {
     }
 
     if (maxTimeMs != kDefaultMaxTimeMs) {
-      args.addAll(['--max-time', '$maxTimeMs']);
+      args.addAll(['--max-time-gpu', '$maxTimeMs']);
     }
     if (maxTimeCpuMs != kDefaultMaxTimeCpuMs) {
       args.addAll(['--max-time-cpu', '$maxTimeCpuMs']);

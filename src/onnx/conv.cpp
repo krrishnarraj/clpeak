@@ -281,7 +281,9 @@ namespace
 int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one pass may be predicted to take: on a GPU, --max-time-gpu
+  // (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
@@ -330,6 +332,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // rung, the end of the ladder above it -- as in gemm.cpp.
       int offDeviceBelow = 0;
       int64_t firstSpatial = 0, offDeviceAbove = 0;
+      // A failed size is logged whatever the row ends up saying: above a
+      // measured one, the row publishes the sizes below it (as in gemm.cpp).
+      auto logFailure = [&](int64_t sp, const char *what, const std::string &why) {
+        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s: %s\n",
+                    ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                    (long long)sp, what,
+                    why.empty() ? "no reason given" : why.c_str());
+      };
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
       {
@@ -363,6 +373,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       "stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
                       (long long)sp, (long long)sp);
+          break;
+        }
+        // On a GPU a pass is also held to what one run may keep the device
+        // busy (gpuRunCapUs): a driver resets a GPU held too long.
+        if (lastRate > 0.0 && runCapUs > 0.0 &&
+            convFlops(v, sp) / lastRate > runCapUs)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would keep the GPU busy "
+                      "~%.2f s a pass, past --max-time-gpu (%.2f s), "
+                      "stopping\n",
+                      ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                      (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
+                      runCapUs / 1.0e6);
           break;
         }
         // The compile cap, checked before paying for the build
@@ -414,6 +437,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             if (++offDeviceBelow < kOnnxOffDevicePatience)
               continue;
           }
+          else
+            logFailure(sp, "session failed", c.error);
           break;
         }
 
@@ -434,6 +459,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         if (per_iter_us <= 0.0)
         {
+          logFailure(sp, "run failed", c.error);
           if (firstErr.empty())
           {
             firstErr = c.error.empty() ? "run failed" : c.error;
@@ -449,10 +475,21 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         // The probe was one whole pass; when the budget affords only one, it
         // already is the measurement.
         double mean_us = (iters > 1) ? timeRuns(rt, c, iters) : per_iter_us;
-        if (mean_us <= 0.0 && firstErr.empty())
+        // A size timed across a device loss is no reading, whatever its runs
+        // returned (gemm.cpp says why).
+        if (mean_us > 0.0 && ep.deviceType != DeviceType::Cpu && onnxDeviceLost())
         {
-          firstErr = c.error.empty() ? "run failed" : c.error;
-          errStatus = ResultStatus::Error;
+          mean_us = -1.0;
+          c.error = "the device was lost while this size was timed";
+        }
+        if (mean_us <= 0.0)
+        {
+          logFailure(sp, "timed runs failed", c.error);
+          if (firstErr.empty())
+          {
+            firstErr = c.error.empty() ? "run failed" : c.error;
+            errStatus = ResultStatus::Error;
+          }
         }
         // What the timed runs computed (onnxNonFiniteReason), read once they
         // are over.  A wrong answer withholds the whole row, as in gemm.cpp.
@@ -519,6 +556,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       "stopping\n",
                       ep.providerKey.c_str(), row.c_str(),
                       (long long)sp, (long long)sp, per_iter_us / 1.0e6);
+          break;
+        }
+        if (runCapUs > 0.0 && per_iter_us > runCapUs)
+        {
+          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.2f s a pass, "
+                      "past --max-time-gpu (%.2f s), stopping\n",
+                      ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                      (long long)sp, per_iter_us / 1.0e6, runCapUs / 1.0e6);
           break;
         }
 

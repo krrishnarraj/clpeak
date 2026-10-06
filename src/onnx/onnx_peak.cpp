@@ -493,12 +493,19 @@ int OnnxPeak::runAll()
 
     // One line that says what happened, in place of the dozens of rows each
     // remaining test would otherwise have filed against a device that cannot
-    // answer.  An error, not a warning: nothing was measured here.
+    // answer.  An error, not a warning: those tests were never measured.
+    //
+    // What was measured before the loss stands.  The S24 whose WebGPU
+    // provider was reset by a 4096-wide fp32 chain published 262 GFLOPS for
+    // that row, from the 1024 and 2048 rungs timed before it.  The ladders
+    // (gemm, conv, the block) also drop a size timed across the loss, whose
+    // cut-short run can still come back a success.
     if (deviceLost())
       CLPEAK_LOG(Error,
                  "ONNX %s: the device was lost during the run (the driver reset "
-                 "it, and the provider cannot recover); no further tests were "
-                 "attempted on it and any rows already filed are not measurements",
+                 "it, and the provider cannot recover), so no further tests "
+                 "were attempted on it; the readings taken before the loss "
+                 "stand",
                  ep.displayName.c_str());
 
     currentDeviceScope = nullptr;

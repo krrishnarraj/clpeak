@@ -84,6 +84,13 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
+// On a GPU one run is bounded too, at --max-time-gpu (gpuRunCapUs), and each
+// operator's first rung, which has no rate to be predicted from, is predicted
+// from a chain this wide timed once beforehand -- the ONNX ladder's rule, for
+// its reason (src/onnx/gemm.cpp).  The scout is no rung: the row neither
+// publishes it nor counts it toward the plateau.
+constexpr int64_t kScoutDim = 512;
+
 // Per-size budget for the timed phase.
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
@@ -244,7 +251,9 @@ std::string formNote(bool conv, int64_t raceDim, const double raceRate[2], const
 
 int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one run may be predicted to take: on a GPU, --max-time-gpu
+  // (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
 
   auto test = currentDeviceScope->beginTest(
       {"litert_gemm", "LiteRT matmul peak", "flops", Category::Unknown,
@@ -319,6 +328,31 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     int64_t raceDim = 0;
     double raceRate[2] = {0.0, 0.0}, raceCreateUs[2] = {0.0, 0.0};
 
+    // On a GPU each operator's first rung is predicted from a kScoutDim
+    // chain; a scout that cannot be built or run leaves it unpredicted.
+    for (int f = 0; f < 2 && runCapUs > 0.0; f++)
+    {
+      if (!race.runs(f) || clpeak::cancelRequested())
+        continue;
+      std::string err;
+      auto s = LitertSession::create(rt, dev, litertMatMulChainModel(plan, kScoutDim, kChainLayers, kSeedWidth, f),
+                                     litertConfigFor(plan), err);
+      double us = -1.0;
+      if (s && !s->onDevice())
+        err = s->offDevice();
+      else if (s && litertBindScalar(*s, plan, err) && s->timeRuns(1, err) > 0.0)   // compile + warmup
+        us = s->timeRuns(1, err);
+      if (us > 0.0)
+      {
+        lanes[f].lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim * (double)kScoutDim * kChainLayers / us;
+        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms\n", dev.displayName.c_str(), label,
+                    (long long)kScoutDim, kChainLayers, kFormName[f], us / 1.0e3);
+      }
+      else
+        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
+                    dev.displayName.c_str(), label, (long long)kScoutDim, kFormName[f], err.c_str());
+    }
+
     for (int64_t D = kMinDim; D <= kMaxDim && !race.done() && wrongRow.empty(); D *= 2)
     {
       if (clpeak::cancelRequested())
@@ -341,10 +375,31 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
           continue;
         Lane &ln = lanes[f];
         const char *form = kFormName[f];
-        if (ln.lastRate > 0.0 && layerOps / ln.lastRate > kMaxIterUs)
+        const double runUs = ln.lastRate > 0.0 ? layerOps * kChainLayers / ln.lastRate : 0.0;
+        const bool runTooLong = runCapUs > 0.0 && runUs > runCapUs;
+        if (runTooLong || runUs / kChainLayers > kMaxIterUs)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would take ~%.1f s per multiply, stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, form, layerOps / ln.lastRate / 1.0e6);
+          if (runTooLong)
+            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would keep the GPU busy ~%.2f s a run, past "
+                        "--max-time-gpu (%.2f s), stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, form, runUs / 1.0e6, runCapUs / 1.0e6);
+          else
+            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would take ~%.1f s per multiply, stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, form, runUs / kChainLayers / 1.0e6);
+          // Before any rung the prediction is the scout's, and it is all the
+          // row has to say.
+          if (ln.rungs == 0)
+          {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.1f", runUs / 1.0e6);
+            ln.fail("at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
+                        std::to_string(D) + "-wide one would take about " + buf + " s a run, " +
+                        (runTooLong ? "longer than --max-time-gpu lets one run hold a GPU -- a driver may "
+                                      "reset a GPU held longer -- "
+                                    : "longer than one multiply may take, ") +
+                        "so no size was measured",
+                    ResultStatus::Error);
+          }
           race.drop(f);
           continue;
         }
@@ -424,6 +479,10 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         s.reset();   // the model's memory goes before the next one is built
         if (m.meanUs <= 0.0)
         {
+          // Logged whatever the row says: above a measured rung it publishes
+          // the rungs below, and this failure would leave no trace.
+          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
+                      (long long)D, form, m.error.c_str());
           ln.fail(m.error, m.status);
           race.drop(f);
           continue;
@@ -505,6 +564,13 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         {
           CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.1f s per multiply, stopping\n",
                       dev.displayName.c_str(), label, (long long)D, form, m.probeUs / kChainLayers / 1.0e6);
+          race.drop(f);
+        }
+        else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
+        {
+          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.2f s a run, past --max-time-gpu (%.2f s), "
+                      "stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, form, m.probeUs / 1.0e6, runCapUs / 1.0e6);
           race.drop(f);
         }
         // A size that compiled past the cap anyway is kept, and ends this

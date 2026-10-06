@@ -59,7 +59,9 @@ class RunConfigScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     'Per-test measurement window. Longer budgets steady the '
-                    'numbers; shorter budgets finish faster.',
+                    'numbers; shorter budgets finish faster. The GPU budget '
+                    'is also the longest a GPU is kept busy in one go, which '
+                    'keeps the driver from resetting it.',
                     style: t.body,
                   ),
                   const SizedBox(height: 14),

@@ -82,8 +82,8 @@ struct CliOptions {
   bool         forceIters    = false;
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
-  unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time, in us
-  // CPU backend uses its own (longer) budget; --max-time does not affect it.
+  unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time-gpu, in us
+  // CPU backend uses its own (longer) budget; --max-time-gpu does not affect it.
   unsigned int targetTimeUsCpu = DEFAULT_CPU_TARGET_TIME_US; // --max-time-cpu, in us
 
   // Test selection.  Default: every category and every test enabled.  The
@@ -143,7 +143,7 @@ struct CliOptions {
 };
 
 // Describe how clpeak was asked to run, for the result document's `invocation`
-// block.  Every number in a run is sensitive to this -- a shorter --max-time
+// block.  Every number in a run is sensitive to this -- a shorter --max-time-gpu
 // measures a different thing, and a selective run is not a full one even though
 // the file looks the same shape -- so it is recorded rather than inferred.
 // Lives here because the category and test flag-name tables do.

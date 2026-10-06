@@ -146,7 +146,7 @@ void main() {
       final config =
           RunConfig.allDevices(catalog, maxTimeMs: 200, maxTimeCpuMs: 500);
       final args = config.toArgs(catalog);
-      expect(args, containsAllInOrder(['--max-time', '200']));
+      expect(args, containsAllInOrder(['--max-time-gpu', '200']));
       expect(args, containsAllInOrder(['--max-time-cpu', '500']));
     });
 

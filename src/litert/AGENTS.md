@@ -48,6 +48,11 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / round trip / d2h through LiteRT's tensor buffers |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — a one-operator graph, a 256-cube matmul, and compiled-model creation |
 
+On a GPU, gemm, conv and the block also hold one run to `--max-time-gpu`
+(`gpuRunCapUs()`), and gemm predicts each operator's first rung from one run
+of a 512-wide chain -- the ONNX backend's rule, for its reason
+(`src/onnx/AGENTS.md`, "Bound a ladder on what it measured").
+
 Test ids are lower_snake and keep the `litert_` prefix (`litert_gemm`,
 `litert_block_decode`); the CLI flags that gate them are backend-neutral
 (`--gemm`, `--transformer-block`, …) and shared with the ONNX and Core ML

@@ -88,6 +88,31 @@ namespace
   // measuring it cannot be measured properly anyway, so it is skipped.
   constexpr unsigned int kBlockBudgetUs = 5000000;
 
+  // Why a point whose one pass is `flops` at `rate` -- flops per microsecond,
+  // from the last point timed, 0 before any -- is not worth timing, or empty
+  // when it is: past the whole budget for measuring it, or on a GPU past what
+  // one run may keep the device busy (`runCapUs`, gpuRunCapUs).  `what` is
+  // "one pass" or "one token".
+  std::string tooSlow(double flops, double rate, double runCapUs, const char *what)
+  {
+    if (rate <= 0.0)
+      return std::string();
+    const double us = flops / rate;
+    if (us > (double)kBlockBudgetUs)
+      return std::string(what) + " would take about " +
+             std::to_string((long long)(us / 1.0e6)) +
+             " s on this provider, too slow to measure";
+    if (runCapUs > 0.0 && us > runCapUs)
+    {
+      char buf[32];
+      std::snprintf(buf, sizeof buf, "%.1f", us / 1.0e6);
+      return std::string(what) + " would keep this GPU busy for about " + buf +
+             " s, longer than --max-time-gpu lets one run hold it -- a driver "
+             "may reset a GPU held longer";
+    }
+    return std::string();
+  }
+
   // The precisions the block is run in.
   //
   // A datatype is the wrong axis for a layer, and it is why the fp16-only
@@ -634,6 +659,13 @@ namespace
     // The probe was one whole block; when the budget affords only one, it
     // already is the measurement.
     double mean_us = (iters > 1) ? timeRuns(rt, r, iters) : per_iter_us;
+    // A point timed across a device loss is no reading, whatever its runs
+    // returned (gemm.cpp says why).
+    if (mean_us > 0.0 && ep.deviceType != DeviceType::Cpu && onnxDeviceLost())
+    {
+      mean_us = -1.0;
+      r.error = "the device was lost while this point was timed";
+    }
     if (mean_us <= 0.0)
     {
       error = r.error.empty() ? "run failed" : r.error;
@@ -725,7 +757,9 @@ namespace
 int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one pass may be predicted to take: on a GPU, --max-time-gpu
+  // (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
   constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
   std::vector<VariantResult> results(kNVariants);
@@ -1067,14 +1101,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
       // affordability uses refPrefillRate which is shared across all variants
       double prefillRate = refPrefillRate;
-      auto affordable = [&](double flops, double rate){ return rate<=0.0 || (flops/rate) <= (double)kBlockBudgetUs; };
       for (int64_t seq : promptsFor(v))
       {
         if (clpeak::cancelRequested()) break;
         Point pt; const double flops = blockFlops(seq, seq);
-        if (!affordable(flops, prefillRate))
+        if (std::string slow = tooSlow(flops, prefillRate, runCapUs, "one pass"); !slow.empty())
         {
-          pt.status = ResultStatus::Error; pt.error = "one pass would take about "+std::to_string((long long)(flops/prefillRate/1.0e6))+" s on this provider, too slow to measure";
+          pt.status = ResultStatus::Error; pt.error = slow;
           CLPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
         }
         else
@@ -1113,14 +1146,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         continue;
       }
       double prefillRate = refPrefillRate;
-      auto affordable = [&](double flops, double rate){ return rate<=0.0 || (flops/rate) <= (double)kBlockBudgetUs; };
       for (int64_t seq : promptsFor(v))
       {
         if (clpeak::cancelRequested()) break;
         Point pt; const double flops = blockFlops(seq, seq);
-        if (!affordable(flops, prefillRate))
+        if (std::string slow = tooSlow(flops, prefillRate, runCapUs, "one pass"); !slow.empty())
         {
-          pt.status = ResultStatus::Error; pt.error = "one pass would take about "+std::to_string((long long)(flops/prefillRate/1.0e6))+" s on this provider, too slow to measure";
+          pt.status = ResultStatus::Error; pt.error = slow;
           CLPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
         }
         else
@@ -1150,7 +1182,16 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           !clpeak::cancelRequested())
       {
         auto it = vr.prefill.find(kPrefillSeq);
-        if (it != vr.prefill.end() && it->second.us > 0.0)
+        // The fp32 form does the fp16 form's arithmetic, so the time just
+        // measured is its prediction, and on a GPU it has to fit one run.
+        if (it != vr.prefill.end() && it->second.us > 0.0 && runCapUs > 0.0 &&
+            it->second.us > runCapUs)
+          CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: the "
+                      "fp16 form held the GPU %.2f s a run, past --max-time-gpu "
+                      "(%.2f s)\n",
+                      ep.providerKey.c_str(), v.label, it->second.us / 1.0e6,
+                      runCapUs / 1.0e6);
+        else if (it != vr.prefill.end() && it->second.us > 0.0)
         {
           Variant v32 = v;
           v32.actDtype = ONNX_DT_FLOAT;
@@ -1232,11 +1273,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         // Need to measure decode for this variant within decode test so it streams
         double decodeRate = refDecodeRate;
-        auto affordable = [&](double flops, double rate){ return rate<=0.0 || (flops/rate) <= (double)kBlockBudgetUs; };
         Point pt; const double flops = blockFlops(1, kDecodeKv);
-        if (!affordable(flops, decodeRate))
+        if (std::string slow = tooSlow(flops, decodeRate, runCapUs, "one token"); !slow.empty())
         {
-          pt.status = ResultStatus::Error; pt.error = "one token would take about "+std::to_string((long long)(flops/decodeRate/1.0e6))+" s on this provider, too slow to measure";
+          pt.status = ResultStatus::Error; pt.error = slow;
           CLPEAK_VLOG("onnx-block[%s/%s]: skipping decode kv%lld, %s\n", ep.providerKey.c_str(), v.label, (long long)kDecodeKv, pt.error.c_str());
         }
         else
@@ -1337,12 +1377,11 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           {
             Point pt;
             const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
-            if (refPrefillRate > 0.0 && flops / refPrefillRate > (double)kBlockBudgetUs)
+            if (std::string slow = tooSlow(flops, refPrefillRate, runCapUs, "one pass");
+                !slow.empty())
             {
               pt.status = ResultStatus::Error;
-              pt.error = "one pass would take about " +
-                         std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
-                         " s on this provider, too slow to measure";
+              pt.error = slow;
             }
             else
               pt.us = measure(rt, ep, v, false, vr.qActDtype, warmupCount, forceIters,
@@ -1373,10 +1412,9 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           {
             Point pt; const double flops = blockFlops(1, kv);
             double decodeRate = refDecodeRate;
-            auto affordable = [&](double f, double r){ return r<=0.0 || (f/r) <= (double)kBlockBudgetUs; };
-            if (!affordable(flops, decodeRate))
+            if (std::string slow = tooSlow(flops, decodeRate, runCapUs, "one token"); !slow.empty())
             {
-              pt.status = ResultStatus::Error; pt.error = "one token would take about "+std::to_string((long long)(flops/decodeRate/1.0e6))+" s on this provider, too slow to measure";
+              pt.status = ResultStatus::Error; pt.error = slow;
             }
             else
             {

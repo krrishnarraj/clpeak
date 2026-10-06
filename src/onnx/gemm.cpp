@@ -48,6 +48,7 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -112,6 +113,21 @@ namespace
   // against 1.47 -- at the price of iterations of up to half a minute there.
   constexpr double kMaxIterUs = 2.0e6; // one multiply, predicted
 
+  // On a GPU one run is bounded too (gpuRunCapUs, --max-time-gpu): a chain
+  // can reach the device as one submission, and a driver resets a GPU that
+  // one submission holds too long.  ONNX Runtime's WebGPU provider submits
+  // every sixteen dispatches, and on a Galaxy S24 the multiply cap let the
+  // 4096-wide fp32 chain through at half a second a multiply -- 7.4 s of
+  // work in its first submission, after 1024 and 2048 had read 262 and 259
+  // GFLOPS -- and the device was reset 2.8 s in.
+  //
+  // The first rung has no rate to be predicted from, and a 1024-wide chain is
+  // 34 GFLOP: past 1.5 s on a GPU slower than 23 GFLOPS.  So on a GPU a chain
+  // this wide, an eighth of the work, is timed first and stands in for the
+  // rung before.  It is no rung itself: the row neither publishes it nor
+  // counts it toward the plateau.
+  constexpr int64_t kScoutDim = 512;
+
   // Everything a rung holds at once (onnxHeldBytes: the operands, and every
   // layer's output), capped at a quarter of physical memory -- a fixed
   // ceiling here would be a crash on a phone and a needless limit on a
@@ -172,7 +188,9 @@ namespace
 int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one run may be predicted to take: on a GPU, --max-time-gpu
+  // (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_gemm", "ONNX MatMul peak",
@@ -236,6 +254,17 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const bool foldable = (shape == OnnxLiveShape::ResultScaled);
     const char *tag = v.label;
 
+    // A rung that fails is logged whatever the row ends up saying.  Above a
+    // measured rung the row publishes the rungs below it, and the failure
+    // would leave no trace of its own: an S24's WebGPU provider timed 1024
+    // and 2048 and lost its device at 4096, and only the runtime's log said
+    // so.
+    auto logFailure = [&](int64_t D, const char *what, const std::string &why) {
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d %s: %s\n",
+                  ep.providerKey.c_str(), tag, (long long)D, layers, what,
+                  why.empty() ? "no reason given" : why.c_str());
+    };
+
     int rungs = 0;
     // Why the ladder ended, for the single-rung verdict below.
     bool endedOnWork = false; // memory or measured time: real work happened
@@ -249,6 +278,40 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     double prevUs = 0.0;
     int64_t prevD = 0;
     int strikes = 0;
+
+    // What a size is called in this ladder's messages.
+    auto sizeName = [&](int64_t D) {
+      return "a " + std::to_string(D) +
+             (layers > 1 ? "-wide chain" : "-cube multiply");
+    };
+
+    // On a GPU the first rung is predicted from a kScoutDim chain.  A scout
+    // that cannot be built or run leaves it unpredicted, as it is everywhere
+    // else.
+    double scoutUs = 0.0;
+    if (runCapUs > 0.0 && !clpeak::cancelRequested())
+    {
+      GemmSetup s = makeSetup(rt, ep, v, kScoutDim, /*profile=*/false,
+                              pr.actDtype, pr.reduceInFloat, pr.wgtDtype,
+                              shape, /*verifyPlacement=*/true, view, layers);
+      if (s.session && timeRuns(rt, s, 1) > 0.0) // compile + warmup
+        scoutUs = timeRuns(rt, s, 1);
+      if (scoutUs > 0.0)
+      {
+        lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim *
+                   (double)kScoutDim * layers / scoutUs;
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d scout %.1f ms\n",
+                    ep.providerKey.c_str(), tag, (long long)kScoutDim, layers,
+                    scoutUs / 1.0e3);
+      }
+      else
+      {
+        scoutUs = 0.0;
+        logFailure(kScoutDim, "scout failed, first rung unpredicted",
+                   s.error);
+      }
+      destroySetup(rt, s);
+    }
 
     for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
     {
@@ -285,12 +348,35 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (lastRate > 0.0)
       {
         const double predictedUs = ops / lastRate;
-        if (predictedUs / layers > kMaxIterUs)
+        const bool runTooLong = runCapUs > 0.0 && predictedUs > runCapUs;
+        if (runTooLong || predictedUs / layers > kMaxIterUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
-                      "multiply, stopping\n",
-                      ep.providerKey.c_str(),
-                      tag, (long long)D, predictedUs / layers / 1.0e6);
+          if (runTooLong)
+            CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d would keep the GPU "
+                        "busy ~%.2f s a run, past --max-time-gpu (%.2f s), "
+                        "stopping\n",
+                        ep.providerKey.c_str(), tag, (long long)D, layers,
+                        predictedUs / 1.0e6, runCapUs / 1.0e6);
+          else
+            CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
+                        "multiply, stopping\n",
+                        ep.providerKey.c_str(),
+                        tag, (long long)D, predictedUs / layers / 1.0e6);
+          // Before any rung that prediction is the scout's, and it is all
+          // the row has to say.
+          if (rungs == 0 && L.err.empty())
+          {
+            char buf[96];
+            std::snprintf(buf, sizeof buf, "%.1f s", predictedUs / 1.0e6);
+            L.err = "at the rate " + sizeName(kScoutDim) + " ran, " +
+                    sizeName(D) + " would take about " + buf + " a run, " +
+                    (runTooLong
+                         ? "longer than --max-time-gpu lets one run hold a "
+                           "GPU -- a driver may reset a GPU held longer -- "
+                         : "longer than one multiply may take, ") +
+                    "so no size was measured";
+            L.errStatus = ResultStatus::Error;
+          }
           endedOnWork = true;
           break;
         }
@@ -340,11 +426,13 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // it is spelled.
       // A convolution row reduces its 4-D product directly, so the view
       // changes nothing there and a retry would only rebuild the same graph.
+      bool retried = false; // the retry logs both refusals itself
       if (!g.session && !g.offDevice && view == OnnxReduceView::Rows &&
           !v.conv1x1 &&
           onnxFailureStatus(g.error) == ResultStatus::Unsupported &&
           !onnxReasonIsOutOfMemory(g.error) && !clpeak::cancelRequested())
       {
+        retried = true;
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused (%s); retrying the "
                     "reduction through a rank-4 view\n",
                     ep.providerKey.c_str(), tag, (long long)D,
@@ -397,6 +485,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           if (++L.offDeviceBelow < kOnnxOffDevicePatience)
             continue;
         }
+        else if (!retried)
+          logFailure(D, "session failed", g.error);
         // Larger sizes need strictly more of everything, so nothing above
         // this one can succeed either.
         break;
@@ -409,6 +499,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         per_iter_us = timeRuns(rt, g, 1);         // calibration probe
       if (per_iter_us <= 0.0)
       {
+        logFailure(D, "run failed", g.error);
         if (L.err.empty())
         {
           L.err = g.error.empty() ? "run failed" : g.error;
@@ -425,10 +516,22 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // one, it already is the measurement -- and at that end of the ladder
       // repeating it is the most expensive thing the sweep does.
       double mean_us = (iters > 1) ? timeRuns(rt, g, iters) : per_iter_us;
-      if (mean_us <= 0.0 && L.err.empty())
+      // A run the device is lost under can still come back a success -- on
+      // the S24 the run the reset cut short did, and only the next one failed
+      // -- so a size timed across a loss is no reading, whatever it returned.
+      if (mean_us > 0.0 && ep.deviceType != DeviceType::Cpu && onnxDeviceLost())
       {
-        L.err = g.error.empty() ? "run failed" : g.error;
-        L.errStatus = ResultStatus::Error;
+        mean_us = -1.0;
+        g.error = "the device was lost while this size was timed";
+      }
+      if (mean_us <= 0.0)
+      {
+        logFailure(D, "timed runs failed", g.error);
+        if (L.err.empty())
+        {
+          L.err = g.error.empty() ? "run failed" : g.error;
+          L.errStatus = ResultStatus::Error;
+        }
       }
       // What the timed runs computed (onnxNonFiniteReason), read once they
       // are over.
@@ -582,6 +685,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     "stopping\n",
                     ep.providerKey.c_str(), tag,
                     (long long)D, per_iter_us / layers / 1.0e6);
+        endedOnWork = true;
+        break;
+      }
+      // The same for a GPU's run (gpuRunCapUs): this one held the device
+      // longer than --max-time-gpu and survived it, and the next would hold
+      // it eight times as long.
+      if (runCapUs > 0.0 && per_iter_us > runCapUs)
+      {
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d measured %.2f s a run, "
+                    "past --max-time-gpu (%.2f s), stopping\n",
+                    ep.providerKey.c_str(), tag, (long long)D, layers,
+                    per_iter_us / 1.0e6, runCapUs / 1.0e6);
         endedOnWork = true;
         break;
       }

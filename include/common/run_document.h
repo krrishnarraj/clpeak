@@ -240,7 +240,7 @@ struct BuildInfo {
 };
 
 // How clpeak was asked to run.  Recorded because every number here is
-// sensitive to it: a shorter --max-time measures a different thing, and a
+// sensitive to it: a shorter --max-time-gpu measures a different thing, and a
 // selective run is not a full one even though the file looks the same shape.
 struct Invocation {
     std::vector<std::string> argv;
