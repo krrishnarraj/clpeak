@@ -39,6 +39,16 @@
 
 #ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 
+namespace clpeak_oneapi {
+float runJmFour(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCount,
+                uint32_t numBlocks, uint32_t blockSize,
+                sycl::ext::oneapi::experimental::matrix::matrix_type at,
+                sycl::ext::oneapi::experimental::matrix::matrix_type bt,
+                sycl::ext::oneapi::experimental::matrix::matrix_type ct,
+                uint32_t M, uint32_t N, uint32_t K, uint32_t trips,
+                unsigned int targetTimeUs, unsigned int forced);
+}
+
 namespace {
 
 namespace syclex = sycl::ext::oneapi::experimental::matrix;
@@ -61,6 +71,14 @@ constexpr uint64_t JM_OUT_BYTES = 512ull << 20;
 // Per-instantiation kernel-name tag: SYCL needs a distinct type per
 // parallel_for, and the template arguments already are the distinction.
 template <typename At, typename Bt, typename Acc, int M, int N, int K> struct JmTag;
+
+// The most accumulator a lane may hold for a tile to be timed with four
+// accumulators as well as one (runJmFour): 128 bytes, counted at the
+// narrowest sub-group the device offers.  Four of Alchemist's 8x8 fp32 tiles
+// at SIMD8 come to exactly that, and so do four 8x16 tiles at SIMD16 on
+// PVC/Xe2; four of Alchemist's 32x32 bf16 tiles would be 2 KB a lane, which
+// could only spill.  Mirrors Vulkan's kAltAccumulatorBytesPerLane.
+constexpr uint32_t JM_FOUR_ACC_BYTES_PER_LANE = 128;
 
 // Returned when the device advertises a tile whose shape has no compiled
 // instantiation.  Distinct from -1 (launch failed) so the row can say which
@@ -624,19 +642,65 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       continue;
     }
 
-    // As many blocks as this tile fits into the shared buffer -- see the
-    // sizing note above.
     const uint64_t tileElems = (uint64_t)t.M * t.N;
-    uint64_t blocks = std::min<uint64_t>(wantBlocks, outElems / tileElems);
-    if (blocks == 0) blocks = 1;
-    const uint32_t numBlocks = (uint32_t)blocks;
+    const bool isInt = jmIsIntAcc(t.ct);
 
-    const float us = jmIsIntAcc(t.ct)
-        ? runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
-                   cfg.targetTimeUs, forced, t)
-        : runJmFp (*this, dev, (float *)out, sgCount, numBlocks, blockSize,
-                   cfg.targetTimeUs, forced, t);
+    // One timing of this tile: `fourTrips` 0 is the accumulator chain, else
+    // runJmFour, which stores four tiles a block.  As many blocks as the tile
+    // fits into the shared buffer -- see the sizing note above.  Returns the
+    // microseconds a launch took (JM_NOT_COMPILED / <= 0 as the runners do)
+    // and the ops that launch issued.
+    auto timeTile = [&](uint32_t fourTrips, double &ops) -> float {
+      const uint64_t perBlock = tileElems * (fourTrips ? 4 : 1);
+      if (outElems < perBlock)
+        return -1.0f;
+      uint64_t blocks = std::min<uint64_t>(wantBlocks, outElems / perBlock);
+      if (blocks == 0) blocks = 1;
+      const uint32_t numBlocks = (uint32_t)blocks;
 
+      float us;
+      if (fourTrips)
+        us = clpeak_oneapi::runJmFour(*this, dev, out, sgCount, numBlocks, blockSize,
+                                      t.at, t.bt, t.ct, t.M, t.N, t.K, fourTrips,
+                                      cfg.targetTimeUs, forced);
+      else if (isInt)
+        us = runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
+                      cfg.targetTimeUs, forced, t);
+      else
+        us = runJmFp(*this, dev, (float *)out, sgCount, numBlocks, blockSize,
+                     cfg.targetTimeUs, forced, t);
+      if (us <= 0.0f)
+        return us;
+
+      // How many chains actually ran per work-group (JM_SG_COUNT_NOTE).
+      uint32_t sgPerWG = 0;
+      try {
+        dev.stream.memcpy(&sgPerWG, sgCount, sizeof(uint32_t)).wait();
+      } catch (const std::exception &e) {
+        CLPEAK_VLOG("joint_matrix: sub-group count readback failed: %s\n", e.what());
+        sgPerWG = 0;
+      }
+      // maxSgPerWG is a hard upper bound (widest work-group over narrowest
+      // advertised sub-group), so a value outside it means the readback is not
+      // to be trusted; fall back to the historical assumption and say so.
+      if (sgPerWG == 0 || sgPerWG > maxSgPerWG)
+      {
+        CLPEAK_VLOG("joint_matrix: implausible sub-group count %u (bound %u), "
+                    "assuming 1\n", sgPerWG, maxSgPerWG);
+        sgPerWG = 1;
+      }
+      CLPEAK_VLOG("joint_matrix: %s %s%s -- %u work-items/work-group ran as %u "
+                  "sub-group(s), %u blocks\n",
+                  t.label.c_str(), t.shape.c_str(),
+                  fourTrips ? " with four accumulators" : "", blockSize, sgPerWG,
+                  numBlocks);
+      const double mads = fourTrips ? 16.0 * fourTrips : (double)JM_ITERS;
+      ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() * 2.0 * mads;
+      return us;
+    };
+
+    double ops = 0.0;
+    const float us = timeTile(0, ops);
     if (us == JM_NOT_COMPILED)
     {
       test.skip(t.metric, ResultStatus::Unsupported,
@@ -650,31 +714,37 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       test.skip(t.metric, ResultStatus::Error, "kernel launch failed", jmOpts(t));
       continue;
     }
+    float value = (float)(ops * 1.0e6 / us);
 
-    // How many chains actually ran per work-group (JM_SG_COUNT_NOTE).
-    uint32_t sgPerWG = 0;
-    try {
-      dev.stream.memcpy(&sgPerWG, sgCount, sizeof(uint32_t)).wait();
-    } catch (const std::exception &e) {
-      CLPEAK_VLOG("joint_matrix: sub-group count readback failed: %s\n", e.what());
-      sgPerWG = 0;
-    }
-    // maxSgPerWG is a hard upper bound (widest work-group over narrowest
-    // advertised sub-group), so a value outside it means the readback is not
-    // to be trusted; fall back to the historical assumption and say so.
-    if (sgPerWG == 0 || sgPerWG > maxSgPerWG)
+    // And with four accumulators, where the tile leaves room for them
+    // (runJmFour).  A failure here is not an error: the chain already
+    // produced a reading.
+    logger::EmitOptions opts = jmOpts(t);
+    const uint64_t accBytes = 4ull * tileElems * 4;   // fp32 and int32 alike
+    if (accBytes <= (uint64_t)JM_FOUR_ACC_BYTES_PER_LANE * minSgSize)
     {
-      CLPEAK_VLOG("joint_matrix: implausible sub-group count %u (bound %u), "
-                  "assuming 1\n", sgPerWG, maxSgPerWG);
-      sgPerWG = 1;
+      double fourOps = 0.0;
+      const float fourUs = timeTile(JM_ITERS / 16, fourOps);
+      if (fourUs > 0.0f)
+      {
+        const float four = (float)(fourOps * 1.0e6 / fourUs);
+        CLPEAK_VLOG("joint_matrix: %s %s one accumulator %.1f, four %.1f %s\n",
+                    t.label.c_str(), t.shape.c_str(), value, four,
+                    isInt ? "ops" : "flops");
+        if (four > value * MAX_ALT_CHAIN_RATIO)
+          CLPEAK_VLOG("joint_matrix: %s %s four accumulators %.1fx faster -- "
+                      "rejecting it as a compiler fold\n",
+                      t.label.c_str(), t.shape.c_str(), four / value);
+        else
+        {
+          opts.description += four > value
+              ? "  Timed with one accumulator and with four; this is four."
+              : "  Timed with one accumulator and with four; this is one.";
+          value = std::max(value, four);
+        }
+      }
     }
-    CLPEAK_VLOG("joint_matrix: %s %s -- %u work-items/work-group ran as %u "
-                "sub-group(s), %u blocks\n",
-                t.label.c_str(), t.shape.c_str(), blockSize, sgPerWG, numBlocks);
-
-    const double ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() *
-                       2.0 * (double)JM_ITERS;
-    test.emit(t.metric, (float)(ops * 1.0e6 / us), jmOpts(t));
+    test.emit(t.metric, value, opts);
   }
 
   sycl::free(out, dev.stream);
