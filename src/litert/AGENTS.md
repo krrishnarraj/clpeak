@@ -215,11 +215,13 @@ kernel name from one profiled run says which kernel it was.
 - **A fast kernel can be a wrong one, and a right one's answer can fail to
   come back.**  The accuracy measurement is memoised per device, format and
   form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
-  `wrongAnswer()` of each form it would time: past `kLitertWrongAnswerPpm`
-  (10% RMS), or with NaN or infinity anywhere in the answer, the gemm, conv
-  and block rows leave that form out -- and are refused, with the figure or
-  the non-finite answer in the reason, when no form answers right -- and the
-  accuracy row says it is a wrong answer.  A figure near 2.5 million ppm
+  `wrongAnswer()` of each form it would time: at or past
+  `clpeak::kWrongAnswerPpm` (50% RMS, the three ML backends' line --
+  `include/common/answer_check.h` says why it sits there), or with NaN or
+  infinity anywhere in the answer, the gemm, conv and block rows leave that
+  form out -- and are refused, with the figure or the non-finite answer in
+  the reason, when no form answers right -- and the accuracy row is an
+  `Error` carrying the figure.  A figure near 2.5 million ppm
   says little by itself: any full-range int8 output uncorrelated with the
   product reads that against clpeak's operands (a right one reads 9,300 to
   10,500).  What says more is the marker: the check fills the output with

@@ -3,11 +3,13 @@
 
 #ifdef ENABLE_ONNX
 
+#include <common/answer_check.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/logger.h>
 #include <common/peak.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -243,6 +245,30 @@ public:
                          benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
+
+  // onnx_numeric_error's measurement of one format on one provider,
+  // memoised: the relative RMS error of the provider's 1024-cubed answer
+  // against the CPU provider's fp32 one, or why there is none
+  // (include/common/answer_check.h).  `label` is a gemm row's, or a
+  // convolution precision's product written as a 1x1 convolution
+  // ("fp16_conv1x1").  The rate tests ask before they publish -- a kernel
+  // that returns a wrong answer is not a capability -- and run before the
+  // accuracy test, so the first to ask measures.  `note` is what the
+  // accuracy row adds to its description.
+  struct AnswerCheck : clpeak::AnswerCheck
+  {
+    std::string note;
+  };
+  const AnswerCheck &answerCheck(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                                 const std::string &label);
+  // Empty when `label`'s answer on this provider is right or could not be
+  // checked; otherwise the reason a rate row is refused with.
+  std::string wrongAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                          const std::string &label);
+
+private:
+  // (provider, device, label)
+  std::map<std::string, AnswerCheck> answerChecks_;
 };
 
 // List the loaded runtime's execution providers in benchmark order

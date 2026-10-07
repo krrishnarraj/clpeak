@@ -36,7 +36,7 @@ micro-graphs on all three side by side.
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
 | `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()`, `coremlNonFiniteReason()` (the readback below), `CoremlLayoutRace` (the weight-layout race below), `coremlHeldBytes()` (what a session holds: every memory gate's count) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format, the ONNX backend's chain (sixteen distinct square layers per prediction from a 64-wide live seed) over a doubling width ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
-| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm; and the answer checks behind every rate row (`CoreMLPeak::answerCheck` / `wrongAnswer`: per weight layout, and for the convolution rows the product as a 1x1 convolution, `coremlPlainConv1x1Model`) |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
@@ -153,6 +153,32 @@ own row.  It rests on nothing in these graphs being able to overflow: the
 gemm chains keep each layer's magnitude (the reduced row reads 11-48 on an
 M1 Pro) and the block's largest value sits 31x under fp16's.  It sees only
 the reduced row, so it is a tripwire, not an accuracy test.
+
+## A fast kernel can be a wrong one
+
+The accuracy matmul sees the whole answer, so it doubles as the check every
+rate row asks before it publishes (`CoreMLPeak::answerCheck` /
+`wrongAnswer`; the line and the words are the three ML backends',
+`include/common/answer_check.h`): memoised per compute unit and weight
+format, measured by whichever test asks first -- gemm, before each ladder,
+since the rate tests run before the accuracy one.
+
+- **Each weight layout is checked on its own**, since a layout can change the
+  kernel: the check builds and times both (the accuracy row reads the faster
+  of those that answer right) and measures each answer.  A wrong layout
+  leaves the gemm and block races, LiteRT's rule for a wrong form, and the
+  row says so; with no layout right the rows are withheld.  The block's
+  variants ask their projections' format (fp16's for `fp16_explicit` and
+  `int8_kv`).
+- **The convolution rows ask their precision's product written as a 1x1
+  convolution** (`coremlPlainConv1x1Model`, x[1, K, 32, 32]): the conv1x1
+  row's operator and the nearest there is to the other shapes'.
+- **Wrong is at or past 50% RMS, or NaN or infinity anywhere**
+  (`clpeak::kWrongAnswerPpm`; the header says why the line sits there).  A
+  withheld rate row is an `Error` naming the figure, and the accuracy row an
+  `Error` carrying it, so the pair stands together.  A check that could not
+  be measured -- a format the OS lacks, a session refused or sent to another
+  unit -- gates nothing.
 
 ## Every weight is raced in both layouts
 

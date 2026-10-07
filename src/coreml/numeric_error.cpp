@@ -17,6 +17,13 @@
 // Engine does is exactly what its fp16 row against the CPU's says.  And the
 // fp32 row on the Neural Engine device reads whatever unit Core ML actually
 // sent it to, which the plan names.
+//
+// Every measurement here is also the answer check the rate rows ask before
+// they publish (CoreMLPeak::answerCheck, include/common/answer_check.h), in
+// each weight layout, and for the convolution rows the fp16 and fp32
+// products written as a 1x1 convolution.  A wrong answer keeps its layout
+// out of the rate rows' races, withholds them where no layout answers
+// right, and files this row as an Error carrying its figure.
 
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
@@ -45,6 +52,10 @@ constexpr int64_t kDim = 1024;
 // What each weight layout gets to show its speed in: a few hundred
 // multiplies, enough to tell a slow kernel from a fast one.
 constexpr unsigned int kRaceBudgetUs = 200000;
+
+// How this backend's answer checks name things (include/common/answer_check.h).
+const clpeak::AnswerWords kWords = {"this compute unit's", "coreml_numeric_error", "the host's reference",
+                                    "the host's double-precision reference"};
 
 struct Variant
 {
@@ -85,26 +96,296 @@ const Variant kVariants[] = {
      "this data; the quantization of the operands is not counted."},
 };
 
-double relativeRmsPpm(const std::vector<float> &got, const std::vector<double> &ref)
+// The reference: A[M, K] * B[K, N] in double, on the host.
+void referenceGemm(const std::vector<double> &a, const std::vector<double> &b, int64_t M, int64_t K,
+                   int64_t N, std::vector<double> &ref)
 {
-  double num = 0.0, den = 0.0;
+  ref.assign((size_t)(M * N), 0.0);
+  // The current CBLAS entry point is iOS 16.4 / macOS 13.3; the backend
+  // itself needs 17.4 / 14.4, so the fallback is never taken and exists to
+  // keep the availability check honest.
+  if (__builtin_available(macOS 13.3, iOS 16.4, *))
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (int)M, (int)N, (int)K, 1.0, a.data(), (int)K,
+                b.data(), (int)N, 0.0, ref.data(), (int)N);
+  else
+    for (int64_t i = 0; i < M; i++)
+      for (int64_t k = 0; k < K; k++)
+      {
+        const double aik = a[(size_t)(i * K + k)];
+        for (int64_t j = 0; j < N; j++)
+          ref[(size_t)(i * N + j)] += aik * b[(size_t)(k * N + j)];
+      }
+}
+
+// A session's answer, read back as floats: `dtype` is the output's (fp16 or
+// fp32).  Empty with `error` set when it cannot be read.
+std::vector<float> readAnswer(CoremlSession &s, int dtype, std::string &error)
+{
+  std::vector<uint8_t> raw;
+  std::vector<float> got;
+  if (!s.outputBytes("y", raw, error))
+    return got;
+  const size_t es = dtype == CML_FP32 ? 4 : 2;
+  if (raw.size() != (size_t)kDim * kDim * es)
+  {
+    error = "unexpected output size";
+    return got;
+  }
+  got.resize((size_t)kDim * kDim);
   for (size_t i = 0; i < got.size(); i++)
   {
-    const double d = (double)got[i] - ref[i];
-    num += d * d;
-    den += ref[i] * ref[i];
+    if (es == 4)
+      std::memcpy(&got[i], raw.data() + i * 4, 4);
+    else
+    {
+      uint16_t h;
+      std::memcpy(&h, raw.data() + i * 2, 2);
+      got[i] = coremlHalfToFloat(h);
+    }
   }
-  if (den <= 0.0)
-    return -1.0;
-  return std::sqrt(num / den) * 1.0e6;
+  return got;
+}
+
+// The activations the device sees, widened: the input's own width, and for
+// the quantized-activation format the codes it quantizes them to.
+std::vector<double> widenInput(const std::string &xRaw, int ioDtype, CoremlWeight w)
+{
+  std::vector<double> a((size_t)kDim * kDim);
+  for (int64_t i = 0; i < kDim * kDim; i++)
+  {
+    float f;
+    if (ioDtype == CML_FP32)
+      std::memcpy(&f, xRaw.data() + i * 4, 4);
+    else
+    {
+      uint16_t h;
+      std::memcpy(&h, xRaw.data() + i * 2, 2);
+      f = coremlHalfToFloat(h);
+    }
+    if (w == CoremlWeight::Int8Qdq)
+    {
+      // The device quantizes the activations before multiplying; the
+      // reference multiplies what comes back from that, so the operand
+      // rounding cancels here as it does for the weights.
+      const float scale = coremlHalfToFloat(coremlFloatToHalf(coremlQdqActScale(1.0f)));
+      int q = (int)std::lround(f / scale);
+      q = std::max(-128, std::min(127, q));
+      f = scale * (float)q;
+    }
+    a[(size_t)i] = f;
+  }
+  return a;
+}
+
+// The format's matmul in both weight layouts, each timed (the accuracy row
+// reads the faster) and each answer measured.
+void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned warmup,
+                   CoreMLPeak::AnswerCheck &c)
+{
+  const int spec = coremlSpecVersion();
+  const char *label = coremlWeightLabel(w);
+  const int act = coremlActDtype(w);
+  const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
+
+  if (coremlSpecForWeight(w) > spec)
+  {
+    for (clpeak::AnswerCheck &l : c.layout)
+    {
+      l.status = ResultStatus::Unsupported;
+      l.error = "needs " + coremlOsForSpec(coremlSpecForWeight(w)) + " (model specification " +
+                std::to_string(coremlSpecForWeight(w)) + "); this OS accepts " + std::to_string(spec);
+    }
+    return;
+  }
+
+  // The activations: the same generator as the speed rows, rounded to the
+  // width the model takes them in, which is the width the device sees.
+  const std::string xRaw = coremlFillFloats(ioDtype, kDim * kDim, 0x243f6a88u);
+
+  // The weights stored both ways, each timed: the speed rows race the two
+  // layouts (CoremlLayoutRace), and a layout can change the kernel and with
+  // it the arithmetic -- the M1 Pro's CPU multiplies blockwise int4 stored
+  // [in, out] in a slow kernel accumulating in fp32 (272 ppm), and stored
+  // [out, in], seven times faster, in the fp16 one its other rows read
+  // (3218).
+  std::vector<float> weights;   // exactly what the device multiplies, either way
+  std::unique_ptr<CoremlSession> sess[2];
+  double rate[2] = {0.0, 0.0}, createUs[2] = {0.0, 0.0};
+  for (int t = 0; t < 2; t++)
+  {
+    clpeak::AnswerCheck &l = c.layout[t];
+    l.status = ResultStatus::Unsupported;
+    std::string err;
+    auto s = CoremlSession::create(dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, w, &weights, t), err);
+    if (!s)
+    {
+      l.error = err;
+      continue;
+    }
+    if (!s->onDevice())
+    {
+      l.error = coremlOffDeviceReason(dev, *s);
+      continue;
+    }
+    void *xp = s->bindInput("x", ioDtype, {kDim, kDim}, xRaw.size(), err);
+    if (!xp)
+    {
+      l.error = err;
+      l.status = ResultStatus::Error;
+      continue;
+    }
+    std::memcpy(xp, xRaw.data(), xRaw.size());
+    const auto m = coremlMeasure(*s, warmup, kRaceBudgetUs, false, 0);
+    if (m.meanUs <= 0.0)
+    {
+      l.error = m.error;
+      l.status = m.status;
+      continue;
+    }
+    l.status = ResultStatus::Ok;
+    rate[t] = 1.0 / m.meanUs;
+    createUs[t] = coremlCreateUs(*s);
+    CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.1f us per multiply, create %.2f s\n",
+                dev.displayName.c_str(), label, coremlLayoutName(t), m.meanUs, createUs[t] / 1.0e6);
+    sess[t] = std::move(s);
+  }
+  if (!sess[0] && !sess[1])
+    return;
+  const bool both = sess[0] && sess[1];
+  const bool faster = both ? CoremlLayoutRace::pick(rate, createUs) : (bool)sess[1];
+
+  // Each answer against one reference: A[M,K] * W[K,N] in double, on the
+  // host, from the values both layouts multiply.
+  const std::vector<double> a = widenInput(xRaw, ioDtype, w);
+  const std::vector<double> b(weights.begin(), weights.end());
+  std::vector<double> ref;
+  referenceGemm(a, b, kDim, kDim, kDim, ref);
+  for (int t = 0; t < 2; t++)
+  {
+    if (!sess[t])
+      continue;
+    clpeak::AnswerCheck &l = c.layout[t];
+    std::string err;
+    std::vector<float> got;
+    if (sess[t]->run(err))
+      got = readAnswer(*sess[t], act, err);
+    sess[t].reset();
+    if (got.empty())
+    {
+      l.status = ResultStatus::Error;
+      l.error = err;
+      continue;
+    }
+    clpeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
+    if (l.ppm >= 0.0)
+      CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.2f ppm%s\n", dev.displayName.c_str(), label,
+                  coremlLayoutName(t), l.ppm, l.wrong() ? ", a wrong answer" : "");
+  }
+
+  // The row reads the faster layout of those that answer right; with none
+  // right, the faster of those measured, whose wrong answer it reports.
+  auto measured = [&](int t) { return c.layout[t].ppm >= 0.0 || c.layout[t].nonFinite; };
+  auto right = [&](int t) { return measured(t) && !c.layout[t].wrong(); };
+  const int fast = faster ? 1 : 0, slow = 1 - fast;
+  c.read = right(fast) ? fast : right(slow) ? slow : measured(fast) ? fast : measured(slow) ? slow : fast;
+  const int other = 1 - c.read;
+  c.note = std::string("  The weights stored ") + coremlLayoutName(c.read);
+  const std::string leftOut = ", so the rate rows leave that order out.";
+  if (!both)
+    c.note += "; stored the other way, this compute unit did not take them.";
+  else if (c.read == fast)
+  {
+    c.note += ": of the two orders, the one this compute unit multiplies faster -- where the "
+              "two run alike, [in, out] unless [out, in] compiles several times faster.";
+    if (right(c.read) && c.layout[other].wrong())
+      c.note += std::string("  Stored ") + coremlLayoutName(other) + ", its answer is wrong" + leftOut;
+  }
+  else
+    c.note += std::string("; stored ") + coremlLayoutName(other) + ", the order it multiplies faster, " +
+              (c.layout[other].wrong() ? "its answer is wrong" + leftOut : std::string("its answer could not be read."));
+}
+
+// The format's product written as a 1x1 convolution, which the convolution
+// rows ask: one layout, untimed.
+void measureConv1x1(const coreml_device_info_t &dev, CoremlWeight w, unsigned warmup,
+                    CoreMLPeak::AnswerCheck &c)
+{
+  const int spec = coremlSpecVersion();
+  const int dtype = coremlActDtype(w);
+  clpeak::AnswerCheck &l = c.layout[0];
+  l.status = ResultStatus::Unsupported;
+  std::vector<float> weights;
+  std::string err;
+  auto s = CoremlSession::create(dev, coremlPlainConv1x1Model(spec, kDim, kDim, kDim, dtype, &weights), err);
+  if (!s)
+  {
+    l.error = err;
+    return;
+  }
+  if (!s->onDevice())
+  {
+    l.error = coremlOffDeviceReason(dev, *s);
+    return;
+  }
+  c.read = 0;
+  const std::string xRaw = coremlFillFloats(dtype, kDim * kDim, 0x243f6a88u);
+  void *xp = s->bindInput("x", dtype, {1, kDim, 32, 32}, xRaw.size(), err);
+  std::vector<float> got;
+  if (xp)
+  {
+    std::memcpy(xp, xRaw.data(), xRaw.size());
+    if (s->timeRuns(1 + warmup, err) > 0.0)
+      got = readAnswer(*s, dtype, err);
+  }
+  s.reset();
+  if (got.empty())
+  {
+    l.status = ResultStatus::Error;
+    l.error = err;
+    return;
+  }
+  // y[n][p] = sum_k W[n][k] x[k][p]: the weights [N, K] times the
+  // activations as [K, H * W].
+  const std::vector<double> a = widenInput(xRaw, dtype, w);
+  const std::vector<double> b(weights.begin(), weights.end());
+  std::vector<double> ref;
+  referenceGemm(b, a, kDim, kDim, kDim, ref);
+  clpeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
+  if (l.ppm >= 0.0)
+    CLPEAK_VLOG("coreml-numeric-error[%s/%s as a 1x1 convolution]: %.2f ppm%s\n", dev.displayName.c_str(),
+                coremlWeightLabel(w), l.ppm, l.wrong() ? ", a wrong answer" : "");
 }
 
 } // namespace
 
+const CoreMLPeak::AnswerCheck &CoreMLPeak::answerCheck(const coreml_device_info_t &dev, CoremlWeight w,
+                                                       bool conv1x1)
+{
+  const auto key = std::make_tuple((int)dev.kind, dev.gpuIndex, (int)w, conv1x1);
+  auto found = answerChecks_.find(key);
+  if (found != answerChecks_.end())
+    return found->second;
+  AnswerCheck &c = answerChecks_[key];
+  if (conv1x1)
+    measureConv1x1(dev, w, warmupCount, c);
+  else
+    measureMatMul(dev, w, warmupCount, c);
+  return c;
+}
+
+std::string CoreMLPeak::wrongAnswer(const coreml_device_info_t &dev, CoremlWeight w, bool transposed,
+                                    bool conv1x1)
+{
+  const AnswerCheck &c = answerCheck(dev, w, conv1x1);
+  const std::string what = std::string(coremlWeightLabel(w)) +
+                           (conv1x1 ? " written as a 1x1 convolution"
+                                    : std::string(" stored ") + coremlLayoutName(transposed));
+  return clpeak::wrongAnswerReason(c.layout[conv1x1 ? 0 : (int)transposed], kWords, what);
+}
+
 int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
   (void)cfg;
-  const int spec = coremlSpecVersion();
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
@@ -121,189 +402,35 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     if (clpeak::cancelRequested())
       break;
     const char *label = coremlWeightLabel(v.w);
-    const int act = coremlActDtype(v.w);
-    const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
-
-    if (coremlSpecForWeight(v.w) > spec)
+    const AnswerCheck &c = answerCheck(dev, v.w);
+    if (c.read < 0)
     {
-      test.skip(label, ResultStatus::Unsupported,
-                "needs " + coremlOsForSpec(coremlSpecForWeight(v.w)) +
-                    " (model specification " + std::to_string(coremlSpecForWeight(v.w)) +
-                    "); this OS accepts " + std::to_string(spec),
-                v.note);
+      test.skip(label, c.layout[0].status, c.layout[0].error, v.note);
       continue;
     }
-
-    // The activations: the same generator as the speed rows, rounded to the
-    // width the model takes them in, which is the width the device sees.
-    const std::string xRaw = coremlFillFloats(ioDtype, kDim * kDim, 0x243f6a88u);
-
-    // The weights stored both ways, each timed, and the faster one's answer
-    // is the row's: the speed rows race the two layouts (CoremlLayoutRace),
-    // and a layout can change the kernel and with it the arithmetic -- the
-    // M1 Pro's CPU multiplies blockwise int4 stored [in, out] in a slow
-    // kernel accumulating in fp32 (272 ppm), and stored [out, in], seven
-    // times faster, in the fp16 one its other rows read (3218).
-    std::vector<float> weights;   // exactly what the device multiplies, either way
-    std::unique_ptr<CoremlSession> sess[2];
-    double rate[2] = {0.0, 0.0}, createUs[2] = {0.0, 0.0};
-    std::string why[2];
-    ResultStatus whyStatus[2] = {ResultStatus::Unsupported, ResultStatus::Unsupported};
-    for (int t = 0; t < 2; t++)
+    const std::string note = std::string(v.note) + c.note;
+    const clpeak::AnswerCheck &r = c.layout[c.read];
+    // A wrong answer in every layout measured is no precision figure: the
+    // row is an Error carrying it, beside the rate rows it withheld.
+    if (r.wrong())
     {
-      std::string err;
-      auto s = CoremlSession::create(
-          dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, v.w, &weights, t), err);
-      if (!s)
-      {
-        why[t] = err;
-        continue;
-      }
-      if (!s->onDevice())
-      {
-        why[t] = coremlOffDeviceReason(dev, *s);
-        continue;
-      }
-      void *xp = s->bindInput("x", ioDtype, {kDim, kDim}, xRaw.size(), err);
-      if (!xp)
-      {
-        why[t] = err;
-        whyStatus[t] = ResultStatus::Error;
-        continue;
-      }
-      std::memcpy(xp, xRaw.data(), xRaw.size());
-      const auto m = coremlMeasure(*s, warmupCount, kRaceBudgetUs, false, 0);
-      if (m.meanUs <= 0.0)
-      {
-        why[t] = m.error;
-        whyStatus[t] = m.status;
-        continue;
-      }
-      rate[t] = 1.0 / m.meanUs;
-      createUs[t] = coremlCreateUs(*s);
-      CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.1f us per multiply, create %.2f s\n",
-                  dev.displayName.c_str(), label, coremlLayoutName(t), m.meanUs,
-                  createUs[t] / 1.0e6);
-      sess[t] = std::move(s);
-    }
-    if (!sess[0] && !sess[1])
-    {
-      test.skip(label, whyStatus[0], why[0], v.note);
-      continue;
-    }
-    const bool both = sess[0] && sess[1];
-    const bool transposed = both ? CoremlLayoutRace::pick(rate, createUs) : (bool)sess[1];
-    std::unique_ptr<CoremlSession> s = std::move(sess[transposed]);
-    sess[!transposed].reset();
-    std::string err;
-    const std::string note =
-        std::string(v.note) + "  The weights stored " + coremlLayoutName(transposed) +
-        (both ? ": of the two orders, the one this compute unit multiplies faster -- where the "
-                "two run alike, [in, out] unless [out, in] compiles several times faster."
-              : "; stored the other way, this compute unit did not take them.");
-
-    std::vector<double> a((size_t)kDim * kDim);
-    for (int64_t i = 0; i < kDim * kDim; i++)
-    {
-      float f;
-      if (ioDtype == CML_FP32)
-        std::memcpy(&f, xRaw.data() + i * 4, 4);
-      else
-      {
-        uint16_t h;
-        std::memcpy(&h, xRaw.data() + i * 2, 2);
-        f = coremlHalfToFloat(h);
-      }
-      if (v.w == CoremlWeight::Int8Qdq)
-      {
-        // The device quantizes the activations before multiplying; the
-        // reference multiplies what comes back from that, so the operand
-        // rounding cancels here as it does for the weights.
-        const float scale = coremlHalfToFloat(coremlFloatToHalf(coremlQdqActScale(1.0f)));
-        int q = (int)std::lround(f / scale);
-        q = std::max(-128, std::min(127, q));
-        f = scale * (float)q;
-      }
-      a[(size_t)i] = f;
-    }
-
-    if (!s->run(err))
-    {
-      test.skip(label, ResultStatus::Error, err, note);
-      continue;
-    }
-    std::vector<uint8_t> raw;
-    if (!s->outputBytes("y", raw, err))
-    {
-      test.skip(label, ResultStatus::Error, err, note);
-      continue;
-    }
-    s.reset();
-
-    std::vector<float> got((size_t)kDim * kDim);
-    if (act == CML_FP32)
-    {
-      if (raw.size() != got.size() * 4)
-      {
-        test.skip(label, ResultStatus::Error, "unexpected output size", note);
-        continue;
-      }
-      std::memcpy(got.data(), raw.data(), raw.size());
-    }
-    else
-    {
-      if (raw.size() != got.size() * 2)
-      {
-        test.skip(label, ResultStatus::Error, "unexpected output size", note);
-        continue;
-      }
-      for (size_t i = 0; i < got.size(); i++)
-      {
-        uint16_t h;
-        std::memcpy(&h, raw.data() + i * 2, 2);
-        got[i] = coremlHalfToFloat(h);
-      }
-    }
-
-    // The reference: A[M,K] * W[K,N] in double, on the host.
-    std::vector<double> b(weights.begin(), weights.end());
-    std::vector<double> ref((size_t)kDim * kDim, 0.0);
-    // The current CBLAS entry point is iOS 16.4 / macOS 13.3; the backend
-    // itself needs 17.4 / 14.4, so the fallback is never taken and exists to
-    // keep the availability check honest.
-    if (__builtin_available(macOS 13.3, iOS 16.4, *))
-      cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (int)kDim, (int)kDim, (int)kDim, 1.0,
-                  a.data(), (int)kDim, b.data(), (int)kDim, 0.0, ref.data(), (int)kDim);
-    else
-      for (int64_t i = 0; i < kDim; i++)
-        for (int64_t k = 0; k < kDim; k++)
-        {
-          const double aik = a[(size_t)i * kDim + k];
-          for (int64_t j = 0; j < kDim; j++)
-            ref[(size_t)i * kDim + j] += aik * b[(size_t)k * kDim + j];
-        }
-
-    const double ppm = relativeRmsPpm(got, ref);
-    if (ppm < 0.0)
-    {
-      test.skip(label, ResultStatus::Error, "reference result was all zero", note);
-      continue;
-    }
-    // A NaN or an infinity anywhere in the compute unit's answer makes the
-    // figure one too.  That is no error figure, and it cannot be recorded
-    // either: the document spells it `nan`, which no JSON reader -- clpeak's
-    // own included -- will load.  The reference multiplies values under 1 in
-    // magnitude, in double, so the non-finite side is the compute unit's.
-    if (!std::isfinite(ppm))
-    {
+      const clpeak::AnswerCheck &o = c.layout[1 - c.read];
+      const bool otherWrong = o.ppm >= 0.0 || o.nonFinite;
       test.skip(label, ResultStatus::Error,
-                "this compute unit's answer holds NaN or infinity where the host's "
-                "double-precision reference is finite everywhere: it computed something "
-                "other than this matmul, so there is no error figure to report",
+                clpeak::wrongAnswerRowReason(
+                    r, kWords,
+                    otherWrong ? std::string("and stored ") + coremlLayoutName(1 - c.read) +
+                                     " it is wrong too, so its rate rows are withheld"
+                               : std::string("so its rate rows are withheld")),
                 note);
       continue;
     }
-    test.emit(label, (float)ppm, note.c_str());
+    if (r.ppm < 0.0)
+    {
+      test.skip(label, r.status, r.error, note);
+      continue;
+    }
+    test.emit(label, (float)r.ppm, note.c_str());
   }
 
   test.end();

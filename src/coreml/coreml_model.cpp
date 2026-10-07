@@ -1207,6 +1207,49 @@ CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
   return p;
 }
 
+CoremlProgram coremlPlainConv1x1Model(int spec, int64_t M, int64_t K, int64_t N, int dtype,
+                                      std::vector<float> *weights)
+{
+  (void)spec;
+  CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
+  // As square a grid as M allows, as the ONNX backend's 1x1 form has.
+  int64_t H = 1, W = M;
+  while (H * H < M && W % 2 == 0)
+  {
+    H *= 2;
+    W /= 2;
+  }
+  p.reserveWeights(coremlElemBytes(dtype, N * K));
+  p.input("x", dtype, {1, K, H, W});
+  const std::string wRaw = coremlFillFloats(dtype, N * K, 0x85a308d3u);
+  if (weights)
+  {
+    weights->resize((size_t)(N * K));
+    for (int64_t i = 0; i < N * K; i++)
+    {
+      if (dtype == CML_FP32)
+        std::memcpy(&(*weights)[(size_t)i], wRaw.data() + i * 4, 4);
+      else
+      {
+        uint16_t h;
+        std::memcpy(&h, wRaw.data() + i * 2, 2);
+        (*weights)[(size_t)i] = coremlHalfToFloat(h);
+      }
+    }
+  }
+  p.constTensor("Wt", dtype, {N, K, 1, 1}, wRaw);
+  p.op("conv",
+       {{"x", "x"}, {"weight", "Wt"},
+        {"strides", p.constInts("strides", {1, 1})},
+        {"pad_type", p.constString("pad_type", "valid")},
+        {"pad", p.constInts("pad", {0, 0, 0, 0})},
+        {"dilations", p.constInts("dilations", {1, 1})},
+        {"groups", p.constInt("groups", 1)}},
+       {"y", dtype, {1, N, H, W}});
+  p.output("y", dtype, {1, N, H, W});
+  return p;
+}
+
 CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
 {
   (void)spec;

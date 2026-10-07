@@ -804,6 +804,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       return;
     }
 
+    // A provider whose answer for the format is wrong has no rate worth
+    // publishing (wrongAnswer, numeric_error.cpp): the accuracy matmul is
+    // checked before a ladder is built.
+    if (const std::string wrong = wrongAnswer(rt, ep, v.label); !wrong.empty())
+    {
+      CLPEAK_VLOG("onnx-gemm[%s/%s]: %s\n", ep.providerKey.c_str(), v.label, wrong.c_str());
+      test.skip(v.label, ResultStatus::Error, wrong, o);
+      return;
+    }
+
     // The probe left one or more viable shapes, result-scaled first.  A
     // single multiply takes them in that order: result-scaled is the fastest
     // shape wherever it does not fold, and the fold check drops to the next

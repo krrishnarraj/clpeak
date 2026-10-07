@@ -960,6 +960,20 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       }
     }
 
+    // A provider whose answer for the projections' format is wrong has no
+    // rate worth publishing (wrongAnswer, numeric_error.cpp) -- the gemm
+    // row's format, whose label the variant shares, and fp16's for a cache
+    // format, whose projections are fp16.
+    if (const std::string wrong = wrongAnswer(rt, ep, v.kvDtype ? "fp16" : v.label);
+        !wrong.empty())
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(), v.label,
+                  wrong.c_str());
+      vr.skipReason = wrong;
+      vr.skipStatus = ResultStatus::Error;
+      return false;
+    }
+
     if (v.qdq || v.wBlock > 0 || v.kvDtype)
     {
       std::string tried, firstErr;

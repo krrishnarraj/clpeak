@@ -82,19 +82,9 @@ const Variant kVariants[] = {
     {LitertFormat::Fp8Weight, "8-bit float weights, if any kernel takes them."},
 };
 
-double relativeRmsPpm(const std::vector<float> &got, const std::vector<double> &ref)
-{
-  double num = 0.0, den = 0.0;
-  for (size_t i = 0; i < got.size(); i++)
-  {
-    const double d = (double)got[i] - ref[i];
-    num += d * d;
-    den += ref[i] * ref[i];
-  }
-  if (den <= 0.0)
-    return -1.0;
-  return std::sqrt(num / den) * 1.0e6;
-}
+// How this backend's answer checks name things (include/common/answer_check.h).
+const clpeak::AnswerWords kWords = {"this accelerator's", "litert_numeric_error", "the host's reference",
+                                    "the host's double-precision reference"};
 
 // y[m][n] = sum_k x[m][k] * w[n][k], in double, across the host's threads.
 void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, int64_t M, int64_t K,
@@ -214,9 +204,35 @@ Miss missOf(const LitertPeak::AnswerCheck &c)
 {
   if (c.unwritten >= kUnwrittenShare && c.unwrittenRerun >= kUnwrittenShare)
     return Miss::Never;
-  if (c.unwritten >= kUnwrittenShare && c.rerunPpm >= 0.0 && c.rerunPpm < kLitertWrongAnswerPpm)
+  if (c.unwritten >= kUnwrittenShare && c.rerunPpm >= 0.0 && c.rerunPpm < clpeak::kWrongAnswerPpm)
     return Miss::Late;
   return Miss::Wrong;
+}
+
+// What the rate rows do without a form whose answer is wrong (gemm.cpp,
+// conv.cpp, block.cpp), as the accuracy row says it.
+constexpr const char *kRowConsequence =
+    "so the rate rows leave this form of the format out, and are withheld where no form of it answers right";
+
+// The reason the accuracy row of a wrong answer is filed under, its figure
+// included: what the marker said of it, or what it read.
+std::string wrongRowReason(const LitertPeak::AnswerCheck &c)
+{
+  char pct[32];
+  const std::string figure =
+      c.ppm >= 0.0 ? " (" + std::to_string((long long)c.ppm) + " ppm against " + kWords.refFull + ")" : "";
+  if (missOf(c) == Miss::Never)
+  {
+    std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
+    return "this accelerator never wrote its answer" + figure + ": after two runs, " + pct +
+           " of the output still held what clpeak wrote there before the first -- a runtime that does not "
+           "return the result, not one that loses precision -- " + kRowConsequence;
+  }
+  if (missOf(c) == Miss::Late)
+    return "this accelerator's answer landed only after the run that computed it had returned" + figure +
+           ": the output still held what clpeak wrote there before the run, and a second run's read was "
+           "right -- its timings would not cover the work, " + kRowConsequence;
+  return clpeak::wrongAnswerRowReason(c, kWords, kRowConsequence);
 }
 
 // A form, in the words a reason or a note gives it after the format's label.
@@ -233,11 +249,6 @@ std::string formWords(const LitertForm &form)
 }
 
 } // namespace
-
-bool LitertPeak::AnswerCheck::wrong() const
-{
-  return nonFinite || ppm >= kLitertWrongAnswerPpm;
-}
 
 const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev,
                                                        LitertFormat f, const LitertForm &form)
@@ -385,29 +396,14 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
 
   std::vector<double> ref;
   referenceGemm(a, weights, kDim, kDim, kDim, ref);
-  const double ppm = relativeRmsPpm(got, ref);
-  if (ppm < 0.0)
-  {
-    c.status = ResultStatus::Error;
-    c.error = "reference result was all zero";
+  // The reference multiplies values under 1 in magnitude, in double, so a NaN
+  // or an infinity in the figure is the accelerator's; and no sum here can
+  // pass 256, which overflows no width a kernel accumulates in.  It is a
+  // wrong answer, not lost precision, and wrongAnswer() refuses the format's
+  // rates for it as it does for one past the line.
+  clpeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
+  if (c.status != ResultStatus::Ok && !c.nonFinite)
     return c;
-  }
-  // A NaN or an infinity anywhere in the answer makes the figure one too.
-  // The reference multiplies values under 1 in magnitude, in double, so the
-  // non-finite side is the accelerator's; and no sum here can pass 256, which
-  // overflows no width a kernel accumulates in.  It is a wrong answer, not
-  // lost precision, and wrongAnswer() refuses the format's rates for it as it
-  // does for one past 10%.
-  if (!std::isfinite(ppm))
-  {
-    c.nonFinite = true;
-    c.status = ResultStatus::Error;
-    c.error = "this accelerator's answer holds NaN or infinity where the host's "
-              "double-precision reference is finite everywhere: it computed something "
-              "other than this matmul, so there is no error figure to report";
-  }
-  else
-    c.ppm = ppm;
 
   // A wrong answer is run once more and read again, the marker left as the
   // first run left it: an answer never written still reads as the marker,
@@ -421,7 +417,7 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
     {
       if (marked)
         c.unwrittenRerun = unwrittenShare(again, elemBytes);
-      const double p2 = relativeRmsPpm(got2, ref);
+      const double p2 = clpeak::answerPpm(got2.data(), ref.data(), got2.size());
       c.rerunPpm = std::isfinite(p2) ? p2 : -1.0;
     }
     CLPEAK_VLOG("litert-numeric-error[%s/%s]: wrong answer, %.0f ppm%s; %.1f%% of the output still held the "
@@ -430,7 +426,7 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
                 100.0 * c.unwritten, 100.0 * c.unwrittenRerun, c.rerunPpm);
   }
   else
-    CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label.c_str(), ppm);
+    CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label.c_str(), c.ppm);
   return c;
 }
 
@@ -487,16 +483,7 @@ std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device
     return "this accelerator's answer for " + what + " landed only after the run that computed it had "
            "returned: the output still held what clpeak wrote there before the run, and a second run's "
            "read was right -- its timings would not cover the work, so its rate is not reported";
-  if (c.nonFinite)
-    return "this accelerator's answer for " + what +
-           " holds NaN or infinity where the host's reference is finite everywhere "
-           "(litert_numeric_error) -- a kernel that does not compute the format, not one that "
-           "loses precision -- so its rate is not reported";
-  std::snprintf(pct, sizeof pct, "%.0f%%", c.ppm / 10000.0);
-  return "this accelerator's answer for " + what + " is wrong by " + pct +
-         " (litert_numeric_error: " + std::to_string((long long)c.ppm) +
-         " ppm against the host's reference) -- a kernel that does not compute the format, not one "
-         "that loses precision -- so its rate is not reported";
+  return clpeak::wrongAnswerReason(c, kWords, what);
 }
 
 int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_info_t &dev,
@@ -544,10 +531,7 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     const LitertForm form = resolveIo(rt, dev, v.f, LitertForm());
     const AnswerCheck &c = answerCheck(rt, dev, v.f, form);
     std::string note = v.note;
-    if (c.wrong())
-      note += "  A wrong answer, not a loss of precision: the rate rows leave this form of the format "
-              "out, and are withheld where no form of it answers right.";
-    if (c.ppm < 0.0)
+    if (c.ppm < 0.0 && !c.wrong())
     {
       test.skip(label, c.status, c.error, note);
       continue;
@@ -581,6 +565,13 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
         alt += std::string(i == 0 ? "" : (i + 1 == alts.size() ? ", and " : ", ")) + alts[i].first + " " +
                alts[i].second;
       note += alt + ".";
+    }
+    // A wrong answer is no precision figure: the row is an Error carrying
+    // it, beside the rate rows it withheld.
+    if (c.wrong())
+    {
+      test.skip(label, ResultStatus::Error, wrongRowReason(c), note);
+      continue;
     }
     test.emit(label, (float)c.ppm, note.c_str());
   }

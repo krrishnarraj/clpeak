@@ -207,13 +207,18 @@ struct VariantResult
   // stored [in, out] and decodes it faster stored [out, in].
   CoremlLayoutRace prefillRace, decodeRace;
   bool decodeRaceSet = false;
+  // The layouts whose answer for the variant's format is wrong, which
+  // neither race runs, and what the rows say of them.
+  bool wrongLayout[2] = {false, false};
+  std::string wrongNote;
 };
 
 // A row's word on the layout its point's weights were stored in
 // (CoremlLayoutRace), and what the other read at the same point when both
 // ran: `work` per second is the row's figure in `unit` (flops, ops, bps),
-// or with no work the row is a time.
-std::string layoutNote(const Point &pt, double work, const char *unit)
+// or with no work the row is a time.  `vr.wrongNote` says which layout's
+// wrong answer kept it out of the race.
+std::string layoutNote(const Point &pt, double work, const char *unit, const VariantResult &vr)
 {
   std::string s = "  Weights stored " + std::string(coremlLayoutName(pt.transposed));
   if (pt.otherUs > 0.0)
@@ -224,7 +229,7 @@ std::string layoutNote(const Point &pt, double work, const char *unit)
     s += ": " + figure(pt.us) + " against " + figure(pt.otherUs) + " stored " +
          coremlLayoutName(!pt.transposed);
   }
-  return s + ".";
+  return s + "." + vr.wrongNote;
 }
 
 CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq, int spec)
@@ -396,6 +401,9 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     if (!vr.decodeRaceSet)
     {
       vr.decodeRace = vr.prefillRace.nextShape();
+      for (int t = 0; t < 2; t++)
+        if (vr.wrongLayout[t])
+          vr.decodeRace.drop(t);
       vr.decodeRaceSet = true;
     }
     return vr.decodeRace;
@@ -457,6 +465,31 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
                         "numbers stay comparable, and a smaller layer would not be the same test";
         return false;
       }
+    }
+    // A layout whose answer for the projections' format is wrong leaves both
+    // races (wrongAnswer, numeric_error.cpp), and a format with no layout
+    // that answers right has no rate worth publishing.
+    {
+      std::string wrongWhy[2];
+      for (int t = 0; t < 2; t++)
+        wrongWhy[t] = wrongAnswer(dev, v.w, t);
+      if (!wrongWhy[0].empty() && !wrongWhy[1].empty())
+      {
+        const int read = answerCheck(dev, v.w).read;
+        CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[read == 1].c_str());
+        vr.skipReason = wrongWhy[read == 1];
+        vr.skipStatus = ResultStatus::Error;
+        return false;
+      }
+      for (int t = 0; t < 2; t++)
+        if (!wrongWhy[t].empty())
+        {
+          CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[t].c_str());
+          vr.wrongLayout[t] = true;
+          vr.prefillRace.drop(t);
+          vr.wrongNote = std::string("  Stored ") + coremlLayoutName(t) +
+                         " the weights gave a wrong answer (coreml_numeric_error), so that order was not timed.";
+        }
     }
     // The probe is the smallest point the variant reports -- its first
     // prompt, or its first context for a cache format -- and its timing is
@@ -555,7 +588,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         continue;
       if (it->second.us > 0.0)
       {
-        o.description += layoutNote(it->second, blockFlops(seq, seq), v.unit ? v.unit : "flops") +
+        o.description += layoutNote(it->second, blockFlops(seq, seq), v.unit ? v.unit : "flops", vr) +
                          it->second.glue;
         test.emit(metric, (float)(blockFlops(seq, seq) * 1.0e6 / it->second.us), o);
       }
@@ -680,7 +713,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       const Point &pt = vr.decode[kDecodeKv];
       if (pt.us > 0.0)
       {
-        o.description += layoutNote(pt, (double)(wBytes + kvB), "bps") + pt.glue;
+        o.description += layoutNote(pt, (double)(wBytes + kvB), "bps", vr) + pt.glue;
         test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
       }
       else
@@ -710,7 +743,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
           measurePrefill(v, vr, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
           if (pt.us > 0.0)
-            test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s")).c_str());
+            test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s", vr)).c_str());
           else
             test.skip(metric, pt.status, pt.error, note);
         }
@@ -730,7 +763,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         measureDecode(v, vr, kv);
         const Point &pt = vr.decode[kv];
         if (pt.us > 0.0)
-          test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s")).c_str());
+          test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s", vr)).c_str());
         else
         {
           test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, note);

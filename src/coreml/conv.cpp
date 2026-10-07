@@ -103,6 +103,15 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
   for (const DType &dt : kDTypes)
   {
+    // A unit whose answer for this precision, written as a 1x1 convolution,
+    // is wrong has no convolution rate worth publishing (wrongAnswer,
+    // numeric_error.cpp): the conv1x1 row's operator, and the nearest there
+    // is to the other shapes'.
+    const std::string wrongConv =
+        clpeak::cancelRequested()
+            ? std::string()
+            : wrongAnswer(dev, dt.dtype == CML_FP32 ? CoremlWeight::Fp32 : CoremlWeight::Fp16, false,
+                          /*conv1x1=*/true);
     for (const Shape &v : kShapes)
     {
       if (clpeak::cancelRequested())
@@ -110,6 +119,12 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
       const std::string row = std::string(dt.label) + "_" + v.label;
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  " + dt.note;
+      if (!wrongConv.empty())
+      {
+        CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());
+        test.skip(row, ResultStatus::Error, wrongConv, o);
+        continue;
+      }
 
       const int64_t group = v.depthwise ? kChannels : 1;
       const uint64_t elemBytes = coremlElemBytes(dt.dtype, 1);

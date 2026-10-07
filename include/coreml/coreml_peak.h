@@ -3,15 +3,19 @@
 
 #ifdef ENABLE_COREML
 
+#include <common/answer_check.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/logger.h>
 #include <common/peak.h>
 
+#include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 struct CliOptions;
+enum class CoremlWeight;   // src/coreml/coreml_model.h
 
 // Ceiling on the iteration count of a timed batch, for every throughput test
 // in this backend.  The time budget alone sizes a batch from the device's
@@ -103,6 +107,34 @@ public:
   int runDispatchLatency(const coreml_device_info_t &dev, benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
+
+  // coreml_numeric_error's measurement of one weight format on one compute
+  // unit, memoised: the relative RMS error of its 1024-cubed answer against
+  // the host's double-precision reference, in each of the two orders the
+  // weights can be stored in, or why there is none
+  // (include/common/answer_check.h).  A layout can change the kernel, so
+  // each is checked on its own, and the rate rows race only the layouts
+  // that answer right.  With `conv1x1` it is the product written as a 1x1
+  // convolution instead, one layout, which the convolution rows ask.
+  struct AnswerCheck
+  {
+    clpeak::AnswerCheck layout[2];   // [in, out] and [out, in]
+    // The layout the accuracy row reads -- of those that answer right, the
+    // faster -- or -1 when neither could be built.
+    int read = -1;
+    // The row's sentence on its layout.
+    std::string note;
+  };
+  const AnswerCheck &answerCheck(const coreml_device_info_t &dev, CoremlWeight w, bool conv1x1 = false);
+  // Empty when the format's answer stored `transposed` -- or written as a
+  // 1x1 convolution -- is right or could not be checked; otherwise the
+  // reason a rate row is refused with.
+  std::string wrongAnswer(const coreml_device_info_t &dev, CoremlWeight w, bool transposed,
+                          bool conv1x1 = false);
+
+private:
+  // (compute unit, GPU index, weight format, conv1x1)
+  std::map<std::tuple<int, int, int, bool>, AnswerCheck> answerChecks_;
 };
 
 // The compute devices Core ML reports on this machine, accelerators first.

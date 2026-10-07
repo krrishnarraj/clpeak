@@ -142,7 +142,7 @@ const Variant kVariants[] = {
 // the peak was measured in and, from the last width both were timed at,
 // what the other order read there -- or that it never ran.
 std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2],
-                       const double raceCreateUs[2], int otherRungs, const char *unit)
+                       const double raceCreateUs[2], int otherRungs, bool otherWrong, const char *unit)
 {
   std::string s = ", its weights stored " + std::string(coremlLayoutName(transposed));
   if (raceDim > 0)
@@ -161,6 +161,9 @@ std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2
       s += buf;
     }
   }
+  else if (otherWrong)
+    s += "; stored " + std::string(coremlLayoutName(!transposed)) +
+         " they gave a wrong answer (coreml_numeric_error), so they were not timed";
   else if (otherRungs == 0)
     s += "; stored " + std::string(coremlLayoutName(!transposed)) + " they did not run here";
   return s + ".";
@@ -229,6 +232,20 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       continue;
     }
 
+    // A layout whose answer is wrong leaves the race (wrongAnswer,
+    // numeric_error.cpp), and a format with no layout that answers right has
+    // no rate worth publishing.
+    std::string wrongWhy[2];
+    for (int t = 0; t < 2; t++)
+      wrongWhy[t] = wrongAnswer(dev, v.w, t);
+    if (!wrongWhy[0].empty() && !wrongWhy[1].empty())
+    {
+      const int read = answerCheck(dev, v.w).read;
+      CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[read == 1].c_str());
+      test.skip(label, ResultStatus::Error, wrongWhy[read == 1], o);
+      continue;
+    }
+
     double best = 0.0;
     int64_t bestDim = 0;
     bool bestTransposed = false;
@@ -242,6 +259,12 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     // runs, each with its own caps and its own compile history, and the
     // width's rate is the faster one's.
     CoremlLayoutRace race;
+    for (int t = 0; t < 2; t++)
+      if (!wrongWhy[t].empty())
+      {
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[t].c_str());
+        race.drop(t);
+      }
     struct Lane
     {
       int rungs = 0;
@@ -470,7 +493,8 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       const Lane &ln = lanes[bestTransposed];
       o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers" +
                       layoutNote(bestTransposed, raceDim, raceRate, raceCreateUs,
-                                 lanes[!bestTransposed].rungs, isInt ? "ops" : "flops") +
+                                 lanes[!bestTransposed].rungs, !wrongWhy[!bestTransposed].empty(),
+                                 isInt ? "ops" : "flops") +
                       "  " + v.note + seedNote + ln.offDeviceNote + ln.glueNote;
       test.emit(label, (float)best, o);
     }

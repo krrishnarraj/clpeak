@@ -177,6 +177,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
 | `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out). `clpeak::MultiFormRace` — the same rule over more forms, for work with more than one choice (LiteRT's int8 operators and GPU kernel policy) |
+| `answer_check.h` | `clpeak::AnswerCheck` — whether an ML runtime's answer is right: the line the ONNX Runtime, Core ML and LiteRT backends share (`kWrongAnswerPpm`, 50% RMS, and why it sits there), the figure (`judgeAnswer`), and the reasons a refused rate row (`wrongAnswerReason`) and a wrong answer's accuracy row (`wrongAnswerRowReason`) give. Each backend measures and memoises its own checks in its `numeric_error.cpp` |
 | `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory

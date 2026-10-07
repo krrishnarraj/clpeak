@@ -315,16 +315,91 @@ std::string OnnxGraph::build()
 // Model recipes
 // ---------------------------------------------------------------------------
 
-std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
-                            const std::string &weightRaw)
+// How a recipe spells a layer: MatMul over [M, K] rows, or with `conv` a 1x1
+// Conv over [1, K, H, W] with H * W = M -- the same multiply-accumulates,
+// named as the operator NPU compilers were first tuned for
+// (onnxResidentQdqMatMulModel's `conv1x1`).
+namespace
 {
+struct LayerForm
+{
+  bool conv;
+  int64_t M, H, W;
+
+  LayerForm(int64_t m, bool c) : conv(c), M(m), H(1), W(m)
+  {
+    // As square a grid as the row count allows.
+    while (conv && H * H < M && W % 2 == 0)
+    {
+      H *= 2;
+      W /= 2;
+    }
+  }
+  OnnxDims act(int64_t cols) const
+  {
+    return conv ? OnnxDims{1, cols, H, W} : OnnxDims{M, cols};
+  }
+  OnnxDims weight(int64_t in, int64_t out) const
+  {
+    return conv ? OnnxDims{out, in, 1, 1} : OnnxDims{in, out};
+  }
+  void layer(OnnxGraph &g, const std::string &x, const std::string &w,
+             const std::string &y) const
+  {
+    // Every attribute spelled out, defaults included: Core ML's converter
+    // refuses a Conv without explicit pads ("Required param 'pad' is
+    // missing").
+    if (conv)
+      g.node("Conv", {x, w}, {y},
+             {OnnxAttr::list("kernel_shape", {1, 1}),
+              OnnxAttr::list("pads", {0, 0, 0, 0}),
+              OnnxAttr::list("strides", {1, 1}),
+              OnnxAttr::list("dilations", {1, 1}),
+              OnnxAttr::num("group", 1)});
+    else
+      g.node("MatMul", {x, w}, {y});
+  }
+  // The maximum of each output column, as the [cols] row every form returns.
+  void reduce(OnnxGraph &g, const std::string &in, const std::string &out,
+              int64_t cols, OnnxReduceView view) const
+  {
+    if (conv)
+      g.reduceMax(in, out, {0, 2, 3});
+    else
+      g.reduceRows(in, out, M, cols, view);
+  }
+};
+} // namespace
+
+std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
+                            const std::string &weightRaw, bool conv1x1)
+{
+  const LayerForm form(M, conv1x1);
   OnnxGraph g;
   g.reserveInitializers(weightRaw.size());
   g.setOpset(onnxOpsetForDtype(dtype));
-  g.input("A", dtype, {M, K});
-  g.initializer("B", dtype, {K, N}, weightRaw);
-  g.node("MatMul", {"A", "B"}, {"C"});
-  g.output("C", dtype, {M, N});
+  g.input("A", dtype, form.act(K));
+  g.initializer("B", dtype, form.weight(K, N), weightRaw);
+  form.layer(g, "A", "B", "C");
+  g.output("C", dtype, form.act(N));
+  return g.build();
+}
+
+std::string onnxWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N, int wDtype,
+                                      int64_t blockSize, const std::string &wPacked,
+                                      const std::string &wScalesRaw)
+{
+  OnnxGraph g;
+  g.reserveInitializers(wPacked.size() + wScalesRaw.size());
+  // The blocked DequantizeLinear is opset 21, as in the resident form.
+  g.setOpset(std::max(onnxOpsetForDtype(wDtype), 21));
+  g.input("A", ONNX_DT_FLOAT16, {M, K});
+  g.initializer("B_q",     wDtype,          {K, N}, wPacked);
+  g.initializer("b_scale", ONNX_DT_FLOAT16, {K / blockSize, N}, wScalesRaw);
+  g.node("DequantizeLinear", {"B_q", "b_scale"}, {"B_f"},
+         {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
+  g.node("MatMul", {"A", "B_f"}, {"C"});
+  g.output("C", ONNX_DT_FLOAT16, {M, N});
   return g.build();
 }
 
@@ -380,7 +455,8 @@ static std::string quantZeroPoint(int dtype)
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRaw,
                                float aScale, float bScale, float cScale,
-                               int actDtype, int wDtype, bool floatIo)
+                               int actDtype, int wDtype, bool floatIo,
+                               bool conv1x1)
 {
   auto f32 = [](float v) {
     std::string s(4, '\0');
@@ -389,19 +465,20 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   };
   const std::string actZp = quantZeroPoint(actDtype);
   const std::string wZp   = quantZeroPoint(wDtype);
+  const LayerForm form(M, conv1x1);
 
   OnnxGraph g;
   // The opset follows whichever operand type is newer: float8 cannot be named
   // below 19, int8 needs nothing beyond 17.
   g.setOpset(std::max(onnxOpsetForDtype(actDtype), onnxOpsetForDtype(wDtype)));
   if (floatIo)
-    g.input("A", ONNX_DT_FLOAT, {M, K});
+    g.input("A", ONNX_DT_FLOAT, form.act(K));
   else
-    g.input("A_q", actDtype, {M, K});
+    g.input("A_q", actDtype, form.act(K));
 
   g.initializer("a_scale", ONNX_DT_FLOAT, {}, f32(aScale));
   g.initializer("a_zp",    actDtype, {}, actZp);
-  g.initializer("B_q",     wDtype,   {K, N}, weightRaw);
+  g.initializer("B_q",     wDtype,   form.weight(K, N), weightRaw);
   g.initializer("b_scale", ONNX_DT_FLOAT, {}, f32(bScale));
   g.initializer("b_zp",    wDtype,   {}, wZp);
   g.initializer("c_scale", ONNX_DT_FLOAT, {}, f32(cScale));
@@ -414,76 +491,20 @@ std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
     g.node("QuantizeLinear", {"A", "a_scale", "a_zp"}, {"A_q"});
   g.node("DequantizeLinear", {"A_q", "a_scale", "a_zp"}, {"A_f"});
   g.node("DequantizeLinear", {"B_q", "b_scale", "b_zp"}, {"B_f"});
-  g.node("MatMul",           {"A_f", "B_f"},             {"C_f"});
+  form.layer(g, "A_f", "B_f", "C_f");
   g.node("QuantizeLinear",   {"C_f", "c_scale", "c_zp"}, {"C_q"});
 
   if (floatIo)
   {
     g.node("DequantizeLinear", {"C_q", "c_scale", "c_zp"}, {"C"});
-    g.output("C", ONNX_DT_FLOAT, {M, N});
+    g.output("C", ONNX_DT_FLOAT, form.act(N));
   }
   else
   {
-    g.output("C_q", actDtype, {M, N});
+    g.output("C_q", actDtype, form.act(N));
   }
   return g.build();
 }
-
-// How the QDQ resident GEMM spells a layer: MatMul over [M, K] rows, or with
-// `conv` a 1x1 Conv over [1, K, H, W] with H * W = M -- the same
-// multiply-accumulates, named as the operator NPU compilers were first tuned
-// for (onnxResidentQdqMatMulModel's `conv1x1`).
-namespace
-{
-struct LayerForm
-{
-  bool conv;
-  int64_t M, H, W;
-
-  LayerForm(int64_t m, bool c) : conv(c), M(m), H(1), W(m)
-  {
-    // As square a grid as the row count allows.
-    while (conv && H * H < M && W % 2 == 0)
-    {
-      H *= 2;
-      W /= 2;
-    }
-  }
-  OnnxDims act(int64_t cols) const
-  {
-    return conv ? OnnxDims{1, cols, H, W} : OnnxDims{M, cols};
-  }
-  OnnxDims weight(int64_t in, int64_t out) const
-  {
-    return conv ? OnnxDims{out, in, 1, 1} : OnnxDims{in, out};
-  }
-  void layer(OnnxGraph &g, const std::string &x, const std::string &w,
-             const std::string &y) const
-  {
-    // Every attribute spelled out, defaults included: Core ML's converter
-    // refuses a Conv without explicit pads ("Required param 'pad' is
-    // missing").
-    if (conv)
-      g.node("Conv", {x, w}, {y},
-             {OnnxAttr::list("kernel_shape", {1, 1}),
-              OnnxAttr::list("pads", {0, 0, 0, 0}),
-              OnnxAttr::list("strides", {1, 1}),
-              OnnxAttr::list("dilations", {1, 1}),
-              OnnxAttr::num("group", 1)});
-    else
-      g.node("MatMul", {x, w}, {y});
-  }
-  // The maximum of each output column, as the [cols] row every form returns.
-  void reduce(OnnxGraph &g, const std::string &in, const std::string &out,
-              int64_t cols, OnnxReduceView view) const
-  {
-    if (conv)
-      g.reduceMax(in, out, {0, 2, 3});
-    else
-      g.reduceRows(in, out, M, cols, view);
-  }
-};
-} // namespace
 
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
@@ -492,7 +513,8 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
                                          float globalScale,
-                                         OnnxReduceView view)
+                                         OnnxReduceView view,
+                                         bool wholeProduct)
 {
   auto f32 = [](float v) {
     std::string s(4, '\0');
@@ -527,6 +549,12 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
          {OnnxAttr::num("axis", 0), OnnxAttr::num("block_size", blockSize)});
 
   g.node("MatMul", {"A_f", "B_f"}, {"C"});
+  if (wholeProduct)
+  {
+    g.node("Mul", {"C", "S"}, {"Y"});
+    g.output("Y", ONNX_DT_FLOAT, {M, N});
+    return g.build();
+  }
   g.reduceRows("C", "R", M, N, view);
   g.node("Mul", {"R", "S"}, {"Y"});
   g.output("Y", ONNX_DT_FLOAT, {N});

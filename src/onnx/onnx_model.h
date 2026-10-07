@@ -168,8 +168,21 @@ private:
 // C[M,N] = MatMul(A[M,K], B[K,N]) in `dtype`.  A is a graph input; B is an
 // embedded initializer, so the EP sees it as constant weights it may
 // pre-pack -- the weight-stationary GEMM inference is built from.
+//
+// `conv1x1` spells the product as a 1x1 Conv, the way the resident QDQ model
+// does (onnxResidentQdqMatMulModel): A is then [1, K, H, W] with H * W = M,
+// B [N, K, 1, 1] and C [1, N, H, W] -- channel-major, so the values A and C
+// hold are A's and C's transposes.
 std::string onnxMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
-                            const std::string &weightRaw);
+                            const std::string &weightRaw, bool conv1x1 = false);
+
+// C[M,N] = MatMul(A[M,K], DequantizeLinear(B)) with A an fp16 graph input and
+// B the gemm rows' blocked weight-only form (onnxResidentWeightOnlyMatMulModel):
+// `wDtype` codes, [K, N], one fp16 scale per `blockSize` rows per column.
+// The accuracy check's shape, since it compares actual values.
+std::string onnxWeightOnlyMatMulModel(int64_t M, int64_t K, int64_t N, int wDtype,
+                                      int64_t blockSize, const std::string &wPacked,
+                                      const std::string &wScalesRaw);
 
 // The smallest graph worth expressing: Y = X * K over [1, width] fp16,
 // K a full-size constant.  A scalar K would need broadcasting, which
@@ -199,11 +212,13 @@ std::string onnxTrivialMulModel(int64_t width = 64);
 // supported" for the same type as a graph input.  The values are unchanged:
 // every number handed in is already exactly representable in the target type,
 // so the added QuantizeLinear round-trips it rather than rounding it again.
+//
+// `conv1x1` spells the multiply as a 1x1 Conv, as onnxMatMulModel's does.
 std::string onnxQdqMatMulModel(int64_t M, int64_t K, int64_t N,
                                const std::string &weightRaw,
                                float aScale, float bScale, float cScale,
                                int actDtype, int wDtype = ONNX_DT_INT8,
-                               bool floatIo = false);
+                               bool floatIo = false, bool conv1x1 = false);
 
 // How a throughput graph is kept from being evaluated at build time.
 //
@@ -314,6 +329,11 @@ struct OnnxLiveSeed
 //
 // Scales are E4M3 and therefore reachable at float4's own opset 23; MXFP4's
 // E8M0 scale is a later opset than anything here emits.
+//
+// `wholeProduct` returns the whole [M, N] product times S instead of its
+// reduced row: the accuracy check's form of the same graph, which needs the
+// values and must not quantize anything to get them (src/onnx/AGENTS.md has
+// the TensorRT crash a blocked QuantizeLinear is).
 std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          int64_t blockSize,
                                          const std::string &aPacked,
@@ -321,7 +341,8 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
                                          const std::string &bPacked,
                                          const std::string &bBlockScales,
                                          float globalScale,
-                                         OnnxReduceView view = OnnxReduceView::Rows);
+                                         OnnxReduceView view = OnnxReduceView::Rows,
+                                         bool wholeProduct = false);
 
 // `chain` holds further [N, N] layers as (packed weights, fp16 block scales)
 // pairs, blocked like the first; see the chain note below.

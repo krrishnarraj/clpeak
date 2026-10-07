@@ -3,6 +3,7 @@
 
 #ifdef ENABLE_LITERT
 
+#include <common/answer_check.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/logger.h>
@@ -120,22 +121,16 @@ public:
   // and reason when it could not be measured.  The rate tests ask before
   // publishing a format's rate -- a kernel that returns a wrong answer
   // (Mali's int8 path on a Pixel 7a was 250% off) is not a capability, and
-  // its speed is not a number anyone should divide by.
-  struct AnswerCheck
+  // its speed is not a number anyone should divide by.  The line and the
+  // words are the three ML backends' (include/common/answer_check.h).
+  struct AnswerCheck : clpeak::AnswerCheck
   {
-    double ppm = -1.0;
-    // The answer held NaN or infinity where the reference is finite
-    // everywhere: no figure, and the most wrong answer there is.
-    bool nonFinite = false;
-    ResultStatus status = ResultStatus::Ok;
-    std::string error;
     // The output is filled with a marker before the run.  The share of its
     // elements still holding it once the run returned, and -- read only for
     // a wrong answer -- after a second run, with that run's figure: a marker
     // that survives both is an answer never written, one the second run
     // replaces is an answer that lands after the run returns.
     double unwritten = -1.0, unwrittenRerun = -1.0, rerunPpm = -1.0;
-    bool wrong() const;
   };
   // The format's answer in one form (LitertForm): `conv1x1` is the same
   // product written as a 1x1 CONV_2D, `gpuInt8Kernels` with the GPU's 8-bit
@@ -164,11 +159,6 @@ private:
   // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo)
   std::map<std::tuple<int, int, bool, bool, bool>, AnswerCheck> answerChecks_;
 };
-
-// A relative RMS error past this is a wrong answer, not a loss of precision:
-// int8 with the result itself quantized costs ~1%, nothing legitimate here
-// reaches 10%.
-constexpr double kLitertWrongAnswerPpm = 100000.0;
 
 // The accelerators this machine can actually run, accelerators first and the
 // CPU last: each has compiled and run one tiny model with nothing handed
