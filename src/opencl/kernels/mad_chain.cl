@@ -42,11 +42,12 @@ MSTRINGIFY(
 // catch a, b and x lined up more often than not: an Arc A380 read the fp32
 // widths at 3.92-3.95 TFLOPS there and 4.93-4.98 pinned to 16, mixed precision
 // 3.98-4.88 against 4.68-4.89 -- but fp16 9.48-9.56 at SIMD32 against 4.92-4.95
-// at 16, since packed fp16 needs SIMD32.  Intel's CPU runtime offers 16 as
-// well, and there it changes the vectorisation: a Threadripper 3955WX read
-// fp32 at widths 1-2 at 1.92-2.06 TFLOPS pinned against 1.52-1.63, and fp64
-// and fp16 slower.  So both are raced wherever 16 is offered.  The
-// measurements are in the MAD chain block of include/common/common.h.
+// at 16, where this compiler drops fp16 to its fp32 rate.  Intel's CPU runtime
+// offers 16 as well, and there it changes the vectorisation: a Threadripper
+// 3955WX read fp32 at widths 1-2 at 1.92-2.06 TFLOPS pinned against
+// 1.52-1.63, and fp64 and fp16 slower.  So both are raced wherever 16 is
+// offered.  The measurements are in the MAD chain block of
+// include/common/common.h.
 //
 // RT* (rotating, x_k = x_k * x_(k+1) + c) is the integer families' second
 // shape, and the reason they differ is not stylistic.  The affine form is

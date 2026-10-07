@@ -375,8 +375,8 @@ struct vk_compute_desc_t
   // pipelines are pinned to, where the device offers it, and keep the faster
   // (see runComputeKernel).  The floating-point families set it -- Alchemist
   // runs their affine chain up to a third faster at SIMD16 than at the SIMD32
-  // that fp16 needs -- and so does int8_dp, whose dot chain an A380 ran ~23%
-  // faster at the SIMD16 its driver picks unpinned.
+  // its driver needs for fp16's double rate -- and so does int8_dp, whose dot
+  // chain an A380 ran ~23% faster at the SIMD16 its driver picks unpinned.
   bool raceHalfSubgroup;
 
 

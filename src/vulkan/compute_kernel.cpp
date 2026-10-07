@@ -274,11 +274,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // The alt build again at half the pinned width, where the device offers it.
   // At SIMD32 Alchemist's register banks catch the affine chain's operands
   // lined up more often than not -- an Arc A380 read it at 3.44-4.83 TFLOPS
-  // there and 4.60-4.88 pinned to 16 -- while fp16 needs SIMD32 for its double
-  // rate, so neither width is right for every family and both are timed.  A
-  // clear loser drops out (FormRace::dropTrailing); a tie does not settle it,
-  // because the allocator lays out every vector width afresh.  See
-  // shaders/mad_chain.glsl.
+  // there and 4.60-4.88 pinned to 16 -- while this driver keeps fp16's double
+  // rate only at SIMD32, so neither width is right for every family and both
+  // are timed.  A clear loser drops out (FormRace::dropTrailing); a tie does
+  // not settle it, because the allocator lays out every vector width afresh.
+  // See shaders/mad_chain.glsl.
   uint32_t halfSubgroup = 0;
   if (d.raceHalfSubgroup && subgroup && dev.info.subgroupSizeControl &&
       dev.info.minSubgroupSize <= subgroup / 2 &&

@@ -195,18 +195,20 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // order, and a mad that reads all three sources from one bank pays for the
 // conflict -- which the allocator's natural layout makes the common case.  At
 // SIMD16 each value sits in one bank and the conflict mostly goes away, but
-// packed fp16 needs SIMD32 for its double rate.  So Vulkan, OpenCL and oneAPI
-// time the float families' affine chain at two sub-group widths: Vulkan at
-// the width its pipelines are pinned to and at half of it, OpenCL and oneAPI
-// at the compiler's choice and pinned to 16 (intel_reqd_sub_group_size,
-// reqd_sub_group_size, where it is offered).  On an Arc A380 (driver 8993),
-// whose fp32 peak is ~5.0 TFLOPS, fp32 read 4.78-4.83 in Vulkan and 3.92-3.95
-// in OpenCL at SIMD32 against 4.87-4.88 and 4.93-4.98 at 16; mixed precision
-// 3.44-3.55 and 3.98-4.88 against 4.60-4.80 and 4.68-4.89, and 3.42 in oneAPI
-// at the compiler's width; fp16 9.48-9.56 at SIMD32 against 4.92-4.95.  The
-// two widths race as a clpeak::FormRace (form_race.h) that drops only a clear
-// loser: a tie at one vector width does not predict the next, because the
-// allocator lays each width out afresh.
+// Vulkan's and OpenCL's fp16 then runs at its fp32 rate.  So Vulkan, OpenCL
+// and oneAPI time the float families' affine chain at two sub-group widths:
+// Vulkan at the width its pipelines are pinned to and at half of it, OpenCL
+// and oneAPI at the compiler's choice and pinned to 16
+// (intel_reqd_sub_group_size, reqd_sub_group_size, where it is offered).  On
+// an Arc A380 (driver 8993), whose fp32 peak is ~5.0 TFLOPS, fp32 read
+// 4.78-4.83 in Vulkan, 3.92-3.95 in OpenCL and 4.08-4.12 in oneAPI at the
+// compiler's width against 4.87-4.88, 4.93-4.98 and 4.85-4.88 at 16; mixed
+// precision 3.44-3.55, 3.98-4.88 and 3.89 against 4.60-4.80, 4.68-4.89 and
+// 4.60.  fp16 read 9.48-9.56 at SIMD32 in Vulkan and OpenCL against 4.92-4.95
+// at 16 -- but 9.50 at 16 in oneAPI, whose compiler keeps the packed rate
+// there.  The two widths race as a clpeak::FormRace (form_race.h) that drops
+// only a clear loser: a tie at one vector width does not predict the next,
+// because the allocator lays each width out afresh.
 //
 // A uniform addend is no substitute.  b = the kernel's scalar + 2 caps the
 // conflict at one half of a mad, and IGC's own listing (ocloc -device

@@ -36,8 +36,8 @@
 // lines them up more often than not.  Pinned to subgroup 16 an Arc A380 read
 // the affine chain at 4.87 TFLOPS in fp32 and 4.60-4.80 in mixed precision,
 // against 4.81 and 3.44-3.55 at the SIMD32 its pipelines are pinned to -- while
-// fp16 needs SIMD32 for its double rate (9.50 against 4.93).  The measurements
-// are in the MAD chain block of include/common/common.h.
+// this driver keeps fp16's double rate only at SIMD32 (9.50 against 4.93).
+// The measurements are in the MAD chain block of include/common/common.h.
 //
 // The race is what keeps Alchemist off the squaring form's half rate: across
 // the Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45 and M1 Pro (via

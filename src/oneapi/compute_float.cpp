@@ -64,12 +64,14 @@ float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 // and OpenCL time their affine chain at that width too, because at SIMD32 an
 // Alchemist fp32 value spans four registers in both banks and the allocator
 // lays the three sources of a mad out to collide; at SIMD16 they mostly do
-// not.  An Arc A380 (driver 8993) read oneAPI's mp at 3.42 TFLOPS with the
-// second shape and 3.89 with the third, at the width the compiler picks, where
-// Vulkan and OpenCL read 4.60-4.89 pinned to 16.  Packed fp16 needs SIMD32 for
-// its double rate, so the half rows drop the pinned build again.  The widths
-// race as a clpeak::FormRace that drops only a clear loser
-// (include/common/form_race.h), as in those two backends.
+// not.  On an Arc A380 (driver 8993), at the width the compiler picks, mp read
+// 3.42 TFLOPS with the second shape and 3.89 with the third, and pinned to 16
+// it read 4.60; float and float2 went from 4.08-4.12 to 4.85-4.88.  fp16 is
+// where oneAPI parts company with the other two: their fp16 pinned to 16 runs
+// at its fp32 rate, but here the pinned build read 9.50 against 9.75 at the
+// compiler's width and won at half8, 9.37 against 7.79, so nothing on that
+// card drops it.  The widths race as a clpeak::FormRace that drops only a
+// clear loser (include/common/form_race.h), as in those two backends.
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
 
 static bool offersSubGroup16(const oneapi_device_info_t &info)
