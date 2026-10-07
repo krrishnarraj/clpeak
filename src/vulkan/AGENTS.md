@@ -91,7 +91,9 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   run, and a fully unrolled run is both what a shader compiler chokes on and what
   it can fold into a closed form.  `COOPMAT_MMA_PER_TRIP` in
   `include/common/common.h` must stay equal to `CM_MMA_PER_TRIP` in
-  `shaders/coopmat_chain.glsl`.
+  `shaders/coopmat_chain.glsl`.  Every coopmat shader's push block is
+  `{A, trips, spread}`, matching `CoopPush` in `coopmat.cpp`; `spread` stays 0
+  and exists so no compiler can treat a tile as one value (why: the header).
 - A shader that `#include`s one of the shared chain headers is compiled
   **twice**, the second time with that header's other shape --
   `-DMAD_CHAIN_AFFINE` for `mad_chain.glsl`, `-DCM_CHAIN_ALT` for

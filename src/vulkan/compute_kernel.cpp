@@ -115,6 +115,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     maxWGs = std::min(maxWGs, (uint64_t)dev.info.maxWGCount);
   uint64_t wantWGs = globalWIs / wgSize;
   uint32_t numGroups = (uint32_t)std::min(wantWGs, maxWGs);
+  // Divided after the limits, not before: a dispatch the limits had already
+  // cut short must shrink too, or its longer work-groups make it longer --
+  // llvmpipe's coopmat dispatch is held at 65535 groups.
+  if (d.globalDivisor > 1)
+    numGroups = std::max(1u, numGroups / d.globalDivisor);
   globalWIs = (uint64_t)numGroups * wgSize;
   uint64_t bufferBytes = (uint64_t)numGroups * bytesPerWG;
 

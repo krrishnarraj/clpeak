@@ -293,9 +293,11 @@ static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 // shaped that way; a different shape silently reports a wrong number.
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
-// coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup
-// (32 threads) per work-group.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops;
-// per work-item: 2,097,152 / 32 = 65,536 ops.
+// The unit tensor-core runs are budgeted in: 256 MulAdds of a 16x16x16 tile
+// per 32-wide subgroup.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops; per
+// work-item: 2,097,152 / 32 = 65,536 ops.  Vulkan's coopmat_*.comp run four
+// times it per work-group (kCoopGroupScale in src/vulkan/coopmat.cpp), as
+// CUDA's fp16, bf16 and int8 WMMA kernels do.
 static const unsigned int COOPMAT_WORK_PER_WI = 65536;
 
 // MulAdds in one trip of the coopmat inner loop.  Must match CM_MMA_PER_TRIP

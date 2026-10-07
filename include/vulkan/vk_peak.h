@@ -361,6 +361,11 @@ struct vk_compute_desc_t
                              // writes per work-group.  0 => defaults to wgSize
                              // (one element per WI).  Coopmat shaders write an
                              // M*N tile (the selected tile's M*N) per WG.
+  uint32_t globalDivisor;    // dispatch this many times fewer work-groups than
+                             // the device would otherwise get (0 = 1), for a
+                             // desc whose work-groups each do that many times
+                             // the work -- coopmat's (kCoopGroupScale in
+                             // coopmat.cpp).
 
   // Push-constant payload.  nullptr => no push constants bound.
   const void *pushData;

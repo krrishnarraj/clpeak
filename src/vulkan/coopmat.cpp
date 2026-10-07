@@ -34,15 +34,21 @@ namespace
   };
 
   // Push payload: the value the shader derives its four A and four B fills from,
-  // then the number of trips of the inner loop.  float and int32_t are both four
-  // bytes at offset 0, so one struct serves every dtype -- only the shader's
-  // spelling of the push block differs.
+  // then the number of trips of the inner loop, then whether to fill the tiles
+  // element by element.  float and int32_t are both four bytes at offset 0, so
+  // one struct serves every dtype -- only the shader's spelling of the push
+  // block differs.
   //
   // The trip count is pushed rather than specialized on purpose.  A compile-time
   // trip count is an invitation for the driver to unroll the whole run, and a
   // fully unrolled run of an emulated tile is what a shader compiler chokes on;
   // it also leaves the loop open to being folded into a closed form, which has
   // inflated these rows before.  Push it and neither is possible.
+  //
+  // `spread` stays 0, so every tile is one value, as the shaders build it.  It
+  // is pushed so that no driver can know that: a driver that can see a tile is
+  // one value computes its dot products once, which is how llvmpipe read above
+  // its CPU's peak (shaders/coopmat_chain.glsl).
   struct CoopPush
   {
     union
@@ -51,6 +57,7 @@ namespace
       int32_t i;
     } A;
     int32_t trips;
+    int32_t spread;
   };
 
   // The most accumulator a lane may carry for the four-accumulator build to be
@@ -61,6 +68,15 @@ namespace
   // Counted in output elements, which are the accumulator's or wider, so it
   // errs on the side of not racing.
   const uint32_t kAltAccumulatorBytesPerLane = 128;
+
+  // Each work-group runs this many times the per-WI budget, over this many
+  // times fewer work-groups, so a dispatch takes as long as it would at the
+  // budget.  What a work-group does before its loop -- building its eight
+  // tiles -- it does once, so its cost shrinks with the trips that follow: at
+  // the budget alone an RTX 5060's int8 work-group ran 8 trips, and building
+  // tiles no compiler can see through (shaders/coopmat_chain.glsl) took 1.6%
+  // off that reading; at four times the budget it is within noise.
+  const uint32_t kCoopGroupScale = 4;
 
   // A desc's second build: VK_ALT_SHADER(name) is its (pointer, size), or
   // (nullptr, 0) where glslc did not build one.
@@ -83,8 +99,8 @@ namespace
   };
 
   // Bind a selected tile into a desc: build the spec constants, scale the trip
-  // count so work-per-WI stays ~COOPMAT_WORK_PER_WI regardless of tile volume,
-  // and record the actual MxNxK that runs.
+  // count so work-per-WI stays ~kCoopGroupScale * COOPMAT_WORK_PER_WI
+  // regardless of tile volume, and record the actual MxNxK that runs.
   //
   // The shape goes on the reading's NOTE, not its name.  Different data types
   // land on different shapes on one device (NVIDIA gives the 8-bit types K=32
@@ -113,7 +129,8 @@ namespace
     }
 
     const uint64_t volume = (uint64_t)t.M * t.N * t.K; // MACs per coopMatMulAdd
-    uint64_t mmas = ((uint64_t)COOPMAT_WORK_PER_WI * wgSize) / (volume * 2);
+    uint64_t mmas = ((uint64_t)COOPMAT_WORK_PER_WI * kCoopGroupScale * wgSize) /
+                    (volume * 2);
     uint64_t trips = mmas / COOPMAT_MMA_PER_TRIP;
     if (trips < 1)
       trips = 1;
@@ -138,6 +155,7 @@ namespace
     d.specInfo = &r.specInfo;
     d.metricDescription = r.note.c_str();
     d.wgSize = wgSize;
+    d.globalDivisor = kCoopGroupScale;
     d.outElemsPerWG = t.M * t.N * (d.altSpirv ? 4 : 1);
     d.pushData = &r.push;
     d.pushSize = sizeof(r.push);

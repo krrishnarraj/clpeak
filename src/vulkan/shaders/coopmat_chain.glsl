@@ -2,19 +2,23 @@
 //
 // Includers define, before including this file:
 //
-//   CM_AB       the A/B component type      (float16_t, int8_t, floate4m3_t...)
-//   CM_ACC      the accumulator type        (float, int32_t)
-//   CM_VAL(i)   the i-th fill value, cast to CM_AB, derived from the push
-//               constant so the driver cannot constant-fold a product
+//   CM_AB         the A/B component type    (float16_t, int8_t, floate4m3_t...)
+//   CM_ACC        the accumulator type      (float, int32_t)
+//   CM_VAL(i, n)  element n of the i-th tile, cast to CM_AB, derived from the
+//                 push constant so the driver cannot constant-fold a
+//                 product.  n = 0 is the value the whole tile is built from;
+//                 every other n must give an expression of its own (the
+//                 fourth property below)
 //
 // and must have M/N/K in scope (the specialization constants carrying the
-// tile the driver advertised) and an `outputBuf.data` array to store into.
+// tile the driver advertised), a push-constant block `pc` with an int
+// `spread` the host leaves 0, and an `outputBuf.data` array to store into.
 // The header then supplies CM_DECLARE for the matrices, CM_MMA_TRIP for one
 // trip of the inner loop and CM_STORE_ALL for the store at the end.  An
 // includer whose accumulator is not what it stores defines CM_STORE(mat,
 // slot) itself first.
 //
-// Shape, and why.  Three properties have to hold at once, and each of them
+// Shape, and why.  Four properties have to hold at once, and each of them
 // has cost this benchmark a wrong number before:
 //
 //  - The MulAdds must run as a straight-line block, not one per loop trip.
@@ -32,6 +36,26 @@
 //    push constant, so the driver can neither unroll the whole run (512
 //    MulAdds of an emulated tile is what a shader compiler chokes on) nor
 //    turn it into a closed form.
+//
+//  - No compiler may be able to see that a tile is one value.  A driver
+//    without a matrix unit lowers the MulAdd to scalar arithmetic, a dot
+//    product per output element, and in a tile built from one scalar every
+//    one of those dot products is the same expression, which it computes
+//    once.  Lavapipe does exactly that -- NIR scalarizes its lowered MulAdd
+//    and CSEs it -- so on a Threadripper PRO 3955WX llvmpipe ran one
+//    multiply, a seven-add reduction and eight vector adds per 8x8x8 MulAdd,
+//    72 of the 1024 flops credited, and read 3.06 TFLOPS fp16 on a CPU whose
+//    fp32 peak is 2.2.  With every element its own expression it runs all
+//    1024 and reads 0.13.  Filling every element costs a GPU, though: in
+//    work-groups of 8 trips it took 11% off an RTX 5060's int8 row and 2%
+//    off fp8.  So the tiles are built from one scalar as before, and
+//    refilled element by element only if the push constant's `spread` is
+//    set, which the host never does.  No compiler can rule that out, so none
+//    can treat a tile as one value -- and losing that, not the branch, is
+//    what a GPU still pays, once per work-group before the loop: 1.6% of the
+//    5060's int8 reading at 8 trips a work-group, nothing measurable at 32,
+//    which is why work-groups run four times the budget (kCoopGroupScale in
+//    coopmat.cpp).
 //
 // Two builds of every shader, raced by runComputeKernel: the same sixteen
 // products, carried on one accumulator or on four.
@@ -74,11 +98,35 @@
 #define CM_TB  coopmat<CM_AB,  gl_ScopeSubgroup, K, N, gl_MatrixUseB>
 #define CM_TC  coopmat<CM_ACC, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator>
 
+// Tile `i` element by element: element e of this invocation's share is
+// numbered e + length * invocation, so no two elements of the tile share a
+// number, in one invocation or across the subgroup.  Written through a copy:
+// the element writes index the matrix at run time, which keeps the variable
+// they write in memory, and the MulAdds should read a value.
+#define CM_SPREAD(type, mat, i)                                               \
+    {                                                                         \
+        type elems;                                                           \
+        for (int e = 0; e < elems.length(); e++)                              \
+            elems[e] = CM_VAL(i, uint(e) + uint(elems.length()) *             \
+                                          gl_LocalInvocationID.x);            \
+        mat = elems;                                                          \
+    }
+
+// The eight tiles, each built from one scalar -- or element by element, on a
+// branch the host never takes and no compiler can rule out (the fourth
+// property above).
 #define CM_DECLARE_AB                                                         \
-    CM_TA matA0 = CM_TA(CM_VAL(0));  CM_TA matA1 = CM_TA(CM_VAL(1));          \
-    CM_TA matA2 = CM_TA(CM_VAL(2));  CM_TA matA3 = CM_TA(CM_VAL(3));          \
-    CM_TB matB0 = CM_TB(CM_VAL(4));  CM_TB matB1 = CM_TB(CM_VAL(5));          \
-    CM_TB matB2 = CM_TB(CM_VAL(6));  CM_TB matB3 = CM_TB(CM_VAL(7));
+    CM_TA matA0 = CM_TA(CM_VAL(0, 0));  CM_TA matA1 = CM_TA(CM_VAL(1, 0));    \
+    CM_TA matA2 = CM_TA(CM_VAL(2, 0));  CM_TA matA3 = CM_TA(CM_VAL(3, 0));    \
+    CM_TB matB0 = CM_TB(CM_VAL(4, 0));  CM_TB matB1 = CM_TB(CM_VAL(5, 0));    \
+    CM_TB matB2 = CM_TB(CM_VAL(6, 0));  CM_TB matB3 = CM_TB(CM_VAL(7, 0));    \
+    if (pc.spread != 0)                                                       \
+    {                                                                         \
+        CM_SPREAD(CM_TA, matA0, 0)  CM_SPREAD(CM_TA, matA1, 1)                \
+        CM_SPREAD(CM_TA, matA2, 2)  CM_SPREAD(CM_TA, matA3, 3)                \
+        CM_SPREAD(CM_TB, matB0, 4)  CM_SPREAD(CM_TB, matB1, 5)                \
+        CM_SPREAD(CM_TB, matB2, 6)  CM_SPREAD(CM_TB, matB3, 7)                \
+    }
 
 #ifdef CM_CHAIN_ALT
 

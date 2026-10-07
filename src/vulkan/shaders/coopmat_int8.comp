@@ -22,6 +22,7 @@ layout(set = 0, binding = 0) buffer Output {
 layout(push_constant) uniform PushConstants {
     int32_t A;
     int     trips;
+    int32_t spread;
 } pc;
 
 layout(constant_id = 0) const uint M = 16u;
@@ -30,7 +31,7 @@ layout(constant_id = 2) const uint K = 16u;
 
 #define CM_AB     int8_t
 #define CM_ACC    int32_t
-#define CM_VAL(i) int8_t(pc.A + (i))
+#define CM_VAL(i, n) int8_t(pc.A + ((i) + int(n)))
 #include "coopmat_chain.glsl"
 
 void main()

@@ -34,6 +34,7 @@ layout(set = 0, binding = 0) buffer Output {
 layout(push_constant) uniform PushConstants {
     float A;
     int   trips;
+    int   spread;
 } pc;
 
 layout(constant_id = 0) const uint M = 16u;
@@ -42,7 +43,7 @@ layout(constant_id = 2) const uint K = 16u;
 
 #define CM_AB     float16_t
 #define CM_ACC    float16_t
-#define CM_VAL(i) float16_t(pc.A + float(i))
+#define CM_VAL(i, n) float16_t(pc.A + (float(i) + float(n) / 256.0))
 #define CM_STORE(mat, slot)                                                   \
     {                                                                         \
         coopmat<float, gl_ScopeSubgroup, M, N, gl_MatrixUseAccumulator> out32 = \
