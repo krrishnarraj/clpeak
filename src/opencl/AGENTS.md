@@ -57,10 +57,12 @@ once per width as `<FAM>_ALT_V<W>(NAME, ATTR)`; where `runAll` passes
 `cl_intel_required_subgroup_size`) the same macro also instantiates
 `compute_<fam>_alt_sg16_v<W>` pinned to 16.  Integer families use the rotating
 `RT*` ones -- an integer affine recurrence folds legally and Apple's compiler
-folds it.  `runComputeTest` times every kernel a width has and reports the
-fastest; a family with no `_alt` kernel simply races nothing, which is how
-`compute_int8_dp` currently behaves.  All shapes must spell the same number of
-chain instructions per work-item so the readings stay comparable.  Per loop
+folds it.  `compute_int8_dp` defines its own second shape, a four-accumulator
+dot cycle (`DP_ALT_V<W>`, widths 1, 2 and 4), and pins it to 16 the same way.
+`runComputeTest` times every kernel a width has and reports the fastest; a
+family with no `_alt` kernel simply races nothing.  All shapes must spell the
+same number of chain instructions per work-item so the readings stay
+comparable.  Per loop
 trip, the fp32/fp16 squaring kernels run 128 (`MAD_128`, but 16 at width 16),
 mixed precision runs 128 in both shapes (`AF*_128`), and everything else 16.
 Full rationale: `mad_chain.cl` and the MAD chain block in

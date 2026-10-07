@@ -203,6 +203,87 @@ __kernel void compute_int8_dp_v16(__global int *ptr, char _A)
        + (((a12 + b12) + (a13 + b13)) + ((a14 + b14) + (a15 + b15))));
 }
 
+// ---- the second shape: four accumulators in a cycle ----
+//
+// compute_int8_dp_alt_v*, which runComputeTest races beside the pair chains
+// above (see mad_chain.cl for how twins are found), and where the host
+// defines CLPEAK_ALT_SG16 again as compute_int8_dp_alt_sg16_v*, pinned to
+// sub-group 16.  Each dot multiplies the next two accumulators of its cycle,
+// a = dot(b, c, a), b = dot(c, d, b), c = dot(d, a, c), d = dot(a, b, d), so
+// nothing loop-invariant is left and every dot still reads three distinct
+// registers -- the Vulkan backend's DP4A_CHAIN_ALT (shaders/dp4a_chain.glsl,
+// which also has why Alchemist's register banks want it).  On an Arc A380
+// (driver 8993) Vulkan read the pair at 12.8-13.0 TOPS and the cycle at 17.1
+// pinned to 16, where these pairs read 12.5-14.4 at the width the compiler
+// picks.  Widths 1, 2 and 4 only, as in Vulkan: a cycle holds twice a pair's
+// accumulators, and eight or sixteen cycles would need 32 or 64 a lane.
+//
+// Same budget as the pairs: 1024 dots a work-item, sixteen a trip over 64
+// trips.  Cycle k starts 16 past cycle k-1 and each accumulator 4 past the
+// one before it, so no two start on the same value.
+
+\n#undef DPC
+\n#undef DPC_DECL
+\n#undef DPC_4
+\n#undef DPC_SUM
+\n#ifdef USE_PACKED_DOT
+\n  #define DPC(p, q, acc)      dot_acc_sat_4x8packed_ss_int(as_uint(p), as_uint(q), acc)
+\n#else
+\n  #define DPC(p, q, acc)      dot_acc_sat(as_char4(p), as_char4(q), acc)
+\n#endif
+\n#define DPC_DECL(k, s)      int a##k = (s);  int b##k = (s) + 4;  int c##k = (s) + 8;  int d##k = (s) + 12;
+\n#define DPC_4(k)            a##k = DPC(b##k, c##k, a##k);  b##k = DPC(c##k, d##k, b##k);  c##k = DPC(d##k, a##k, c##k);  d##k = DPC(a##k, b##k, d##k);
+\n#define DPC_SUM(k)          ((a##k + b##k) + (c##k + d##k))
+\n
+
+\n#define DP_ALT_V1(NAME, ATTR) \
+__kernel ATTR void NAME(__global int *ptr, char _A) \
+{ \
+    int s = (int)get_local_id(0) + (int)_A; \
+    DPC_DECL(0, s) \
+    for (int i = 0; i < 64; i++) \
+    { \
+        DPC_4(0)  DPC_4(0)  DPC_4(0)  DPC_4(0) \
+    } \
+    ptr[get_global_id(0)] = DPC_SUM(0); \
+}
+\n
+\n#define DP_ALT_V2(NAME, ATTR) \
+__kernel ATTR void NAME(__global int *ptr, char _A) \
+{ \
+    int s = (int)get_local_id(0) + (int)_A; \
+    DPC_DECL(0, s)  DPC_DECL(1, s + 16) \
+    for (int i = 0; i < 64; i++) \
+    { \
+        DPC_4(0)  DPC_4(1)  DPC_4(0)  DPC_4(1) \
+    } \
+    ptr[get_global_id(0)] = DPC_SUM(0) + DPC_SUM(1); \
+}
+\n
+\n#define DP_ALT_V4(NAME, ATTR) \
+__kernel ATTR void NAME(__global int *ptr, char _A) \
+{ \
+    int s = (int)get_local_id(0) + (int)_A; \
+    DPC_DECL(0, s)  DPC_DECL(1, s + 16)  DPC_DECL(2, s + 32)  DPC_DECL(3, s + 48) \
+    for (int i = 0; i < 64; i++) \
+    { \
+        DPC_4(0)  DPC_4(1)  DPC_4(2)  DPC_4(3) \
+    } \
+    ptr[get_global_id(0)] = (DPC_SUM(0) + DPC_SUM(1)) + (DPC_SUM(2) + DPC_SUM(3)); \
+}
+\n
+
+DP_ALT_V1(compute_int8_dp_alt_v1, )
+DP_ALT_V2(compute_int8_dp_alt_v2, )
+DP_ALT_V4(compute_int8_dp_alt_v4, )
+
+\n#ifdef CLPEAK_ALT_SG16
+\nDP_ALT_V1(compute_int8_dp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V2(compute_int8_dp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
+DP_ALT_V4(compute_int8_dp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))
+\n#endif
+\n
+
 \n#endif  // INT8_DP_AVAILABLE
 
 )

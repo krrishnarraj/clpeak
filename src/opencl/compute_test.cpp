@@ -85,9 +85,9 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
     // Create kernels and set arguments.  Each width also looks for its
     // second-shape twins (see kernels/mad_chain.cl): compute_*_alt_v*, and for
-    // the float families on a device that offers it compute_*_alt_sg16_v*,
-    // the same affine chain pinned to sub-group 16.  A family that defines
-    // neither simply races nothing.
+    // the float families and int8_dp on a device that offers it
+    // compute_*_alt_sg16_v*, the same second shape pinned to sub-group 16.  A
+    // family that defines neither simply races nothing.
     // A program that failed to build is a null handle, and an older ICD
     // loader dereferences one rather than returning CL_INVALID_PROGRAM --
     // which the catch below reads as the family not having been built.

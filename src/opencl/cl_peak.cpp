@@ -160,11 +160,14 @@ int clPeak::runAll()
             std::string(BUILD_OPTIONS) +
             (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
         // The int8 dot builtins hang off OpenCL C 3.0 feature macros, which a
-        // compiler left at its default 1.2 never defines.
+        // compiler left at its default 1.2 never defines.  Its four-accumulator
+        // cycle races pinned to sub-group 16 too, like the float families'
+        // affine chain (kernels/compute_int8_dp_kernels.cl).
         const std::string int8Options =
             std::string(BUILD_OPTIONS) +
             (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "") +
-            (devInfo.openclC30 ? " -cl-std=CL3.0 " : "");
+            (devInfo.openclC30 ? " -cl-std=CL3.0 " : "") +
+            (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
         want(Benchmark::ComputeSP, "Single-precision compute",
              isAllowed(Benchmark::ComputeSP), floatOptions);
         want(Benchmark::ComputeHP, "Half-precision compute",
