@@ -64,10 +64,11 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   auto test = currentDeviceScope->beginTest(
         {"onemkl_gemm", "oneMKL GEMM peak", "flops", Category::Unknown,
          "Matrix-multiply speed through Intel's own tuned library, on a large "
-         "square problem.  Where the joint_matrix rows show what the hardware "
-         "can do in principle, this shows what shipping code reaches on the "
-         "operation most AI work is built from.  Each reading is a different "
-         "input format.",
+         "square problem -- what shipping code reaches on the operation most AI "
+         "work is built from.  The joint_matrix rows drive the same matrix "
+         "engine from a hand-written loop that touches no memory; the library "
+         "brings its own kernels, and can land above or below them.  Each "
+         "reading is a different input format.",
          TestShape::Heterogeneous, "data type"});
 
   auto mklOpts = [&](const char *note) {
@@ -188,17 +189,32 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       }
     };
 
+    // The probe: one timed call, then up to three more while they fit in
+    // 200 ms -- enough to rank forms on a GPU, where a call takes a few
+    // milliseconds, without spending seconds a form on the CPU fallback.
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
-    const unsigned int probeIters = 4;
+    const unsigned int probeMaxIters = 4;
+    const double probeBudgetUs = 200000.0;
     size_t best = forms.size();
     double bestUs = 0.0;
     for (size_t f = 0; f < forms.size(); f++)
     {
       if (runBatch(forms[f], warm) <= 0.0)
         continue;
-      double us = runBatch(forms[f], probeIters);
+      double us = runBatch(forms[f], 1);
       if (us <= 0.0)
         continue;
+      unsigned int probeIters = 1;
+      const unsigned int more =
+          (unsigned int)std::min<double>(probeMaxIters - 1, probeBudgetUs / us);
+      if (more > 0)
+      {
+        const double moreUs = runBatch(forms[f], more);
+        if (moreUs <= 0.0)
+          continue;
+        us = (us + moreUs * more) / (more + 1);
+        probeIters += more;
+      }
       if (forms.size() > 1)
         CLPEAK_VLOG("oneMKL %s as %s: %.1f %s over a %u-call probe\n", label,
                     forms[f].name.c_str(), flops * 1.0e6 / us, unit, probeIters);
@@ -228,21 +244,23 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
     // q and its private context are destroyed here.
   };
 
-  // Both layouts of one overload, for a dtype on the matrix engine: NN, and
-  // TN, A stored transposed so both inputs keep K contiguous -- the layout
-  // cuBLASLt's tensor-core kernels are tuned around (cuda_blas.cpp).  How
-  // oneMKL picks its kernel is not public, but oneDNN's GEMM catalog
-  // (src/gpu/intel/gemm/jit/selector/db/kernel.db there) keeps separate
-  // matrix-engine kernels per layout, and for DG2 its cost model ranks NN
-  // first for fp16 and bf16 and TN first for int8.
-  using LayoutGemm = std::function<void(sycl::queue &, transpose, void *, void *, void *, void *,
-                                        std::int64_t)>;
+  // All four layouts of one overload, for a dtype on the matrix engine: NN,
+  // NT, TN -- A stored transposed so both inputs keep K contiguous, the
+  // layout cuBLASLt's tensor-core kernels are tuned around (cuda_blas.cpp) --
+  // and TT.  How oneMKL picks its kernel is not public, and the layout alone
+  // can move it by several times: an Arc A380 (driver 8993) read int8 at 11.6
+  // TOPS NN and 37.6 TN through the same call, where oneDNN's catalog for
+  // DG2 (src/gpu/intel/gemm/jit/selector/db/kernel.db there) has the two 13%
+  // apart.
+  using LayoutGemm = std::function<void(sycl::queue &, transpose, transpose, void *, void *,
+                                        void *, void *, std::int64_t)>;
   auto layouts = [](std::vector<GemmForm> &forms, const std::string &what, LayoutGemm gemm) {
     for (transpose ta : {transpose::nontrans, transpose::trans})
-      forms.push_back({what + (ta == transpose::trans ? ", TN" : ", NN"),
-                       [=](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo, std::int64_t n) {
-                         gemm(q, ta, dA, dB, dC, dCo, n);
-                       }});
+      for (transpose tb : {transpose::nontrans, transpose::trans})
+        forms.push_back({what + ", " + (ta == transpose::trans ? "T" : "N") +
+                             (tb == transpose::trans ? "T" : "N"),
+                         [=](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
+                             std::int64_t n) { gemm(q, ta, tb, dA, dB, dC, dCo, n); }});
   };
 
   measure("fp32", D,
@@ -272,17 +290,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   if (dev.info.fp16Supported)
   {
     std::vector<GemmForm> forms;
-    layouts(forms, "fp16 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
-                                  std::int64_t n) {
+    layouts(forms, "fp16 out", [](sycl::queue &q, transpose ta, transpose tb,
+                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
-        q, ta, transpose::nontrans, n, n, n, sycl::half(1.0f),
+        q, ta, tb, n, n, n, sycl::half(1.0f),
         (const sycl::half *)dA, n, (const sycl::half *)dB, n,
         sycl::half(0.0f), (sycl::half *)dC, n);
     });
-    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
-                                  std::int64_t n) {
+    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, transpose tb,
+                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
-        q, ta, transpose::nontrans, n, n, n, 1.0f,
+        q, ta, tb, n, n, n, 1.0f,
         (const sycl::half *)dA, n, (const sycl::half *)dB, n, 0.0f, (float *)dC, n);
     });
     measure("fp16", D, forms, mklOpts(fp16Note));
@@ -297,10 +315,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   {
     using bfloat16 = sycl::ext::oneapi::bfloat16;
     std::vector<GemmForm> forms;
-    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
-                                  std::int64_t n) {
+    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, transpose tb,
+                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
-        q, ta, transpose::nontrans, n, n, n, 1.0f,
+        q, ta, tb, n, n, n, 1.0f,
         (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
     });
     measure("bf16", D, forms, mklOpts(bf16Note));
@@ -314,27 +332,29 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
 
   // INT8 through both of oneMKL's int8 entry points: gemm_bias (s8 x u8, its
   // A and B offsets zero) and gemm's int8 overload (s8 x s8, which takes no
-  // offsets).  A nonzero offset needs row and column sums, and for NN the
-  // catalog's two fastest DG2 int8 kernels compute none.  An Arc A380 (driver
-  // 8993) read gemm_bias NN at 11.7 TOPS, where joint_matrix reads 31.0.
+  // offsets), since a nonzero offset needs row and column sums and the
+  // catalog's fastest DG2 int8 kernels compute none.  On an Arc A380 (driver
+  // 8993) the two read alike and the layout decided it: 11.6-11.8 TOPS NN,
+  // 37.4-37.6 TN.
   if (!dev.info.xmxSupported)
     test.skip("int8", ResultStatus::Unsupported,
               "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note));
   else
   {
     std::vector<GemmForm> forms;
-    layouts(forms, "gemm_bias s8 x u8", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC,
-                                           void *dCo, std::int64_t n) {
+    layouts(forms, "gemm_bias s8 x u8", [](sycl::queue &q, transpose ta, transpose tb,
+                                           void *dA, void *dB, void *dC, void *dCo,
+                                           std::int64_t n) {
       mkl::blas::column_major::gemm_bias(
-        q, ta, transpose::nontrans, mkl::offset::fix, n, n, n, 1.0f,
+        q, ta, tb, mkl::offset::fix, n, n, n, 1.0f,
         (const std::int8_t *)dA, n, (std::int8_t)0,
         (const std::uint8_t *)dB, n, (std::uint8_t)0,
         0.0f, (std::int32_t *)dC, n, (const std::int32_t *)dCo);
     });
-    layouts(forms, "gemm s8 x s8", [](sycl::queue &q, transpose ta, void *dA, void *dB, void *dC, void *,
-                                      std::int64_t n) {
+    layouts(forms, "gemm s8 x s8", [](sycl::queue &q, transpose ta, transpose tb,
+                                      void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
-        q, ta, transpose::nontrans, n, n, n, 1.0f,
+        q, ta, tb, n, n, n, 1.0f,
         (const std::int8_t *)dA, n, (const std::int8_t *)dB, n, 0.0f, (std::int32_t *)dC, n);
     });
     measure("int8", D, forms, intOpts(int8Note));
