@@ -62,7 +62,7 @@ struct Variant
   const char *label;
   LitertFormat f;
   bool sweep;         // walk the whole prompt and context ladders
-  const char *unit;   // nullptr: the scope's own unit
+  const char *unit;   // "ops" for full-integer, the scope it runs in; litertRateUnit has the row's
   const char *note;
   bool int8Kv;        // the cache stored as int8
   bool decodeOnly;    // a cache format has no prefill row
@@ -81,16 +81,16 @@ const Variant kVariants[] = {
      false, false, true},
     {"int4_weight", LitertFormat::Int4Weight, true, nullptr,
      "4-bit blockwise weights against float activations, what a quantized "
-     "language model ships as; XNNPACK runs the projections as int8 "
-     "arithmetic, an NPU compiler does what it can with the blocked form.",
+     "language model ships as.",
      false, false, false},
     {"int8_weight", LitertFormat::Int8Weight, false, nullptr,
      "8-bit per-row weights against float activations -- dynamic-range "
      "quantization, the post-training-quantized format.",
      false, false, false},
     {"int8_qdq", LitertFormat::Int8Qdq, false, "ops",
-     "8-bit arithmetic through the seven projections, quantized in and out, "
-     "with attention and the softmax in float as in any real deployment.",
+     "8-bit weights and activations through the seven projections, quantized "
+     "in and out, with attention and the softmax in float as in any real "
+     "deployment.",
      false, false, false},
     {"fp32", LitertFormat::Fp32, false, nullptr,
      "Full precision as a control: an accelerator whose fp16 row fails to beat "
@@ -167,6 +167,11 @@ struct Point
   size_t form = 0;
   double otherUs = -1.0;
   bool nonFinite = false;   // the timed graph returned NaN or infinity
+  // The kernel the projections ran as in each of those forms, for a format
+  // whose weights are integer (litertRateUnit, litertKernelNote): empty
+  // until profiled, and where a profile names none.
+  bool profiled = false;
+  std::string kernel, otherKernel;
 };
 
 struct VariantResult
@@ -493,6 +498,58 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     vr.prefill[seq] = pt;
   };
 
+  // The kernel the projections ran as at a prompt length, in each form the
+  // point timed, from a profiled session of its own (gemm.cpp: profiling
+  // never touches a timed one), for a format whose weights are integer: it
+  // says whether they were multiplied as integers -- the unit of a
+  // weight-only row and of the other form's reading beside it, and a
+  // full-integer row's word on a float kernel (litertRateUnit,
+  // litertKernelNote).  A profile that names no kernel whose arithmetic can
+  // be read ends the profiling on this accelerator: the next would not
+  // either, and on an NPU each is another compile.
+  bool profileReadable = true;
+  auto profilePrefill = [&](size_t vi, int64_t seq)
+  {
+    const Variant &v = kVariants[vi];
+    const LitertPlan &plan = plans[vi];
+    VariantResult &vr = results[vi];
+    auto it = vr.prefill.find(seq);
+    if (!litertIntegerWeights(plan) || it == vr.prefill.end() || it->second.us <= 0.0 || it->second.profiled)
+      return;
+    Point &pt = it->second;
+    pt.profiled = true;
+    auto kernelOf = [&](size_t f) -> std::string
+    {
+      if (!profileReadable || clpeak::cancelRequested())
+        return std::string();
+      std::string err;
+      auto ps = LitertSession::create(rt, dev, litertBlockModel(plan, shapeFor(v, false, kDecodeKv, seq)),
+                                      litertConfigFor(plan, vr.forms[f], true), err);
+      LitertPlan sp = plan;
+      if (sp.act == clpeak_tflite::TfType::I8)
+        sp.act = clpeak_tflite::TfType::F32;
+      std::string kernel;
+      if (ps && ps->onDevice() && litertBindScalar(*ps, sp, err))
+        kernel = litertMatMulKernel(ps->profileOps(err));
+      CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'%s%s\n", dev.displayName.c_str(),
+                  v.label, (long long)seq,
+                  plan.gpuInt8KernelChoice
+                      ? (vr.forms[f].gpuInt8Kernels ? " with 8-bit kernels" : " without 8-bit kernels")
+                      : "",
+                  kernel.c_str(), err.empty() ? "" : ": ", err.c_str());
+      if (litertKernelArithmetic(kernel, dev.accel) == LitertArithmetic::Unknown)
+      {
+        CLPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",
+                    dev.displayName.c_str());
+        profileReadable = false;
+      }
+      return kernel;
+    };
+    pt.kernel = kernelOf(pt.form);
+    if (pt.otherUs > 0.0 && vr.forms.size() == 2)
+      pt.otherKernel = kernelOf(1 - pt.form);
+  };
+
   auto measureDecode = [&](size_t vi, int64_t kv)
   {
     VariantResult &vr = results[vi];
@@ -537,22 +594,30 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   auto emitPrefillTo = [&](logger::TestScope &test, size_t vi)
   {
     const Variant &v = kVariants[vi];
+    const LitertPlan &plan = plans[vi];
     const VariantResult &vr = results[vi];
     for (int64_t seq : promptsFor(v))
     {
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
       auto it = vr.prefill.find(seq);
-      const std::string form =
-          it == vr.prefill.end()
-              ? std::string()
-              : formClause(vi, it->second, [&](double us) {
-                  return formatReading(blockFlops(seq, seq) * 1.0e6 / us, v.unit ? v.unit : "flops");
-                });
+      const Point *pt = it == vr.prefill.end() ? nullptr : &it->second;
+      // In the unit litertRateUnit gives the format and the projections'
+      // kernel, and the other form's reading in its own.
+      const char *unit = litertRateUnit(plan, pt ? pt->kernel : std::string(), dev.accel);
+      const char *otherUnit = litertRateUnit(plan, pt ? pt->otherKernel : std::string(), dev.accel);
+      const std::string form = !pt ? std::string() : formClause(vi, *pt, [&](double us) {
+        return formatReading(blockFlops(seq, seq) * 1.0e6 / us, otherUnit);
+      });
+      const std::string kernel = !pt || pt->kernel.empty()
+                                     ? std::string()
+                                     : ", its projections as `" + pt->kernel + "`" +
+                                           litertKernelNote(plan, pt->kernel, dev.accel);
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply in the layer" + form + "." + seedNote(seq);
-      if (v.unit)
-        o.unit = v.unit;
+                      " tokens in one pass, counting every multiply in the layer" + form + kernel + "." +
+                      seedNote(seq);
+      if (v.unit || std::strcmp(unit, "flops") != 0)
+        o.unit = unit;
       if (!vr.usable)
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -613,6 +678,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
+        profilePrefill(vi, seq);
       }
       VariantResult &vr = results[vi];
       if (auto it = vr.prefill.find(kPrefillSeq); it != vr.prefill.end() && it->second.us > 0.0)
@@ -641,6 +707,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
+        profilePrefill(vi, seq);
       }
       emitPrefillTo(test, vi);
     }

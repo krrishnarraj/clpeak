@@ -29,6 +29,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -183,45 +184,100 @@ inline bool litertKernelMultiplies(const std::string &tag)
          l.find("matmul") != std::string::npos || l.find("gemm") != std::string::npos;
 }
 
-// Whether a profiled kernel tag names an integer kernel.  The GPU
-// accelerator answers most quantized graphs with a float kernel between
-// quantize and dequantize passes -- Metal's "convolution1x1(conv_wave_matrix)
-// -> quantize_and_dequantize", Mali's Winograd 3x3 -- but Mali also has a
-// real int8 kernel, "convolution_int8(conv_wave_matrix_mali) ->
-// dequantize_to_float16 -> quantize_and_dequantize", whose tag carries the
-// same dequantize tail.  So the tail says nothing; the kernel's own name
-// (the part before the first arrow) has to say it is integer: XNNPACK's
-// QS8/QD8/QP8/QC8W/QB4W packings, the GPU's "int8"/"int4".
-inline bool litertKernelIsInteger(const std::string &kernel)
+// The kernel that did a graph's multiplies, from a profiled run: the one
+// most of them ran as.  A chain's 64-deep seed widening can be given another
+// (the Metal accelerator runs it as conv_generic where the layers run
+// conv_wave_matrix), and so can a block's attention; and a convolution's
+// need not say "conv" -- XNNPACK runs a 1x1 one as its Fully Connected GEMM.
+inline std::string litertMatMulKernel(const std::vector<std::string> &ops)
 {
+  std::map<std::string, int> count;
+  std::string best;
+  for (const std::string &o : ops)
+    if (litertKernelMultiplies(o) && ++count[o] > (best.empty() ? 0 : count[best]))
+      best = o;
+  return best;
+}
+
+// What a profiled kernel tag says its multiplies were, if anything.
+// XNNPACK names an operator by the types it packed, its input's first after
+// the layout: `Fully Connected (NC, QD8, F32, QC8W)` multiplies int8
+// activations it quantizes as it goes, where `(NC, F32, QC8W)` would unpack
+// int8 weights into float multiplies -- integer weights alone say nothing.
+// The GPU accelerator computes in float unless a kernel's own name, the part
+// before the first arrow, says int8 or int4: Mali's `convolution_int8(
+// conv_generic) -> dequantize_to_float16` quantizes its source as it goes
+// (what allow_src_quantized_fc_conv_ops is documented to allow), while
+// Metal's `convolution1x1(conv_wave_matrix) -> quantize_and_dequantize` is a
+// float kernel between quantize and dequantize passes, so a tail proves
+// nothing.  Elsewhere only such a pass says float: the interpreter's own
+// reference kernels are plain op names ("FULLY_CONNECTED").
+enum class LitertArithmetic
+{
+  Unknown,
+  Float,
+  Integer,
+};
+
+inline LitertArithmetic litertKernelArithmetic(const std::string &kernel, LitertAccel accel)
+{
+  if (kernel.empty())
+    return LitertArithmetic::Unknown;
   std::string l = kernel;
   std::transform(l.begin(), l.end(), l.begin(), ::tolower);
   const size_t arrow = l.find(" -> ");
   const std::string head = arrow == std::string::npos ? l : l.substr(0, arrow);
-  for (const char *mark : {"int8", "int4", "int16", "qs8", "qd8", "qp8", "qc8", "qb4", "qu8", "quantized"})
+  // XNNPACK's "<operator> (<layout>, <input type>, ...)": QS8, QD8, QP8 and
+  // the rest are integer, F32, F16, BF16 and PF32 float.
+  const size_t open = head.find(" (");
+  const size_t comma = open == std::string::npos ? std::string::npos : head.find(", ", open);
+  if (comma != std::string::npos && comma > open + 2 && head.find_first_not_of("nchwd", open + 2) == comma)
+    return head.compare(comma + 2, 1, "q") == 0 ? LitertArithmetic::Integer : LitertArithmetic::Float;
+  for (const char *mark : {"int8", "int4", "int16", "quantized"})
     if (head.find(mark) != std::string::npos)
-      return true;
-  return false;
+      return LitertArithmetic::Integer;
+  if (accel == LitertAccel::Gpu || l.find("quantize") != std::string::npos)
+    return LitertArithmetic::Float;
+  return LitertArithmetic::Unknown;
 }
 
-// Whether an integer format's profiled kernel was a float one.  On the GPU
-// accelerator every kernel not named integer is: it computes in float
-// unless a kernel says otherwise.  Elsewhere only a tag that carries a
-// quantize pass says so -- the interpreter's own reference kernels are
-// plain op names ("FULLY_CONNECTED") and are integer arithmetic.
-inline bool litertKernelIsFloatForInteger(const std::string &kernel, LitertAccel accel)
+// Whether a plan's weights are integer, which a kernel may multiply as
+// integers or unpack to float: the formats whose kernel a row has to name.
+inline bool litertIntegerWeights(const LitertPlan &p)
 {
-  if (litertKernelIsInteger(kernel))
-    return false;
-  return accel == LitertAccel::Gpu || kernel.find("quantize") != std::string::npos;
+  using clpeak_tflite::TfType;
+  return p.weight == TfType::I8 || p.weight == TfType::I4 || p.weight == TfType::I2 || p.weight == TfType::U8 ||
+         p.weight == TfType::U4;
 }
 
-// The clause such a row's kernel gets (appended to "..., as `kernel`").
-inline const char *litertFloatKernelNote()
+// The unit a rate row counts in.  A full-integer format
+// (LitertPlan::integerOps) counts ops whatever ran it: its graph is integer
+// arithmetic, which a GPU without integer kernels carries out in float
+// between quantize and dequantize passes, and the row says so
+// (litertKernelNote).  A weight-only format's graph is float arithmetic over
+// compressed weights, counted in flops -- unless its kernel quantizes the
+// activations and multiplies int8, as XNNPACK's and a GPU's 8-bit kernels
+// do, and then it counts ops.
+inline const char *litertRateUnit(const LitertPlan &p, const std::string &kernel, LitertAccel accel)
 {
-  return " -- a float kernel between quantize and dequantize passes, not integer "
-         "arithmetic, so this is the accelerator's float rate with the format's "
-         "traffic savings";
+  if (p.integerOps)
+    return "ops";
+  return litertIntegerWeights(p) && litertKernelArithmetic(kernel, accel) == LitertArithmetic::Integer ? "ops"
+                                                                                                      : "flops";
+}
+
+// The clause a row's kernel gets (appended to "..., as `kernel`") when it
+// ran other arithmetic than its format's graph asks for.
+inline std::string litertKernelNote(const LitertPlan &p, const std::string &kernel, LitertAccel accel)
+{
+  const LitertArithmetic a = litertKernelArithmetic(kernel, accel);
+  if (p.integerOps && a == LitertArithmetic::Float)
+    return " -- a float kernel between quantize and dequantize passes, not integer "
+           "arithmetic, so this is the accelerator's float rate with the format's "
+           "traffic savings";
+  if (!p.integerOps && litertIntegerWeights(p) && a == LitertArithmetic::Integer)
+    return " -- int8 multiplies on activations it quantizes as it goes, so counted in ops";
+  return std::string();
 }
 
 // The session config a plan asks for on a device, in one form (its GPU

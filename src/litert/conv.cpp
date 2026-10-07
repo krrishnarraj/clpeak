@@ -23,7 +23,8 @@
 #include "litert_session.h"
 
 #include <algorithm>
-#include <cctype>
+#include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -94,18 +95,6 @@ double convFlops(const Shape &v, int64_t spatial)
   const double inPerGroup = v.depthwise ? 1.0 : (double)kChannels;
   const double out = (double)(spatial / v.stride);   // the output's side
   return 2.0 * (double)kChannels * out * out * inPerGroup * (double)(v.kernel * v.kernel);
-}
-
-std::string convKernel(const std::vector<std::string> &ops)
-{
-  for (const std::string &o : ops)
-  {
-    std::string l = o;
-    std::transform(l.begin(), l.end(), l.begin(), ::tolower);
-    if (l.find("conv") != std::string::npos && litertKernelMultiplies(o))
-      return o;
-  }
-  return std::string();
 }
 
 // One form's climb over feature-map sizes.
@@ -195,9 +184,9 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         if (!wrong[f].empty())
           race.drop(f);
       std::vector<ConvLane> lanes(nf);
-      // The last size both forms were timed at, for the row's note.
-      int64_t raceSp = 0;
-      std::vector<double> raceRate(nf, 0.0);
+      // What each form read at every size both were timed at, for the row's
+      // note.
+      std::map<int64_t, std::vector<double>> raceAt;
       auto what = [&](size_t f) {
         return raced ? std::string(forms[f].gpuInt8Kernels ? " with" : " without") + " the GPU's 8-bit kernels"
                      : std::string();
@@ -268,7 +257,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             if (ps && ps->onDevice() && litertBindScalar(*ps, fp, err))
             {
               std::string perr;
-              ln.kernel = convKernel(ps->profileOps(perr));
+              ln.kernel = litertMatMulKernel(ps->profileOps(perr));
             }
           }
 
@@ -377,8 +366,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
         if (rate.size() > 1 && std::count_if(rate.begin(), rate.end(), [](double r) { return r > 0.0; }) >= 2)
         {
-          raceSp = sp;
-          raceRate = rate;
+          raceAt[sp] = rate;
           bool work = true;
           for (size_t f = 0; f < nf; f++)
             if (rate[f] > 0.0)
@@ -395,23 +383,28 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       const ConvLane &win = lanes[w];
       if (win.best > 0.0)
       {
+        // In the unit litertRateUnit gives the format and the kernel that ran
+        // it, and the other form's reading in its own.
+        o.unit = std::strcmp(litertRateUnit(plan, win.kernel, dev.accel), "ops") == 0 ? "ops" : "";
         o.description = std::string(v.note) + "  " + fmt.note + "  Fastest at a " + std::to_string(win.bestSp) +
                         " by " + std::to_string(win.bestSp) + " feature map";
         if (!win.kernel.empty())
-        {
-          o.description += ", as `" + win.kernel + "`";
-          if (plan.integerOps && litertKernelIsFloatForInteger(win.kernel, dev.accel))
-            o.description += litertFloatKernelNote();
-        }
+          o.description += ", as `" + win.kernel + "`" + litertKernelNote(plan, win.kernel, dev.accel);
         // The race and the boundary, inside the same sentence: the row's
         // three are the shape, the format and this one.
         if (raced)
         {
           o.description += "," + what(w);
           const size_t other = 1 - w;
-          if (raceSp > 0 && raceRate[other] > 0.0)
-            o.description += " (" + formatReading(raceRate[other], plan.integerOps ? "ops" : "flops") +
-                             what(other) + " at " + std::to_string(raceSp) + " by " + std::to_string(raceSp) + ")";
+          // The other form at the size the row's reading came from, where it
+          // ran there too, else at the last size both ran.
+          int64_t sp = raceAt.empty() ? 0 : raceAt.rbegin()->first;
+          if (raceAt.count(win.bestSp))
+            sp = win.bestSp;
+          if (sp > 0)
+            o.description += " (" +
+                             formatReading(raceAt[sp][other], litertRateUnit(plan, lanes[other].kernel, dev.accel)) +
+                             what(other) + " at " + std::to_string(sp) + " by " + std::to_string(sp) + ")";
           else if (!wrong[other].empty())
             o.description += " (" + what(other).substr(1) + " the answer was wrong)";
         }

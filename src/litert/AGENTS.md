@@ -38,11 +38,11 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
-| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback), `litertHeldBytes()` (what a session holds: every memory gate's count) |
+| `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback), `litertHeldBytes()` (what a session holds: every memory gate's count), `litertRateUnit()` (a rate row's unit) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels (`clpeak::MultiFormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm; and the answer checks behind every rate row (`answerCheck`, per form, with the never-written marker; `resolveIo`; `wrongAnswer`) |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size; a GPU's int8 rows race its 8-bit kernels |
-| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels point by point |
+| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq and where the projections multiplied int8), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels point by point |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / round trip / d2h through LiteRT's tensor buffers |
@@ -181,10 +181,10 @@ kernel name from one profiled run says which kernel it was.
   F32, QB4W)`.  The last two are the finding: the weight-only formats
   (`int8_weight`, `int4_weight`) run as *int8 arithmetic on dynamically
   quantized activations*, not as float multiplies of unpacked weights.  On
-  an M1 Pro that is why `int8_weight` reads 2.8 TFLOPS against fp32's 488
-  GFLOPS, and why its accuracy row reads 3918 ppm where the GPU's -- which
-  unpacks the same weights to half and multiplies in float -- reads 4692
-  because it accumulates in fp16.
+  an M1 Pro that is why `int8_weight` reads 2.8 TOPS against fp32's 488
+  GFLOPS, and why its accuracy row reads 3918 ppm where the Metal GPU's --
+  which unpacks the same weights to half and multiplies in float -- reads
+  4692 because it accumulates in fp16.
 - **The GPU accelerator computes an fp32 graph in fp16 unless told
   otherwise**, so `fp32` asks for its fp32 policy, `fp16` is its fp16 policy
   over an fp32 graph whose constants are stored as fp16 (it refuses
@@ -195,13 +195,23 @@ kernel name from one profiled run says which kernel it was.
 - **Its quantized graphs are mostly float kernels between quantize and
   dequantize passes** (`convolution1x1(conv_wave_matrix) ->
   quantize_and_dequantize` on Metal), so an `int8_qdq` "TOPS" figure there
-  equals the fp16 rate.  But Mali has a real one -- `convolution_int8(
-  conv_wave_matrix_mali) -> dequantize_to_float16 -> quantize_and_dequantize`,
-  3.5x its fp16 rate on a Pixel 7a -- whose tag carries the same dequantize
-  tail, so the tail proves nothing.  `litertKernelIsInteger()` reads the
-  kernel's own name (before the first arrow: `int8`, `int4`, XNNPACK's
-  QS8/QD8/QP8/QC8W/QB4W packings) and the "float kernel" sentence goes on
-  integer rows whose kernel was not one.
+  equals the fp16 rate.  But Mali has real int8 kernels --
+  `convolution_int8(conv_generic) -> dequantize_to_float16` -- whose tags
+  carry a dequantize tail too, so a tail proves nothing;
+  `litertKernelArithmetic()` reads the kernel's own name instead.
+- **A full-integer row counts ops on every accelerator; a weight-only one
+  counts flops unless its kernel multiplied int8** (`litertRateUnit()`).
+  An `int8_qdq` or int8 convolution graph is integer arithmetic whichever
+  kernel carries it out, and a float one says so after its name
+  (`litertKernelNote()`); an `int8_weight` or `int4_weight` graph is float
+  arithmetic over compressed weights, which XNNPACK and a GPU's 8-bit
+  kernels turn into int8 multiplies by quantizing the activations as they
+  go -- so those rows read TOPS there, TFLOPS on Metal, and a race's other
+  forms each in their own kernel's unit.  Where a tag names no arithmetic
+  (an NPU's), the format's unit stands.  gemm and conv profile every form
+  they race; the block profiles its projections at each prompt it reports,
+  in every form it timed there, for the formats whose weights are integer,
+  until a profile names nothing it can read.
 - **A fast kernel can be a wrong one, and a right one's answer can fail to
   come back.**  The accuracy measurement is memoised per device, format and
   form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
@@ -259,15 +269,18 @@ kernel name from one profiled run says which kernel it was.
   runs `convolution1x1(conv_wave_matrix)` and ties, at 10430 ppm; for
   int8_weight the sharing converts the weights on the GPU and runs a
   generic `convolution(conv_wave_matrix)` at the same rate, ready five times
-  sooner, which wins the tie.  A Pixel 7a's Mali ran int8 at 3.5x its fp16
-  rate with the kernels allowed (`convolution_int8(conv_wave_matrix_mali)`),
-  behind the OpenCL fault below, so whether that kernel is right is the
-  next Mali run's to say.  Ties are weighed by what a form took to be ready
-  to run, its first inference included: sharing moves the weight
-  conversion out of creation and into that inference.  A convolution row's
-  race settles only on sizes where every form's pass took eight times its
-  first size's (the kernels are for large layers, and at 64 by 64 every
-  form ties on the cost of asking), and the block races each point in full.
+  sooner, which wins the tie.  A Pixel 7a's Mali has real int8 kernels, and
+  behind the float boundary they answer right: as `convolution_int8(
+  conv_generic)` its `int8_qdq` chain ran 1.24 TOPS against 702 GOPS
+  without them (11098 ppm against 10535), and `int8_weight` 1.28 TOPS
+  against 678 GFLOPS (7876 ppm against 4692, the activations'
+  quantization), where fp16 runs 848 GFLOPS.  Ties are weighed by what a
+  form took to be ready to run, its first inference included: sharing moves
+  the weight conversion out of creation and into that inference.  A
+  convolution row's race settles only on sizes where every form's pass took
+  eight times its first size's (the kernels are for large layers, and at 64
+  by 64 every form ties on the cost of asking), and the block races each
+  point in full.
   Each form's answer is checked on its own: a wrong one leaves the race
   rather than withholding the row, and the accuracy row reads
   FULLY_CONNECTED without the 8-bit kernels, with what the other forms read
@@ -467,7 +480,7 @@ interleaved pairs, the other rows within 5%.  The conv row is 2026-10-02's.
 |---|---|---|
 | gemm fp32 / fp16 / fp16_acc32 | 4.25 / 4.66 / 3.43 TFLOPS | 488 GFLOPS / 967 GFLOPS / — |
 | gemm int8_qdq / int16x8 | 4.67 "TOPS" (float kernel) / aborts | 2.43 TOPS / 1.24 GOPS |
-| gemm int8_weight / int4_weight | 4.73 TFLOPS / heap overrun | 2.83 / 1.67 TFLOPS |
+| gemm int8_weight / int4_weight | 4.73 TFLOPS / heap overrun | 2.83 / 1.67 TOPS |
 | error fp32 / fp16 / fp16_acc32 | 0.57 / 4690 / 388 ppm | 0.57 / 4690 / — |
 | error int8_qdq / int8_weight / int4_weight | 10430 / 4692 / — | 9317 / 3918 / 4377 |
 | conv3x3s2 fp32 / fp16 / int8 | 3.25 / 4.02 TFLOPS / 4.15 "TOPS" (float kernel) | 464 G / 922 G / 2.09 TOPS |

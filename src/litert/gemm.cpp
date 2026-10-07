@@ -29,6 +29,8 @@
 // packed ("Fully Connected (NC, QD8, F32, QB4W)" is 4-bit weights against
 // dynamically quantized int8 activations), the GPU accelerator names the
 // shader ("convolution1x1(conv_wave_matrix)" is a simdgroup-matrix kernel).
+// A weight-only row whose kernel multiplies int8 that way counts ops, not
+// flops (litertRateUnit).
 //
 // The int8 row races two spellings of its layers (clpeak::MultiFormRace):
 // FULLY_CONNECTED, and a 1x1 CONV_2D over a grid of as many positions as
@@ -40,10 +42,12 @@
 // tied on every provider tried -- so only int8 races.  On a GPU the int8
 // rows (int8_qdq, and int8_weight, which the kernels were written for) also
 // race the accelerator's 8-bit FULLY_CONNECTED and convolution kernels,
-// which it uses only when allowed: allowed, a Pixel 7a's Mali ran int8 at
-// 3.5 times its fp16 rate (`convolution_int8(conv_wave_matrix_mali)`), and
-// the Metal accelerator has none.  So int8_qdq is four forms there.  The row
-// reports the fastest, names it and says what the others read.
+// which it uses only when allowed: allowed, a Pixel 7a's Mali ran the
+// int8_qdq chain at 1.24 TOPS against 702 GOPS, as int8 multiplies
+// (`convolution_int8(conv_generic)`) rather than a float kernel between
+// quantize and dequantize passes, and the Metal accelerator has none.  So
+// int8_qdq is four forms there.  The row reports the fastest, names it and
+// says what the others read.
 //
 // LiteRT's own answer is the guard.  The runtime keeps the CPU as a fallback
 // for any operation an accelerator declines and says nothing about it in
@@ -62,6 +66,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -148,30 +153,15 @@ const Variant kVariants[] = {
      "scheme; the CPU has only the reference kernel for it, an NPU may have a "
      "real one."},
     {LitertFormat::Int8Weight,
-     "8-bit per-row weights against float activations (dynamic-range "
-     "quantization): int8 arithmetic on XNNPACK, unpacked to half and "
-     "multiplied in float on the GPU."},
+     "8-bit per-row weights against float activations: dynamic-range "
+     "quantization, the post-training-quantized format."},
     {LitertFormat::Int4Weight,
      "4-bit blockwise weights (32 per scale) against float activations, what "
-     "an on-device language model ships as; XNNPACK runs it as int8 "
-     "arithmetic, the GPU unpacks to half."},
+     "an on-device language model ships as."},
     {LitertFormat::Fp8Weight,
      "8-bit float (E4M3) weights with a scale per row; which accelerator has a "
      "kernel for them is the row."},
 };
-
-// The kernel that did the multiplies, from a profiled run: the one most of
-// them ran as.  The seed's 64-deep widening can be given another (the Metal
-// accelerator runs it as conv_generic where the layers run conv_wave_matrix).
-std::string matmulKernel(const std::vector<std::string> &ops)
-{
-  std::map<std::string, int> count;
-  std::string best;
-  for (const std::string &o : ops)
-    if (litertKernelMultiplies(o) && ++count[o] > (best.empty() ? 0 : count[best]))
-      best = o;
-  return best;
-}
 
 // The forms a format's chain is raced in on this accelerator (LitertForm):
 // int8's layers as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as
@@ -248,16 +238,17 @@ std::string foldReason(const std::string &form, const char *tail)
 }
 
 // A raced row's word on its race (clpeak::MultiFormRace): the form its peak
-// ran as and, from the last width two or more were timed at, what the others
-// read there -- or why one was not timed.
+// ran as and what the others read at a width they shared, each in the unit
+// its own kernel counts in -- or why one was not timed.
 std::string formNote(const std::vector<LitertForm> &forms, bool kernelsRaced, size_t win, int64_t raceDim,
                      const std::vector<double> &raceRate, const std::vector<double> &raceCreateUs,
-                     const std::vector<Lane> &lanes, const std::vector<std::string> &wrongForm, const char *unit)
+                     const std::vector<Lane> &lanes, const std::vector<std::string> &wrongForm,
+                     const std::vector<const char *> &units)
 {
   std::string s = "  The layers were written as " + formName(forms[win], kernelsRaced);
   if (raceDim > 0 && raceRate[win] > 0.0)
   {
-    s += ": at " + std::to_string(raceDim) + "-wide layers they ran at " + formatReading(raceRate[win], unit) +
+    s += ": at " + std::to_string(raceDim) + "-wide layers they ran at " + formatReading(raceRate[win], units[win]) +
          " that way";
     std::vector<size_t> others;
     for (size_t i = 0; i < forms.size(); i++)
@@ -265,11 +256,12 @@ std::string formNote(const std::vector<LitertForm> &forms, bool kernelsRaced, si
         others.push_back(i);
     for (size_t k = 0; k < others.size(); k++)
       s += std::string(k + 1 == others.size() && k > 0 ? ", and " : ", ") +
-           formatReading(raceRate[others[k]], unit) + " " + formDiff(forms[others[k]], forms[win]);
-    // A tie the build times settled, which would otherwise read as the
-    // slower form kept by mistake: the first form it tied with, which a tie
-    // keeps, took twice as long to be ready to run.
+           formatReading(raceRate[others[k]], units[others[k]]) + " " + formDiff(forms[others[k]], forms[win]);
+    // A tie, which would otherwise read as the slower form kept by mistake:
+    // the race keeps the form tried first, unless a later one was ready to
+    // run twice as fast -- which says so with the two times.
     if (clpeak::MultiFormRace::tieOnBuild(raceRate, raceCreateUs, win))
+    {
       for (size_t i = 0; i < win; i++)
         if (raceRate[i] > 0.0 &&
             std::max(raceRate[i], raceRate[win]) <= std::min(raceRate[i], raceRate[win]) * clpeak::kFormRaceTie &&
@@ -279,6 +271,14 @@ std::string formNote(const std::vector<LitertForm> &forms, bool kernelsRaced, si
           std::snprintf(buf, sizeof buf, " -- a tie, kept for being ready to run in %.1f s against %.1f",
                         raceCreateUs[win] / 1.0e6, raceCreateUs[i] / 1.0e6);
           s += buf;
+          break;
+        }
+    }
+    else
+      for (size_t i = 0; i < forms.size(); i++)
+        if (i != win && raceRate[i] > raceRate[win] && raceRate[i] <= raceRate[win] * clpeak::kFormRaceTie)
+        {
+          s += " -- a tie, which keeps the form tried first";
           break;
         }
   }
@@ -378,9 +378,9 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
     std::vector<Lane> lanes(nf);
     std::string wrongRow;   // a NaN from any form withholds the row
-    // The last width two or more forms were timed at, for the row's note.
-    int64_t raceDim = 0;
-    std::vector<double> raceRate(nf, 0.0), raceCreateUs(nf, 0.0);
+    // Each width two or more forms were timed at, with what each read and
+    // took to be ready to run there, for the row's note.
+    std::map<int64_t, std::pair<std::vector<double>, std::vector<double>>> raceAt;
     // A form in the log's words, and in a reason's, which names it only
     // where the row has more than one.
     auto what = [&](size_t f) { return formName(forms[f], plan.gpuInt8KernelChoice); };
@@ -496,7 +496,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
           if (ps && ps->onDevice() && litertBindScalar(*ps, fp, err))
           {
             std::string perr;
-            ln.kernel = matmulKernel(ps->profileOps(perr));
+            ln.kernel = litertMatMulKernel(ps->profileOps(perr));
             CLPEAK_VLOG("litert-gemm[%s/%s]: %s kernel '%s'\n", dev.displayName.c_str(), label, form.c_str(),
                         ln.kernel.c_str());
           }
@@ -662,9 +662,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         timed += rate[f] > 0.0;
       if (timed >= 2)
       {
-        raceDim = D;
-        raceRate = rate;
-        raceCreateUs = createUs;
+        raceAt[D] = {rate, createUs};
         size_t before = 0, after = 0;
         for (size_t f = 0; f < nf; f++)
           before += race.runs(f);
@@ -699,23 +697,35 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     const Lane &win = lanes[w];
     if (wrongRow.empty() && win.best > 0.0)
     {
+      // Each form's rate in the unit litertRateUnit gives the format and the
+      // form's own kernel: a weight-only one's in ops where it multiplied int8.
+      std::vector<const char *> units(nf);
+      for (size_t f = 0; f < nf; f++)
+        units[f] = litertRateUnit(plan, lanes[f].kernel, dev.accel);
+      o.unit = std::strcmp(units[w], "ops") == 0 ? "ops" : "";
       const std::string io = floatIoClause(rt, dev, v.f, forms[w]);
       o.description = std::string(v.note) + "  Sixteen layers chained per dispatch from a " +
                       std::to_string(kSeedWidth) + "-wide seed, whose widening multiply is not "
                       "counted" + (io.empty() ? std::string() : ", " + io) + "; fastest at " +
                       std::to_string(win.bestDim) + "-wide layers";
       if (!win.kernel.empty())
-      {
-        o.description += ", as `" + win.kernel + "`";
-        // A row that says "ops" for float arithmetic needs the words; the
-        // kernel's name, not the passes around it, says which it was.
-        if (plan.integerOps && litertKernelIsFloatForInteger(win.kernel, dev.accel))
-          o.description += litertFloatKernelNote();
-      }
+        o.description += ", as `" + win.kernel + "`" + litertKernelNote(plan, win.kernel, dev.accel);
       o.description += ".";
       if (raced)
-        o.description += formNote(forms, plan.gpuInt8KernelChoice, w, raceDim, raceRate, raceCreateUs, lanes,
-                                  wrongForm, plan.integerOps ? "ops" : "flops");
+      {
+        // The others beside the reading the row reports, at the width it
+        // came from where they ran there too -- the last width they shared
+        // can have the race's survivor reading less than another, kept by a
+        // tie -- and otherwise at that last width.
+        int64_t noteDim = raceAt.empty() ? 0 : raceAt.rbegin()->first;
+        if (auto it = raceAt.find(win.bestDim); it != raceAt.end() && it->second.first[w] > 0.0)
+          noteDim = win.bestDim;
+        const std::vector<double> none(nf, 0.0);
+        const std::vector<double> &noteRate = noteDim ? raceAt[noteDim].first : none;
+        const std::vector<double> &noteReadyUs = noteDim ? raceAt[noteDim].second : none;
+        o.description += formNote(forms, plan.gpuInt8KernelChoice, w, noteDim, noteRate, noteReadyUs, lanes,
+                                  wrongForm, units);
+      }
       test.emit(label, (float)win.best, o);
     }
     else
