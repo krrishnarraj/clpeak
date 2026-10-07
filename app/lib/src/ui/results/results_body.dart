@@ -662,7 +662,8 @@ class _TestLineState extends State<_TestLine> {
           const SizedBox(width: 12),
           if (collapsible) ...[
             Builder(builder: (context) {
-              final peak = formatValue(test.peakValue, test.units);
+              final peak =
+                  formatValue(test.peakValue, test.unitsOf(test.peakMetric));
               return CValue(
                   value: peak.value, unit: peak.unit, color: widget.color);
             }),

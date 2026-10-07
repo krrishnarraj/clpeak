@@ -48,8 +48,9 @@ class TestResult {
   /// The reason shown for a fully-unavailable test.
   String get skipReason => metrics.isEmpty ? '' : metrics.first.reason;
 
-  /// Unit for one reading, honouring its override.
-  Units unitsOf(MetricResult m) => m.units ?? units;
+  /// Unit for one reading, honouring its override; the test's own when there
+  /// is no reading.
+  Units unitsOf(MetricResult? m) => m?.units ?? units;
 
   /// Whether one number can stand for the whole test.
   ///
@@ -59,16 +60,22 @@ class TestResult {
   bool get collapsible =>
       shape == TestShape.homogeneous || okMetrics.length <= 1;
 
-  /// The test's answer: best of the readings, by its own direction.  Only
-  /// meaningful when [collapsible]; a heterogeneous test has no single
-  /// answer, which is the whole reason for the distinction.
-  double get peakValue {
+  /// The test's answer: best of the readings, by its own direction, or null
+  /// when none was measured.  Only meaningful when [collapsible]; a
+  /// heterogeneous test has no single answer, which is the whole reason for
+  /// the distinction.
+  MetricResult? get peakMetric {
     final ok = okMetrics;
-    if (ok.isEmpty) return 0;
+    if (ok.isEmpty) return null;
     return header.direction == Direction.lowerIsBetter
-        ? ok.map((m) => m.value).reduce((a, b) => a < b ? a : b)
-        : ok.map((m) => m.value).reduce((a, b) => a > b ? a : b);
+        ? ok.reduce((a, b) => a.value < b.value ? a : b)
+        : ok.reduce((a, b) => a.value > b.value ? a : b);
   }
+
+  /// [peakMetric]'s value.  Print it in that reading's unit,
+  /// `unitsOf(peakMetric)`, not the test's: a FLOPS test whose one measured
+  /// row counts OPS collapses to TOPS.
+  double get peakValue => peakMetric?.value ?? 0;
 
   /// How full to draw one reading's meter: its size relative to the largest
   /// reading in the test, whichever direction is better.
