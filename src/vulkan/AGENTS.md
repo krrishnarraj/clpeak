@@ -64,7 +64,13 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   type runs at the first advertised tile the driver will build: `rankTiles`
   (`vk_peak.cpp`) keeps every tile, best first, and a refusal to build
   (`vk_compute_desc_t::refused`, set by `runComputeKernel`) moves
-  `runCoopMatrix` on to the next; the note names any it refused.  The prose
+  `runCoopMatrix` on to the next; the note names any it refused.  A tile the
+  driver advertised without a subgroup width (no
+  `VK_EXT_cooperative_matrix_maintenance1`) is also timed at each narrower
+  width the device can pin (`coopmatSubgroupWidths()` in `vk_peak.h`): the
+  runner hands each reading back through `vk_compute_desc_t::reading` instead
+  of emitting it, and `runCoopMatrix` emits the fastest, naming the width in
+  the note.  The prose
   goes on `metricDescription` — the test's own description covers the family.
   int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.

@@ -3,7 +3,9 @@
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
 #include <cstddef> // offsetof
+#include <cstdio>
 #include <string>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Cooperative matrix (tensor-core) umbrella.
@@ -199,11 +201,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   // only at a narrower subgroup than another's, and a tile run at a width it
   // was never advertised at is a shape no driver promised to compile.
   // coopmat_tile_t carries the width it came from, or 0 when only the
-  // width-agnostic KHR query answered and there is no way to know.
-  auto tileWG = [&](const coopmat_tile_t &t)
-  {
-    return coopmatSubgroupWidth(dev.info, t.subgroupSize);
-  };
+  // width-agnostic KHR query answered and there is no way to know -- in which
+  // case runTiles times it at more than one (coopmatSubgroupWidths()).
   auto tileSub = [&](const coopmat_tile_t &t)
   {
     return coopmatRequiredSubgroupSize(dev.info, t.subgroupSize);
@@ -228,6 +227,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   // Only a refusal moves on.  A dispatch that fails is the row's error, as it
   // would be with one tile, and a desc already marked skip goes straight to
   // the runner, which emits the skip.  `tiles` is non-empty otherwise.
+  //
+  // A tile whose width the driver did not name is timed at every width
+  // coopmatSubgroupWidths() lists and reported at the fastest.  The first is
+  // the width it runs at when nothing is raced, so only its refusal moves on
+  // to the next tile; a narrower width the driver refuses just drops out.
   auto runTiles = [&](const vk_compute_desc_t &base, const coopmat_tiles_t &tiles,
                       const CoopPush &fill)
   {
@@ -239,19 +243,82 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     std::string refusedTiles;
     for (const coopmat_tile_t &t : tiles)
     {
-      CoopTileRun r;
-      r.push = fill;
-      vk_compute_desc_t d = base;
-      d.requiredSubgroupSize = tileSub(t);
-      bindCoopTile(r, d, t, tileWG(t), refusedTiles);
+      const std::vector<uint32_t> widths = coopmatSubgroupWidths(dev.info, t);
+      const bool race = widths.size() > 1;
+      // Sized once: each run's spec info points into itself.
+      std::vector<CoopTileRun> runs(widths.size());
+      std::vector<float> readings(widths.size(), 0.0f);
       bool refused = false;
-      d.refused = &refused;
-      runComputeKernel(dev, cfg, d);
-      if (!refused)
+      for (size_t i = 0; i < widths.size() && !refused; i++)
+      {
+        CoopTileRun &r = runs[i];
+        r.push = fill;
+        vk_compute_desc_t d = base;
+        d.requiredSubgroupSize = i == 0 ? tileSub(t) : widths[i];
+        d.pinOnly = i > 0;
+        bindCoopTile(r, d, t, widths[i], refusedTiles);
+        bool widthRefused = false;
+        d.refused = &widthRefused;
+        if (race)
+          d.reading = &readings[i];
+        runComputeKernel(dev, cfg, d);
+        if (widthRefused && i == 0)
+          refused = true;
+        else if (widthRefused)
+          CLPEAK_VLOG("%s %s: the driver refused %s pinned to subgroup %u\n",
+                      base.resultTag, base.metricLabel, coopmatTileName(t).c_str(),
+                      widths[i]);
+      }
+      if (refused)
+      {
+        CLPEAK_VLOG("%s %s: the driver refused to build %s\n", base.resultTag,
+                    base.metricLabel, coopmatTileName(t).c_str());
+        refusedTiles += (refusedTiles.empty() ? "" : ", ") + coopmatTileName(t);
+        continue;
+      }
+      if (!race)
         return;
-      CLPEAK_VLOG("%s %s: the driver refused to build %s\n", base.resultTag,
-                  base.metricLabel, coopmatTileName(t).c_str());
-      refusedTiles += (refusedTiles.empty() ? "" : ", ") + coopmatTileName(t);
+
+      // The race's reading, at the fastest width, saying which it was and --
+      // where more than one width ran -- what else was timed.
+      size_t best = 0;
+      std::vector<size_t> ran;
+      std::string timed;
+      for (size_t i = 0; i < widths.size(); i++)
+      {
+        if (readings[i] > readings[best])
+          best = i;
+        if (readings[i] <= 0.0f)
+          continue;
+        ran.push_back(i);
+        char reading[48];
+        snprintf(reading, sizeof(reading), "%s%.1f (subgroup %u)",
+                 timed.empty() ? "" : ", ", readings[i], widths[i]);
+        timed += reading;
+      }
+      logger::EmitOptions o;
+      if (base.metricUnit)
+        o.unit = base.metricUnit;
+      o.description = runs[best].note;
+      if (ran.empty())
+      {
+        test.skip(base.metricLabel, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed", o);
+        return;
+      }
+      CLPEAK_VLOG("%s %s: %s %s\n", base.resultTag, base.metricLabel, timed.c_str(),
+                  base.unit);
+      if (ran.size() > 1)
+      {
+        std::string widthList;
+        for (size_t j = 0; j < ran.size(); j++)
+          widthList += (j == 0 ? "" : j + 1 == ran.size() ? " and " : ", ") +
+                       std::to_string(widths[ran[j]]);
+        o.description += "  The driver names no subgroup width for it, so it was timed at " +
+                         widthList + " lanes; this is the fastest, at " +
+                         std::to_string(widths[best]) + ".";
+      }
+      test.emit(base.metricLabel, readings[best], o);
+      return;
     }
     // Refused at every tile: the row's error, naming what was asked.
     logger::EmitOptions o;

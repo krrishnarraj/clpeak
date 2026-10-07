@@ -241,8 +241,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     // the device has to have another width to choose.  An Adreno 840 offers
     // 64 alone, so retrying there built the same pipeline twice.  And a
     // refusal of a pinned build does not say the width was refused -- only
-    // what the retry does says anything about that.
-    if (!*built && width == subgroup && dev.canPinSubgroupSize(width) &&
+    // what the retry does says anything about that.  Nor for a width a caller
+    // is racing (d.pinOnly), which unpinned would only time another case.
+    if (!*built && width == subgroup && !d.pinOnly && dev.canPinSubgroupSize(width) &&
         dev.info.minSubgroupSize < dev.info.maxSubgroupSize)
     {
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
@@ -306,8 +307,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
     if (timed <= 0.0f)
     {
-      test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                emitOpts(v.description));
+      if (d.reading)
+        *d.reading = 0.0f;
+      else
+        test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                  emitOpts(v.description));
       continue;
     }
     float value = toValue(timed);
@@ -376,7 +380,10 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       }
     }
 
-    test.emit(v.label, value, emitOpts(v.description));
+    if (d.reading)
+      *d.reading = value;
+    else
+      test.emit(v.label, value, emitOpts(v.description));
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

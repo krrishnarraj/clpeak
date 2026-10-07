@@ -189,6 +189,30 @@ static inline uint32_t coopmatRequiredSubgroupSize(const vk_device_info_t &info,
   return 0;
 }
 
+// Every width a tile is timed at, coopmatSubgroupWidth()'s first.  A tile the
+// driver advertised at a width runs at that width alone.  One from the
+// width-agnostic KHR query leaves the width a guess -- that list is the union
+// over every width the device supports, and nothing says the matrix unit is
+// built around the widest.  Alchemist's DPAS is an 8-lane instruction: an Arc
+// A380 (driver 8993, no maintenance1) read coopmat int8 at 22.0 TOPS pinned to
+// 32, where joint_matrix, compiled to 8-wide sub-groups, read 31.0.  So each
+// narrower width the device can pin is timed too, while it still divides the
+// MxN tile spread across the lanes, and runCoopMatrix reports the fastest.
+// Not wider ones: the guess already starts at 32.
+static inline std::vector<uint32_t> coopmatSubgroupWidths(const vk_device_info_t &info,
+                                                          const coopmat_tile_t &t)
+{
+  const uint32_t first = coopmatSubgroupWidth(info, t.subgroupSize);
+  std::vector<uint32_t> widths(1, first);
+  if (t.subgroupSize || !coopmatRequiredSubgroupSize(info, t.subgroupSize) ||
+      info.minSubgroupSize == 0)
+    return widths;
+  for (uint32_t w = first / 2; w >= info.minSubgroupSize; w /= 2)
+    if (((uint64_t)t.M * t.N) % w == 0)
+      widths.push_back(w);
+  return widths;
+}
+
 // Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
 // rows: those variants are independent chains -- see compute_int.cpp.
 static inline const char *vkWidthNote(uint32_t width)
@@ -372,6 +396,18 @@ struct vk_compute_desc_t
   // another shape to offer -- runCoopMatrix walks the tiles the driver
   // advertised.  nullptr: a refusal is the row's error.
   bool *refused;
+
+  // Single-variant path only.  When set, the reading is stored here instead of
+  // emitted, and a dispatch that fails leaves 0 instead of the row's error:
+  // the caller races several builds of one reading and emits the fastest
+  // itself -- runCoopMatrix timing a tile at each subgroup width it could run
+  // at.  A refusal to build still goes to `refused`.
+  float *reading;
+
+  // Never retry a refused pinned build unpinned.  Set for a width raced beside
+  // the one the stage would otherwise run at: unpinned, the driver would
+  // choose a width of its own, which is another case and not this one.
+  bool pinOnly;
 };
 
 // Top-level Vulkan benchmark runner
