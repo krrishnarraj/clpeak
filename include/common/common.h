@@ -340,14 +340,14 @@ static inline uint64_t targetGlobalThreads(uint32_t numCUs)
 
 // Default --max-time-gpu budget (microseconds): how long a GPU may be kept
 // busy in one go.  Every GPU backend sizes a test's timed batch to it --
-// Vulkan records that batch as a single submission -- and the ONNX Runtime
-// and LiteRT ladders on a GPU stop before a size whose one run is predicted
-// to take longer.  A driver resets a GPU that one submission holds too long:
-// Windows' TDR and older Qualcomm kernel drivers allow 2 s, and a Galaxy
-// S24's Adreno 750 ran a 0.93 s submission and was reset 2.8 s into a
-// 7.4 s one, so its limit lies between those.  1500 ms is under the 2 s,
-// and far past the M1's clock ramp (220-440 ms), so the batch is timed at
-// steady clocks.  This is the single source of truth -- CliOptions,
+// Vulkan records that batch as a single submission -- and the ONNX Runtime,
+// LiteRT and Core ML ladders on a GPU stop before a size whose one run is
+// predicted to take longer.  A driver resets a GPU that one submission
+// holds too long: Windows' TDR and older Qualcomm kernel drivers allow 2 s,
+// and a Galaxy S24's Adreno 750 ran a 0.93 s submission and was reset 2.8 s
+// into a 7.4 s one, so its limit lies between those.  1500 ms is under the
+// 2 s, and far past the M1's clock ramp (220-440 ms), so the batch is timed
+// at steady clocks.  This is the single source of truth -- CliOptions,
 // benchmark_config_t::forDevice, and the backend constructors all read it.
 // Keep the "1500 ms" mention in the --help text in src/common/options.cpp
 // in sync.
@@ -456,15 +456,15 @@ struct benchmark_config_t {
 };
 
 // The longest one run of an ML runtime's graph -- an ONNX Runtime Run, a
-// LiteRT invoke -- may be predicted to take on a device of `type`, in
-// microseconds, or 0 where nothing bounds it.  A runtime can hand a GPU a
-// whole graph as one submission, and a driver resets a GPU one submission
-// holds too long: ONNX Runtime's WebGPU provider submits every sixteen
-// dispatches, so a 4096-wide fp32 chain went to a Galaxy S24's Adreno 750 as
-// 7.4 s of work and the device was reset 2.8 s in.  On a GPU the bound is
-// --max-time-gpu, the budget the GPU backends size their batches to
-// (DEFAULT_TARGET_TIME_US).  Only on a GPU: those watchdogs guard a device
-// that also drives a display, and an NPU drives none.
+// LiteRT invoke, a Core ML prediction -- may be predicted to take on a device
+// of `type`, in microseconds, or 0 where nothing bounds it.  A runtime can
+// hand a GPU a whole graph as one submission, and a driver resets a GPU one
+// submission holds too long: ONNX Runtime's WebGPU provider submits every
+// sixteen dispatches, so a 4096-wide fp32 chain went to a Galaxy S24's
+// Adreno 750 as 7.4 s of work and the device was reset 2.8 s in.  On a GPU
+// the bound is --max-time-gpu, the budget the GPU backends size their
+// batches to (DEFAULT_TARGET_TIME_US).  Only on a GPU: those watchdogs guard
+// a device that also drives a display, and an NPU drives none.
 inline double gpuRunCapUs(DeviceType type, const benchmark_config_t &cfg)
 {
   return type == DeviceType::Gpu ? (double)cfg.targetTimeUs : 0.0;

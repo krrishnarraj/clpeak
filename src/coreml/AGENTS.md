@@ -44,6 +44,11 @@ micro-graphs on all three side by side.
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / d2h / round trip as differences between three spellings of one matmul |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — the smallest work the planner sends to the unit, and model creation |
 
+On the GPU, gemm, conv and the block also hold one prediction to
+`--max-time-gpu` (`gpuRunCapUs()`), and gemm predicts each layout's first
+rung from one prediction of a 512-wide chain -- the ONNX backend's rule, for
+its reason (`src/onnx/AGENTS.md`, "Bound a ladder on what it measured").
+
 Test ids are lower_snake and keep the `coreml_` prefix (`coreml_gemm`,
 `coreml_block_decode`); the CLI flags that gate them are backend-neutral
 (`--gemm`, `--transformer-block`, …) and shared with the ONNX backend through

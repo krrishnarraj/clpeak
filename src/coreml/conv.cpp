@@ -89,7 +89,9 @@ double convFlops(const Shape &v, int64_t spatial)
 
 int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one prediction may be predicted to take: on a GPU,
+  // --max-time-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
   auto test = currentDeviceScope->beginTest(
@@ -163,6 +165,16 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
                       dev.displayName.c_str(), row.c_str(), (long long)sp);
           break;
         }
+        // On a GPU a prediction is also held to what one run may keep the
+        // device busy (gpuRunCapUs): a driver resets a GPU held too long.
+        if (lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / lastRate > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a prediction, past "
+                      "--max-time-gpu (%.2f s), stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
+                      runCapUs / 1.0e6);
+          break;
+        }
         if (sp > kMinSpatial && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kCoremlMaxCreateUs)
           break;
 
@@ -225,6 +237,10 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         s.reset();
         if (m.meanUs <= 0.0)
         {
+          // Logged whatever the row says: above a measured size it publishes
+          // the sizes below, and this failure would leave no trace.
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld run failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                      (long long)sp, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -266,6 +282,13 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         }
         if (m.probeUs > kMaxIterUs)
           break;
+        if (runCapUs > 0.0 && m.probeUs > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-gpu (%.2f s), "
+                      "stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
+          break;
+        }
         if (prevCreateUs > 0.0 && createUs > kCoremlCreateGrowthFloor &&
             createUs > prevCreateUs * kCoremlCreateGrowthFactor)
         {

@@ -250,9 +250,9 @@ static std::string helpText()
   helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
   helpLine(s, "--max-time-gpu ms", "how long a GPU may be kept busy in one go (default:\n"
                                    "1500 ms): every backend but CPU sizes a test's timed\n"
-                                   "phase to it, and ONNX Runtime and LiteRT stop a GPU's\n"
-                                   "size sweep before one run would take longer.  Set it\n"
-                                   "lower if you hit a GPU watchdog");
+                                   "phase to it, and ONNX Runtime, LiteRT and Core ML stop\n"
+                                   "a GPU's size sweep before one run would take longer.\n"
+                                   "Set it lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
   helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
                            "with -o, record them in the file's log, with the device\n"

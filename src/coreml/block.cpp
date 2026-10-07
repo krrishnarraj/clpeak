@@ -33,6 +33,7 @@
 #include "coreml_model.h"
 #include "coreml_session.h"
 
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <string>
@@ -263,7 +264,9 @@ std::string seedNote(int64_t seq)
 
 int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one prediction may be predicted to take: on a GPU,
+  // --max-time-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
   constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
   std::vector<VariantResult> results(kNVariants);
@@ -517,7 +520,28 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
   };
 
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
-  auto affordable = [&](double flops, double rate) { return rate <= 0.0 || (flops / rate) <= (double)kBlockBudgetUs; };
+  // Why a point whose one pass is `flops` at `rate` (flops per microsecond,
+  // from the last point timed; 0 before any) is not worth timing, or empty
+  // when it is: past the whole budget for measuring it, or on a GPU past what
+  // one prediction may keep the device busy.  `what` is "one pass" or "one
+  // token".
+  auto tooSlow = [&](double flops, double rate, const char *what) -> std::string
+  {
+    if (rate <= 0.0)
+      return std::string();
+    const double us = flops / rate;
+    if (us > (double)kBlockBudgetUs)
+      return std::string(what) + " would take about " + std::to_string((long long)(us / 1.0e6)) +
+             " s on this compute unit, too slow to measure";
+    if (runCapUs > 0.0 && us > runCapUs)
+    {
+      char buf[32];
+      std::snprintf(buf, sizeof buf, "%.1f", us / 1.0e6);
+      return std::string(what) + " would keep this GPU busy for about " + buf +
+             " s, longer than --max-time-gpu lets one run hold it -- a driver may reset a GPU held longer";
+    }
+    return std::string();
+  };
 
   auto measurePrefill = [&](const Variant &v, VariantResult &vr, int64_t seq)
   {
@@ -526,11 +550,10 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       return;
     Point pt;
     const double flops = blockFlops(seq, seq);
-    if (!affordable(flops, refPrefillRate))
+    if (std::string slow = tooSlow(flops, refPrefillRate, "one pass"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
-      pt.error = "one pass would take about " + std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
-                 " s on this compute unit, too slow to measure";
+      pt.error = slow;
     }
     else
     {
@@ -553,11 +576,10 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       pt.status = ResultStatus::Unsupported;
       pt.error = fence;
     }
-    else if (!affordable(flops, refDecodeRate))
+    else if (std::string slow = tooSlow(flops, refDecodeRate, "one token"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
-      pt.error = "one token would take about " + std::to_string((long long)(flops / refDecodeRate / 1.0e6)) +
-                 " s on this compute unit, too slow to measure";
+      pt.error = slow;
     }
     else
     {

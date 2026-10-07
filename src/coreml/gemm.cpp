@@ -86,13 +86,20 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
+// On a GPU one prediction is bounded too, at --max-time-gpu (gpuRunCapUs),
+// and each layout's first rung, which has no rate to be predicted from, is
+// predicted from a chain this wide timed once beforehand -- the ONNX ladder's
+// rule, for its reason (src/onnx/gemm.cpp).  The scout is no rung: the row
+// neither publishes it nor counts it toward the plateau.
+constexpr int64_t kScoutDim = 512;
+
 // Per-size budget for the timed phase.
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
 // Everything a rung holds at once (rungBytes), capped at a quarter of
 // physical memory -- a fixed ceiling would be a crash on a phone and a
-// needless limit on a Mac Studio -- and at 8 GB, which still admits the
-// 8192-wide fp16 chain the GPU peaks at.
+// needless limit on a Mac Studio -- and at 8 GB, which still admits an
+// 8192-wide fp16 chain, for a GPU that runs one inside --max-time-gpu.
 uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
 
 struct Variant
@@ -185,7 +192,9 @@ uint64_t rungBytes(CoremlWeight w, int64_t D)
 
 int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one prediction may be predicted to take: on a GPU,
+  // --max-time-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
   auto test = currentDeviceScope->beginTest(
@@ -275,6 +284,34 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     int64_t raceDim = 0;
     double raceRate[2] = {0.0, 0.0}, raceCreateUs[2] = {0.0, 0.0};
 
+    // On a GPU each layout's first rung is predicted from a kScoutDim chain;
+    // a scout that cannot be built, is sent to another unit or cannot run
+    // leaves it unpredicted.
+    for (int t = 0; t < 2 && runCapUs > 0.0; t++)
+    {
+      if (!race.runs(t) || clpeak::cancelRequested())
+        continue;
+      std::string err;
+      auto s = CoremlSession::create(
+          dev, coremlMatMulChainModel(spec, kScoutDim, kChainLayers, kSeedWidth, v.w, t), err);
+      double us = -1.0;
+      if (s && !s->onDevice())
+        err = coremlOffDeviceReason(dev, *s);
+      else if (s && coremlBindScalar(*s, "s", ioDtype, err) && s->timeRuns(1, err) > 0.0)   // compile + warmup
+        us = s->timeRuns(1, err);
+      s.reset();
+      if (us > 0.0)
+      {
+        lanes[t].lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim * (double)kScoutDim * kChainLayers / us;
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms\n", dev.displayName.c_str(), label,
+                    (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3);
+      }
+      else
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
+                    dev.displayName.c_str(), label, (long long)kScoutDim, coremlLayoutName(t),
+                    err.empty() ? "no reason given" : err.c_str());
+    }
+
     for (int64_t D = kMinDim; D <= kMaxDim && !race.done(); D *= 2)
     {
       if (clpeak::cancelRequested())
@@ -297,12 +334,34 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           continue;
         Lane &ln = lanes[t];
         const char *layout = coremlLayoutName(t);
-        if (ln.lastRate > 0.0 && layerOps / ln.lastRate > kMaxIterUs)
+        const double runUs = ln.lastRate > 0.0 ? layerOps * kChainLayers / ln.lastRate : 0.0;
+        const bool runTooLong = runCapUs > 0.0 && runUs > runCapUs;
+        if (runTooLong || runUs / kChainLayers > kMaxIterUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
-                      "stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, layout,
-                      layerOps / ln.lastRate / 1.0e6);
+          if (runTooLong)
+            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would keep the GPU busy ~%.2f s a "
+                        "prediction, past --max-time-gpu (%.2f s), stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, layout, runUs / 1.0e6,
+                        runCapUs / 1.0e6);
+          else
+            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
+                        "stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, layout,
+                        runUs / kChainLayers / 1.0e6);
+          // Before any rung the prediction is the scout's, and it is all the
+          // row has to say.
+          if (ln.rungs == 0 && firstErr.empty())
+          {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.1f", runUs / 1.0e6);
+            firstErr = "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
+                       std::to_string(D) + "-wide one would take about " + buf + " s a prediction, " +
+                       (runTooLong ? "longer than --max-time-gpu lets one run hold a GPU -- a driver "
+                                     "may reset a GPU held longer -- "
+                                   : "longer than one multiply may take, ") +
+                       "so no size was measured";
+            errStatus = ResultStatus::Error;
+          }
           race.drop(t);
           continue;
         }
@@ -392,6 +451,10 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         s.reset();   // the temp files go before the next model is written
         if (m.meanUs <= 0.0)
         {
+          // Logged whatever the row says: above a measured width it
+          // publishes the widths below, and this failure would leave no trace.
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
+                      (long long)D, layout, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -428,6 +491,17 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                       "stopping\n",
                       dev.displayName.c_str(), label, (long long)D, layout,
                       m.probeUs / kChainLayers / 1.0e6);
+          race.drop(t);
+        }
+        // The same for a GPU's prediction (gpuRunCapUs): this one held the
+        // device longer than --max-time-gpu and survived it, and the next
+        // would hold it eight times as long.
+        else if (runCapUs > 0.0 && m.probeUs > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.2f s a prediction, past "
+                      "--max-time-gpu (%.2f s), stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, layout, m.probeUs / 1.0e6,
+                      runCapUs / 1.0e6);
           race.drop(t);
         }
         // A size that compiled past the cap anyway is kept, and ends this
