@@ -176,7 +176,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
-| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, LiteRT's int8 operators, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out) |
+| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out). `clpeak::MultiFormRace` — the same rule over more forms, for work with more than one choice (LiteRT's int8 operators and GPU kernel policy) |
 | `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory

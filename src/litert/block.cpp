@@ -22,6 +22,8 @@
 // attention, the softmax and the SwiGLU, and whether an accelerator keeps
 // its matmul rate through all of that is what a model would meet.
 
+#include <common/form_race.h>
+#include <common/units.h>
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
 #include "litert_model.h"
@@ -159,6 +161,12 @@ struct Point
   double us = -1.0;
   std::string error;
   ResultStatus status = ResultStatus::Ok;
+  double createUs = 0.0;
+  // Where the variant races forms (VariantResult::forms): the one this
+  // point's time is, and the other's time at the same point when it ran.
+  size_t form = 0;
+  double otherUs = -1.0;
+  bool nonFinite = false;   // the timed graph returned NaN or infinity
 };
 
 struct VariantResult
@@ -167,6 +175,11 @@ struct VariantResult
   std::string skipReason;
   ResultStatus skipStatus = ResultStatus::Unsupported;
   std::map<int64_t, Point> prefill, decode;
+  // The forms the variant runs in (LitertForm): on a GPU with 8-bit kernels
+  // for the format, with them disallowed and allowed, each regime racing the
+  // two as gemm.cpp does; one form everywhere else.
+  std::vector<LitertForm> forms;
+  clpeak::MultiFormRace prefillRace{1}, decodeRace{1};
 };
 
 // Why a variant's decode form cannot be sent to this accelerator, or empty.
@@ -223,14 +236,16 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
 
   // Time one regime end to end: mean us per block, or negative with the
   // point's status and error set.
-  auto measure = [&](const Variant &v, const LitertPlan &plan, bool decode, int64_t kvLen,
-                     int64_t prefillSeq, Point &pt)
+  auto measure = [&](const Variant &v, const LitertPlan &plan, const LitertForm &form, bool decode,
+                     int64_t kvLen, int64_t prefillSeq, Point &pt)
   {
     std::string err;
     auto s = LitertSession::create(rt, dev, litertBlockModel(plan, shapeFor(v, decode, kvLen, prefillSeq)),
-                                   litertConfigFor(plan), err);
-    const std::string what = decode ? "decode_kv" + std::to_string(kvLen)
-                                    : "prefill_s" + std::to_string(prefillSeq);
+                                   litertConfigFor(plan, form), err);
+    const std::string what = (decode ? "decode_kv" + std::to_string(kvLen) : "prefill_s" + std::to_string(prefillSeq)) +
+                             (plan.gpuInt8KernelChoice
+                                  ? std::string(form.gpuInt8Kernels ? " with" : " without") + " 8-bit kernels"
+                                  : std::string());
     if (!s)
     {
       CLPEAK_VLOG("litert-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
@@ -241,6 +256,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     CLPEAK_VLOG("litert-block[%s/%s]: %s create %.2f s\n", dev.displayName.c_str(), v.label, what.c_str(),
                 s->createUs / 1.0e6);
+    pt.createUs = s->createUs;
     if (!s->onDevice())
     {
       pt.error = s->offDevice();
@@ -264,6 +280,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     }
     auto m = litertMeasure(*s, warmupCount, kBlockBudgetUs, forceIters, specifiedIters);
+    pt.createUs += s->firstRunUs;   // the race's build cost, as in gemm.cpp
     if (m.meanUs <= 0.0)
     {
       pt.error = m.error.empty() ? "run failed" : m.error;
@@ -282,10 +299,74 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       CLPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
       pt.error = wrong;
       pt.status = ResultStatus::Error;
+      pt.nonFinite = true;
       return;
     }
     pt.us = m.meanUs;
     pt.status = ResultStatus::Ok;
+  };
+
+  // One point in every form the regime's race still runs: the faster one's
+  // time -- a tie keeps the first unless the other was ready to run twice
+  // as fast, FormRace's rule -- and the other's beside it.  A form that
+  // cannot run a point leaves the race; the point fails only when no form
+  // runs it.  No point settles the race for the next: the GPU uses its 8-bit
+  // kernels on large layers only, so the 64-token point that validates a
+  // variant says nothing of the 512-token one, and an int8 variant has one
+  // prefill and one decode point to report anyway.
+  auto measureRaced = [&](size_t vi, bool decode, int64_t kvLen, int64_t prefillSeq, Point &pt)
+  {
+    VariantResult &vr = results[vi];
+    clpeak::MultiFormRace &race = decode ? vr.decodeRace : vr.prefillRace;
+    const size_t nf = vr.forms.size();
+    std::vector<Point> pts(nf);
+    std::vector<double> rate(nf, 0.0), build(nf, 0.0);
+    for (size_t f = 0; f < nf; f++)
+    {
+      if (!race.runs(f) || clpeak::cancelRequested())
+        continue;
+      measure(kVariants[vi], plans[vi], vr.forms[f], decode, kvLen, prefillSeq, pts[f]);
+      if (pts[f].us > 0.0)
+      {
+        rate[f] = 1.0 / pts[f].us;
+        build[f] = pts[f].createUs;
+      }
+      else
+        race.drop(f);
+    }
+    // A NaN from either form withholds the point, as in gemm.cpp: the other
+    // form is no alibi for the accelerator.
+    for (size_t f = 0; f < nf; f++)
+      if (pts[f].nonFinite)
+      {
+        pt = pts[f];
+        return;
+      }
+    size_t w = nf, failed = nf;
+    for (size_t f = 0; f < nf; f++)
+    {
+      if (rate[f] > 0.0 && (w == nf || rate[f] > rate[w] * clpeak::kFormRaceTie ||
+                            (rate[f] * clpeak::kFormRaceTie >= rate[w] && build[w] >= build[f] * clpeak::kFormRaceBuildGap)))
+        w = f;
+      if (failed == nf && !pts[f].error.empty())
+        failed = f;
+    }
+    if (w == nf)
+    {
+      if (failed != nf)
+        pt = pts[failed];
+      else
+      {
+        pt.status = ResultStatus::Error;
+        pt.error = "no form of the block ran";
+      }
+      return;
+    }
+    pt = pts[w];
+    pt.form = w;
+    for (size_t f = 0; f < nf; f++)
+      if (f != w && rate[f] > 0.0)
+        pt.otherUs = pts[f].us;
   };
 
   // Everything that has to be true before a variant is worth timing: the
@@ -303,12 +384,29 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       vr.skipReason = plan.whyNot;
       return false;
     }
-    if (const std::string wrong = wrongAnswer(rt, dev, v.f); !wrong.empty())
+    // The forms it runs in, each gated on the format's answer in that form
+    // with float inputs and outputs -- the block's own boundary: its int8
+    // projections quantize and dequantize inside the graph, so an
+    // accelerator that cannot return an int8 tensor still runs it.
+    vr.forms.clear();
+    std::string firstWrong;
+    for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
     {
-      vr.skipReason = wrong;
+      const LitertForm form{false, k == 1, true};
+      const std::string wrong = wrongAnswer(rt, dev, v.f, form);
+      if (wrong.empty())
+        vr.forms.push_back(form);
+      else if (firstWrong.empty())
+        firstWrong = wrong;
+    }
+    if (vr.forms.empty())
+    {
+      vr.skipReason = firstWrong;
       vr.skipStatus = ResultStatus::Error;
       return false;
     }
+    vr.prefillRace = clpeak::MultiFormRace(vr.forms.size());
+    vr.decodeRace = clpeak::MultiFormRace(vr.forms.size());
     if (v.int8Kv && dev.accel != LitertAccel::Npu)
     {
       // XNNPACK dequantizes a constant int8 tensor once, when the model
@@ -336,7 +434,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     Point pt;
     const bool decode = v.decodeOnly;
-    measure(v, plan, decode, kKvLadder[0], kPromptLadder[0], pt);
+    measureRaced(vi, decode, kKvLadder[0], kPromptLadder[0], pt);
     if (pt.us <= 0.0)
     {
       vr.skipReason = pt.error.empty() ? std::string("the block could not be built for ") + v.label : pt.error;
@@ -388,7 +486,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     else
     {
-      measure(kVariants[vi], plans[vi], false, kDecodeKv, seq, pt);
+      measureRaced(vi, false, kDecodeKv, seq, pt);
       if (pt.us > 0.0)
         refPrefillRate = flops / pt.us;
     }
@@ -414,11 +512,26 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     else
     {
-      measure(kVariants[vi], plans[vi], true, kv, kPrefillSeq, pt);
+      measureRaced(vi, true, kv, kPrefillSeq, pt);
       if (pt.us > 0.0)
         refDecodeRate = flops / pt.us;
     }
     vr.decode[kv] = pt;
+  };
+
+  // A raced variant's word on its form, inside one of a row's sentences:
+  // the form the point ran as and, when the other ran the same point, what
+  // it read there (`reading` turns a time into the row's unit).
+  auto formClause = [&](size_t vi, const Point &pt, auto &&reading) -> std::string
+  {
+    const VariantResult &vr = results[vi];
+    if (vr.forms.size() < 2 || pt.us <= 0.0)
+      return std::string();
+    const bool k = vr.forms[pt.form].gpuInt8Kernels;
+    std::string s = k ? ", with the GPU's 8-bit kernels allowed" : ", with the GPU's 8-bit kernels disallowed";
+    if (pt.otherUs > 0.0)
+      s += " (" + reading(pt.otherUs) + (k ? " without them" : " with them") + ")";
+    return s;
   };
 
   auto emitPrefillTo = [&](logger::TestScope &test, size_t vi)
@@ -428,9 +541,16 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     for (int64_t seq : promptsFor(v))
     {
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
+      auto it = vr.prefill.find(seq);
+      const std::string form =
+          it == vr.prefill.end()
+              ? std::string()
+              : formClause(vi, it->second, [&](double us) {
+                  return formatReading(blockFlops(seq, seq) * 1.0e6 / us, v.unit ? v.unit : "flops");
+                });
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply in the layer." + seedNote(seq);
+                      " tokens in one pass, counting every multiply in the layer" + form + "." + seedNote(seq);
       if (v.unit)
         o.unit = v.unit;
       if (!vr.usable)
@@ -438,7 +558,6 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
         continue;
       }
-      auto it = vr.prefill.find(seq);
       if (it == vr.prefill.end())
         continue;
       if (it->second.us > 0.0)
@@ -542,9 +661,10 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       const uint64_t wBytes = weightBytes(plan);
       const uint64_t kvB = kvBytes(plan, v.int8Kv, kDecodeKv);
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  One token with 2048 of context: " +
-                      std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
-                      std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache, read once.";
+      const std::string head = std::string(v.note) + "  One token with 2048 of context: " +
+                               std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
+                               std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache, read once";
+      o.description = head + ".";
       if (!validateVariant(vi))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -552,6 +672,9 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       }
       measureDecode(vi, kDecodeKv);
       const Point &pt = vr.decode[kDecodeKv];
+      o.description = head + formClause(vi, pt, [&](double us) {
+                        return formatReading((double)(wBytes + kvB) / (us * 1.0e-6), "bps");
+                      }) + ".";
       if (pt.us > 0.0)
         test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
       else
@@ -572,14 +695,17 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
-                                 seedNote(kPrefillSeq);
         if (!vr.usable)
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason,
+                    std::string("One pass over a 512-token prompt.  ") + v.note + seedNote(kPrefillSeq));
         else
         {
           measurePrefill(vi, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
+          const std::string note =
+              "One pass over a 512-token prompt" +
+              formClause(vi, pt, [&](double us) { return formatReading(us * 1.0e-6, "s"); }) + ".  " + v.note +
+              seedNote(kPrefillSeq);
           if (pt.us > 0.0)
             test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
           else
@@ -591,14 +717,17 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One token with " + std::to_string(kv) + " of context.  " + v.note;
         if (!vr.usable)
         {
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason,
+                    "One token with " + std::to_string(kv) + " of context.  " + v.note);
           continue;
         }
         measureDecode(vi, kv);
         const Point &pt = vr.decode[kv];
+        const std::string note =
+            "One token with " + std::to_string(kv) + " of context" +
+            formClause(vi, pt, [&](double us) { return formatReading(us * 1.0e-6, "s"); }) + ".  " + v.note;
         if (pt.us > 0.0)
           test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
         else

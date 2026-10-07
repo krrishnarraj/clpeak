@@ -109,8 +109,10 @@ inline LitertMeasurement litertMeasure(LitertSession &s, unsigned warmupCount, u
 // scalar's own scale (1/127, 1/32767) puts one at the top code.
 inline bool litertBindScalar(LitertSession &s, const LitertPlan &p, std::string &error)
 {
+  // Under floatIo an integer plan's scalar goes in as a float32 one and is
+  // quantized at the same scale, so the same one lands on the top code.
   const bool integer = (p.act == clpeak_tflite::TfType::I8 || p.act == clpeak_tflite::TfType::I16);
-  const std::string v = litertScalarBytes(p.act, integer ? 1.0f : 1.0009765625f);
+  const std::string v = litertScalarBytes(litertIoType(p), integer ? 1.0f : 1.0009765625f);
   return s.writeInput(0, v.data(), v.size(), error);
 }
 
@@ -166,6 +168,21 @@ inline std::string litertNonFiniteReason(LitertSession &s, clpeak_tflite::TfType
          "is withheld";
 }
 
+// Whether a profiled tag names a kernel that multiplies -- an operator or
+// shader with "fully", "conv", "matmul" or "gemm" in its name -- and not one
+// that converts weights for it: with constant sharing on, the GPU
+// accelerator runs a `weights_convert_uint8_to_float16` per layer ahead of
+// the layers, as many as they are, and "conv" is in "convert".
+inline bool litertKernelMultiplies(const std::string &tag)
+{
+  std::string l = tag;
+  std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+  if (l.find("convert") != std::string::npos)
+    return false;
+  return l.find("fully") != std::string::npos || l.find("conv") != std::string::npos ||
+         l.find("matmul") != std::string::npos || l.find("gemm") != std::string::npos;
+}
+
 // Whether a profiled kernel tag names an integer kernel.  The GPU
 // accelerator answers most quantized graphs with a float kernel between
 // quantize and dequantize passes -- Metal's "convolution1x1(conv_wave_matrix)
@@ -207,14 +224,20 @@ inline const char *litertFloatKernelNote()
          "traffic savings";
 }
 
-// The session config a plan asks for on a device.
-inline LitertSessionConfig litertConfigFor(const LitertPlan &p, bool profile = false)
+// The session config a plan asks for on a device, in one form (its GPU
+// kernel policy; the rest of a form is the graph's, litertFormPlan).
+inline LitertSessionConfig litertConfigFor(const LitertPlan &p, const LitertForm &form, bool profile = false)
 {
   LitertSessionConfig cfg;
   cfg.gpuPrecision = p.gpuPrecision;
-  cfg.gpuAllowQuantized = p.gpuAllowQuantized;
+  cfg.gpuInt8Kernels = p.gpuInt8KernelChoice && form.gpuInt8Kernels;
+  cfg.gpuShareConstants = cfg.gpuInt8Kernels && p.gpuShareConstants;
   cfg.profile = profile;
   return cfg;
+}
+inline LitertSessionConfig litertConfigFor(const LitertPlan &p, bool profile = false)
+{
+  return litertConfigFor(p, LitertForm(), profile);
 }
 
 #endif // CLPEAK_LITERT_BENCH_H

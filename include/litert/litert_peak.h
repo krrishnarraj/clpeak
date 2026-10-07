@@ -61,6 +61,25 @@ enum class LitertFormat;   // src/litert/litert_model.h
 enum class LitertAccel { Cpu, Gpu, Npu };
 const char *litertAccelName(LitertAccel a);   // "CPU" / "GPU" / "NPU"
 
+// How a raced format's graph is written and run (gemm.cpp, conv.cpp,
+// block.cpp, each with its numbers): the operator its layers are, whether a
+// GPU may use its 8-bit kernels, and whether an integer graph's inputs and
+// outputs are float.  The first two are raced on rate; the last is settled
+// by the answer (LitertPeak::resolveIo), since it moves no rate.
+struct LitertForm
+{
+  // The layers as 1x1 CONV_2Ds over a grid of positions, not FULLY_CONNECTED.
+  bool conv1x1 = false;
+  // GPU: allow_src_quantized_fc_conv_ops -- the accelerator's 8-bit FC and
+  // convolution kernels, which it otherwise disallows -- with the
+  // enable_constant_tensors_sharing its documentation requires where the
+  // graph's constants allow it (LitertPlan::gpuShareConstants).
+  bool gpuInt8Kernels = false;
+  // An integer format's graph takes and returns float32, quantized inside it
+  // (QUANTIZE in, DEQUANTIZE out), the converter's default form.
+  bool floatIo = false;
+};
+
 struct litert_device_info_t
 {
   LitertAccel accel = LitertAccel::Cpu;
@@ -110,18 +129,40 @@ public:
     bool nonFinite = false;
     ResultStatus status = ResultStatus::Ok;
     std::string error;
+    // The output is filled with a marker before the run.  The share of its
+    // elements still holding it once the run returned, and -- read only for
+    // a wrong answer -- after a second run, with that run's figure: a marker
+    // that survives both is an answer never written, one the second run
+    // replaces is an answer that lands after the run returns.
+    double unwritten = -1.0, unwrittenRerun = -1.0, rerunPpm = -1.0;
+    bool wrong() const;
   };
-  // `conv1x1` checks the same product written as a 1x1 CONV_2D, the form
-  // litert_gemm races the int8 one against.
+  // The format's answer in one form (LitertForm): `conv1x1` is the same
+  // product written as a 1x1 CONV_2D, `gpuInt8Kernels` with the GPU's 8-bit
+  // kernels allowed, `floatIo` an integer graph with float inputs and outputs.
   const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                                 bool conv1x1 = false);
-  // Empty when the format's answer is right or could not be checked;
-  // otherwise the reason a rate row is refused with.
+                                 const LitertForm &form = LitertForm());
+  // Empty when the format's answer in that form is right or could not be
+  // checked; otherwise the reason a rate row is refused with.
   std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                          bool conv1x1 = false);
+                          const LitertForm &form = LitertForm());
+  // The inputs and outputs an integer format's graph takes in `form` on this
+  // device: its own int8 or int16 ones while its answer is right with them,
+  // float ones quantized inside the graph when only those answer right --
+  // LiteRT 2.2.0's OpenCL accelerator never converts an integer graph's
+  // inputs and outputs (src/litert/AGENTS.md has the source).  Any other
+  // format's are float already, and `form` comes back as it went in.
+  LitertForm resolveIo(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                       LitertForm form);
+  // What a rate row says of a form resolveIo gave float inputs and outputs:
+  // "the graph's input and output float, since with int8 ones this
+  // accelerator never wrote its answer".  Empty for any other form.
+  std::string floatIoClause(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                            const LitertForm &form);
 
 private:
-  std::map<std::tuple<int, int, bool>, AnswerCheck> answerChecks_;   // (accelerator, format, conv1x1)
+  // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo)
+  std::map<std::tuple<int, int, bool, bool, bool>, AnswerCheck> answerChecks_;
 };
 
 // A relative RMS error past this is a wrong answer, not a loss of precision:

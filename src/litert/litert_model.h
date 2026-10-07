@@ -62,7 +62,21 @@ struct LitertPlan
   bool dynamicQuant = false;      // FULLY_CONNECTED.asymmetric_quantize_inputs
   bool integerOps = false;        // counts in ops rather than flops
   LiteRtDelegatePrecision gpuPrecision = kLiteRtDelegatePrecisionDefault;
-  bool gpuAllowQuantized = false;
+  // The GPU accelerator has 8-bit FULLY_CONNECTED and convolution kernels
+  // for this format, which it uses only when allowed
+  // (LitertForm::gpuInt8Kernels): the rate rows race the two policies.
+  bool gpuInt8KernelChoice = false;
+  // Allowing them also turns on enable_constant_tensors_sharing, which
+  // their documentation requires -- for a graph whose constants it takes.
+  // It takes only int8, int4 and int2 weights: an int32 bias, which every
+  // full-integer FULLY_CONNECTED and CONV_2D carries, fails the whole
+  // delegate ("Only quantized int8, int4, and int2 weights are supported for
+  // sharing", Metal, LiteRT 2.2.0), so int8_qdq allows the kernels alone.
+  bool gpuShareConstants = false;
+  // An integer plan's graph takes and returns float32 and quantizes inside
+  // the graph -- QUANTIZE after each input, DEQUANTIZE before each output --
+  // instead of exchanging int8 or int16 tensors (LitertForm::floatIo).
+  bool floatIo = false;
   // The fp32 tensors hold values already rounded to fp16: the GPU's fp16
   // policies convert every fp32 operand to half at load, and an accuracy
   // reference built from the unrounded values would count that conversion
@@ -83,6 +97,14 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 // `halfConstants`, otherwise the activation type.  What a resident tensor
 // costs in host memory and, on the GPU, the bytes it streams.
 clpeak_tflite::TfType litertConstantType(const LitertPlan &p);
+
+// The type a graph's inputs and outputs are in: the activation type, or
+// float32 for an integer plan under `floatIo`.
+clpeak_tflite::TfType litertIoType(const LitertPlan &p);
+
+// The plan one form's graph is written in (LitertForm::floatIo); the rest of
+// a form is the session's (litertConfigFor).
+LitertPlan litertFormPlan(const LitertPlan &p, const LitertForm &form);
 
 // The version number a converted model would carry for FULLY_CONNECTED in
 // this plan (tflite/converter/tools/versioning/op_version.cc), with or

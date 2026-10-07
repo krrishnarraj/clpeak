@@ -15,6 +15,8 @@
 // of the multiplies counted), so the ladders divide row for row; the int8 rows
 // are this backend's own, because TFLite is where int8 convolution ships.
 
+#include <common/form_race.h>
+#include <common/units.h>
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
 #include "litert_model.h"
@@ -35,6 +37,13 @@ constexpr double kImproveFactor = 1.03;
 constexpr int kMaxStrikes = 2;
 constexpr double kMaxIterUs = 2.0e6;
 constexpr unsigned int kSizeBudgetUs = 2000000;
+
+// A GPU's 8-bit kernels race only on feature maps large enough to be work,
+// not dispatch: a size settles a row's race once every form timed there took
+// this many times as long a pass as at its first size.  The accelerator
+// uses those kernels for large layers only, and on an M1 Pro both forms of
+// every int8 row tied at 64 by 64, where a pass is the cost of asking.
+constexpr double kRaceWorkFactor = 8.0;
 
 // Everything a rung holds at once (litertHeldBytes), capped at a quarter of
 // physical memory and at 2 GB, which still admits the 1024-square int8 maps
@@ -93,11 +102,32 @@ std::string convKernel(const std::vector<std::string> &ops)
   {
     std::string l = o;
     std::transform(l.begin(), l.end(), l.begin(), ::tolower);
-    if (l.find("conv") != std::string::npos)
+    if (l.find("conv") != std::string::npos && litertKernelMultiplies(o))
       return o;
   }
   return std::string();
 }
+
+// One form's climb over feature-map sizes.
+struct ConvLane
+{
+  double best = 0.0;
+  int64_t bestSp = 0;
+  double firstUs = 0.0;   // the mean pass at its first size: what asking costs
+  std::string firstErr, kernel;
+  ResultStatus errStatus = ResultStatus::Unsupported;
+  double lastRate = 0.0, prevCreateUs = 0.0;
+  int strikes = 0, rungs = 0;
+
+  void fail(const std::string &why, ResultStatus status = ResultStatus::Unsupported)
+  {
+    if (firstErr.empty())
+    {
+      firstErr = why;
+      errStatus = status;
+    }
+  }
+};
 
 } // namespace
 
@@ -119,9 +149,27 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
   for (const Format &fmt : kFormats)
   {
     const LitertPlan plan = litertPlanFor(fmt.f, dev.accel);
-    // The format's matmul answer, checked once: a kernel that gets the
-    // format wrong there gets no convolution rate either.
-    const std::string wrong = plan.applies ? wrongAnswer(rt, dev, fmt.f) : std::string();
+    // The forms a row races: on a GPU with 8-bit kernels for the format,
+    // with them disallowed and allowed (gemm.cpp has why).  Each is checked
+    // once, as the same product written as a 1x1 convolution -- the conv1x1
+    // row's own graph, and for the 3x3 and the depthwise the nearest one
+    // there is -- in the inputs and outputs it answers right with.  A form
+    // whose answer is wrong leaves every shape's race.
+    std::vector<LitertForm> forms;
+    std::vector<std::string> wrong;
+    if (plan.applies)
+      for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
+      {
+        const LitertForm form = resolveIo(rt, dev, fmt.f, LitertForm{true, k == 1, false});
+        forms.push_back(LitertForm{false, form.gpuInt8Kernels, form.floatIo});
+        wrong.push_back(wrongAnswer(rt, dev, fmt.f, form));
+      }
+    const size_t nf = forms.size();
+    const bool raced = nf > 1;
+    size_t wrongCount = 0;
+    for (const std::string &w : wrong)
+      wrongCount += !w.empty();
+
     for (const Shape &v : kShapes)
     {
       if (clpeak::cancelRequested())
@@ -136,28 +184,33 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         test.skip(row, ResultStatus::Unsupported, plan.whyNot, o);
         continue;
       }
-      if (!wrong.empty())
+      if (wrongCount == nf)
       {
-        test.skip(row, ResultStatus::Error, wrong, o);
+        test.skip(row, ResultStatus::Error, wrong[0], o);
         continue;
       }
 
-      const uint64_t elemBytes = litertElemBytes(litertConstantType(plan), 1);
-      double best = 0.0;
-      int64_t bestSp = 0;
-      std::string firstErr, kernel;
-      ResultStatus errStatus = ResultStatus::Unsupported;
-      double lastRate = 0.0, prevCreateUs = 0.0;
-      int strikes = 0;
-      int rungs = 0;
+      clpeak::MultiFormRace race(nf);
+      for (size_t f = 0; f < nf; f++)
+        if (!wrong[f].empty())
+          race.drop(f);
+      std::vector<ConvLane> lanes(nf);
+      // The last size both forms were timed at, for the row's note.
+      int64_t raceSp = 0;
+      std::vector<double> raceRate(nf, 0.0);
+      auto what = [&](size_t f) {
+        return raced ? std::string(forms[f].gpuInt8Kernels ? " with" : " without") + " the GPU's 8-bit kernels"
+                     : std::string();
+      };
 
-      for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
+      for (int64_t sp = kMinSpatial; sp <= kMaxSpatial && !race.done(); sp *= 2)
       {
         if (clpeak::cancelRequested())
           break;
         // The feature map and the filter are constants (litertHeldBytes);
         // the scaled copy of the map and the result, a quarter of it at
         // stride 2, are activations.
+        const uint64_t elemBytes = litertElemBytes(litertConstantType(plan), 1);
         const uint64_t pixels = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp;
         const uint64_t filter = litertElemBytes(plan.weight, kChannels * (v.depthwise ? 1 : kChannels) *
                                                                  v.kernel * v.kernel);
@@ -172,149 +225,218 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
                       (unsigned long long)(budget >> 20));
           break;
         }
-        if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)
-        {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld would take too long, stopping\n", dev.displayName.c_str(),
-                      row.c_str(), (long long)sp);
-          break;
-        }
-        // On a GPU a pass is also held to what one run may keep the device
-        // busy (gpuRunCapUs): a driver resets a GPU held too long.
-        if (lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / lastRate > runCapUs)
-        {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a pass, past --max-time-gpu "
-                      "(%.2f s), stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
-                      runCapUs / 1.0e6);
-          break;
-        }
-        if (sp > kMinSpatial && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kLitertMaxCreateUs)
-          break;
+        std::vector<double> rate(nf, 0.0), createUsAt(nf, 0.0);
+        std::vector<bool> workBound(nf, false);
 
-        if (rungs == 0 && kernel.empty())
+        for (size_t f = 0; f < nf; f++)
         {
+          if (!race.runs(f))
+            continue;
+          ConvLane &ln = lanes[f];
+          const LitertPlan fp = litertFormPlan(plan, forms[f]);
+          const std::string form = what(f);
+          if (ln.lastRate > 0.0 && convFlops(v, sp) / ln.lastRate > kMaxIterUs)
+          {
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s would take too long, stopping\n", dev.displayName.c_str(),
+                        row.c_str(), (long long)sp, form.c_str());
+            race.drop(f);
+            continue;
+          }
+          // On a GPU a pass is also held to what one run may keep the device
+          // busy (gpuRunCapUs): a driver resets a GPU held too long.
+          if (ln.lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / ln.lastRate > runCapUs)
+          {
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s would keep the GPU busy ~%.2f s a pass, past "
+                        "--max-time-gpu (%.2f s), stopping\n",
+                        dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(),
+                        convFlops(v, sp) / ln.lastRate / 1.0e6, runCapUs / 1.0e6);
+            race.drop(f);
+            continue;
+          }
+          if (sp > kMinSpatial && ln.prevCreateUs > 0.0 && ln.prevCreateUs * 4.0 > kLitertMaxCreateUs)
+          {
+            race.drop(f);
+            continue;
+          }
+
+          if (ln.rungs == 0 && ln.kernel.empty())
+          {
+            std::string err;
+            auto ps = LitertSession::create(rt, dev,
+                                            litertConvModel(fp, kChannels, sp, v.kernel, v.stride, v.depthwise),
+                                            litertConfigFor(fp, forms[f], true), err);
+            if (ps && ps->onDevice() && litertBindScalar(*ps, fp, err))
+            {
+              std::string perr;
+              ln.kernel = convKernel(ps->profileOps(perr));
+            }
+          }
+
           std::string err;
-          auto ps = LitertSession::create(rt, dev,
-                                          litertConvModel(plan, kChannels, sp, v.kernel, v.stride, v.depthwise),
-                                          litertConfigFor(plan, true), err);
-          if (ps && ps->onDevice() && litertBindScalar(*ps, plan, err))
+          auto s = LitertSession::create(rt, dev, litertConvModel(fp, kChannels, sp, v.kernel, v.stride, v.depthwise),
+                                         litertConfigFor(fp, forms[f]), err);
+          if (!s)
           {
-            std::string perr;
-            kernel = convKernel(ps->profileOps(perr));
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s create failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                        (long long)sp, form.c_str(), err.c_str());
+            ln.fail(err);
+            race.drop(f);
+            continue;
           }
-        }
-
-        std::string err;
-        auto s = LitertSession::create(rt, dev,
-                                       litertConvModel(plan, kChannels, sp, v.kernel, v.stride, v.depthwise),
-                                       litertConfigFor(plan), err);
-        if (!s)
-        {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld create failed: %s\n", dev.displayName.c_str(), row.c_str(),
-                      (long long)sp, err.c_str());
-          if (firstErr.empty())
-            firstErr = err;
-          break;
-        }
-        const double createUs = s->createUs;
-        if (!s->onDevice())
-        {
-          if (firstErr.empty())
-            firstErr = s->offDevice();
-          break;
-        }
-        if (!litertBindScalar(*s, plan, err))
-        {
-          if (firstErr.empty())
+          const double createUs = s->createUs;
+          if (!s->onDevice())
           {
-            firstErr = err;
-            errStatus = ResultStatus::Error;
+            ln.fail(s->offDevice());
+            race.drop(f);
+            continue;
           }
-          break;
-        }
-        auto m = litertMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
-        const std::string wrong =
-            (m.meanUs > 0.0) ? litertNonFiniteReason(*s, plan.act,
-                                                     "on a " + std::to_string(sp) + "x" + std::to_string(sp) +
-                                                         " feature map")
-                             : std::string();
-        s.reset();
-        if (m.meanUs <= 0.0)
-        {
-          // Logged whatever the row says: above a measured size it publishes
-          // the sizes below, and this failure would leave no trace.
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld run failed: %s\n", dev.displayName.c_str(), row.c_str(),
-                      (long long)sp, m.error.c_str());
-          if (firstErr.empty())
+          if (!litertBindScalar(*s, fp, err))
           {
-            firstErr = m.error;
-            errStatus = m.status;
+            ln.fail(err, ResultStatus::Error);
+            race.drop(f);
+            continue;
           }
-          break;
-        }
-        // A wrong answer withholds the whole row, as in gemm.cpp.
-        if (!wrong.empty())
-        {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
-          best = 0.0;
-          firstErr = wrong;
-          errStatus = ResultStatus::Error;
-          break;
-        }
-        rungs++;
-        const double flops = convFlops(v, sp);
-        const double rate = flops * 1.0e6 / m.meanUs;
-        lastRate = flops / m.meanUs;
-        CLPEAK_VLOG("litert-conv[%s/%s]: %lld -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
-                    (long long)sp, rate, m.meanUs);
-
-        if (rate > best * kImproveFactor)
-        {
-          strikes = 0;
-          best = rate;
-          bestSp = sp;
-        }
-        else
-        {
-          if (rate > best)
+          auto m = litertMeasure(*s, warmupCount, kSizeBudgetUs, forceIters, specifiedIters);
+          const double readyUs = createUs + s->firstRunUs;   // the race's build cost, as in gemm.cpp
+          const std::string nonFinite =
+              (m.meanUs > 0.0) ? litertNonFiniteReason(*s, litertIoType(fp),
+                                                       "on a " + std::to_string(sp) + "x" + std::to_string(sp) +
+                                                           " feature map" + form)
+                               : std::string();
+          s.reset();
+          if (m.meanUs <= 0.0)
           {
-            best = rate;
-            bestSp = sp;
+            // Logged whatever the row says: above a measured size it
+            // publishes the sizes below, and this failure would leave no
+            // trace.
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s run failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                        (long long)sp, form.c_str(), m.error.c_str());
+            ln.fail(m.error, m.status);
+            race.drop(f);
+            continue;
           }
-          if (++strikes >= kMaxStrikes)
+          // A wrong answer withholds the whole row, as in gemm.cpp.
+          if (!nonFinite.empty())
+          {
+            CLPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), nonFinite.c_str());
+            for (ConvLane &l : lanes)
+            {
+              l.best = 0.0;
+              l.firstErr = nonFinite;
+              l.errStatus = ResultStatus::Error;
+            }
+            for (size_t g = 0; g < nf; g++)
+              race.drop(g);
             break;
+          }
+          ln.rungs++;
+          if (ln.firstUs == 0.0)
+            ln.firstUs = m.meanUs;
+          workBound[f] = m.meanUs >= kRaceWorkFactor * ln.firstUs;
+          const double flops = convFlops(v, sp);
+          const double r = flops * 1.0e6 / m.meanUs;
+          ln.lastRate = flops / m.meanUs;
+          CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
+                      (long long)sp, form.c_str(), r, m.meanUs);
+          rate[f] = r;
+          createUsAt[f] = readyUs;
+
+          if (r > ln.best * kImproveFactor)
+          {
+            ln.strikes = 0;
+            ln.best = r;
+            ln.bestSp = sp;
+          }
+          else
+          {
+            if (r > ln.best)
+            {
+              ln.best = r;
+              ln.bestSp = sp;
+            }
+            if (++ln.strikes >= kMaxStrikes)
+              race.drop(f);
+          }
+          if (race.runs(f) && m.probeUs > kMaxIterUs)
+            race.drop(f);
+          else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
+          {
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s measured %.2f s a pass, past --max-time-gpu (%.2f s), "
+                        "stopping\n",
+                        dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), m.probeUs / 1.0e6,
+                        runCapUs / 1.0e6);
+            race.drop(f);
+          }
+          else if (race.runs(f) && ln.prevCreateUs > 0.0 && createUs > kLitertCreateGrowthFloor &&
+                   createUs > ln.prevCreateUs * kLitertCreateGrowthFactor)
+            race.drop(f);
+          else if (race.runs(f) && sp != kMinSpatial && createUs > kLitertMaxCreateUs)
+            race.drop(f);
+          ln.prevCreateUs = createUs;
         }
-        if (m.probeUs > kMaxIterUs)
-          break;
-        if (runCapUs > 0.0 && m.probeUs > runCapUs)
+
+        if (rate.size() > 1 && std::count_if(rate.begin(), rate.end(), [](double r) { return r > 0.0; }) >= 2)
         {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld measured %.2f s a pass, past --max-time-gpu (%.2f s), stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
-          break;
+          raceSp = sp;
+          raceRate = rate;
+          bool work = true;
+          for (size_t f = 0; f < nf; f++)
+            if (rate[f] > 0.0)
+              work = work && workBound[f];
+          if (work)
+            race.settle(rate, createUsAt);
         }
-        if (prevCreateUs > 0.0 && createUs > kLitertCreateGrowthFloor &&
-            createUs > prevCreateUs * kLitertCreateGrowthFactor)
-          break;
-        if (sp != kMinSpatial && createUs > kLitertMaxCreateUs)
-          break;
-        prevCreateUs = createUs;
       }
 
-      if (best > 0.0)
+      size_t w = 0;
+      for (size_t f = 1; f < nf; f++)
+        if (lanes[f].best > lanes[w].best)
+          w = f;
+      const ConvLane &win = lanes[w];
+      if (win.best > 0.0)
       {
-        o.description = std::string(v.note) + "  " + fmt.note + "  Fastest at a " + std::to_string(bestSp) +
-                        " by " + std::to_string(bestSp) + " feature map";
-        if (!kernel.empty())
+        o.description = std::string(v.note) + "  " + fmt.note + "  Fastest at a " + std::to_string(win.bestSp) +
+                        " by " + std::to_string(win.bestSp) + " feature map";
+        if (!win.kernel.empty())
         {
-          o.description += ", as `" + kernel + "`";
-          if (plan.integerOps && litertKernelIsFloatForInteger(kernel, dev.accel))
+          o.description += ", as `" + win.kernel + "`";
+          if (plan.integerOps && litertKernelIsFloatForInteger(win.kernel, dev.accel))
             o.description += litertFloatKernelNote();
         }
+        // The race and the boundary, inside the same sentence: the row's
+        // three are the shape, the format and this one.
+        if (raced)
+        {
+          o.description += "," + what(w);
+          const size_t other = 1 - w;
+          if (raceSp > 0 && raceRate[other] > 0.0)
+            o.description += " (" + formatReading(raceRate[other], plan.integerOps ? "ops" : "flops") +
+                             what(other) + " at " + std::to_string(raceSp) + " by " + std::to_string(raceSp) + ")";
+          else if (!wrong[other].empty())
+            o.description += " (" + what(other).substr(1) + " the answer was wrong)";
+        }
+        const std::string io = floatIoClause(rt, dev, fmt.f, forms[w]);
+        if (!io.empty())
+          o.description += ", " + io;
         o.description += ".";
-        test.emit(row, (float)best, o);
+        test.emit(row, (float)win.best, o);
       }
       else
-        test.skip(row, errStatus, firstErr.empty() ? "no size could be measured" : firstErr, o);
+      {
+        const ConvLane *l = nullptr;
+        for (const ConvLane &ln : lanes)
+          if (!ln.firstErr.empty() && (!l || (ln.errStatus == ResultStatus::Error && l->errStatus != ResultStatus::Error)))
+            l = &ln;
+        std::string why = l ? l->firstErr : std::string();
+        ResultStatus status = l ? l->errStatus : ResultStatus::Unsupported;
+        for (size_t f = 0; f < nf && why.empty(); f++)
+          if (!wrong[f].empty())
+          {
+            why = wrong[f];
+            status = ResultStatus::Error;
+          }
+        test.skip(row, status, why.empty() ? "no size could be measured" : why, o);
+      }
     }
   }
 

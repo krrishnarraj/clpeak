@@ -518,8 +518,10 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     std::string toml;
     if (cfg.gpuPrecision != kLiteRtDelegatePrecisionDefault)
       toml += "precision = " + std::to_string((int)cfg.gpuPrecision) + "\n";
-    if (cfg.gpuAllowQuantized)
+    if (cfg.gpuInt8Kernels)
       toml += "allow_src_quantized_fc_conv_ops = true\n";
+    if (cfg.gpuShareConstants)
+      toml += "enable_constant_tensors_sharing = true\n";
     if (!toml.empty() && !addOpaque(rt, s->options_, "gpu_options", toml, optErr))
       return fail(optErr, kLiteRtStatusErrorInvalidArgument);
   }
@@ -805,6 +807,30 @@ bool LitertSession::outputBytes(size_t i, std::vector<uint8_t> &out, std::string
     return false;
   }
   out.assign(static_cast<const uint8_t *>(p), static_cast<const uint8_t *>(p) + outputBytes_[i]);
+  st = rt_->api.LiteRtUnlockTensorBuffer(outputs_[i]);
+  if (st != kLiteRtStatusOk)
+  {
+    error = "LiteRT could not unmap an output buffer: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  return true;
+}
+
+bool LitertSession::fillOutput(size_t i, uint8_t byte, std::string &error)
+{
+  if (i >= outputs_.size())
+  {
+    error = "no output " + std::to_string(i);
+    return false;
+  }
+  void *p = nullptr;
+  LiteRtStatus st = rt_->api.LiteRtLockTensorBuffer(outputs_[i], &p, kLiteRtTensorBufferLockModeWrite);
+  if (st != kLiteRtStatusOk || !p)
+  {
+    error = "LiteRT could not map an output buffer: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  std::memset(p, byte, outputBytes_[i]);
   st = rt_->api.LiteRtUnlockTensorBuffer(outputs_[i]);
   if (st != kLiteRtStatusOk)
   {

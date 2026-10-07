@@ -101,7 +101,7 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     p.weight = TfType::I8;
     p.perChannel = true;
     p.integerOps = true;
-    p.gpuAllowQuantized = true;
+    p.gpuInt8KernelChoice = accel == LitertAccel::Gpu;
     break;
   case LitertFormat::Int16x8:
     if (accel == LitertAccel::Gpu)
@@ -110,12 +110,15 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     p.weight = TfType::I8;
     p.perChannel = true;
     p.integerOps = true;
-    p.gpuAllowQuantized = true;
     break;
   case LitertFormat::Int8Weight:
+    // What the GPU's 8-bit kernels were written for: dynamic-range
+    // quantization of a float input against int8 weights.
     p.weight = TfType::I8;
     p.perChannel = true;
     p.dynamicQuant = true;
+    p.gpuInt8KernelChoice = accel == LitertAccel::Gpu;
+    p.gpuShareConstants = true;
     break;
   case LitertFormat::Int4Weight:
     // Blockwise int4 is the one format the GPU accelerator gets memory-
@@ -415,6 +418,19 @@ float litertOutScale(int64_t K, int bits)
 TfType litertConstantType(const LitertPlan &p)
 {
   return (p.halfConstants && p.act == TfType::F32) ? TfType::F16 : p.act;
+}
+
+TfType litertIoType(const LitertPlan &p)
+{
+  const bool integer = p.act == TfType::I8 || p.act == TfType::I16;
+  return (p.floatIo && integer) ? TfType::F32 : p.act;
+}
+
+LitertPlan litertFormPlan(const LitertPlan &p, const LitertForm &form)
+{
+  LitertPlan fp = p;
+  fp.floatIo = form.floatIo;
+  return fp;
 }
 
 size_t litertElemBytes(TfType t, int64_t count)
@@ -812,8 +828,40 @@ int addFcBias(Recipe &r, int64_t N, float aScale, float wScale)
   return r.m.addTensor(0, {(int32_t)N}, TfType::I32, "bias", r.ints(std::vector<int32_t>((size_t)N, 0)), bq);
 }
 
-// The scalar input that keeps a graph live, in the activation type.
-int addScalar(Recipe &r, const LitertPlan &p)
+// A graph input of the activation type, `q` its quantization; the subgraph's
+// input goes to `input`.  Under `floatIo` an integer plan's input is float32
+// and a QUANTIZE -- the converter's default boundary -- makes the tensor the
+// graph reads from it.  The tensor the graph reads is returned either way,
+// and a plan without `floatIo` adds exactly the one tensor it always did.
+int addInput(Recipe &r, const LitertPlan &p, const std::vector<int32_t> &shape, const std::string &name,
+             const TfQuant &q, int &input)
+{
+  const int t = r.m.addTensor(0, shape, p.act, name, 0, q);
+  input = t;
+  if (litertIoType(p) == p.act)
+    return t;
+  input = r.m.addTensor(0, shape, TfType::F32, name + "_f", 0);
+  // op_version.cc: QUANTIZE to int16 2, else 1.
+  r.m.addOp(0, TfOp::Quantize, p.act == TfType::I16 ? 2 : 1, {input}, {t});
+  return t;
+}
+
+// What a graph returns for its result `t`: `t` itself, or under `floatIo` an
+// integer plan's DEQUANTIZE of it to float32.
+int addOutput(Recipe &r, const LitertPlan &p, int t, const std::vector<int32_t> &shape, const std::string &name)
+{
+  if (litertIoType(p) == p.act)
+    return t;
+  const int out = r.m.addTensor(0, shape, TfType::F32, name + "_f", 0);
+  // op_version.cc: DEQUANTIZE from int16 3, from int8 2.
+  r.m.addOp(0, TfOp::Dequantize, p.act == TfType::I16 ? 3 : 2, {t}, {out});
+  return out;
+}
+
+// The scalar input that keeps a graph live, in the activation type (under
+// `floatIo` taken as float32 and quantized, addInput); `input` receives the
+// subgraph's input.
+int addScalar(Recipe &r, const LitertPlan &p, int &input)
 {
   TfQuant q;
   if (p.act == TfType::I8)
@@ -826,7 +874,7 @@ int addScalar(Recipe &r, const LitertPlan &p)
     q.scale = {1.0f / 32767.0f};
     q.zeroPoint = {0};
   }
-  return r.m.addTensor(0, {1}, p.act, "s", 0, q);
+  return addInput(r, p, {1}, "s", q, input);
 }
 
 int mulVersion(const LitertPlan &p)
@@ -922,7 +970,8 @@ TfOptions conv1x1Options()
 
 std::string describe(const LitertPlan &p, const char *what)
 {
-  return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight);
+  return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
+         (litertIoType(p) != p.act ? " float I/O" : "");
 }
 
 } // namespace
@@ -942,7 +991,8 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
 
   const int a = r.actConstant(p, {1, (int32_t)M, (int32_t)K}, "A", M, K, seedA, 1.0f,
                               isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int as = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "As", 0, aq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
   const bool bias = fcHasBias(p);
@@ -955,8 +1005,8 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {a, s}, {as}, mulOptions());
   r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {as, w, b}, {c}, fcOptions(p));
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {c, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, {1, 1, (int32_t)N}, "out")});
   return r.m.build(describe(p, "matmul"));
 }
 
@@ -979,7 +1029,8 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
 
   const TfQuant xq = actQuant(p, xScale);
   const int x0 = r.actConstant(p, shape(sw), "X0", D, sw, 0x243f6a88u, 1.0f, xScale, qmax, xq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape(sw), p.act, "X", 0, xq);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
 
@@ -1056,12 +1107,12 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
   // axes for the convolutions.
   const int ax = conv1x1 ? r.m.addTensor(0, {2}, TfType::I32, "axes", r.ints({1, 2}))
                          : r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
-  const int out = r.m.addTensor(0, conv1x1 ? std::vector<int32_t>{1, 1, 1, (int32_t)D}
-                                           : std::vector<int32_t>{1, 1, (int32_t)D},
-                                p.act, "out", 0, actQuant(p, cScale));
+  const std::vector<int32_t> outShape = conv1x1 ? std::vector<int32_t>{1, 1, 1, (int32_t)D}
+                                                 : std::vector<int32_t>{1, 1, (int32_t)D};
+  const int out = r.m.addTensor(0, outShape, p.act, "out", 0, actQuant(p, cScale));
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {t, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, outShape, "out")});
   return r.m.build(describe(p, conv1x1 ? "conv1x1 chain" : "matmul chain"));
 }
 
@@ -1074,21 +1125,23 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const float wScale = isInteger(p.weight) ? litertWeightScale(bitsOf(p.weight)) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
-  const int x = r.m.addTensor(0, conv1x1 ? convGrid(M, K) : std::vector<int32_t>{1, (int32_t)M, (int32_t)K},
-                              p.act, "x", 0, aq);
+  int xIn;
+  const int x = addInput(r, p, conv1x1 ? convGrid(M, K) : std::vector<int32_t>{1, (int32_t)M, (int32_t)K}, "x",
+                         aq, xIn);
   const Fill *wf = nullptr;
   const int w = addWeight(r, p, N, K, seedW, &wf, conv1x1);
   const bool bias = fcHasBias(p);
   const int b = conv1x1 ? addConvBias(r, p, N, aScale, wScale) : (bias ? addFcBias(r, N, aScale, wScale) : -1);
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
-  const int y = r.m.addTensor(0, conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N},
-                              p.act, "y", 0, yq);
+  const std::vector<int32_t> yShape =
+      conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N};
+  const int y = r.m.addTensor(0, yShape, p.act, "y", 0, yq);
   if (conv1x1)
     r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {x, w, b}, {y}, conv1x1Options());
   else
     r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
-  r.m.setInputs(0, {x});
-  r.m.setOutputs(0, {y});
+  r.m.setInputs(0, {xIn});
+  r.m.setOutputs(0, {addOutput(r, p, y, yShape, "y")});
   if (weights && wf)
   {
     weights->resize((size_t)(N * K));
@@ -1126,7 +1179,8 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
   const std::vector<int32_t> shape = {1, (int32_t)rows, (int32_t)cols};
   // Magnitude 4: softmax and the normalisation need a spread to work on.
   const int x0 = r.actConstant(p, shape, "X0", rows, cols, 0x6a09e667u, 4.0f);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
   int y = x;
@@ -1186,7 +1240,7 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
   const int out = r.m.addTensor(0, {1, 1, (int32_t)cols}, p.act, "out", 0);
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
+  r.m.setInputs(0, {sIn});
   r.m.setOutputs(0, {out});
   return r.m.build(describe(p, "activation"));
 }
@@ -1289,7 +1343,8 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 
   const int x0 = r.actConstant(p, shape, "X0", spatial * spatial, channels, 0x9e3779b9u, 1.0f,
                                isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0, aq);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
 
@@ -1314,8 +1369,8 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
   const int ax = r.m.addTensor(0, {2}, TfType::I32, "axes", r.ints({1, 2}));
   const int out = r.m.addTensor(0, {1, 1, 1, (int32_t)channels}, p.act, "out", 0, yq);
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, {1, 1, 1, (int32_t)channels}, "out")});
   return r.m.build(describe(p, depthwise ? "depthwise conv" : "conv"));
 }
 
@@ -1410,12 +1465,12 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   // seedWidth products of the seed's [-0.25, 0.25) values sum to the plain
   // input's rms of 0.144; the input is rank seedWidth all the same, which is
   // what moves the magnitudes quoted above and at blockActScale.
-  int s, x;
+  int s, sIn, x;
   if (sw > 0)
   {
     const std::vector<int32_t> seedShape = {1, (int32_t)S, (int32_t)sw};
     const int x0 = r.actConstant(fp, seedShape, "X0", S, sw, 0xa5a5a5a5u, mag);
-    s = addScalar(r, fp);
+    s = addScalar(r, fp, sIn);
     const int xs = tensor(seedShape, "Xs");
     r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {xs}, mulOptions());
     // [d, seedWidth]: FULLY_CONNECTED's [N, K] weight layout.
@@ -1427,7 +1482,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   else
   {
     const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
-    s = addScalar(r, fp);
+    s = addScalar(r, fp, sIn);
     x = tensor(xShape, "X");
     r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
   }
@@ -1670,7 +1725,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
   const int out = tensor({1, 1, (int32_t)d}, "out");
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(fp), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
+  r.m.setInputs(0, {sIn});
   r.m.setOutputs(0, {out});
   return r.m.build(describe(p, decode ? "block decode" : "block prefill"));
 }

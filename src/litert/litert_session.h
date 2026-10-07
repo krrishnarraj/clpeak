@@ -23,9 +23,13 @@ struct LitertSessionConfig
   // half storage and arithmetic; Fp16WithFp32Accum keeps fp32 accumulation
   // in the matmul-class operators.  Ignored elsewhere.
   LiteRtDelegatePrecision gpuPrecision = kLiteRtDelegatePrecisionDefault;
-  // GPU: let quantized FULLY_CONNECTED / CONV_2D run on the GPU as such
-  // rather than being handed back (allow_src_quantized_fc_conv_ops).
-  bool gpuAllowQuantized = false;
+  // GPU: allow the accelerator's 8-bit FULLY_CONNECTED and convolution
+  // kernels (allow_src_quantized_fc_conv_ops); without it the accelerator
+  // computes a quantized layer in float.  LitertForm::gpuInt8Kernels.
+  bool gpuInt8Kernels = false;
+  // GPU: enable_constant_tensors_sharing, which the option above is
+  // documented to need (LitertPlan::gpuShareConstants says for which graphs).
+  bool gpuShareConstants = false;
   // CPU: XNNPACK threads; 0 = every hardware thread.
   int cpuThreads = 0;
   // Record per-operation events so profileOps() can name what ran where.
@@ -90,6 +94,10 @@ public:
 
   // Bytes of output `i` after the last run().
   bool outputBytes(size_t i, std::vector<uint8_t> &out, std::string &error);
+
+  // Set every byte of output `i` to `byte` -- a marker the run should
+  // overwrite, so a check can tell an answer never written from a wrong one.
+  bool fillOutput(size_t i, uint8_t byte, std::string &error);
 
   // One profiled run: the operator events LiteRT recorded, each as
   // "TAG [source]" where the source says whether the interpreter (CPU

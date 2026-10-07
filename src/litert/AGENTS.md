@@ -39,10 +39,10 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
 | `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback), `litertHeldBytes()` (what a session holds: every memory gate's count) |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds (`clpeak::FormRace`) |
-| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm |
-| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size |
-| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels (`clpeak::MultiFormRace`) |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm; and the answer checks behind every rate row (`answerCheck`, per form, with the never-written marker; `resolveIo`; `wrongAnswer`) |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size; a GPU's int8 rows race its 8-bit kernels |
+| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels point by point |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / round trip / d2h through LiteRT's tensor buffers |
@@ -202,35 +202,76 @@ kernel name from one profiled run says which kernel it was.
   kernel's own name (before the first arrow: `int8`, `int4`, XNNPACK's
   QS8/QD8/QP8/QC8W/QB4W packings) and the "float kernel" sentence goes on
   integer rows whose kernel was not one.
-- **A fast kernel can be a wrong one.**  That Mali int8 kernel answered the
-  accuracy test 250% off (2.5 million ppm, where int8 costs ~1%): a wrong
-  answer, not precision.  So the accuracy measurement is memoised per
-  device and format (`LitertPeak::answerCheck`) and every rate test asks
-  `wrongAnswer()` before publishing a format: past `kLitertWrongAnswerPpm`
+- **A fast kernel can be a wrong one, and a right one's answer can fail to
+  come back.**  The accuracy measurement is memoised per device, format and
+  form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
+  `wrongAnswer()` of each form it would time: past `kLitertWrongAnswerPpm`
   (10% RMS), or with NaN or infinity anywhere in the answer, the gemm, conv
-  and block rows for that format are refused with the figure, or the
-  non-finite answer, in the reason, and the accuracy row says it is a wrong
-  answer.  That check runs the accuracy matmul, not the graph a rate is
-  timed on, so gemm, conv and the block also read back the row their own
-  last timed run reduced to: a NaN or an infinity there
-  (`litertNonFiniteReason()`, the ONNX backend's rule) withholds the gemm or
-  conv row, or the block's point, as an `Error`.  Nothing in those graphs
-  can overflow, and integer rows hold no NaN and are not read.
-  The full-integer FULLY_CONNECTED graphs now carry the int32 zero bias a
-  converted model always has (version 5 with keep_num_dims), since a kernel
-  written for the converter's form may be reading a bias that is not there;
-  the next Pixel 7a run says whether that was it, and until then the guard
-  keeps the row honest either way.
-- **`int8_qdq` races two operators** (`clpeak::FormRace`,
+  and block rows leave that form out -- and are refused, with the figure or
+  the non-finite answer in the reason, when no form answers right -- and the
+  accuracy row says it is a wrong answer.  A figure near 2.5 million ppm
+  says little by itself: any full-range int8 output uncorrelated with the
+  product reads that against clpeak's operands (a right one reads 9,300 to
+  10,500).  What says more is the marker: the check fills the output with
+  0x80 bytes before the run, an answer still holding it after two runs was
+  never written, and one that holds it only after the first landed after
+  the run returned (`AnswerCheck::unwritten`; both go into the reason).
+  That check runs the accuracy matmul, not the graph a rate is timed on, so
+  gemm, conv and the block also read back the row their own last timed run
+  reduced to: a NaN or an infinity there (`litertNonFiniteReason()`, the ONNX
+  backend's rule) withholds the gemm or conv row, or the block's point, as
+  an `Error`.  Nothing in those graphs can overflow, and integer rows hold
+  no NaN and are not read.  Convolution rows ask the format's answer as a
+  1x1 convolution -- the conv1x1 row's own graph, and for the 3x3 and the
+  depthwise the nearest there is, so their own kernels go unchecked -- and
+  the block asks it with float inputs and outputs, its own boundary.  The
+  full-integer FULLY_CONNECTED graphs carry the int32 zero bias a converted
+  model always has (version 5 with keep_num_dims), as CONV_2D's must.
+- **An integer graph's inputs and outputs are settled by its answer**
+  (`LitertPeak::resolveIo`): `int8_qdq` and `int16x8` exchange int8 and
+  int16 tensors while the accelerator answers right with them, and
+  otherwise take and return float32, quantized inside the graph by a
+  QUANTIZE and a DEQUANTIZE (`LitertPlan::floatIo`; `addInput` /
+  `addOutput` in `litert_model.cpp`), the form a converter writes by
+  default.  The OpenCL accelerator needs it (below).  Not raced: the
+  boundary is a scalar and one reduced row, so it moves no rate, and a graph
+  that answers right with int8 is left byte for byte as it was.  On Metal
+  the float form reads 10526 ppm against 10430, the boundary's conversions
+  done by the GPU in fp16 rather than by the delegate on the host.
+- **`int8_qdq` races its forms** (`clpeak::MultiFormRace`,
   `include/common/form_race.h`): its chain is timed with the layers written
   as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as many positions as
-  a layer is wide (`litertMatMulChainModel(..., conv1x1)`), and the row
-  reports the faster, naming it and what the other read -- an NPU compiler's
-  convolution path can be its faster int8 one (`gemm.cpp` has the ONNX
-  backend's numbers).  Each form's answer is checked on its own
-  (`answerCheck(..., conv1x1)`): a wrong one leaves the race rather than
-  withholding the row, and the accuracy row reads FULLY_CONNECTED's answer
-  with the convolution's beside it.
+  a layer is wide (`litertMatMulChainModel(..., conv1x1)`) -- an NPU
+  compiler's convolution path can be its faster int8 one (`gemm.cpp` has
+  the ONNX backend's numbers) -- and on a GPU each with the accelerator's
+  8-bit kernels allowed and not (`LitertForm::gpuInt8Kernels`,
+  `allow_src_quantized_fc_conv_ops`, without which ML Drift adds
+  `kDisallow8bitConvs`): four forms, the fastest reported and named with
+  what the others read.  `int8_weight`, dynamic-range quantization -- what
+  those kernels were written for -- races the two policies on a GPU too, in
+  gemm, conv and the block.  The policy also sends
+  `enable_constant_tensors_sharing`, which the option's documentation
+  requires, but only for `int8_weight` (`LitertPlan::gpuShareConstants`):
+  sharing takes int8, int4 and int2 weights alone, and the int32 bias every
+  full-integer FULLY_CONNECTED and CONV_2D carries fails the whole delegate
+  ("Only quantized int8, int4, and int2 weights are supported for sharing",
+  Metal).  The Metal accelerator has no 8-bit kernels: every int8_qdq form
+  runs `convolution1x1(conv_wave_matrix)` and ties, at 10430 ppm; for
+  int8_weight the sharing converts the weights on the GPU and runs a
+  generic `convolution(conv_wave_matrix)` at the same rate, ready five times
+  sooner, which wins the tie.  A Pixel 7a's Mali ran int8 at 3.5x its fp16
+  rate with the kernels allowed (`convolution_int8(conv_wave_matrix_mali)`),
+  behind the OpenCL fault below, so whether that kernel is right is the
+  next Mali run's to say.  Ties are weighed by what a form took to be ready
+  to run, its first inference included: sharing moves the weight
+  conversion out of creation and into that inference.  A convolution row's
+  race settles only on sizes where every form's pass took eight times its
+  first size's (the kernels are for large layers, and at 64 by 64 every
+  form ties on the cost of asking), and the block races each point in full.
+  Each form's answer is checked on its own: a wrong one leaves the race
+  rather than withholding the row, and the accuracy row reads
+  FULLY_CONNECTED without the 8-bit kernels, with what the other forms read
+  beside it.
 - `int16x8` has no XNNPACK kernel: the CPU row is the runtime's reference
   kernel, three orders of magnitude slower, which is the honest number for
   a format that only an NPU implements -- and, sixteen multiplies to a
@@ -332,6 +373,23 @@ is a one-line change:
 Verify a new format or accelerator path under guard malloc
 (`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) before trusting a run
 that merely completes: the int4 overrun completed several runs first.
+
+**One more fault returns where those crash: the OpenCL accelerator never
+converts an integer graph's inputs and outputs.**  ML Drift builds a
+quantized model's GPU graph on float staging tensors (TFLite's
+`quant_conversion_map_`), and the Metal and WebGPU `Invoke`s dequantize the
+int8 inputs into them and quantize the outputs back (`DequantizeInputs` /
+`QuantizeOutputs`); the OpenCL one, `ml_drift_delegate/delegate/
+delegate_opencl.cc`, calls neither -- in v2.2.0 and on main as of
+2026-10-07.  So with int8 inputs and outputs the GPU computes from a staging
+tensor nothing wrote, and the output keeps whatever its buffer held: an
+Adreno 750 and a Mali-G710 both read 2.5 million ppm.  The one sign LiteRT
+gives is `Failed to get buffer requirements for tensor` for each int8 input
+and output (`compiled_model.cc`: the delegate registered its staging
+tensors, so the model's own fall back to host memory), which Metal prints
+too and answers right.  `resolveIo` gives those graphs float inputs and
+outputs; the int8 check still runs first everywhere, so a release whose
+OpenCL `Invoke` converts goes back to int8 without a change here.
 
 ## What the runtime says reaches the row
 
@@ -578,9 +636,11 @@ budgets.
   logs LiteRT's own `WARNING: [compiled_model.cc:1357] Failed to get
   buffer requirements for tensor` for the gemm and conv sessions' scalar
   and output tensors -- upstream falling back to host-memory requirements
-  when its buffer context has none for a tensor of a fully delegated model,
-  benign, absent on macOS with the same session code -- and those lines
-  reach the run log at LiteRT's severity, as any of its warnings do.
+  when its buffer context has none for a tensor of a fully delegated model.
+  macOS prints it for the int8 sessions' inputs and outputs, the staging
+  path above, and answers right; whether the simulator's lines were more
+  than those is unchecked.  Those lines reach the run log at LiteRT's
+  severity, as any of its warnings do.
 
 ## When You Change This Directory
 
