@@ -29,17 +29,50 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
   per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
   107 MB for every slice).  The NPU libraries are not part of that:
-  `tools/fetch_android_npu.sh qualcomm|google_tensor|all` stages them under
-  `android/app/src/main/jniLibs/` (git-ignored) before a build that should
-  reach an NPU, and the build packages whatever is staged -- LiteRT's
-  vendor shims (with several vendors staged the app picks the SoC's at
-  launch) and, for Qualcomm, the QNN runtime both backends load and ONNX
-  Runtime's QNN plugin (about 70 MB more).  Staging any switches the build
-  to extracting native libraries at install (LiteRT finds the shim by
-  listing a directory, which an APK's internal `lib/` is not), and Gradle
-  refuses an incomplete Qualcomm set.  MediaTek's and Google Tensor's
-  runtimes are system libraries on the device.  See `src/litert/AGENTS.md`,
-  Packaging.
+  `tools/fetch_android_npu.sh` stages every vendor's into the NPU modules
+  under `android/npu/` (git-ignored `jniLibs/`) before a build that should
+  reach an NPU, and the build packages each module staged -- LiteRT's vendor shims (with several vendors present the app
+  picks the SoC's at launch) and, for Qualcomm, the QNN runtime both
+  backends load and ONNX Runtime's QNN plugin.  Staging any switches the
+  build to extracting native libraries at install (LiteRT finds the shim
+  by listing a directory, which an APK's internal `lib/` is not), and
+  Gradle refuses an incomplete Qualcomm set or libraries an older script
+  left in the base.  MediaTek's and Google Tensor's runtimes are system
+  libraries on the device.  See NPU delivery below and
+  `src/litert/AGENTS.md`, Packaging.
+- NPU delivery (Android, Play): each NPU module is a dynamic feature
+  module -- `android/npu/<module>/AndroidManifest.xml` names its device
+  groups, `android/npu/module.gradle.kts` builds them all, and
+  `settings.gradle.kts` includes those staged -- that Play installs with
+  the app only on the chipsets of its groups, the layout of LiteRT's own
+  NPU zip: `qualcomm_runtime` (the QNN runtime and both stacks' Qualcomm
+  libraries) on every whitelisted Snapdragon, `qualcomm_runtime_vNN` (one
+  Hexagon generation's Skel/Stub) on that generation's, and
+  `google_tensor_runtime` on Tensor G3–G6; any other phone downloads
+  none.  The whitelist is `android/app/device_targeting_configuration.xml`.
+  Play matches the exact pair the phone reports (`ro.soc.manufacturer`,
+  `ro.soc.model`) and has no vendor-wide selector, so a chipset missing
+  there gets no NPU libraries and lists no NPU, silently.  **Keep the
+  whitelist current, from time to time as new chipsets reach phones and at
+  every LiteRT bump**: diff it against LiteRT's
+  `litert/vendors/qualcomm/supported_soc.csv` (chipset → Hexagon
+  generation) and the Tensor models in
+  `litert/python/aot/vendors/google_tensor/target.py`, at the tag
+  `third_party/litert/README.md` pins, and add each new chipset to its
+  generation's group under both "QTI" and "Qualcomm" (Play cannot tell
+  them apart).  A chipset with no published generation stays out until
+  one is published (SM8735, SM7750 and SM7635 at LiteRT 2.2.0) -- the
+  wrong Skel loads nothing.  A new generation needs a module directory and
+  a group of its own; `fetch_android_npu.sh` stops on a Skel with no
+  module.  bundletool refuses a bundle whose modules carry native
+  libraries for different ABI sets, so each module also builds an empty
+  library for every ABI of the base (`android/npu/stub/`), keeping the
+  32-bit and x86_64 splits; and it decides extraction per module, so
+  `module.gradle.kts` copies the base's `useLegacyPackaging`.  Device
+  targeting is an experimental AGP API
+  (`android.experimental.enableDeviceTargetingConfigApi`).  A universal APK
+  built from the bundle (bundletool `--mode=universal`) fuses every module;
+  `flutter build apk` carries none.
 - iOS: `tools/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
@@ -271,3 +304,5 @@ the platform dirs:
   `src/common/options.cpp`.
 - versionCode continues the retired native app's sequence (pubspec
   `version: x.y.z+N`).
+- New Snapdragon or Tensor chipsets in phones, or a LiteRT bump → update
+  the NPU whitelist (NPU delivery, above) before the next Play release.

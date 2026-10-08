@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The chipsets Google Play delivers the NPU modules to (../npu/): a module
+  installs with the app only on a phone in one of its device groups, so a
+  chipset missing here gets no NPU libraries and lists no NPU.  Play matches
+  the exact pair the phone reports (ro.soc.manufacturer, ro.soc.model, API
+  31+): no wildcard, no vendor-only selector.  Keep it current, as
+  app/AGENTS.md (NPU delivery) says.
+
+  Qualcomm: one group per Hexagon generation, which picks the Skel/Stub
+  module (qualcomm_runtime_vNN) beside the shared qualcomm_runtime.  The
+  generations are LiteRT's own (litert/vendors/qualcomm/supported_soc.csv,
+  v2.2.0): every row at v68 or later, less automotive (SA*) parts; v65/v66
+  rows have no HTP.  SC8380XP is Snapdragon X Elite, in the Snapdragon
+  Googlebooks (Android laptops).  Each chipset is listed under both
+  manufacturer names, as LiteRT's AI Pack export does: Play cannot tell
+  "Qualcomm" from "QTI".
+
+  Google Tensor: G3 and later, the chipsets LiteRT's Tensor module serves
+  (litert/python/aot/vendors/google_tensor/target.py).
+-->
+<config:device-targeting-config xmlns:config="http://schemas.android.com/apk/config">
+
+    <config:device-group name="qualcomm_v68">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="QCM6490"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7315"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7325"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7350"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8350"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8350P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCM6490"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7315"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7325"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7350"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8350"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8350P"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="qualcomm_v69">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="SM7425"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7450"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7475"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8450"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8475"/>
+            <config:system-on-chip manufacturer="QTI" model="SXR2230P"/>
+            <config:system-on-chip manufacturer="QTI" model="SXR2250P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7425"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7450"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7475"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8450"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8475"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SXR2230P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SXR2250P"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="qualcomm_v73">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="QCM6690"/>
+            <config:system-on-chip manufacturer="QTI" model="QCM8550LA"/>
+            <config:system-on-chip manufacturer="QTI" model="QCM8550LE"/>
+            <config:system-on-chip manufacturer="QTI" model="QCS6690"/>
+            <config:system-on-chip manufacturer="QTI" model="QCS9075"/>
+            <config:system-on-chip manufacturer="QTI" model="QCS9100"/>
+            <config:system-on-chip manufacturer="QTI" model="SAR2130P"/>
+            <config:system-on-chip manufacturer="QTI" model="SC8380XP"/>
+            <config:system-on-chip manufacturer="QTI" model="SM6450"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7435"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7550"/>
+            <config:system-on-chip manufacturer="QTI" model="SM7675"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8550"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8635"/>
+            <config:system-on-chip manufacturer="QTI" model="SSG2115P"/>
+            <config:system-on-chip manufacturer="QTI" model="SSG2125P"/>
+            <config:system-on-chip manufacturer="QTI" model="SXR1230P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCM6690"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCM8550LA"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCM8550LE"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS6690"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS9075"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS9100"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SAR2130P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SC8380XP"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM6450"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7435"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7550"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM7675"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8550"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8635"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SSG2115P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SSG2125P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SXR1230P"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="qualcomm_v75">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="QCS8275"/>
+            <config:system-on-chip manufacturer="QTI" model="QCS8300"/>
+            <config:system-on-chip manufacturer="QTI" model="QCS8625"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8650"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS8275"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS8300"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="QCS8625"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8650"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="qualcomm_v79">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="SM8750"/>
+            <config:system-on-chip manufacturer="QTI" model="SXR2330P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8750"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SXR2330P"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="qualcomm_v81">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="QTI" model="SAR2230P"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8845"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8845P"/>
+            <config:system-on-chip manufacturer="QTI" model="SM8850"/>
+            <config:system-on-chip manufacturer="QTI" model="SW6100"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SAR2230P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8845"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8845P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SM8850"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SW6100"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="google_tensor">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="Google" model="Tensor G3"/>
+            <config:system-on-chip manufacturer="Google" model="Tensor G4"/>
+            <config:system-on-chip manufacturer="Google" model="Tensor G5"/>
+            <config:system-on-chip manufacturer="Google" model="Tensor G6"/>
+        </config:device-selector>
+    </config:device-group>
+
+</config:device-targeting-config>

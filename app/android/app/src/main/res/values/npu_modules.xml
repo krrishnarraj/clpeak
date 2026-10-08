@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Titles of the NPU runtime modules (app/android/npu/): Play names a
+     module by its title, which must live in the base. -->
+<resources>
+    <string name="npu_qualcomm_runtime">Qualcomm NPU runtime</string>
+    <string name="npu_qualcomm_runtime_v68">Qualcomm NPU runtime (Hexagon v68)</string>
+    <string name="npu_qualcomm_runtime_v69">Qualcomm NPU runtime (Hexagon v69)</string>
+    <string name="npu_qualcomm_runtime_v73">Qualcomm NPU runtime (Hexagon v73)</string>
+    <string name="npu_qualcomm_runtime_v75">Qualcomm NPU runtime (Hexagon v75)</string>
+    <string name="npu_qualcomm_runtime_v79">Qualcomm NPU runtime (Hexagon v79)</string>
+    <string name="npu_qualcomm_runtime_v81">Qualcomm NPU runtime (Hexagon v81)</string>
+    <string name="npu_google_tensor_runtime">Google Tensor NPU runtime</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing in the base references the NPU modules' titles; only their
+     manifests do, so the release resource shrinker keeps them by name. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/npu_*" />

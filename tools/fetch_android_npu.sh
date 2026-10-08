@@ -1,7 +1,7 @@
 #!/bin/sh
 # fetch_android_npu.sh — stage the NPU libraries the Android app packages.
 #
-#   tools/fetch_android_npu.sh qualcomm|google_tensor|all [tag]
+#   tools/fetch_android_npu.sh [tag]
 #                                       tag: the LiteRT release whose shims
 #                                       are staged, by default the one
 #                                       pinned in third_party/litert/README.md
@@ -9,10 +9,13 @@
 # Two backends reach an Android NPU -- LiteRT through vendor shims, ONNX
 # Runtime through Qualcomm's plugin execution provider -- and neither's
 # vendor libraries come with the runtimes the Gradle build packages (the
-# onnxruntime-android and LiteRT AARs).  This script stages them in
-# app/android/app/src/main/jniLibs/arm64-v8a/ (ignored by git), replacing
-# whatever was staged before, and the build packages what it finds there:
-# nothing staged, no NPU libraries, which is the CI APK's case.
+# onnxruntime-android and LiteRT AARs).  This script stages every vendor's
+# into the NPU runtime modules, app/android/npu/<module>/jniLibs/arm64-v8a/ (ignored
+# by git), replacing whatever was staged before, and the build packages
+# each module it finds staged as a Play feature module that installs with
+# the app only on the chipsets of its device groups
+# (app/android/app/device_targeting_configuration.xml): nothing staged, no
+# NPU libraries, which is the CI APK's case.
 #
 # LiteRT reaches an NPU through a vendor "dispatch" library
 # (libLiteRtDispatch_<Vendor>.so) and, for on-device compilation, a compiler
@@ -21,8 +24,9 @@
 # Maven, laid out as Play feature modules -- one per Hexagon generation for
 # Qualcomm, one for Google Tensor (G3 and later).
 #
-# `all` stages every vendor, for the one APK that serves a Pixel and a
-# Snapdragon alike.  LiteRT loads the first libLiteRtDispatch_* it lists in
+# Every vendor's, for the one bundle that serves a Pixel and a Snapdragon
+# alike: Play gives each phone its own vendor's modules, and a universal
+# APK built from the bundle carries them all.  For that APK: LiteRT loads the first libLiteRtDispatch_* it lists in
 # its dispatch directory and warns about the rest (litert_dispatch.cc), so
 # the app does not hand it the lib dir then: at launch the LiteRT backend
 # picks the vendor of this SoC (ro.soc.manufacturer) and links that
@@ -35,8 +39,8 @@
 # The vendor runtime the shims drive is not in that zip.  MediaTek's and
 # Google Tensor's live on the device as system libraries.  Qualcomm's -- the
 # QNN libraries of its QAIRT SDK -- must be bundled by the app, and serves
-# both backends, so `qualcomm` stages three things beside the shims, all of
-# one QNN build:
+# both backends, so the script stages three things beside its shims, all
+# of one QNN build:
 #  - com.qualcomm.qti:qnn-runtime from Maven Central: libQnnHtp,
 #    libQnnSystem, libQnnHtpPrepare and every Hexagon generation's
 #    Skel/Stub, 67 MB compressed;
@@ -53,35 +57,35 @@
 #  - com.qualcomm.qti:onnxruntime-android-qnn from Maven Central: one
 #    libonnxruntime_providers_qnn.so, which the app registers on the
 #    onnxruntime-android it packages (SettingsService.effectiveOnnxEpLibraries).
-# The build refuses a Qualcomm set with any of the QNN libraries missing:
-# it would install, run and list no Hexagon NPU.  A Play release could
-# instead ship one feature module per Hexagon generation, delivered by
-# device group, which is the layout Google's zip comes in (its
-# fetch_qualcomm_library.sh fills them from the same SDK).
+# Each Hexagon generation's Skel/Stub pair goes into that generation's
+# module (qualcomm_runtime_vNN), the layout Google's zip comes in, and the
+# rest into qualcomm_runtime, which every Snapdragon on the whitelist gets.
+# A generation the runtime brings with no module for it stops the script
+# before anything is replaced.  The build refuses a Qualcomm set with any
+# of the QNN libraries missing: it would install, run and list no Hexagon
+# NPU.
 #
-# Uses curl and unzip from the base system, and python3 for Qualcomm.
+# Uses curl and unzip from the base system, and python3.
 set -eu
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 readme=$here/third_party/litert/README.md
-vendor=${1:-}
-case "$vendor" in
-    qualcomm)      vendors=qualcomm ;;
-    google_tensor) vendors=google_tensor ;;
-    all)           vendors="qualcomm google_tensor" ;;
+case "${1:-}" in
+    ''|v*) ;;
     *)
-        echo "usage: tools/fetch_android_npu.sh qualcomm|google_tensor|all [tag]" >&2
+        echo "usage: tools/fetch_android_npu.sh [tag]   (a LiteRT release tag, e.g. v2.2.0)" >&2
         exit 2 ;;
 esac
+vendors="qualcomm google_tensor"
 module_of() {
     case "$1" in
         qualcomm)      echo qualcomm_runtime_v75 ;;   # every generation carries the same shims
         google_tensor) echo google_tensor_runtime ;;
     esac
 }
-tag=${2:-$(sed -n 's/^- \*\*Tag:\*\* `\([^`]*\)`.*/\1/p' "$readme")}
+tag=${1:-$(sed -n 's/^- \*\*Tag:\*\* `\([^`]*\)`.*/\1/p' "$readme")}
 repo=https://github.com/google-ai-edge/LiteRT
-dest=$here/app/android/app/src/main/jniLibs/arm64-v8a
+npu=$here/app/android/npu
 
 # Qualcomm's set, one QNN build for every library in the APK: the Maven
 # runtime, the QAIRT SDK it was built from (2.50.0 carries
@@ -163,52 +167,77 @@ fi
 
 # Qualcomm's runtime before anything is replaced: a staging that would
 # leave the shims without it is no staging at all.
-case " $vendors " in *" qualcomm "*)
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo "fetch_android_npu.sh: python3 is needed to read $qairt_libs out of the QAIRT $qairt SDK" >&2
-        exit 1
-    fi
-    mkdir "$staging/qnn"
-    if ! fetch_aar qnn-runtime "$qnn" "$staging/qnn"; then
-        echo "fetch_android_npu.sh: cannot fetch com.qualcomm.qti:qnn-runtime:$qnn" >&2
-        exit 1
-    fi
-    if ! fetch_qairt "$staging/qnn" $qairt_libs; then
-        echo "fetch_android_npu.sh: cannot fetch $qairt_libs from the QAIRT $qairt SDK ($qairt_url)" >&2
-        exit 1
-    fi
-    if ! fetch_aar onnxruntime-android-qnn "$ort_qnn" "$staging/qnn"; then
-        echo "fetch_android_npu.sh: cannot fetch com.qualcomm.qti:onnxruntime-android-qnn:$ort_qnn" >&2
-        exit 1
-    fi
-    ;;
-esac
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "fetch_android_npu.sh: python3 is needed to read $qairt_libs out of the QAIRT $qairt SDK" >&2
+    exit 1
+fi
+mkdir "$staging/qnn"
+if ! fetch_aar qnn-runtime "$qnn" "$staging/qnn"; then
+    echo "fetch_android_npu.sh: cannot fetch com.qualcomm.qti:qnn-runtime:$qnn" >&2
+    exit 1
+fi
+if ! fetch_qairt "$staging/qnn" $qairt_libs; then
+    echo "fetch_android_npu.sh: cannot fetch $qairt_libs from the QAIRT $qairt SDK ($qairt_url)" >&2
+    exit 1
+fi
+if ! fetch_aar onnxruntime-android-qnn "$ort_qnn" "$staging/qnn"; then
+    echo "fetch_android_npu.sh: cannot fetch com.qualcomm.qti:onnxruntime-android-qnn:$ort_qnn" >&2
+    exit 1
+fi
 
-# Whatever was staged before goes: the directory holds nothing else.
-rm -rf "$dest"
-mkdir -p "$dest"
+# place <library> <module> <origin>: one library into its module's set,
+# gathered under $staging/out before anything staged is replaced.
+out=$staging/out
 n=0
+place() {
+    if [ ! -f "$npu/$2/AndroidManifest.xml" ]; then
+        echo "fetch_android_npu.sh: $(basename "$1") belongs in app/android/npu/$2, which does" \
+            "not exist: add the module and its device group (app/AGENTS.md, NPU delivery)" >&2
+        exit 1
+    fi
+    mkdir -p "$out/$2"
+    cp "$1" "$out/$2/"
+    n=$((n + 1))
+    echo "staged $(basename "$1") into $2 ($3)"
+}
 for v in $vendors; do
     module=$(module_of "$v")
+    case "$v" in
+        qualcomm)      into=qualcomm_runtime ;;
+        google_tensor) into=google_tensor_runtime ;;
+    esac
     for so in $(find "$staging/$module" -path '*/jni/arm64-v8a/libLiteRt*.so' | sort); do
-        base=$(basename "$so")
-        cp "$so" "$dest/$base"
-        n=$((n + 1))
-        echo "staged $base (LiteRT $tag)"
+        place "$so" "$into" "LiteRT $tag"
     done
     if [ "$v" = qualcomm ]; then
         for so in "$staging"/qnn/*.so; do
             base=$(basename "$so")
-            cp "$so" "$dest/$base"
-            n=$((n + 1))
             case "$base" in
                 libonnxruntime_providers_qnn.so) from="onnxruntime-android-qnn $ort_qnn" ;;
                 libQnnIr.so|libQnnSaver.so)      from="QAIRT $qairt" ;;
                 *)                               from="qnn-runtime $qnn" ;;
             esac
-            echo "staged $base ($from)"
+            case "$base" in
+                libQnnHtpV[0-9]*Skel.so|libQnnHtpV[0-9]*Stub.so)
+                    gen=$(echo "$base" | sed 's/^libQnnHtpV\([0-9]*\).*/\1/')
+                    place "$so" "qualcomm_runtime_v$gen" "$from" ;;
+                *)
+                    place "$so" qualcomm_runtime "$from" ;;
+            esac
         done
     fi
 done
-echo "Staged $n libraries ($vendors) into ${dest#$here/};"
+
+# Whatever was staged before goes: in the modules, and in the base, where
+# an older version of this script staged everything for every phone.
+rm -rf "$here/app/android/app/src/main/jniLibs"
+for d in "$npu"/*/; do
+    rm -rf "${d}jniLibs"
+done
+for d in "$out"/*/; do
+    m=$(basename "$d")
+    mkdir -p "$npu/$m/jniLibs/arm64-v8a"
+    cp "$d"*.so "$npu/$m/jniLibs/arm64-v8a/"
+done
+echo "Staged $n libraries ($vendors) into the NPU modules in app/android/npu;"
 echo "the next Android build packages them."

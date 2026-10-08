@@ -55,8 +55,8 @@ class SettingsService extends ChangeNotifier {
   List<OnnxEpLibrary> get onnxEpLibraries => List.unmodifiable(_onnxEpLibraries);
 
   /// The saved libraries plus the platform's implicit ones: on Android the
-  /// Qualcomm QNN plugin the APK may carry (`tools/fetch_android_npu.sh
-  /// qualcomm` stages it beside the QNN runtime), registered by its bare
+  /// Qualcomm QNN plugin the APK may carry (`tools/fetch_android_npu.sh`
+  /// stages it beside the QNN runtime), registered by its bare
   /// soname.  The native side registers it only when the file is there; a
   /// build without it says "not packaged with this app" in the verbose
   /// notes.  This is what the native side gets.

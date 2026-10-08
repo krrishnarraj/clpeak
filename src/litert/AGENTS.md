@@ -541,11 +541,15 @@ budgets.
   `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
   entries merge into ours.  NPU dispatch and compiler-plugin shims come from
   the release's `litert_npu_runtime_libraries_jit.zip` via
-  `tools/fetch_android_npu.sh qualcomm|google_tensor|all` into
-  `src/main/jniLibs/` (git-ignored), and the build packages whatever is
-  staged there -- there is no other switch.  LiteRT lists the dispatch
+  `tools/fetch_android_npu.sh` (every vendor's) into the NPU modules
+  under `app/android/npu/`, and the build packages whatever is staged
+  there -- there is no other switch.  Play installs a module only on
+  the chipsets of its device groups (`app/AGENTS.md`, NPU delivery), so a
+  Play install carries one vendor's shims; every module lands in the app's
+  one lib dir.  LiteRT lists the dispatch
   directory and loads the first `libLiteRtDispatch_*` it finds
-  (`litert_dispatch.cc`, still so on main), so with `all` staged the lib
+  (`litert_dispatch.cc`, still so on main), so in a universal APK, which
+  carries every vendor's, the lib
   dir is not what it is handed: `litertStageNpuVendor()`
   (`litert_peak.cpp`) reads `ro.soc.manufacturer` ("Google", "QTI",
   "Mediatek", "Samsung"), links the
@@ -593,9 +597,7 @@ budgets.
   LiteRT points at the dispatch directory (prepending when the variable is
   already set); with
   the shims in a directory of their own, `litertStageNpuVendor()` sets it
-  to the lib dir first.  A Play release would carry the zip's
-  per-generation dynamic feature modules instead, delivered by device
-  group.  NPU needs API 31+ and arm64.  Unverified on Snapdragon and
+  to the lib dir first.  NPU needs API 31+ and arm64.  Unverified on Snapdragon and
   Tensor silicon: the APK builds and packages (137 MB with QNN and both
   vendors' shims), every staged shim's DT_NEEDED resolves to a library in
   it or the platform's, and on an arm64 emulator the Qualcomm plugin loads
