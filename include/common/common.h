@@ -102,10 +102,15 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // swizzle too.  Which block size wins is the swizzle granularity and the two
 // disagree -- Mali climbs to 16x16, Apple peaks at 2x2 -- so both ends run.
 //
-// The other five backends carry the two 1D shapes alone.  On an M1 Pro that
-// leaves OpenCL at 164 and Metal at 160 where Vulkan's blocked walk reaches
-// 176, so porting it is worth real bandwidth on Apple; Mali's OpenCL images are
-// evidently linear, since they sit at the roof on the row-major walk already.
+// OpenCL and oneAPI race the same four shapes, all of them divide-free: the
+// extent and the block are powers of two, so every coordinate is a shift and
+// a mask, where a divide by a run-time value is a long emulated sequence on a
+// GPU without an integer divider -- Intel's among them.  With the 1D shapes
+// alone, and OpenCL dividing three times a fetch, an Arc A380 read about half
+// its Vulkan rate through both.  CUDA, ROCm and Metal still carry the two 1D
+// shapes alone: on an M1 Pro that leaves Metal at 160 where Vulkan's blocked
+// walk reaches 176.  Mali's OpenCL images are evidently linear, since they sat
+// at the roof on the row-major walk already.
 //
 // Unlike the MAD chains, no walk can flatter the result and no ratio guard is
 // needed: every shape reads every pixel exactly once, so the byte count is

@@ -3,10 +3,21 @@
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
 #include <algorithm>
-#include <type_traits>
 #include <sycl/sycl.hpp>
 
-template <int WALK> class image_bw_kernel;
+template <int TW, int TH, bool TRANSPOSE> class image_bw_kernel;
+
+// One walk shape: TW x TH blocks walked row-major, row-major within a block
+// (TW = the width with TH = 1 is the plain row-major sweep), or with
+// TRANSPOSE the whole image transposed.  The Vulkan backend's shapes -- see
+// the image-bandwidth block in include/common/common.h.
+template <int TW, int TH, bool TRANSPOSE> struct ImageWalk {};
+template <typename T> struct WalkOf;
+template <int TW, int TH, bool TRANSPOSE> struct WalkOf<ImageWalk<TW, TH, TRANSPOSE>>
+{
+  static constexpr int tw = TW, th = TH;
+  static constexpr bool transpose = TRANSPOSE;
+};
 
 int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -30,7 +41,10 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     return 0;
   }
 
-  const int imgW = 4096, imgH = 4096;
+  // Compile-time extents, so every coordinate in the walk is a shift and a
+  // mask: a divide by a run-time value is a long emulated sequence on GPUs
+  // without an integer divider, Intel's among them.
+  constexpr int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
   uint64_t groups = ((uint64_t)imgW * (uint64_t)imgH) / IMAGE_FETCH_PER_WI / blockSize;
   if (groups == 0) groups = 1;
@@ -59,48 +73,50 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
                        sycl::image_channel_type::fp32,
                        sycl::range<2>(imgW, imgH));
 
-    // Two walk orders are raced and the faster reported -- why, and why
-    // neither can flatter the result: the image-bandwidth block in
-    // include/common/common.h.
-    // walk == 0 decomposes the linear index row-major (x fastest); walk == 1
-    // transposes it.  Both cover every pixel exactly once.
-    // Generic lambda + integral_constant rather than a templated lambda: the
-    // project builds as C++17, where the latter is not available.
+    // The walk shapes are raced and the fastest reported -- why, and why
+    // none can flatter the result: the image-bandwidth block in
+    // include/common/common.h.  Every shape covers every pixel exactly once.
+    // Generic lambda over an ImageWalk tag rather than a templated lambda:
+    // the project builds as C++17, where the latter is not available.
     auto submit = [&](auto walkTag) {
-      constexpr int WALK = decltype(walkTag)::value;
-      return [&](sycl::queue &q) -> sycl::event {
+      return [&, walkTag](sycl::queue &q) -> sycl::event {
         return q.submit([&](sycl::handler &h) {
           // Unsampled image accessor: read coordinates as int2, get a float4 back.
           sycl::accessor<sycl::float4, 2, sycl::access::mode::read,
                          sycl::access::target::image>
               acc(img, h);
 
-          h.parallel_for<image_bw_kernel<WALK>>(
+          h.parallel_for<image_bw_kernel<WalkOf<decltype(walkTag)>::tw,
+                                         WalkOf<decltype(walkTag)>::th,
+                                         WalkOf<decltype(walkTag)>::transpose>>(
             sycl::nd_range<1>(globalThreads, blockSize),
             [=](sycl::nd_item<1> it) {
+              using W = WalkOf<decltype(walkTag)>;
               uint32_t gid   = (uint32_t)it.get_global_id(0);
               uint32_t gsize = (uint32_t)globalThreads;
-              uint32_t total = (uint32_t)imgW * (uint32_t)imgH;
               // Stride the IMAGE_FETCH_PER_WI samples by the global size, so
-              // adjacent work-items touch adjacent pixels.  This is the pattern
-              // every other backend uses; reading a contiguous run per work-item
-              // instead made this row incomparable with them.  The wrap keeps
-              // all lanes in-bounds when the grid does not divide the image.
+              // adjacent work-items touch adjacent pixels of the walk.  This is
+              // the pattern every other backend uses; reading a contiguous run
+              // per work-item instead made this row incomparable with them.
+              // No wrap: globalThreads * IMAGE_FETCH_PER_WI <= imgW * imgH.
               sycl::float4 sum{0.0f, 0.0f, 0.0f, 0.0f};
               #pragma unroll
               for (int i = 0; i < (int)IMAGE_FETCH_PER_WI; i++)
               {
-                uint32_t pixel = (gid + (uint32_t)i * gsize) % total;
+                uint32_t pixel = gid + (uint32_t)i * gsize;
                 int x, y;
-                if constexpr (WALK == 0)
-                {
-                  x = (int)(pixel % (uint32_t)imgW);
-                  y = (int)(pixel / (uint32_t)imgW);
-                }
-                else
+                if constexpr (W::transpose)
                 {
                   y = (int)(pixel % (uint32_t)imgH);
                   x = (int)(pixel / (uint32_t)imgH);
+                }
+                else
+                {
+                  constexpr uint32_t tilesX = (uint32_t)(imgW / W::tw);
+                  constexpr uint32_t perTile = (uint32_t)(W::tw * W::th);
+                  uint32_t t = pixel / perTile, in = pixel % perTile;
+                  x = (int)((t % tilesX) * W::tw + in % W::tw);
+                  y = (int)((t / tilesX) * W::th + in / W::tw);
                 }
                 sum += acc.read(sycl::int2{x, y});
               }
@@ -111,20 +127,23 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     };
 
     unsigned int forced = forceIters ? specifiedIters : 0;
-    float rowUs = runKernel(dev, submit(std::integral_constant<int, 0>{}),
-                            cfg.targetTimeUs, forced);
-    float colUs = runKernel(dev, submit(std::integral_constant<int, 1>{}),
-                            cfg.targetTimeUs, forced);
     const uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(float) * globalThreads;
-    float rowBps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
-    float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
-    CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
-                rowBps, colBps);
+    float best = 0.0f;
+    auto timeWalk = [&](auto walkTag, const char *label) {
+      float us = runKernel(dev, submit(walkTag), cfg.targetTimeUs, forced);
+      float bps = us > 0.0f ? (float)bytes / us * 1e6f : 0.0f;
+      CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", label, bps);
+      best = std::max(best, bps);
+    };
+    timeWalk(ImageWalk<imgW, 1, false>{}, "row");
+    timeWalk(ImageWalk<imgW, 1, true>{}, "col");
+    timeWalk(ImageWalk<2, 2, false>{}, "tile2x2");
+    timeWalk(ImageWalk<16, 16, false>{}, "tile16x16");
 
-    if (rowBps <= 0.0f && colBps <= 0.0f)
+    if (best <= 0.0f)
       test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
     else
-      test.emit("float4", std::max(rowBps, colBps), fetchNote);
+      test.emit("float4", best, fetchNote);
   }
   catch (const sycl::exception &e)
   {
