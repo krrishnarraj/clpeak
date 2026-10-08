@@ -267,16 +267,18 @@ inline const char *litertRateUnit(const LitertPlan &p, const std::string &kernel
 }
 
 // The clause a row's kernel gets (appended to "..., as `kernel`") when it
-// ran other arithmetic than its format's graph asks for.
+// ran other arithmetic than its format's graph asks for.  A full-integer
+// row on a float kernel -- one between quantize and dequantize passes -- is
+// the accelerator's float rate with the format's traffic savings, still
+// counted in ops; a weight-only row's int8 kernel quantizes the activations
+// as it goes (litertRateUnit).
 inline std::string litertKernelNote(const LitertPlan &p, const std::string &kernel, LitertAccel accel)
 {
   const LitertArithmetic a = litertKernelArithmetic(kernel, accel);
   if (p.integerOps && a == LitertArithmetic::Float)
-    return " -- a float kernel between quantize and dequantize passes, not integer "
-           "arithmetic, so this is the accelerator's float rate with the format's "
-           "traffic savings";
+    return ", a float kernel";
   if (!p.integerOps && litertIntegerWeights(p) && a == LitertArithmetic::Integer)
-    return " -- int8 multiplies on activations it quantizes as it goes, so counted in ops";
+    return ", which multiplies in int8";
   return std::string();
 }
 

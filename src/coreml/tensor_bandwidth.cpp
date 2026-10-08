@@ -38,17 +38,11 @@ struct Size
 };
 
 const Size kSizes[] = {
-    {2048, "8mb",
-     "Eight megabytes of weights -- small enough to sit in fast local memory "
-     "on most devices, so this is usually the fastest rung."},
-    {4096, "32mb", "Thirty-two megabytes -- around the size of a large cache or a device's fast local memory."},
-    {8192, "128mb", "128 megabytes -- past the cache of most devices, though not all."},
-    {16384, "512mb",
-     "512 megabytes -- beyond any cache shipping today, so this is main memory "
-     "on anything that still shows a falling rate by this point."},
-    {32768, "2gb",
-     "Two gigabytes.  Only reached by a device whose rate was still dropping at "
-     "512 MB, meaning a cache larger than anything current."},
+    {2048, "8mb", "8 MB of fp16 weights, small enough for most devices' fast local memory."},
+    {4096, "32mb", "32 MB of fp16 weights, around the size of a large cache."},
+    {8192, "128mb", "128 MB of fp16 weights, past most devices' caches."},
+    {16384, "512mb", "512 MB of fp16 weights, beyond any current cache: main memory."},
+    {32768, "2gb", "2 GB of fp16 weights, reached only if the rate was still falling at 512 MB."},
 };
 
 constexpr double kFallingRatio = 0.9;
@@ -150,12 +144,10 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_tensor_bw", "Core ML resident-weight bandwidth", "bps", Category::Bandwidth,
-       "How fast this compute unit streams a weight matrix it already holds "
-       "through a matrix-vector product -- the shape of generating one token -- "
-       "at growing sizes, net of the cost of asking.  Where the rate drops is "
-       "where a model stopped fitting in fast local memory: on the Neural "
-       "Engine that is its on-chip SRAM, and it decides whether a model "
-       "streams from main memory on every token.",
+       "How fast this compute unit streams a resident weight matrix through a "
+       "matrix-vector product -- the shape of generating a token -- at growing "
+       "sizes, net of dispatch cost.  Where the rate drops, the weights no "
+       "longer fit in fast local memory.",
        TestShape::Heterogeneous, "working set"});
 
   // The floor is the smallest graph's whole time.  The planner may keep a

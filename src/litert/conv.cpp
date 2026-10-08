@@ -16,7 +16,6 @@
 // are this backend's own, because TFLite is where int8 convolution ships.
 
 #include <common/form_race.h>
-#include <common/units.h>
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
 #include "litert_model.h"
@@ -24,7 +23,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -67,27 +65,17 @@ struct Shape
   const char *note;
 };
 
+// A row's first sentence is its shape's words and then its format's.
 const Format kFormats[] = {
-    {LitertFormat::Fp32, "fp32", "In fp32, the GPU under its fp32 policy."},
-    {LitertFormat::Fp16, "fp16",
-     "In fp16: half-typed on the CPU, the GPU's fp16 policy over half-stored "
-     "weights."},
-    {LitertFormat::Int8Qdq, "int8",
-     "Full-integer int8 with per-channel weights, the operation every mobile "
-     "NPU is rated on."},
+    {LitertFormat::Fp32, "fp32", "full 32-bit precision"},
+    {LitertFormat::Fp16, "fp16", "16-bit weights and arithmetic"},
+    {LitertFormat::Int8Qdq, "int8", "full-integer int8 with per-channel weights"},
 };
 
 const Shape kShapes[] = {
-    {3, 2, false, "conv3x3s2",
-     "A 3x3 convolution over 256 channels at stride 2, the layer vision "
-     "networks downsample with, which Winograd kernels cannot run, so every "
-     "multiply counted is one the accelerator did."},
-    {1, 1, false, "conv1x1",
-     "A 1x1 convolution, arithmetically a matmul at every pixel, so it should "
-     "land near the matmul rows."},
-    {3, 1, true, "depthwise3x3",
-     "A depthwise 3x3, each channel on its own: far less arithmetic per byte "
-     "loaded, where hardware built around dense arrays collapses."},
+    {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
+    {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
+    {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -128,11 +116,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
   auto test = currentDeviceScope->beginTest(
       {"litert_conv", "LiteRT convolution peak", "flops", Category::Compute,
-       "2-D convolution rate through LiteRT on this accelerator: a 3x3 at "
-       "stride 2, a 1x1 and a depthwise 3x3 at 256 channels, in fp32, fp16 and "
-       "full-integer int8, each swept over feature-map size.  Against the matmul "
-       "rows it says whether the accelerator was built for convolution, as "
-       "mobile NPUs were.",
+       "2-D convolution rate on this accelerator at 256 channels -- a stride-2 "
+       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
+       "reported at its best.  Set against the matmul rows, it shows how well "
+       "this accelerator handles convolution.",
        TestShape::Heterogeneous, "format and shape"});
 
   for (const Format &fmt : kFormats)
@@ -165,7 +152,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         break;
       const std::string row = std::string(fmt.label) + "_" + v.label;
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  " + fmt.note;
+      o.description = std::string(v.note) + ", " + fmt.note + ".";
       if (plan.integerOps)
         o.unit = "ops";
       if (!plan.applies)
@@ -184,9 +171,6 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         if (!wrong[f].empty())
           race.drop(f);
       std::vector<ConvLane> lanes(nf);
-      // What each form read at every size both were timed at, for the row's
-      // note.
-      std::map<int64_t, std::vector<double>> raceAt;
       auto what = [&](size_t f) {
         return raced ? std::string(forms[f].gpuInt8Kernels ? " with" : " without") + " the GPU's 8-bit kernels"
                      : std::string();
@@ -366,7 +350,6 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
         if (rate.size() > 1 && std::count_if(rate.begin(), rate.end(), [](double r) { return r > 0.0; }) >= 2)
         {
-          raceAt[sp] = rate;
           bool work = true;
           for (size_t f = 0; f < nf; f++)
             if (rate[f] > 0.0)
@@ -384,33 +367,14 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       if (win.best > 0.0)
       {
         // In the unit litertRateUnit gives the format and the kernel that ran
-        // it, and the other form's reading in its own.
+        // it; a raced row names its winner (`what`).
         o.unit = std::strcmp(litertRateUnit(plan, win.kernel, dev.accel), "ops") == 0 ? "ops" : "";
-        o.description = std::string(v.note) + "  " + fmt.note + "  Fastest at a " + std::to_string(win.bestSp) +
-                        " by " + std::to_string(win.bestSp) + " feature map";
+        o.description += "  Fastest at a " + std::to_string(win.bestSp) + "x" + std::to_string(win.bestSp) +
+                         " feature map" + what(w);
         if (!win.kernel.empty())
           o.description += ", as `" + win.kernel + "`" + litertKernelNote(plan, win.kernel, dev.accel);
-        // The race and the boundary, inside the same sentence: the row's
-        // three are the shape, the format and this one.
-        if (raced)
-        {
-          o.description += "," + what(w);
-          const size_t other = 1 - w;
-          // The other form at the size the row's reading came from, where it
-          // ran there too, else at the last size both ran.
-          int64_t sp = raceAt.empty() ? 0 : raceAt.rbegin()->first;
-          if (raceAt.count(win.bestSp))
-            sp = win.bestSp;
-          if (sp > 0)
-            o.description += " (" +
-                             formatReading(raceAt[sp][other], litertRateUnit(plan, lanes[other].kernel, dev.accel)) +
-                             what(other) + " at " + std::to_string(sp) + " by " + std::to_string(sp) + ")";
-          else if (!wrong[other].empty())
-            o.description += " (" + what(other).substr(1) + " the answer was wrong)";
-        }
-        const std::string io = floatIoClause(rt, dev, fmt.f, forms[w]);
-        if (!io.empty())
-          o.description += ", " + io;
+        if (forms[w].floatIo)
+          o.description += ", with float inputs and outputs";
         o.description += ".";
         test.emit(row, (float)win.best, o);
       }

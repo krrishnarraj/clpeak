@@ -163,26 +163,6 @@ namespace
     return "?";
   }
 
-  // What the description says about where the runtime dependency entered.
-  // Only the live shapes need a sentence: they cost something that is inside
-  // the figure, and a reader dividing rows should know it.  A chain pays a
-  // pass over a narrow seed and the multiply that widens it (OnnxLiveSeed); a
-  // single multiply, a pass over the whole of its activations.
-  std::string shapeNote(OnnxLiveShape shape, int layers)
-  {
-    if (usesSeed(shape, layers))
-      return "  The chain starts from a " + std::to_string(kSeedWidth) +
-             "-wide seed that takes a runtime value, and one more multiply, "
-             "not counted, widens it into the first layer's activations -- so "
-             "no compiler can fold the multiplies away, and the seed's pass "
-             "and that multiply are inside the figure.";
-    if (shape != OnnxLiveShape::ResultScaled)
-      return "  The activations take a runtime value ahead of the multiply, "
-             "so no compiler can fold it away; that pass is inside the "
-             "figure.";
-    return "";
-  }
-
 } // namespace
 
 int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
@@ -196,17 +176,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {"onnx_gemm", "ONNX MatMul peak",
        "flops",
        Category::Unknown,
-       "Matrix-multiply rate through this execution provider, one data type "
-       "per row, and int8 a second time with its layers spelled as 1x1 "
-       "convolutions: sixteen distinct square multiplies chained in one "
-       "dispatch, each layer's product feeding the next, swept over layer "
-       "widths and reported at its best.  A chain is how a model runs, and it "
-       "spreads what surrounds a multiply -- the dispatch, the reduction that "
-       "brings one row back -- over sixteen of them, while the pass that keeps "
-       "the graph from being computed at build time runs over a narrow seed "
-       "rather than the first layer's whole input.  The same model runs on "
-       "every provider, and one that cannot run it entirely on its own device "
-       "reports unsupported rather than quietly measuring the host.",
+       "Matrix-multiply rate on this provider, one data type per row: sixteen "
+       "chained square matmuls in one dispatch, swept over layer width and "
+       "reported at its best.  int8 runs a second time as 1x1 convolutions, "
+       "and a model the provider cannot run entirely on its device reports "
+       "unsupported.",
        TestShape::Heterogeneous, "data type"});
 
   // runAll also clears per EP before dispatching; this entry clear keeps
@@ -776,12 +750,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const bool chained = layers > 1;
 
     logger::EmitOptions o;
-    const std::string sweep =
-        chained ? "Peak over a doubling sweep of layer widths, sixteen layers "
-                  "chained per dispatch."
-                : "Peak over a doubling sweep of square sizes, one multiply "
-                  "per dispatch.";
-    o.description = sweep + "  " + v.note;
+    o.description = v.note;
     if (isInt)
       o.unit = "ops";
 
@@ -868,42 +837,39 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       return;
     }
 
-    o.description =
-        chained ? "Peak over a doubling sweep of layer widths, sixteen layers "
-                  "chained per dispatch; fastest at " +
-                      std::to_string(L.bestDim) + "-wide layers.  " + v.note
-                : "Peak over a doubling sweep of square sizes; fastest at " +
-                      std::to_string(L.bestDim) + " cubed.  " + v.note +
-                      "  A single multiply per dispatch: chaining NVFP4 would "
-                      "requantize every layer's product with block scales "
-                      "taken from the data at run time, which this test does "
-                      "not build.";
+    // The format's sentence, then one about this run: the size it peaked
+    // at, the kernel that ran and what it had to work around.  The live pass
+    // and the seed's widening multiply sit inside the figure unsaid
+    // (OnnxLiveSeed); the 4-D view reduces the same values with the same work.
+    o.description += "  Fastest at " + std::to_string(L.bestDim) +
+                     (chained ? "-wide layers" : " cubed");
     if (!pr.ranAs.empty())
-      o.description += "  Ran as " + pr.ranAs + " (" + pr.schemeName + ").";
+    {
+      o.description += " as " + pr.ranAs;
+      // Only int8 has a choice of scheme (schemesFor); the rest have one.
+      if (isInt && pr.schemeName[0])
+        o.description += " with " + std::string(pr.schemeName);
+    }
     if (pr.castedActs)
-      o.description += "  The provider converts the activations first, a "
-                       "full pass inside this figure.";
+      o.description += ", activations cast first";
     if (!pr.ranWider.empty())
-      o.description += "  This provider has no " + std::string(v.label) +
-                       " matmul kernel and ran it in " + pr.ranWider +
-                       ", so this is that width rather than " + v.label + ".";
+      o.description += ", run in " + pr.ranWider + " (no " +
+                       std::string(v.label) + " kernel)";
     if (pr.reduceInFloat)
-      o.description += "  The product is cast to fp32 before the reduction; "
-                       "the multiplies are unaffected.";
-    o.description += shapeNote(L.shape, layers);
+      o.description += ", product cast to fp32 before the reduction";
     if (L.rank4From > 0)
-      o.description += "  From " + std::to_string(L.rank4From) +
-                       " the product was reduced through a 4-D view of itself, "
-                       "because this provider refused the 2-D reduction there; "
-                       "the values reduced and the work are the same.";
-    if (L.offDeviceBelow > 0)
-      o.description += "  Sizes below " + std::to_string(L.firstDim) +
-                       " were sent to another compute unit by the provider's "
-                       "runtime and are not in this figure.";
-    if (L.offDeviceAbove > 0)
-      o.description += "  From " + std::to_string(L.offDeviceAbove) +
-                       " the provider's runtime sent the work to another "
-                       "compute unit, which ended the sweep.";
+      o.description += ", reduced via a 4-D view";
+    if (L.offDeviceBelow > 0 && L.offDeviceAbove > 0)
+      o.description += "; sizes below " + std::to_string(L.firstDim) +
+                       " and from " + std::to_string(L.offDeviceAbove) +
+                       " ran on another unit";
+    else if (L.offDeviceBelow > 0)
+      o.description += "; sizes below " + std::to_string(L.firstDim) +
+                       " ran on another unit";
+    else if (L.offDeviceAbove > 0)
+      o.description += "; from " + std::to_string(L.offDeviceAbove) +
+                       " it ran on another unit";
+    o.description += ".";
     test.emit(v.label, (float)L.best, o);
   };
 

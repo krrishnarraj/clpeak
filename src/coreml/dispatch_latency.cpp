@@ -175,61 +175,52 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_dispatch_latency", "Core ML dispatch latency", "s", Category::Latency,
-       "The fixed cost of handing one prediction to this compute unit, on the "
-       "smallest piece of work Core ML's planner will send it -- an "
-       "accelerator is never given trivial work, so each row names the size "
-       "it settled on -- and the cost of preparing a model for it, a compiler "
-       "run on the Neural Engine.  It is why a chip advertising tens of TOPS "
-       "can still lose to the host on small work, and no throughput row can "
-       "show it.",
+       "The fixed cost of handing this compute unit one prediction -- at the "
+       "smallest work Core ML will send it, which each row names -- and of "
+       "compiling a model for it.  It is why a chip rated at tens of TOPS can "
+       "still lose to the host on small work.",
        TestShape::Heterogeneous, "what is submitted"});
 
   if (trivial.perRunUs > 0.0)
   {
     std::string note = "One elementwise multiply over " + mbOrValues(trivial.size) +
-                       " values, the smallest such model the planner sends to this unit";
+                       " values, the smallest the planner sends this unit";
     if (trivial.size <= kTrivialWidths[0])
-      note += " -- as close to doing nothing as a model can get, so almost all of this "
-              "is the cost of asking.";
+      note += ", so nearly all of it is the cost of asking.";
     else
-      note += ".  Nothing smaller is ever given to it, so this is the floor a model "
-              "actually sees: the submission plus moving that much data in and out.";
+      note += "; it includes moving that data in and out.";
     test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), note.c_str());
   }
   else
     test.skip("trivial_op", trivial.status,
               "no elementwise model up to 8 MB was sent to this unit: " + trivial.error,
-              "One elementwise multiply, at the smallest size the planner sends to this unit.");
+              "One elementwise multiply, at the smallest size the planner sends this unit.");
 
   if (matmul.perRunUs > 0.0)
   {
     const double gflop = 2.0 * (double)matmul.size * (double)matmul.size * (double)matmul.size / 1.0e9;
     char buf[32];
     std::snprintf(buf, sizeof buf, "%.2f", gflop);
-    std::string note = "A " + std::to_string(matmul.size) + "-cube fp16 matrix multiply with a live " +
-                       "input (" + buf + " GFLOP), the smallest the planner sends to this unit";
+    std::string note = "A " + std::to_string(matmul.size) + "-cube fp16 matmul with a live input (" + buf +
+                       " GFLOP), the smallest the planner sends this unit";
     if (matmul.size <= kMatMulDims[0])
-      note += " -- which it finishes in well under a millisecond, so whatever this reads "
-              "above the row before it is still mostly overhead.";
+      note += ", so it is still mostly overhead.";
     else
-      note += ".  Divide the arithmetic by the matmul peak row to see how much of this "
-              "is work; the rest is the submission and the input copy.";
+      note += "; beyond its arithmetic, the time is submission and the input copy.";
     test.emit("small_matmul", (float)(matmul.perRunUs * 1e-6), note.c_str());
   }
   else
     test.skip("small_matmul", matmul.status,
               "no matrix multiply up to 1024-cube was sent to this unit: " + matmul.error,
-              "A small matrix multiply, at the smallest size the planner sends to this unit.");
+              "A small fp16 matmul, at the smallest size the planner sends this unit.");
 
   const Timed &created = (trivial.perRunUs > 0.0 && trivial.createUs > 0.0) ? trivial : first;
   if (created.createUs > 0.0)
   {
     const std::string note =
-        "Compiling and loading the elementwise model above (" + mbOrValues(created.size) +
-        " values), fresh -- it is salted so Core ML's cache cannot answer from a previous "
-        "run: " + std::to_string((long long)(created.compileUs / 1000.0)) +
-        " ms to compile the package and " + std::to_string((long long)(created.loadUs / 1000.0)) +
-        " ms to load it for this configuration, which is where a unit's own compiler runs.";
+        "Compiling (" + std::to_string((long long)(created.compileUs / 1000.0)) + " ms) and loading (" +
+        std::to_string((long long)(created.loadUs / 1000.0)) + " ms) the elementwise multiply over " +
+        mbOrValues(created.size) + " values, uncached; loading is where the unit's own compiler runs.";
     test.emit("model_create", (float)(created.createUs * 1e-6), note.c_str());
   }
   else

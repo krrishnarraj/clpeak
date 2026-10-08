@@ -122,19 +122,14 @@ namespace
   {
     OnnxActivation act;
     const char *label;
-    const char *note;
+    const char *note; // "<note>, over <size> of activations."
   };
 
   const Variant kVariants[] = {
-      {OnnxActivation::Silu, "silu",
-       "x times sigmoid(x) -- the gate in the feed-forward network of most "
-       "current language models."},
-      {OnnxActivation::Softmax, "softmax",
-       "Softmax across the row, at the heart of attention: two passes and a "
-       "maximum before it can divide."},
+      {OnnxActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
+      {OnnxActivation::Softmax, "softmax", "Softmax across each row"},
       {OnnxActivation::LayerNorm, "layernorm",
-       "Mean and variance across each row, then rescale -- every transformer "
-       "layer does this at least twice."},
+       "Layer norm (each row's mean and variance, then a rescale)"},
   };
 
   struct Run
@@ -317,12 +312,9 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_activation", "ONNX activation throughput", "bps",
        Category::Bandwidth,
-       "How fast this provider runs the operations between the matrix "
-       "multiplies -- normalisation, softmax, the feed-forward gate.  They do "
-       "almost no arithmetic, so their limit is memory and the figure is the "
-       "bandwidth each achieves, net of a reference graph that reads the same "
-       "tensor and applies nothing.  The sizes are the resident-tensor rows' "
-       "own, so the two ladders divide row for row.",
+       "Bandwidth of the operations between the matmuls -- SiLU gate, "
+       "softmax, layer norm -- over a transformer-shaped tensor.  Each is net "
+       "of a reference graph that reads the same tensor and applies nothing.",
        // Three operations across three working-set sizes: nine separate
        // measurements, no one of which stands for the rest.
        TestShape::Heterogeneous, "operation and size"});
@@ -379,11 +371,9 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const uint64_t bytes = sz.bytes;
       const int64_t rows = (int64_t)(bytes / ((uint64_t)kCols * es));
       const std::string metric = std::string(v.label) + "_" + sz.label;
-      const std::string note =
-          std::string(sz.label) + " of activations -- " + v.note +
-          "  Against onnx-tensor-bw's rung of the same name, the ratio is how "
-          "much of its streaming rate this provider keeps once it has to touch "
-          "the data." + widthNote;
+      const std::string note = std::string(v.note) + ", over " +
+                               std::to_string(bytes >> 20) +
+                               " MB of activations." + widthNote;
 
       if (bytes * kCopiesAtPeak > maxTensorBytes())
       {

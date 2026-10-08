@@ -30,13 +30,13 @@
 //
 // Each width is timed with the weights stored both ways, [in, out] and
 // [out, in], until the readings settle which one this unit runs faster
-// (CoremlLayoutRace), and the row takes the faster, names it and says what
-// the other read.  On an M1 Pro every row's race settles at the first width
-// or the second but the GPU's int4_weight, whose layouts stay 7-18% apart
-// all the way up, so the race costs about one more model per row; and on
-// the Neural Engine, which runs the two at one rate, the climb goes on in
-// the [out, in] layout its compiler takes as it is: 2048-wide layers
-// compile in about a second there instead of fifteen.
+// (CoremlLayoutRace), and the row takes the faster and names it.  On an M1
+// Pro every row's race settles at the first width or the second but the
+// GPU's int4_weight, whose layouts stay 7-18% apart all the way up, so the
+// race costs about one more model per row; and on the Neural Engine, which
+// runs the two at one rate, the climb goes on in the [out, in] layout its
+// compiler takes as it is: 2048-wide layers compile in about a second there
+// instead of fifteen.
 //
 // One test, `coreml_gemm`: the same chain in every format Core ML can store a
 // weight in.  Core ML's arithmetic is fp16 or fp32 and nothing else, so most
@@ -52,7 +52,6 @@
 // operations that moved, rather than a CPU number under an accelerator's
 // name.
 
-#include <common/units.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
 #include "coreml_model.h"
@@ -109,71 +108,30 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {CoremlWeight::Fp16,
-     "16-bit inputs, the Neural Engine's native width and the currency of "
-     "every shipping Core ML model."},
-    {CoremlWeight::Fp32,
-     "Full 32-bit precision.  The Neural Engine has no fp32 path, so on that "
-     "row Core ML sends the multiply elsewhere and the plan says where."},
-    {CoremlWeight::Bf16,
-     "bfloat16: in Core ML's type list but accepted by none of its "
-     "operations, so this row records what the compiler says to it."},
+    {CoremlWeight::Fp16, "16-bit weights and arithmetic."},
+    {CoremlWeight::Fp32, "Full 32-bit precision."},
+    {CoremlWeight::Bf16, "bfloat16 weights and arithmetic."},
     {CoremlWeight::Int8Channel,
-     "8-bit integer weights with one scale per output column, unpacked into a "
-     "16-bit multiply -- Core ML's affine weight quantization.  The "
-     "arithmetic is unchanged, so what the narrow weights buy is traffic."},
-    {CoremlWeight::Int4Block,
-     "4-bit integer weights, one scale per block of 32 along the reduction "
-     "axis, unpacked into a 16-bit multiply.  The blocked form needs macOS 15 "
-     "/ iOS 18, and a Neural Engine older than the A17 Pro / M4 generation "
-     "may decline it with live activations, which every layer of the chain "
-     "has -- as the transformer-block rows do."},
-    {CoremlWeight::Int4Lut,
-     "4-bit palettized weights: every value is an index into a 16-entry "
-     "table, the compression Apple's Neural Engine was built to decode.  "
-     "The same 16-level grid as the blocked row, so the two differ only in "
-     "how the levels are found."},
+     "8-bit weights, one scale per output column, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Block, "4-bit weights in blocks of 32, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Lut, "4-bit indices into a 16-entry table, widened to 16 bits for the multiply."},
     {CoremlWeight::Fp8Block,
-     "8-bit float (E4M3) weights with block scales.  The type exists in Core "
-     "ML's format since macOS 26; whether any compute unit takes it is what "
-     "this row asks."},
+     "8-bit float (E4M3) weights in blocks of 32, widened to 16 bits for the multiply."},
     {CoremlWeight::Int8Qdq,
-     "8-bit weights and 8-bit activations: the activations are quantized on "
-     "device and every product quantized back, the pattern Core ML fuses into "
-     "an integer multiply on Neural Engines that have one (A17 Pro, M4 and "
-     "later).  Measured in ops; a reading no faster than the fp16 row is a "
-     "Neural Engine doing this in 16-bit."},
+     "Full-integer int8: 8-bit activations and weights; only A17 Pro / M4 and later Neural Engines "
+     "multiply them as integers."},
 };
 
 // A row's word on the layout of its weights (CoremlLayoutRace): the order
-// the peak was measured in and, from the last width both were timed at,
-// what the other order read there -- or that it never ran.
-std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2],
-                       const double raceCreateUs[2], int otherRungs, bool otherWrong, const char *unit)
+// the peak was measured in, and why there was no race when there was none.
+std::string layoutNote(bool transposed, int otherRungs, bool otherWrong)
 {
-  std::string s = ", its weights stored " + std::string(coremlLayoutName(transposed));
-  if (raceDim > 0)
-  {
-    char buf[96];
-    s += "; at " + std::to_string(raceDim) + "-wide layers they ran at " +
-         formatReading(raceRate[transposed], unit) + " that way and " +
-         formatReading(raceRate[!transposed], unit) + " stored " + coremlLayoutName(!transposed);
-    // A tie the compile times settled, which would otherwise read as the
-    // slower layout kept by mistake.
-    if (CoremlLayoutRace::tieOnBuild(raceRate, raceCreateUs) &&
-        raceCreateUs[!transposed] > raceCreateUs[transposed])
-    {
-      std::snprintf(buf, sizeof buf, ", which took %.1f s to compile against %.1f",
-                    raceCreateUs[!transposed] / 1.0e6, raceCreateUs[transposed] / 1.0e6);
-      s += buf;
-    }
-  }
-  else if (otherWrong)
-    s += "; stored " + std::string(coremlLayoutName(!transposed)) +
-         " they gave a wrong answer (coreml_numeric_error), so they were not timed";
+  std::string s = ", weights stored " + std::string(coremlLayoutName(transposed));
+  if (otherWrong)
+    s += "; " + std::string(coremlLayoutName(!transposed)) + " answered wrong";
   else if (otherRungs == 0)
-    s += "; stored " + std::string(coremlLayoutName(!transposed)) + " they did not run here";
-  return s + ".";
+    s += ", the only order that ran";
+  return s;
 }
 
 // The chain's constants -- the seed and the weights that widen it, then
@@ -199,23 +157,11 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_gemm", "Core ML matmul peak", "flops", Category::Unknown,
-       "Matrix-multiply rate through Core ML on this compute unit, one weight "
-       "format per row: sixteen distinct square multiplies chained in one "
-       "prediction, each layer's product feeding the next, swept over layer "
-       "widths and reported at its best, with the weights stored in whichever "
-       "of their two orders, [in, out] or [out, in], this unit runs faster.  "
-       "The same chain runs on the Neural Engine, the GPU and the CPU, and the "
-       "compute plan proves which one actually did the multiplies: a row Core "
-       "ML would have moved to another unit reports unsupported instead.",
+       "Matrix-multiply rate on this compute unit, one weight format per row: "
+       "sixteen chained square matmuls in one prediction, swept over layer width "
+       "and reported at its best in the faster of the two weight layouts.  A row "
+       "Core ML would move to another unit reports unsupported.",
        TestShape::Heterogeneous, "weight format"});
-
-  const std::string sweep = "Peak over a doubling sweep of layer widths, sixteen layers chained "
-                            "per prediction";
-  const std::string seedNote =
-      "  The chain starts from a " + std::to_string(kSeedWidth) +
-      "-wide seed that takes a runtime value, and one more multiply, not counted, "
-      "widens it into the first layer's activations -- so no compiler can fold the "
-      "multiplies away, and the seed's pass and that multiply are inside the figure.";
 
   for (const Variant &v : kVariants)
   {
@@ -227,7 +173,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
 
     logger::EmitOptions o;
-    o.description = sweep + ".  " + v.note;
+    o.description = v.note;
     if (isInt)
       o.unit = "ops";
 
@@ -280,9 +226,6 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       double lastRate = 0.0, prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
       std::string offDeviceNote, glueNote;
     } lanes[2];
-    // The last width both layouts were timed at, for the row's note.
-    int64_t raceDim = 0;
-    double raceRate[2] = {0.0, 0.0}, raceCreateUs[2] = {0.0, 0.0};
 
     // On a GPU each layout's first rung is predicted from a kScoutDim chain;
     // a scout that cannot be built, is sent to another unit or cannot run
@@ -423,8 +366,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
             }
           }
           else
-            ln.offDeviceNote = "  Wider layers were declined by the " +
-                               std::string(coremlKindName(dev.kind)) + ".";
+            ln.offDeviceNote = "; the " + std::string(coremlKindName(dev.kind)) + " declined wider layers";
           race.drop(t);
           continue;
         }
@@ -525,9 +467,6 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       if (rate[0] > 0.0 && rate[1] > 0.0)
       {
-        raceDim = D;
-        std::copy(rate, rate + 2, raceRate);
-        std::copy(createUs, createUs + 2, raceCreateUs);
         race.settle(rate, createUs);
         if (!race.runs(0) || !race.runs(1))
           CLPEAK_VLOG("coreml-gemm[%s/%s]: layouts settled at %lld-wide layers: %s goes on\n",
@@ -565,11 +504,10 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     if (best > 0.0)
     {
       const Lane &ln = lanes[bestTransposed];
-      o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers" +
-                      layoutNote(bestTransposed, raceDim, raceRate, raceCreateUs,
-                                 lanes[!bestTransposed].rungs, !wrongWhy[!bestTransposed].empty(),
-                                 isInt ? "ops" : "flops") +
-                      "  " + v.note + seedNote + ln.offDeviceNote + ln.glueNote;
+      o.description = std::string(v.note) + "  Fastest at " + std::to_string(bestDim) + "-wide layers" +
+                      layoutNote(bestTransposed, lanes[!bestTransposed].rungs,
+                                 !wrongWhy[!bestTransposed].empty()) +
+                      ln.offDeviceNote + ln.glueNote + ".";
       test.emit(label, (float)best, o);
     }
     else

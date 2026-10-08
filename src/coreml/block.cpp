@@ -27,7 +27,6 @@
 // meet.  The compute plan settles it per session, and a row it declines
 // reports so instead of measuring the CPU.
 
-#include <common/units.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
 #include "coreml_model.h"
@@ -80,58 +79,26 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {"fp16", CoremlWeight::Fp16, true, nullptr,
-     "16-bit weights and 16-bit arithmetic, the form an unquantized Core ML "
-     "model is served in and the reference the other rows are read against.",
-     false, false},
+    {"fp16", CoremlWeight::Fp16, true, nullptr, "16-bit weights and arithmetic, the reference row.", false,
+     false},
     {"fp16_explicit", CoremlWeight::Fp16, false, nullptr,
-     "The fp16 row with attention spelled out as matmul, softmax and matmul "
-     "over a key cache stored already transposed, instead of Core ML's fused "
-     "scaled-dot-product op over the [heads, context, head_dim] cache it "
-     "takes -- the form the ONNX backend's block carries, so this row divides "
-     "directly against it.  Whatever separates it from the fp16 row is the "
-     "fused op and its cache layout on this compute unit: on an M1 Pro's "
-     "Neural Engine the fused op prefills slightly faster and decodes slower, "
-     "half again the cost per cached token, the transpose of the cache it "
-     "makes every token.",
+     "The fp16 row with attention spelled out (matmul, softmax, matmul) over a pre-transposed key cache.",
      false, false, /*explicitAttention=*/true, /*sweepContext=*/true},
     {"int4_weight", CoremlWeight::Int4Block, true, nullptr,
-     "4-bit weights, one scale per 32, against 16-bit activations -- what a "
-     "quantized language model ships as.  The arithmetic stays 16-bit, so "
-     "four bits buys weight traffic rather than rate; whether this compute "
-     "unit takes the blocked form with live activations is the finding.",
-     false, false},
+     "4-bit weights in blocks of 32, widened to 16 bits for the multiply.", false, false},
     {"int4_lut", CoremlWeight::Int4Lut, false, nullptr,
-     "4-bit palettized weights -- a 16-entry table per matrix, the compression "
-     "Apple's Neural Engine decodes natively -- against 16-bit activations.",
-     false, false},
+     "4-bit indices into a 16-entry table per matrix, widened to 16 bits for the multiply.", false, false},
     {"int8_weight", CoremlWeight::Int8Channel, false, nullptr,
-     "8-bit weights, one scale per output column, against 16-bit activations.  "
-     "This narrows only the weights where int8_qdq narrows the arithmetic too, "
-     "so the gap between them is what integer multipliers are worth.",
-     false, false},
+     "8-bit weights, one scale per output column, widened to 16 bits for the multiply.", false, false},
     {"int8_qdq", CoremlWeight::Int8Qdq, false, "ops",
-     "8-bit weights and 8-bit arithmetic through the projections, quantized in "
-     "and out -- what headline TOPS figures are quoted for, measured on a whole "
-     "layer.  Attention and the softmax stay 16-bit, as they do in every real "
-     "deployment.",
-     false, false},
-    {"fp32", CoremlWeight::Fp32, false, nullptr,
-     "Full precision, which nobody serves a language model in, here as a "
-     "control -- and on the Neural Engine row, a layer Core ML has to send "
-     "elsewhere, which the plan reports.",
-     false, false},
-    {"bf16", CoremlWeight::Bf16, false, nullptr,
-     "bfloat16 has no arithmetic in Core ML; the row records the refusal.",
-     false, false},
+     "Full-integer int8 projections: 8-bit activations and weights; attention stays 16-bit.", false, false},
+    {"fp32", CoremlWeight::Fp32, false, nullptr, "Full 32-bit precision.", false, false},
+    {"bf16", CoremlWeight::Bf16, false, nullptr, "bfloat16 weights and arithmetic.", false, false},
     {"fp8_weight", CoremlWeight::Fp8Block, false, nullptr,
-     "8-bit float weights with block scales, if this OS takes them.",
-     false, false},
+     "8-bit float (E4M3) weights in blocks of 32, widened to 16 bits for the multiply.", false, false},
+    // Sweeps context: the cache is what bounds how long a conversation fits.
     {"int8_kv", CoremlWeight::Fp16, true, nullptr,
-     "16-bit throughout with only the cached context stored as 8-bit integers "
-     "and decompressed into attention -- the axis that decides how long a "
-     "conversation a device can hold, which is why this row sweeps context.",
-     true, true},
+     "The fp16 row with the context cache stored as 8-bit integers.", true, true},
 };
 
 int64_t weightParams()
@@ -192,7 +159,6 @@ struct Point
   bool plannerDeclined = false;
   bool wrong = false;         // the answer came back NaN or infinite
   bool transposed = false;    // the weight layout `us` was measured in
-  double otherUs = -1.0;      // the other layout at this point, when both ran
   double createUs = 0.0;
 };
 
@@ -214,23 +180,12 @@ struct VariantResult
   std::string wrongNote;
 };
 
-// A row's word on the layout its point's weights were stored in
-// (CoremlLayoutRace), and what the other read at the same point when both
-// ran: `work` per second is the row's figure in `unit` (flops, ops, bps),
-// or with no work the row is a time.  `vr.wrongNote` says which layout's
-// wrong answer kept it out of the race.
-std::string layoutNote(const Point &pt, double work, const char *unit, const VariantResult &vr)
+// A row's clause on the layout its point's weights were stored in
+// (CoremlLayoutRace); `vr.wrongNote` says which layout's wrong answer kept it
+// out of the race.
+std::string layoutNote(const Point &pt, const VariantResult &vr)
 {
-  std::string s = "  Weights stored " + std::string(coremlLayoutName(pt.transposed));
-  if (pt.otherUs > 0.0)
-  {
-    auto figure = [&](double us) {
-      return work > 0.0 ? formatReading(work / (us * 1.0e-6), unit) : formatReading(us * 1.0e-6, "s");
-    };
-    s += ": " + figure(pt.us) + " against " + figure(pt.otherUs) + " stored " +
-         coremlLayoutName(!pt.transposed);
-  }
-  return s + "." + vr.wrongNote;
+  return ", weights stored " + std::string(coremlLayoutName(pt.transposed)) + vr.wrongNote;
 }
 
 CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq, int spec)
@@ -247,17 +202,6 @@ CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
   sh.fusedAttention = spec >= 9 && !v.explicitAttention;
   sh.seedWidth = sh.seq > kSeedWidth ? kSeedWidth : 0;
   return sh;
-}
-
-// What a prompt row says about its way in, when it has a seed (kSeedWidth).
-std::string seedNote(int64_t seq)
-{
-  if (seq <= kSeedWidth)
-    return std::string();
-  return "  The prompt starts from a " + std::to_string(kSeedWidth) +
-         "-wide seed that takes a runtime value, and one more multiply, not "
-         "counted, widens it into the layer's input -- inside the figure, "
-         "a quarter of a percent of its arithmetic.";
 }
 
 } // namespace
@@ -378,7 +322,6 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       race.settle(rate, createUs);
       const bool t = one[1].us < one[0].us;
       pt = one[t];
-      pt.otherUs = one[!t].us;
       return;
     }
     if (ok[0] || ok[1])
@@ -490,8 +433,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
           CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[t].c_str());
           vr.wrongLayout[t] = true;
           vr.prefillRace.drop(t);
-          vr.wrongNote = std::string("  Stored ") + coremlLayoutName(t) +
-                         " the weights gave a wrong answer (coreml_numeric_error), so that order was not timed.";
+          vr.wrongNote = std::string("; ") + coremlLayoutName(t) + " answered wrong";
         }
     }
     // The probe is the smallest point the variant reports -- its first
@@ -595,9 +537,9 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     for (int64_t seq : promptsFor(v))
     {
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
+      const std::string prompt = std::string(v.note) + "  A " + std::to_string(seq) + "-token prompt";
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply in the layer." + seedNote(seq);
+      o.description = prompt + ".";
       if (v.unit)
         o.unit = v.unit;
       if (!vr.usable)
@@ -610,8 +552,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         continue;
       if (it->second.us > 0.0)
       {
-        o.description += layoutNote(it->second, blockFlops(seq, seq), v.unit ? v.unit : "flops", vr) +
-                         it->second.glue;
+        o.description = prompt + layoutNote(it->second, vr) + it->second.glue + ".";
         test.emit(metric, (float)(blockFlops(seq, seq) * 1.0e6 / it->second.us), o);
       }
       else
@@ -619,39 +560,28 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     }
   };
 
-  const std::string geometry =
-      "One 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
-  const std::string attention = spec >= 9 ? "attention as Core ML's fused scaled-dot-product op "
-                                            "(the fp16_explicit row spells it out instead)"
-                                          : "attention as explicit matmul, softmax and matmul";
-
   const logger::TestSpec prefillSpec = {
       "coreml_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
-      geometry + ", working through a prompt on this compute unit -- the phase that decides "
-      "how long you wait for the first word -- at each precision a model ships in, with " +
-      attention + ".  Only the seven projection matmuls change precision, so whatever separates "
-      "two rows is the projection format, its weights stored in whichever of their two orders, "
-      "[in, out] or [out, in], this unit runs faster; and the compute plan proves every "
-      "operation ran here.",
+      std::string("Prompt processing through one 2048-wide, 16-head decoder block (SwiGLU "
+                  "feed-forward, 50.6M parameters) at each precision a model ships in -- what "
+                  "sets time to the first token.  ") +
+          (spec >= 9 ? "Attention is Core ML's fused op" : "Attention is explicit matmul, softmax and matmul") +
+          ", and the compute plan confirms the block ran on this unit.",
       TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec prefillOpsSpec = {
       "coreml_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "data type and prompt length"};
   const logger::TestSpec decodeSpec = {
       "coreml_block_decode", "Transformer block, decode", "bps", Category::Ai,
-      "How fast " + geometry + " streams its weights on this compute unit while generating a "
-      "token with 2048 of context, at each precision.  Each row counts the bytes that format "
-      "actually moves, so it compares directly against the resident-weight bandwidth rows -- "
-      "and a narrow-weight row far below the 16-bit one is a unit unpacking to full width "
-      "before using them.  The weights are stored in whichever of their two orders, [in, out] "
-      "or [out, in], this unit streams faster.",
+      "Weight-streaming rate of the same block generating one token at 2048 context, counting "
+      "the bytes each format actually moves.  A narrow-weight row far below fp16 means this "
+      "compute unit unpacks the weights to full width first.",
       TestShape::Heterogeneous, "data type"};
   const logger::TestSpec latencySpec = {
       "coreml_block_latency", "Transformer block latency", "s", Category::Ai,
-      "How long " + geometry + " takes on this compute unit at each precision: multiply by a "
-      "model's layer count for a floor on its time-to-first-token and per-token time here.  "
-      "Everything but attention costs the same at every context length, so whatever the decode "
-      "rows add as the context grows is attention.",
+      "Time for one pass of the block at each precision; multiply by a model's layer count for a "
+      "floor on time to first token and per-token time.  What the decode rows add as the context "
+      "grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
 
   // ---- Prefill, flops ------------------------------------------------------
@@ -721,11 +651,11 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
       const uint64_t wBytes = weightBytes(v);
       const uint64_t kvB = kvBytes(v, kDecodeKv);
+      const std::string token = std::string(v.note) + "  One token at 2048 context: " +
+                                std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights, " +
+                                std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache";
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  One token with 2048 of context: " +
-                      std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
-                      std::to_string((unsigned long long)(kvB >> 20)) +
-                      " MB of cached context, read in full for one token.";
+      o.description = token + ".";
       if (!validateVariant(v, vr))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -735,7 +665,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       const Point &pt = vr.decode[kDecodeKv];
       if (pt.us > 0.0)
       {
-        o.description += layoutNote(pt, (double)(wBytes + kvB), "bps", vr) + pt.glue;
+        o.description = token + layoutNote(pt, vr) + pt.glue + ".";
         test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
       }
       else
@@ -756,18 +686,18 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
-                                 seedNote(kPrefillSeq);
+        const std::string pass =
+            std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) + "-token prompt";
         if (!vr.usable)
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason, pass + ".");
         else
         {
           measurePrefill(v, vr, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
           if (pt.us > 0.0)
-            test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s", vr)).c_str());
+            test.emit(metric, (float)(pt.us * 1e-6), (pass + layoutNote(pt, vr) + ".").c_str());
           else
-            test.skip(metric, pt.status, pt.error, note);
+            test.skip(metric, pt.status, pt.error, pass + ".");
         }
       }
       for (int64_t kv : contextsFor(v))
@@ -775,20 +705,20 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         if (clpeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One generated token with " + std::to_string(kv) +
-                                 " tokens of context behind it.  " + v.note;
+        const std::string token =
+            std::string(v.note) + "  One token with " + std::to_string(kv) + " tokens of context";
         if (!vr.usable)
         {
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason, token + ".");
           continue;
         }
         measureDecode(v, vr, kv);
         const Point &pt = vr.decode[kv];
         if (pt.us > 0.0)
-          test.emit(metric, (float)(pt.us * 1e-6), (note + layoutNote(pt, 0.0, "s", vr)).c_str());
+          test.emit(metric, (float)(pt.us * 1e-6), (token + layoutNote(pt, vr) + ".").c_str());
         else
         {
-          test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, note);
+          test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, token + ".");
           // A longer context is more work, so a point the unit could not
           // run ends the ladder -- but one the planner kept back for its
           // size says nothing about the next.

@@ -149,11 +149,6 @@ public:
   // format's are float already, and `form` comes back as it went in.
   LitertForm resolveIo(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
                        LitertForm form);
-  // What a rate row says of a form resolveIo gave float inputs and outputs:
-  // "the graph's input and output float, since with int8 ones this
-  // accelerator never wrote its answer".  Empty for any other form.
-  std::string floatIoClause(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                            const LitertForm &form);
 
 private:
   // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo)

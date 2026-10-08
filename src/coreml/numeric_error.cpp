@@ -63,37 +63,22 @@ struct Variant
   const char *note;
 };
 
+// The weight formats read against fp16: the reference shares their codes, so
+// what separates a row from fp16 is the decompression (dequantizedTo, in
+// coreml_model.cpp), and the exact table lookup should match it.
 const Variant kVariants[] = {
     {CoremlWeight::Fp16,
-     "16-bit inputs and a 16-bit answer.  Around 200 ppm is an answer "
-     "accumulated in fp32 and rounded once at the end; ten times that is a "
-     "unit accumulating in fp16 all the way."},
-    {CoremlWeight::Fp32,
-     "Full precision; near zero, and the control the other rows are read "
-     "against.  A nonzero figure here is a compute unit substituting a "
-     "narrower type for the fp32 it was handed."},
-    {CoremlWeight::Bf16,
-     "bfloat16 has no arithmetic in Core ML; the row records the refusal so "
-     "the accuracy table stays in step with the speed one."},
+     "16-bit weights and arithmetic; near 200 ppm means fp32 accumulation, ten times that fp16 accumulation."},
+    {CoremlWeight::Fp32, "Full 32-bit precision; far above zero means the unit substituted a narrower type."},
+    {CoremlWeight::Bf16, "bfloat16 weights and arithmetic."},
     {CoremlWeight::Int8Channel,
-     "8-bit weights with a scale per output column, multiplied in 16-bit.  "
-     "The quantization of the weights is not counted -- the reference uses "
-     "the same codes at their exact scaled values -- so a unit that folds the "
-     "scale out of the accumulation reads near its fp16 row, and one that "
-     "rounds each weight to 16 bits first reads a little above it."},
-    {CoremlWeight::Int4Block,
-     "4-bit weights with a scale per block of 32, multiplied in 16-bit.  As "
-     "for int8_weight: the codes are shared with the reference, so whatever "
-     "separates this from the fp16 row is the decompression."},
-    {CoremlWeight::Int4Lut,
-     "4-bit table lookup, multiplied in 16-bit; the lookup is exact, so this "
-     "row should match fp16."},
+     "8-bit weights, one scale per output column, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Block, "4-bit weights in blocks of 32, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Lut, "4-bit indices into a 16-entry table, widened to 16 bits for the multiply."},
     {CoremlWeight::Fp8Block,
-     "8-bit float weights with block scales, if any compute unit takes them."},
+     "8-bit float (E4M3) weights in blocks of 32, widened to 16 bits for the multiply."},
     {CoremlWeight::Int8Qdq,
-     "8-bit weights and 8-bit activations, with the answer itself quantized "
-     "to 8 bits.  Around 9000 ppm is what keeping the result in int8 costs on "
-     "this data; the quantization of the operands is not counted."},
+     "Full-integer int8: 8-bit activations and weights; keeping the answer in int8 costs about 9000 ppm."},
 };
 
 // The reference: A[M, K] * B[K, N] in double, on the host.
@@ -289,20 +274,17 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
   const int fast = faster ? 1 : 0, slow = 1 - fast;
   c.read = right(fast) ? fast : right(slow) ? slow : measured(fast) ? fast : measured(slow) ? slow : fast;
   const int other = 1 - c.read;
-  c.note = std::string("  The weights stored ") + coremlLayoutName(c.read);
-  const std::string leftOut = ", so the rate rows leave that order out.";
+  const std::string otherName = coremlLayoutName(other);
+  const std::string leftOut = " answered wrong, so the rate rows leave it out.";
+  c.note = std::string("  Weights stored ") + coremlLayoutName(c.read);
   if (!both)
-    c.note += "; stored the other way, this compute unit did not take them.";
+    c.note += "; this compute unit did not take " + otherName + ".";
   else if (c.read == fast)
-  {
-    c.note += ": of the two orders, the one this compute unit multiplies faster -- where the "
-              "two run alike, [in, out] unless [out, in] compiles several times faster.";
-    if (right(c.read) && c.layout[other].wrong())
-      c.note += std::string("  Stored ") + coremlLayoutName(other) + ", its answer is wrong" + leftOut;
-  }
+    c.note += right(c.read) && c.layout[other].wrong() ? ", the faster order; " + otherName + leftOut
+                                                       : ", the faster order.";
   else
-    c.note += std::string("; stored ") + coremlLayoutName(other) + ", the order it multiplies faster, " +
-              (c.layout[other].wrong() ? "its answer is wrong" + leftOut : std::string("its answer could not be read."));
+    c.note += "; " + otherName + ", the faster order," +
+              (c.layout[other].wrong() ? leftOut : std::string(" could not be read."));
 }
 
 // The format's product written as a 1x1 convolution, which the convolution
@@ -389,12 +371,10 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
-       "How far each weight format's answer drifts from a full-precision one, "
-       "in parts per million, on a fixed 1024-cubed matrix multiply -- what "
-       "the speed rows cost.  The reference multiplies the same stored values "
-       "the compute unit was handed, in double precision, so this is the "
-       "arithmetic and the width the answer was kept in, not the rounding of "
-       "the inputs, which is the format's and identical everywhere.",
+       "How far each weight format's answer on a 1024-cubed matmul drifts from a "
+       "double-precision reference, in parts per million.  The reference "
+       "multiplies the exact values this compute unit was given, so only the "
+       "arithmetic and the width the answer was kept in remain.",
        TestShape::Heterogeneous, "weight format"});
 
   for (const Variant &v : kVariants)

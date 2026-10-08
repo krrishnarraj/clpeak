@@ -71,15 +71,9 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {CoremlActivation::Silu, "silu",
-     "x times sigmoid(x) -- the gate in the feed-forward network of most "
-     "current language models."},
-    {CoremlActivation::Softmax, "softmax",
-     "Softmax across the row, at the heart of attention: two passes and a "
-     "maximum before it can divide."},
-    {CoremlActivation::LayerNorm, "layernorm",
-     "Mean and variance across each row, then rescale -- every transformer "
-     "layer does this at least twice."},
+    {CoremlActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
+    {CoremlActivation::Softmax, "softmax", "Softmax across each row"},
+    {CoremlActivation::LayerNorm, "layernorm", "Layer norm (each row's mean and variance, then a rescale)"},
 };
 
 struct Run
@@ -150,12 +144,9 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_activation", "Core ML activation throughput", "bps", Category::Bandwidth,
-       "How fast this compute unit applies the operations between the matrix "
-       "multiplies -- the feed-forward gate, softmax, layer normalisation -- "
-       "as the bandwidth each achieves over a transformer-shaped tensor, at "
-       "the same three working-set sizes the resident-weight rows use.  Each "
-       "is net of reading, scaling and reducing the same tensor with nothing "
-       "applied, so it is the operation's own cost.",
+       "Bandwidth of the operations between the matmuls -- SiLU gate, softmax, "
+       "layer norm -- over a transformer-shaped tensor.  Each is net of a "
+       "reference graph that reads the same tensor and applies nothing.",
        TestShape::Heterogeneous, "operation and working set"});
 
   // Reference per size, shared by the three operations.
@@ -174,8 +165,8 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
         break;
       const Size &sz = kSizes[si];
       const std::string metric = std::string(v.label) + "_" + sz.label;
-      const std::string note = std::string(sz.label) + " of activations -- " + v.note +
-                               "  Net of the read, scale and reduction around it.";
+      const std::string note =
+          std::string(v.note) + ", over " + std::to_string(sz.bytes >> 20) + " MB of activations.";
       const int64_t rows = (int64_t)(sz.bytes / (2ull * (uint64_t)kCols));
 
       if (sz.bytes * kCopiesAtPeak > maxTensorBytes())
@@ -241,9 +232,8 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       const double refStreamBps = 3.0 * (double)sz.bytes / (ref.run.us * 1.0e-6);
       std::string row = note;
       if (bps > 2.0 * refStreamBps)
-        row += "  Faster than this unit streamed the same tensor in the reference graph, "
-               "so the operation was fused into the passes around it or the working set "
-               "stayed in cache: this is the rate of its arithmetic, not of memory.";
+        row += "  Faster than this unit streamed the reference graph, so the operation was fused "
+               "or cached: an arithmetic rate, not memory's.";
       test.emit(metric, (float)bps, row.c_str());
     }
   }

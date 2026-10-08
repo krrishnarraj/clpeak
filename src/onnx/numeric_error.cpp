@@ -84,69 +84,48 @@ struct Variant
 
 const Variant kVariants[] = {
   {"fp32", ONNX_DT_FLOAT, Kind::Plain, false, "fp32",
-   "Should be near zero -- an fp32 graph compared against fp32.  A reading "
-   "well above single digits means the provider is not really computing in "
-   "fp32, but quietly downgrading internally."},
+   "fp32 against fp32, so near zero; well above single digits means the "
+   "provider quietly computes it narrower."},
   {"fp16", ONNX_DT_FLOAT16, Kind::Plain, false, "fp16",
-   "What half precision costs: fp16 inputs and an fp16 answer, against the "
-   "fp32 one.  Whether the running total inside the multiply stays at 16 "
-   "bits too is up to the provider -- ONNX Runtime's CUDA provider keeps it "
-   "at 32 by default -- and a 16-bit total adds error of its own on top of "
-   "rounding the answer."},
+   "fp16 operands and answer.  A provider that also keeps the running total "
+   "at 16 bits adds error of its own."},
   {"bf16", ONNX_DT_BFLOAT16, Kind::Plain, false, "bf16",
-   "The other 16-bit float: three fewer mantissa bits than fp16 in exchange "
-   "for fp32's exponent range.  Expect a larger error than fp16 on values "
-   "like these, which all sit comfortably inside both ranges -- bf16 buys "
-   "headroom against overflow, not precision, and this shows the price."},
+   "bfloat16 operands and answer: three fewer mantissa bits than fp16, so a "
+   "larger error on in-range values like these."},
   {"fp8_e4m3", ONNX_DT_FLOAT8E4M3FN, Kind::Qdq, false, "fp8_e4m3",
-   "The same for 8-bit floating point, in the precision-favouring variant.  "
-   "Read it beside int8: both are eight bits holding the same product, and "
-   "which one loses less depends entirely on how the values are spread.  "
-   "These are uniform over a fixed range, which is int8's best case and "
-   "float8's worst -- float8 buys dynamic range, and uniform data has none "
-   "to spend."},
+   "fp8 e4m3, quantized in and out.  Uniform values like these favour int8, "
+   "since they never use the range float8 spends its bits on."},
   {"fp8_e5m2", ONNX_DT_FLOAT8E5M2, Kind::Qdq, false, "fp8_e5m2",
-   "The same in the range-favouring variant, with one fewer mantissa bit.  "
-   "It should be about twice fp8_e4m3's error on data like this."},
+   "fp8 e5m2, quantized in and out: one fewer mantissa bit than e4m3, so "
+   "about twice its error."},
   {"fp4_e2m1", ONNX_DT_FLOAT4E2M1, Kind::Qdq, false, "fp4_e2m1",
-   "The same for 4-bit floating point, which has eight magnitudes to hold "
-   "the answer in.  Expect roughly four times fp8_e4m3's error: two fewer "
-   "mantissa bits."},
+   "fp4 e2m1, quantized in and out: two fewer mantissa bits than e4m3, so "
+   "roughly four times its error."},
   // No row: keeping NVFP4's answer in four bits needs a blocked
   // QuantizeLinear, which segfaults TensorRT (src/onnx/AGENTS.md), and
   // without it the figure would read as though four bits cost nothing.  The
   // check reads the product whole, which is all a check needs.
   {"nvfp4", ONNX_DT_FLOAT4E2M1, Kind::Nvfp4, false, "nvfp4", nullptr},
+  // Weight-only: the reference takes the same codes at their exact scaled
+  // values, so what is left is the kernel's cost, which no rate row shows.
   {"fp4_weight", ONNX_DT_FLOAT4E2M1, Kind::WeightOnly, false, "fp4_weight",
-   "4-bit float weights, one scale per 32, against 16-bit activations.  The "
-   "reference multiplies the same codes at their exact scaled values, so the "
-   "weights' rounding -- what four bits cost a model, and the same everywhere "
-   "-- cancels, and this is only what the provider's kernel adds: near the "
-   "fp16 row unpacked into a 16-bit multiply, far above it where the "
-   "activations are quantized to multiply in integers."},
+   "4-bit float weights in blocks of 32 against 16-bit activations.  Near "
+   "the fp16 row means a 16-bit multiply; far above it, activations "
+   "quantized to integers."},
   {"int4_weight", ONNX_DT_INT4, Kind::WeightOnly, false, "int4_weight",
-   "4-bit integer weights, one scale per 32, against 16-bit activations.  As "
-   "for fp4_weight the weights' rounding cancels, so near the fp16 row is a "
-   "kernel unpacking into a 16-bit multiply and well above it one that "
-   "quantizes the activations to multiply in integers -- a cost no rate row "
-   "shows."},
+   "4-bit integer weights in blocks of 32 against 16-bit activations.  Near "
+   "the fp16 row means a 16-bit multiply; far above it, activations "
+   "quantized to integers."},
   {"int8_weight", ONNX_DT_INT8, Kind::WeightOnly, false, "int8_weight",
-   "8-bit integer weights, blocked the same way, against 16-bit activations: "
-   "read like int4_weight.  Beside int8_qdq, whose answer is kept in 8 bits "
-   "too, it separates what the activations' quantization costs from what "
-   "keeping the result narrow does."},
+   "8-bit integer weights in blocks of 32 against 16-bit activations.  Near "
+   "the fp16 row means a 16-bit multiply; far above it, activations "
+   "quantized to integers."},
   {"int8_qdq", ONNX_DT_INT8, Kind::Qdq, false, "int8_qdq",
-   "What the integer path costs once the operands are already quantized: "
-   "the multiply, and storing the result back in 8 bits.  Rounding the "
-   "operands is not counted -- the reference multiplies the same quantized "
-   "values, so that part cancels and what is left is this hardware's doing.  "
-   "Whether the multiply ran in integers at all is a separate question, and "
-   "this row says which it was."},
+   "Full-integer int8: 8-bit activations and weights, the answer kept in 8 "
+   "bits."},
   {"int8_qdq_conv1x1", ONNX_DT_INT8, Kind::Qdq, true, "int8_qdq_conv1x1",
-   "The int8 row's product spelled as a quantized 1x1 convolution, the "
-   "operator the int8_qdq_conv1x1 rate row times: the same arithmetic with "
-   "the result kept in 8 bits, so near the int8 row unless the provider's "
-   "convolution path rounds differently."},
+   "The int8 row's product as a quantized 1x1 convolution, the answer kept "
+   "in 8 bits."},
   // The convolution rows' checks (conv.cpp): each precision's product as a
   // 1x1 convolution, the conv1x1 row's operator and the nearest one to the
   // other shapes'.
@@ -755,12 +734,10 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_numeric_error", "ONNX MatMul numeric error", "ppm",
        Category::Compute,
-       "How far each datatype's answer drifts from a full-precision one, in "
-       "parts per million, on a fixed 1024-cubed matrix multiply -- what the "
-       "speed rows cost.  The reference multiplies the same operands the "
-       "device was handed, so this is the arithmetic and the width the answer "
-       "was kept in, not the rounding of the inputs, which is the format's "
-       "and identical everywhere.",
+       "How far each data type's answer on a 1024-cubed matmul drifts from "
+       "an fp32 reference, in parts per million.  The reference multiplies "
+       "the exact values this provider was given, so only the arithmetic and "
+       "the width the answer was kept in remain.",
        // Lower is better, which the `ppm` unit already says.
        TestShape::Heterogeneous, "data type"});
 

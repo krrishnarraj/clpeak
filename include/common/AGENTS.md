@@ -114,6 +114,13 @@ table somewhere else:
   (see the `Level` struct in `src/cpu/latency.cpp`) so name and note stay
   adjacent.
 
+Both stay short: a test's in two sentences (three at most), a reading's in
+two counting everything appended at run time — fastest size, race winner,
+kernel that ran — and a sentence strung together with dashes and semicolons
+does not count as one. Say what is measured and what this row is; why the
+method is shaped that way belongs in a comment beside the code, not in the
+row, and a row never repeats its test's description.
+
 Authoring natively, next to the measurement, is what makes this work at all:
 CPU tags are ISA-slugged at runtime, so no static table keyed by tag could
 cover them, and the same tag means different things across backends.

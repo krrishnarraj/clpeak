@@ -51,35 +51,24 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {LitertFormat::Fp32,
-     "Full precision, the control: hundreds of ppm here is an accelerator "
-     "substituting a narrower type for the fp32 it was asked for."},
+    {LitertFormat::Fp32, "Full 32-bit precision: hundreds of ppm would mean a narrower type was used."},
     {LitertFormat::Fp16,
-     "16-bit inputs and answer: around 200 ppm is fp32 accumulation rounded "
-     "once at the end, ten times that is accumulating in fp16 all the way."},
-    {LitertFormat::Fp16Acc32,
-     "The GPU's fp16 policy with fp32 accumulation; the difference from the "
-     "fp16 row is what the accumulator width was worth."},
-    {LitertFormat::Bf16,
-     "bfloat16 has three fewer mantissa bits than fp16, so eight times the "
-     "fp16 figure is what it costs, if any kernel takes it."},
+     "16-bit weights and arithmetic: about 200 ppm is fp32 accumulation, ten times that is fp16 "
+     "accumulation."},
+    {LitertFormat::Fp16Acc32, "The GPU's fp16 policy with fp32 accumulation."},
+    {LitertFormat::Bf16, "bfloat16 weights and arithmetic."},
     {LitertFormat::Int8Qdq,
-     "8-bit weights and activations with the answer itself quantized to 8 "
-     "bits: around 9000 ppm is what keeping the result in int8 costs on this "
-     "data (the operands' quantization is not counted)."},
+     "Full-integer int8 with the answer kept in 8 bits: about 9000 ppm on this data."},
     {LitertFormat::Int16x8,
-     "16-bit activations over 8-bit weights, the answer kept in 16 bits; its "
-     "result quantization costs about 256 times less than int8_qdq's."},
+     "Full-integer int16x8: 16-bit activations over 8-bit weights, the answer kept in 16 bits."},
     {LitertFormat::Int8Weight,
-     "8-bit weights against float activations: near the fp16 or fp32 row on "
-     "an accelerator that multiplies in float, and on XNNPACK -- which "
-     "quantizes the activations as it goes -- what dynamic-range quantization "
-     "really costs."},
+     "8-bit weights, one scale per output column, against float activations, counting the activations' "
+     "rounding where the kernel quantizes them."},
     {LitertFormat::Int4Weight,
-     "4-bit blockwise weights against float activations; the codes are shared "
-     "with the reference, so whatever separates this from int8_weight is the "
-     "accelerator's arithmetic."},
-    {LitertFormat::Fp8Weight, "8-bit float weights, if any kernel takes them."},
+     "4-bit weights in blocks of 32 against float activations, counting the activations' rounding where "
+     "the kernel quantizes them."},
+    {LitertFormat::Fp8Weight,
+     "8-bit float (E4M3) weights, one scale per output column, against float activations."},
 };
 
 // How this backend's answer checks name things (include/common/answer_check.h).
@@ -447,22 +436,6 @@ LitertForm LitertPeak::resolveIo(const LitertRuntime &rt, const litert_device_in
   return form;
 }
 
-std::string LitertPeak::floatIoClause(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                                      const LitertForm &form)
-{
-  if (!form.floatIo)
-    return std::string();
-  LitertForm own = form;
-  own.floatIo = false;
-  const AnswerCheck &c = answerCheck(rt, dev, f, own);
-  const char *type = litertPlanFor(f, dev.accel).act == clpeak_tflite::TfType::I16 ? "int16" : "int8";
-  const char *what = !c.wrong()                    ? "did not run it"
-                     : missOf(c) == Miss::Never ? "never wrote its answer"
-                     : missOf(c) == Miss::Late  ? "wrote its answer only after the run returned"
-                                                : "returned a wrong answer";
-  return std::string("the graph's input and output float, since with ") + type + " ones this accelerator " + what;
-}
-
 std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
                                     const LitertForm &form)
 {
@@ -493,29 +466,25 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
 
   auto test = currentDeviceScope->beginTest(
       {"litert_numeric_error", "LiteRT matmul numeric error", "ppm", Category::Compute,
-       "How far each format's 1024-cubed matmul drifts from a double-precision "
-       "reference built from the exact values the accelerator was handed, in "
-       "parts per million -- what the speed rows cost.  The stored operands' "
-       "rounding cancels; what remains is the arithmetic and the width the "
-       "answer was kept in.",
+       "How far each format's answer on a 1024-cubed matmul drifts from a "
+       "double-precision reference, in parts per million.  The reference "
+       "multiplies the exact values this accelerator was given, so only the "
+       "arithmetic and the width the answer was kept in remain.",
        TestShape::Heterogeneous, "model format"});
 
   // What another form of the same product read, for the clause that quotes
   // it: its figure, or why it has none.
   auto reading = [&](LitertFormat f, const LitertForm &form) -> std::string {
     const AnswerCheck &c = answerCheck(rt, dev, f, form);
-    char buf[64];
     if (c.wrong() && missOf(c) == Miss::Never)
-      return "no answer (never written)";
+      return "no answer";
     if (c.wrong() && missOf(c) == Miss::Late)
-      return "an answer that landed after the run returned";
+      return "a late answer";
     if (c.wrong())
-    {
-      std::snprintf(buf, sizeof buf, "a wrong answer (%.0f ppm)", c.ppm);
-      return buf;
-    }
+      return "a wrong answer";
     if (c.ppm < 0.0)
-      return "nothing (it did not run)";
+      return "nothing";
+    char buf[64];
     std::snprintf(buf, sizeof buf, "%.0f ppm", c.ppm);
     return buf;
   };
@@ -536,36 +505,37 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
       test.skip(label, c.status, c.error, note);
       continue;
     }
-    // An integer format the accelerator answered only with float inputs and
-    // outputs: what its own int8 or int16 ones did.
+    // One sentence after the format's: an integer format the accelerator
+    // answered only with float inputs and outputs, and what its own int8 or
+    // int16 ones gave; then the other forms the rate rows race -- int8's
+    // layers as 1x1 convolutions (gemm.cpp), and on the GPU its 8-bit kernels.
+    std::string extra;
     if (form.floatIo)
     {
       LitertForm own = form;
       own.floatIo = false;
-      note += "  With " + std::string(plan.act == clpeak_tflite::TfType::I16 ? "int16" : "int8") +
-              " inputs and outputs this accelerator returned " + reading(v.f, own) +
-              ", so the product goes in and out as float, quantized inside the graph, as a converter "
-              "writes it by default.";
+      extra = "Float inputs and outputs, as " +
+              std::string(plan.act == clpeak_tflite::TfType::I16 ? "int16" : "int8") + " ones gave " +
+              reading(v.f, own);
     }
-    // The other forms the rate rows race: int8's layers as 1x1
-    // convolutions (gemm.cpp), and on the GPU its 8-bit kernels.
     const bool conv = v.f == LitertFormat::Int8Qdq;
     std::vector<std::pair<std::string, std::string>> alts;   // (reading, how)
     if (conv)
       alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{true, false, false})), "as a 1x1 convolution"});
     if (plan.gpuInt8KernelChoice)
       alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{false, true, false})),
-                      "with the GPU's 8-bit kernels allowed"});
+                      "with 8-bit kernels"});
     if (conv && plan.gpuInt8KernelChoice)
       alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{true, true, false})), "both ways"});
     if (!alts.empty())
     {
-      std::string alt = "  The other forms the rate rows race read ";
+      extra += extra.empty() ? "Other forms gave " : "; other forms gave ";
       for (size_t i = 0; i < alts.size(); i++)
-        alt += std::string(i == 0 ? "" : (i + 1 == alts.size() ? ", and " : ", ")) + alts[i].first + " " +
-               alts[i].second;
-      note += alt + ".";
+        extra += std::string(i == 0 ? "" : (i + 1 == alts.size() ? " and " : ", ")) + alts[i].first + " " +
+                 alts[i].second;
     }
+    if (!extra.empty())
+      note += "  " + extra + ".";
     // A wrong answer is no precision figure: the row is an Error carrying
     // it, beside the rate rows it withheld.
     if (c.wrong())

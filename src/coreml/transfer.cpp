@@ -131,12 +131,9 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   auto test = currentDeviceScope->beginTest(
       {"coreml_transfer_bw", "Core ML input transfer bandwidth", "bps", Category::Bandwidth,
        "How fast a tensor handed to Core ML reaches this compute unit and how "
-       "fast a result comes back -- the copy every other test here keeps its "
-       "tensors resident to avoid.  Measured as the difference between one "
-       "matrix multiply built with its input resident, with it handed in, and "
-       "with its result handed back, so the arithmetic cancels.  All three "
-       "units share the host's memory: this is the framework's cost of "
-       "presenting a tensor, which for the Neural Engine is a real copy.",
+       "fast a result comes back.  Each is the difference between one matmul "
+       "run with its input resident, handed in, and handed back, so the "
+       "arithmetic cancels.",
        TestShape::Heterogeneous, "direction"});
 
   // The sizes are named in the rows because they differ: the trip out is
@@ -147,18 +144,10 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   auto mb = [](int64_t rows, int64_t width) {
     return std::to_string(((uint64_t)rows * (uint64_t)width * 2) >> 20) + " MB";
   };
-  std::string h2dNote =
-      "Host to device: the input-fed multiply less the resident one, so what is "
-      "left is the trip out.  Reported at the largest size measured";
+  std::string h2dNote = "Host to device: the input-fed matmul less the resident one, at the largest size";
   std::string d2hNote =
-      "Device to host: the multiply that returns its whole result less the one that "
-      "reduces it on the device.  What is left is the return journey alone, reported "
-      "at the largest size measured";
-  std::string rtNote =
-      "Both transfers of an offloaded operation, in and out, less the arithmetic "
-      "between them -- the bar any offloaded work has to clear.  Measured at the "
-      "smallest size, where the trip out is reported at the largest, so the two rows "
-      "are not one subtraction apart";
+      "Device to host: returning the whole result less returning one row of it, at the largest size";
+  std::string rtNote = "Both trips less the resident matmul, at the smallest size";
 
   double lastH2dBps = 0.0;
   double firstResidentUs = 0.0, firstToDeviceUs = 0.0;
@@ -220,6 +209,8 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   h2dNote += ".";
   if (firstRows > 0)
     rtNote += " (" + mb(firstRows, kK) + " in, " + mb(firstRows, kN) + " out)";
+  // The round trip is read at the smallest size and h2d at the largest, so
+  // the two rows are not one subtraction apart.
   rtNote += ".";
   if (lastRows > 0)
     d2hNote += " (" + mb(lastRows, kN) + ")";

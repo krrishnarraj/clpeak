@@ -39,7 +39,7 @@ struct Variant
   int dtype;         // element type of the graph's input/output
   bool qdq;          // build the quantized (DequantizeLinear/MatMul/Q) form
   const char *label;
-  const char *note;  // the row's description, after the sweep sentence
+  const char *note;  // the row's description; gemm.cpp appends what the run found
   int64_t blockSize; // >0: blocked, one scale per this many elements
   bool nvfp4;        // blocked on *both* operands, with a second scale
   bool conv1x1 = false; // every layer a 1x1 Conv rather than a MatMul

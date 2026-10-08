@@ -105,16 +105,16 @@ inline std::string coremlOffDeviceReason(const coreml_device_info_t &dev, const 
          "on another compute unit, so this would not be a " + unit + " number";
 }
 
-// A sentence for a row's description when a passing session still had
-// negligible glue -- a closing scalar multiply, a reshape -- placed on
-// another unit; empty when everything ran on the device.
+// A clause for a row's description ("; ..."), when a passing session still
+// had glue -- a closing scalar multiply, a reshape, under kCoremlOffDeviceShare
+// of the plan's cost -- placed on another unit; empty when everything ran on
+// the device.
 inline std::string coremlGlueNote(const CoremlSession &s)
 {
   const std::string g = s.glue();
   if (g.empty())
     return std::string();
-  return "  Core ML placed " + g + " on another compute unit, at under 5% of the "
-         "plan's estimated cost.";
+  return "; negligible " + g + " ran elsewhere";
 }
 
 // Session creation cost, for the compile-time gates.

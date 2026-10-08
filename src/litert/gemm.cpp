@@ -46,8 +46,7 @@
 // int8_qdq chain at 1.24 TOPS against 702 GOPS, as int8 multiplies
 // (`convolution_int8(conv_generic)`) rather than a float kernel between
 // quantize and dequantize passes, and the Metal accelerator has none.  So
-// int8_qdq is four forms there.  The row reports the fastest, names it and
-// says what the others read.
+// int8_qdq is four forms there.  The row reports the fastest and names it.
 //
 // LiteRT's own answer is the guard.  The runtime keeps the CPU as a fallback
 // for any operation an accelerator declines and says nothing about it in
@@ -56,7 +55,6 @@
 // number under the accelerator's name.
 
 #include <common/form_race.h>
-#include <common/units.h>
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
 #include "litert_model.h"
@@ -67,7 +65,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -133,34 +130,16 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {LitertFormat::Fp32,
-     "Full 32-bit precision as a control; the GPU is asked for its fp32 policy, "
-     "since it otherwise computes an fp32 graph in half."},
-    {LitertFormat::Fp16,
-     "16-bit storage and arithmetic: half-typed tensors and XNNPACK's fp16 GEMM "
-     "on the CPU, the fp16 policy over half-stored weights on the GPU."},
-    {LitertFormat::Fp16Acc32,
-     "The GPU's fp16 policy with the matmul accumulated in fp32; the accuracy "
-     "row says what that buys over plain fp16."},
-    {LitertFormat::Bf16,
-     "bfloat16 tensors, which the .tflite schema allows; whether any kernel "
-     "takes them is the row."},
-    {LitertFormat::Int8Qdq,
-     "8-bit weights, activations and result -- TFLite's full-integer "
-     "quantization, what headline TOPS figures are quoted for."},
-    {LitertFormat::Int16x8,
-     "16-bit activations over 8-bit weights, TFLite's higher-accuracy integer "
-     "scheme; the CPU has only the reference kernel for it, an NPU may have a "
-     "real one."},
-    {LitertFormat::Int8Weight,
-     "8-bit per-row weights against float activations: dynamic-range "
-     "quantization, the post-training-quantized format."},
-    {LitertFormat::Int4Weight,
-     "4-bit blockwise weights (32 per scale) against float activations, what "
-     "an on-device language model ships as."},
+    {LitertFormat::Fp32, "Full 32-bit precision."},
+    {LitertFormat::Fp16, "16-bit weights and arithmetic."},
+    {LitertFormat::Fp16Acc32, "The GPU's fp16 policy with fp32 accumulation."},
+    {LitertFormat::Bf16, "bfloat16 weights and arithmetic."},
+    {LitertFormat::Int8Qdq, "Full-integer int8: 8-bit activations and weights."},
+    {LitertFormat::Int16x8, "Full-integer int16x8: 16-bit activations over 8-bit weights."},
+    {LitertFormat::Int8Weight, "8-bit weights, one scale per output column, against float activations."},
+    {LitertFormat::Int4Weight, "4-bit weights in blocks of 32 against float activations."},
     {LitertFormat::Fp8Weight,
-     "8-bit float (E4M3) weights with a scale per row; which accelerator has a "
-     "kernel for them is the row."},
+     "8-bit float (E4M3) weights, one scale per output column, against float activations."},
 };
 
 // The forms a format's chain is raced in on this accelerator (LitertForm):
@@ -185,17 +164,6 @@ std::string formName(const LitertForm &form, bool kernelsRaced)
   std::string s = form.conv1x1 ? "1x1 convolutions" : "FULLY_CONNECTED operators";
   if (kernelsRaced)
     s += form.gpuInt8Kernels ? " with the GPU's 8-bit kernels" : " without the GPU's 8-bit kernels";
-  return s;
-}
-
-// Another form, in the words that tell it from the one named before it.
-std::string formDiff(const LitertForm &form, const LitertForm &named)
-{
-  std::string s;
-  if (form.conv1x1 != named.conv1x1)
-    s = form.conv1x1 ? "as 1x1 convolutions" : "as FULLY_CONNECTED operators";
-  if (form.gpuInt8Kernels != named.gpuInt8Kernels)
-    s += std::string(s.empty() ? "" : " ") + (form.gpuInt8Kernels ? "with" : "without") + " the 8-bit kernels";
   return s;
 }
 
@@ -237,61 +205,17 @@ std::string foldReason(const std::string &form, const char *tail)
          "the compiler folded the multiplies away: " + tail;
 }
 
-// A raced row's word on its race (clpeak::MultiFormRace): the form its peak
-// ran as and what the others read at a width they shared, each in the unit
-// its own kernel counts in -- or why one was not timed.
-std::string formNote(const std::vector<LitertForm> &forms, bool kernelsRaced, size_t win, int64_t raceDim,
-                     const std::vector<double> &raceRate, const std::vector<double> &raceCreateUs,
-                     const std::vector<Lane> &lanes, const std::vector<std::string> &wrongForm,
-                     const std::vector<const char *> &units)
+// A raced row's winner (clpeak::MultiFormRace), in the words that follow
+// "Fastest at N-wide layers": how its layers were written where that was
+// raced, and whether the GPU's 8-bit kernels were allowed where that was.
+std::string winnerWords(const std::vector<LitertForm> &forms, bool kernelsRaced, size_t win)
 {
-  std::string s = "  The layers were written as " + formName(forms[win], kernelsRaced);
-  if (raceDim > 0 && raceRate[win] > 0.0)
-  {
-    s += ": at " + std::to_string(raceDim) + "-wide layers they ran at " + formatReading(raceRate[win], units[win]) +
-         " that way";
-    std::vector<size_t> others;
-    for (size_t i = 0; i < forms.size(); i++)
-      if (i != win && raceRate[i] > 0.0)
-        others.push_back(i);
-    for (size_t k = 0; k < others.size(); k++)
-      s += std::string(k + 1 == others.size() && k > 0 ? ", and " : ", ") +
-           formatReading(raceRate[others[k]], units[others[k]]) + " " + formDiff(forms[others[k]], forms[win]);
-    // A tie, which would otherwise read as the slower form kept by mistake:
-    // the race keeps the form tried first, unless a later one was ready to
-    // run twice as fast -- which says so with the two times.
-    if (clpeak::MultiFormRace::tieOnBuild(raceRate, raceCreateUs, win))
-    {
-      for (size_t i = 0; i < win; i++)
-        if (raceRate[i] > 0.0 &&
-            std::max(raceRate[i], raceRate[win]) <= std::min(raceRate[i], raceRate[win]) * clpeak::kFormRaceTie &&
-            raceCreateUs[i] >= raceCreateUs[win] * clpeak::kFormRaceBuildGap)
-        {
-          char buf[128];
-          std::snprintf(buf, sizeof buf, " -- a tie, kept for being ready to run in %.1f s against %.1f",
-                        raceCreateUs[win] / 1.0e6, raceCreateUs[i] / 1.0e6);
-          s += buf;
-          break;
-        }
-    }
-    else
-      for (size_t i = 0; i < forms.size(); i++)
-        if (i != win && raceRate[i] > raceRate[win] && raceRate[i] <= raceRate[win] * clpeak::kFormRaceTie)
-        {
-          s += " -- a tie, which keeps the form tried first";
-          break;
-        }
-  }
-  for (size_t i = 0; i < forms.size(); i++)
-  {
-    if (i == win || (raceDim > 0 && raceRate[i] > 0.0))
-      continue;
-    if (!wrongForm[i].empty())
-      s += "; " + formDiff(forms[i], forms[win]) + " this accelerator's answer was wrong, so they were not timed";
-    else if (lanes[i].rungs == 0)
-      s += "; " + formDiff(forms[i], forms[win]) + " they did not run here";
-  }
-  return s + ".";
+  std::string s;
+  if (forms.front().conv1x1 != forms.back().conv1x1)
+    s += forms[win].conv1x1 ? " as 1x1 convolutions" : " as FULLY_CONNECTED";
+  if (kernelsRaced)
+    s += forms[win].gpuInt8Kernels ? " with the GPU's 8-bit kernels" : " without the GPU's 8-bit kernels";
+  return s;
 }
 
 } // namespace
@@ -304,13 +228,10 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
   auto test = currentDeviceScope->beginTest(
       {"litert_gemm", "LiteRT matmul peak", "flops", Category::Unknown,
-       "Matrix-multiply rate through LiteRT on this accelerator, one model "
-       "format per row: sixteen distinct square multiplies chained in one "
-       "dispatch, swept over layer widths and reported at its best.  Each row "
-       "names the kernel that ran, and the int8 row times its layers written "
-       "both as FULLY_CONNECTED and as 1x1 convolutions -- on a GPU with its "
-       "8-bit kernels allowed and not -- and reports the fastest; a format "
-       "handed back to the CPU reports unsupported.",
+       "Matrix-multiply rate on this accelerator, one model format per row: "
+       "sixteen chained square matmuls in one dispatch, swept over layer width "
+       "and reported at its best.  Each row names the kernel that ran, and a "
+       "format LiteRT hands back to the CPU reports unsupported.",
        TestShape::Heterogeneous, "model format"});
 
   // The cost of asking, measured once: a 64^3 multiply whose arithmetic is
@@ -378,9 +299,6 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
     std::vector<Lane> lanes(nf);
     std::string wrongRow;   // a NaN from any form withholds the row
-    // Each width two or more forms were timed at, with what each read and
-    // took to be ready to run there, for the row's note.
-    std::map<int64_t, std::pair<std::vector<double>, std::vector<double>>> raceAt;
     // A form in the log's words, and in a reason's, which names it only
     // where the row has more than one.
     auto what = [&](size_t f) { return formName(forms[f], plan.gpuInt8KernelChoice); };
@@ -662,7 +580,6 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         timed += rate[f] > 0.0;
       if (timed >= 2)
       {
-        raceAt[D] = {rate, createUs};
         size_t before = 0, after = 0;
         for (size_t f = 0; f < nf; f++)
           before += race.runs(f);
@@ -697,35 +614,18 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     const Lane &win = lanes[w];
     if (wrongRow.empty() && win.best > 0.0)
     {
-      // Each form's rate in the unit litertRateUnit gives the format and the
-      // form's own kernel: a weight-only one's in ops where it multiplied int8.
-      std::vector<const char *> units(nf);
-      for (size_t f = 0; f < nf; f++)
-        units[f] = litertRateUnit(plan, lanes[f].kernel, dev.accel);
-      o.unit = std::strcmp(units[w], "ops") == 0 ? "ops" : "";
-      const std::string io = floatIoClause(rt, dev, v.f, forms[w]);
-      o.description = std::string(v.note) + "  Sixteen layers chained per dispatch from a " +
-                      std::to_string(kSeedWidth) + "-wide seed, whose widening multiply is not "
-                      "counted" + (io.empty() ? std::string() : ", " + io) + "; fastest at " +
-                      std::to_string(win.bestDim) + "-wide layers";
+      // In the unit litertRateUnit gives the format and the winner's kernel:
+      // a weight-only one's in ops where it multiplied int8.
+      o.unit = std::strcmp(litertRateUnit(plan, win.kernel, dev.accel), "ops") == 0 ? "ops" : "";
+      const std::string winner = raced ? winnerWords(forms, plan.gpuInt8KernelChoice, w) : std::string();
+      o.description += "  Fastest at " + std::to_string(win.bestDim) + "-wide layers" + winner;
       if (!win.kernel.empty())
-        o.description += ", as `" + win.kernel + "`" + litertKernelNote(plan, win.kernel, dev.accel);
+        o.description += std::string(winner.empty() ? ", as `" : ", run as `") + win.kernel + "`" +
+                         litertKernelNote(plan, win.kernel, dev.accel);
+      // What its own int8 or int16 inputs and outputs did is the accuracy row's to say.
+      if (forms[w].floatIo)
+        o.description += ", with float inputs and outputs";
       o.description += ".";
-      if (raced)
-      {
-        // The others beside the reading the row reports, at the width it
-        // came from where they ran there too -- the last width they shared
-        // can have the race's survivor reading less than another, kept by a
-        // tie -- and otherwise at that last width.
-        int64_t noteDim = raceAt.empty() ? 0 : raceAt.rbegin()->first;
-        if (auto it = raceAt.find(win.bestDim); it != raceAt.end() && it->second.first[w] > 0.0)
-          noteDim = win.bestDim;
-        const std::vector<double> none(nf, 0.0);
-        const std::vector<double> &noteRate = noteDim ? raceAt[noteDim].first : none;
-        const std::vector<double> &noteReadyUs = noteDim ? raceAt[noteDim].second : none;
-        o.description += formNote(forms, plan.gpuInt8KernelChoice, w, noteDim, noteRate, noteReadyUs, lanes,
-                                  wrongForm, units);
-      }
       test.emit(label, (float)win.best, o);
     }
     else

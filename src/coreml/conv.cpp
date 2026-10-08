@@ -54,28 +54,17 @@ struct Shape
   const char *note;
 };
 
+// A row's description is its shape's note, then its type's: "Stride-2 3x3,
+// 16-bit weights and arithmetic."
 const DType kDTypes[] = {
-    {CML_FP16, "fp16", "16-bit floats, the native currency of the Neural Engine's convolution engine."},
-    {CML_FP32, "fp32",
-     "FP32 in and out.  The Neural Engine has no fp32 path, so on that device "
-     "this row reads whichever unit Core ML sent it to, or reports so."},
+    {CML_FP16, "fp16", "16-bit weights and arithmetic."},
+    {CML_FP32, "fp32", "full 32-bit precision."},
 };
 
 const Shape kShapes[] = {
-    {3, 2, false, "conv3x3s2",
-     "A 3x3 convolution over 256 channels at stride 2, the layer vision "
-     "networks downsample with.  Winograd kernels, which do a fraction of the "
-     "multiplies a direct count assumes, cannot run a stride of 2, so every "
-     "multiply counted here is one the unit did."},
-    {1, 1, false, "conv1x1",
-     "Arithmetically a matrix multiply at every pixel, so it should land near "
-     "the matmul rows; where it does not, the two shapes reach different "
-     "machinery."},
-    {3, 1, true, "depthwise3x3",
-     "A 3x3 at stride 1 with each channel kept separate, so far less "
-     "arithmetic per value loaded.  Hardware built around dense arrays "
-     "collapses here, which is why mobile networks run slower than their FLOP "
-     "counts."},
+    {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
+    {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
+    {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -96,11 +85,10 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_conv", "Core ML convolution peak", "flops", Category::Compute,
-       "2-D convolution rate through Core ML on this compute unit, three "
-       "shapes at 256 channels, each swept over feature-map size and reported "
-       "at its best.  Against the matmul rows this says whether the unit was "
-       "built for convolution, and the depthwise row says what it does when "
-       "the arithmetic per byte collapses.",
+       "2-D convolution rate on this compute unit at 256 channels -- a stride-2 "
+       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
+       "reported at its best.  Set against the matmul rows, it shows how well "
+       "this compute unit handles convolution.",
        TestShape::Heterogeneous, "data type and shape"});
 
   for (const DType &dt : kDTypes)
@@ -120,7 +108,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         break;
       const std::string row = std::string(dt.label) + "_" + v.label;
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  " + dt.note;
+      o.description = std::string(v.note) + ", " + dt.note;
       if (!wrongConv.empty())
       {
         CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());
@@ -212,8 +200,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
             }
           }
           else
-            offDeviceNote = "  Larger feature maps were declined by the " +
-                            std::string(coremlKindName(dev.kind)) + ".";
+            offDeviceNote = "; the " + std::string(coremlKindName(dev.kind)) + " declined larger maps";
           break;
         }
         if (!coremlBindScalar(*s, "s", dt.dtype, err))
@@ -305,9 +292,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       if (best > 0.0)
       {
-        o.description = std::string(v.note) + "  " + dt.note + "  Fastest at a " +
-                        std::to_string(bestSp) + " by " + std::to_string(bestSp) + " feature map." +
-                        offDeviceNote + glueNote;
+        o.description += "  Fastest at a " + std::to_string(bestSp) + "x" + std::to_string(bestSp) +
+                         " feature map" + offDeviceNote + glueNote + ".";
         test.emit(row, (float)best, o);
       }
       else

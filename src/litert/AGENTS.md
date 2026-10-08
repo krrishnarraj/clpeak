@@ -206,12 +206,11 @@ kernel name from one profiled run says which kernel it was.
   (`litertKernelNote()`); an `int8_weight` or `int4_weight` graph is float
   arithmetic over compressed weights, which XNNPACK and a GPU's 8-bit
   kernels turn into int8 multiplies by quantizing the activations as they
-  go -- so those rows read TOPS there, TFLOPS on Metal, and a race's other
-  forms each in their own kernel's unit.  Where a tag names no arithmetic
-  (an NPU's), the format's unit stands.  gemm and conv profile every form
-  they race; the block profiles its projections at each prompt it reports,
-  in every form it timed there, for the formats whose weights are integer,
-  until a profile names nothing it can read.
+  go -- so those rows read TOPS there, TFLOPS on Metal.  Where a tag names
+  no arithmetic (an NPU's), the format's unit stands.  gemm and conv profile
+  every form they race; the block profiles its projections at each prompt it
+  reports, in the form that won there, for the formats whose weights are
+  integer, until a profile names nothing it can read.
 - **A fast kernel can be a wrong one, and a right one's answer can fail to
   come back.**  The accuracy measurement is memoised per device, format and
   form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
@@ -258,8 +257,8 @@ kernel name from one profiled run says which kernel it was.
   the ONNX backend's numbers) -- and on a GPU each with the accelerator's
   8-bit kernels allowed and not (`LitertForm::gpuInt8Kernels`,
   `allow_src_quantized_fc_conv_ops`, without which ML Drift adds
-  `kDisallow8bitConvs`): four forms, the fastest reported and named with
-  what the others read.  `int8_weight`, dynamic-range quantization -- what
+  `kDisallow8bitConvs`): four forms, the fastest reported and named.
+  `int8_weight`, dynamic-range quantization -- what
   those kernels were written for -- races the two policies on a GPU too, in
   gemm, conv and the block.  The policy also sends
   `enable_constant_tensors_sharing`, which the option's documentation
@@ -669,6 +668,3 @@ budgets.
 - A new recipe: `litert_model.h` declares, `litert_model.cpp` builds
   through `Recipe`; keep the leading batch dimension and the runtime scalar.
 - Update `third_party/litert` with `tools/update_litert_headers.sh <tag>`.
-- Descriptions -- a test's and a row's, with whatever the row appends
-  (fastest size, kernel, caveat) -- stay within three sentences; the
-  reasoning behind a row belongs here, not in the row.

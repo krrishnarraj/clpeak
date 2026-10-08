@@ -14,54 +14,42 @@ namespace onnxgemm
 
 const Variant kFpVariants[] = {
     {ONNX_DT_FLOAT, false, "fp32",
-     "FP32 in and out.  Some providers compute it narrower or route it off "
-     "their matrix hardware entirely; the fp32 numeric-error row says which.",
+     "Full 32-bit precision, unless the numeric-error row says otherwise.",
      0, false},
-    {ONNX_DT_FLOAT16, false, "fp16",
-     "16-bit floats, the native currency of most matrix hardware.", 0, false},
-    {ONNX_DT_BFLOAT16, false, "bf16",
-     "The 16-bit float with fp32's exponent range and three fewer mantissa "
-     "bits.  Hardware with a real bf16 path runs it at the fp16 rate; well "
-     "short of that is emulation.",
+    {ONNX_DT_FLOAT16, false, "fp16", "16-bit weights and arithmetic.", 0, false},
+    {ONNX_DT_BFLOAT16, false, "bf16", "bfloat16 weights and arithmetic.",
      0, false},
     {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
-     "The 8-bit float that spends its bits on precision -- four exponent, "
-     "three mantissa, reaching 448 -- quantized in and out.  This is what "
-     "inference uses below 16 bits without going to integers.",
+     "fp8 e4m3 activations and weights, quantized in and out.",
      0, false},
     {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
-     "The other 8-bit float, a mantissa bit traded for an exponent one: it "
-     "reaches 57344 and rounds more coarsely.  A gap against the e4m3 row is "
-     "the provider reaching for different machinery.",
+     "fp8 e5m2 activations and weights, quantized in and out.",
      0, false},
     {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
-     "4-bit floating point on both operands, one scale for the whole tensor: "
-     "eight magnitudes in all, the largest 6.  Unlike int4 a provider may fuse "
-     "it into real 4-bit arithmetic, and the row says whether this one did.",
+     "fp4 e2m1 activations and weights, one scale per tensor, quantized in "
+     "and out.",
      0, false},
+    // An E4M3 scale for every 16 values along the reduction axis and one for
+    // the tensor; the one row whose arithmetic is genuinely four-bit rather
+    // than four bits unpacked into something wider.  gemm.cpp says why it is
+    // not chained.
     {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
-     "NVIDIA's 4-bit block format on both operands: an 8-bit float scale for "
-     "every 16 values along the reduction axis, and one more for the tensor.  "
-     "It is the only row here whose arithmetic is genuinely four-bit rather "
-     "than four bits unpacked into something wider.",
+     "NVFP4 on both operands, 4-bit values with an fp8 scale per 16; one "
+     "multiply per dispatch, not a chain.",
      /*blockSize=*/16, /*nvfp4=*/true},
     {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
-     "4-bit float weights, one scale per 32, against 16-bit activations.  "
-     "Identical to the int4 row in every respect but whether the four bits "
-     "are a float or an integer.",
+     "4-bit float weights in blocks of 32 against 16-bit "
+     "activations.",
      /*blockSize=*/32, false},
     {ONNX_DT_INT4, false, "int4_weight",
-     "4-bit integer weights, one scale per 32, against 16-bit activations -- "
-     "how quantized language models ship.  They unpack into a 16-bit "
-     "multiply, so this reads in TFLOPS: four bits buys weight traffic, not "
-     "rate, and well below the fp16 row is a costly unpack.",
+     "4-bit integer weights in blocks of 32 against 16-bit "
+     "activations.",
      /*blockSize=*/32, false},
+    // Narrows only the weights where int8_qdq narrows the arithmetic too, so
+    // the gap between the two is what the integer units are worth.
     {ONNX_DT_INT8, false, "int8_weight",
-     "8-bit integer weights, blocked the same way, against 16-bit "
-     "activations.  This narrows only the weights where int8_qdq narrows the "
-     "arithmetic too, so the gap between them is what the integer units are "
-     "worth -- and the same row the Core ML and LiteRT backends measure, so "
-     "the three ladders line up.",
+     "8-bit integer weights in blocks of 32 against 16-bit "
+     "activations.",
      /*blockSize=*/32, false},
 };
 const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
@@ -80,15 +68,10 @@ const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 // and cost the HTP's int8 seven eighths of its rate.
 const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
-     "8-bit integers quantized in and quantized out, the shape quantized "
-     "inference ships in and what vendors quote headline TOPS figures for.",
+     "Full-integer int8: 8-bit activations and weights.",
      0, false},
     {ONNX_DT_INT8, true, "int8_qdq_conv1x1",
-     "The int8 chain again, every layer a quantized 1x1 convolution over a "
-     "grid of as many positions as the layer is wide: the same arithmetic, "
-     "spelled as the operator NPU compilers were first built for.  Where it "
-     "beats the int8_qdq row, the provider's convolution path is its faster "
-     "int8 one.",
+     "Full-integer int8 again, every layer spelled as a 1x1 convolution.",
      0, false, /*conv1x1=*/true},
 };
 const size_t kIntVariantCount = sizeof(kIntVariants) / sizeof(kIntVariants[0]);

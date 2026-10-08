@@ -53,6 +53,8 @@ namespace
   constexpr double kMaxIterUs = 2.0e6;
   constexpr unsigned int kSizeBudgetUs = 2000000;
 
+  // A row's description is "<Shape::note>, <DType::note>." and then a
+  // sentence on where it peaked.
   struct DType
   {
     int dtype;
@@ -78,11 +80,8 @@ namespace
   // reason the symmetric int4 GEMM row does not exist.  MatMul gained
   // bfloat16 among its types at opset 14, which is why gemm keeps its row.
   const DType kDTypes[] = {
-      {ONNX_DT_FLOAT, "fp32",
-       "FP32 in and out; far short of this provider's own fp16 row means no "
-       "full-precision convolution path."},
-      {ONNX_DT_FLOAT16, "fp16",
-       "16-bit floats, the native currency of most convolution engines."},
+      {ONNX_DT_FLOAT, "fp32", "full 32-bit precision"},
+      {ONNX_DT_FLOAT16, "fp16", "16-bit weights and arithmetic"},
   };
 
   // The dense 3x3 runs at stride 2 because a FLOPS row has to count
@@ -99,20 +98,9 @@ namespace
   // either.  Core ML and LiteRT take these shapes, so the ladders divide row
   // for row.
   const Shape kShapes[] = {
-      {3, 2, false, "conv3x3s2",
-       "A 3x3 convolution over 256 channels at stride 2, the layer vision "
-       "networks downsample with.  Winograd kernels, which do a fraction of "
-       "the multiplies a direct count assumes, cannot run a stride of 2, so "
-       "every multiply counted here is one the device did."},
-      {1, 1, false, "conv1x1",
-       "Arithmetically a matrix multiply at every pixel, so it should land "
-       "near the matmul rows; where it does not, the two shapes reach "
-       "different machinery."},
-      {3, 1, true, "depthwise3x3",
-       "A 3x3 at stride 1 with each channel kept separate, so far less "
-       "arithmetic per value loaded.  Hardware built around dense arrays "
-       "collapses here, which is why mobile networks run slower than their "
-       "FLOP counts."},
+      {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
+      {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
+      {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -287,10 +275,10 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   auto test = currentDeviceScope->beginTest(
       {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
-       "Convolution rate at the precision and shape each row names, swept "
-       "over feature-map sizes and reported at its best.  Accelerators were "
-       "built for this before anything else, so the gap against the matmul "
-       "rows says what the hardware was shaped for.",
+       "2-D convolution rate on this provider at 256 channels -- a stride-2 "
+       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size "
+       "and reported at its best.  Set against the matmul rows, it shows how "
+       "well this provider handles convolution.",
        TestShape::Heterogeneous, "convolution shape and data type"});
 
   for (const DType &dt : kDTypes)
@@ -301,6 +289,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
 
       const std::string row = std::string(dt.label) + "_" + v.label;
+      const std::string desc = std::string(v.note) + ", " + dt.note + ".";
 
       // Global probe fast-path: gemm's 64^3 matmul probe already tells us if
       // this dtype is emulated on this EP (QNN HTP fp32 33s).  Skip before
@@ -310,10 +299,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         auto it = probe.find(dt.label);
         if (it != probe.end() && !it->second.ok)
         {
-          logger::EmitOptions o;
-          o.description = std::string("Peak over a doubling sweep of feature-map sizes.  ") + dt.note + "  " + v.note;
           test.skip(row, onnxFailureStatus(it->second.reason), it->second.reason,
-                    o.description);
+                    desc);
           continue;
         }
       }
@@ -325,8 +312,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           !wrong.empty())
       {
         CLPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(), row.c_str(), wrong.c_str());
-        test.skip(row, ResultStatus::Error, wrong,
-                  std::string("Peak over a doubling sweep of feature-map sizes.  ") + dt.note + "  " + v.note);
+        test.skip(row, ResultStatus::Error, wrong, desc);
         continue;
       }
 
@@ -593,37 +579,33 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         prevCreateUs = createUs;
       }
 
-      logger::EmitOptions o;
       if (best > 0.0)
       {
-        o.description = "Peak over a doubling sweep of feature-map sizes; "
-                        "fastest at " +
-                        std::to_string(bestSpatial) + " square.  " + dt.note +
-                        "  " + v.note;
+        logger::EmitOptions o;
+        const std::string side = std::to_string(bestSpatial);
+        o.description = desc + "  Fastest at a " + side + "x" + side +
+                        " feature map";
         if (!ranWider.empty())
-          o.description += "  This provider has no " + std::string(dt.label) +
-                           " convolution kernel and ran it in " + ranWider +
-                           ", so this is that width rather than " +
-                           dt.label + ".";
-        if (offDeviceBelow > 0)
-          o.description += "  Feature maps below " + std::to_string(firstSpatial) +
-                           " square were sent to another compute unit by the "
-                           "provider's runtime and are not in this figure.";
-        if (offDeviceAbove > 0)
-          o.description += "  From " + std::to_string(offDeviceAbove) +
-                           " square the provider's runtime sent the work to "
-                           "another compute unit, which ended the sweep.";
+          o.description += ", run in " + ranWider + " (no " +
+                           std::string(dt.label) + " kernel)";
+        if (offDeviceBelow > 0 && offDeviceAbove > 0)
+          o.description += "; maps below " + std::to_string(firstSpatial) +
+                           " and from " + std::to_string(offDeviceAbove) +
+                           " square ran on another unit";
+        else if (offDeviceBelow > 0)
+          o.description += "; maps below " + std::to_string(firstSpatial) +
+                           " square ran on another unit";
+        else if (offDeviceAbove > 0)
+          o.description += "; from " + std::to_string(offDeviceAbove) +
+                           " square it ran on another unit";
+        o.description += ".";
         test.emit(row, (float)best, o);
       }
       else
       {
-        o.description = std::string("Peak over a doubling sweep of "
-                                    "feature-map sizes.  ") +
-                        dt.note + "  " +
-                        v.note;
         test.skip(row, onnxFailureStatus(firstErr, errStatus),
                   firstErr.empty() ? "convolution unsupported" : firstErr,
-                  o.description);
+                  desc);
       }
     }
   }

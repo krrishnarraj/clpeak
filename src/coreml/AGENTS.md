@@ -196,8 +196,8 @@ every width, the block at every point (its prompt and its cache race
 separately, since one unit can take the wide multiply and the one-row one
 in opposite layouts), and the accuracy matmul times both and reads the
 faster one's answer, because a layout can change the kernel and with it
-the arithmetic.  Each row reports the faster and names its layout, with
-what the other read beside it.  `CoremlLayoutRace` (`coreml_bench.h`) has
+the arithmetic.  Each row reports the faster and names its layout.
+`CoremlLayoutRace` (`coreml_bench.h`) has
 the M1 Pro's cases, and `clpeak::FormRace` (`include/common/form_race.h`)
 the rule that closes a race once its readings settle it, so most rows pay
 for one extra model; on the Neural Engine, which runs

@@ -38,17 +38,11 @@ struct Size
 };
 
 const Size kSizes[] = {
-    {2048, "8mb",
-     "Eight megabytes of weights -- small enough to sit in fast local memory "
-     "on most devices, so this is usually the fastest rung."},
-    {4096, "32mb", "Thirty-two megabytes -- around the size of a large cache or a device's fast local memory."},
-    {8192, "128mb", "128 megabytes -- past the cache of most devices, though not all."},
-    {16384, "512mb",
-     "512 megabytes -- beyond any cache shipping today, so this is main memory "
-     "on anything that still shows a falling rate by this point."},
-    {32768, "2gb",
-     "Two gigabytes, reached only by a device whose rate was still dropping at "
-     "512 MB, meaning a cache larger than anything current."},
+    {2048, "8mb", "8 MB of weights, small enough for most devices' fast local memory."},
+    {4096, "32mb", "32 MB of weights, around the size of a large cache."},
+    {8192, "128mb", "128 MB of weights, past most devices' caches."},
+    {16384, "512mb", "512 MB of weights, beyond any current cache: main memory."},
+    {32768, "2gb", "2 GB of weights, reached only if the rate was still falling at 512 MB."},
 };
 
 constexpr double kFallingRatio = 0.9;
@@ -123,9 +117,9 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
   auto test = currentDeviceScope->beginTest(
       {"litert_tensor_bw", "LiteRT resident-weight bandwidth", "bps", Category::Bandwidth,
        "How fast this accelerator streams a resident weight matrix through a "
-       "matrix-vector product -- the shape of generating one token -- at growing "
-       "sizes, net of the cost of asking.  Where the rate drops, a model of that "
-       "size stopped fitting in fast local memory.",
+       "matrix-vector product -- the shape of generating a token -- at growing "
+       "sizes, net of dispatch cost.  Where the rate drops, the weights no longer "
+       "fit in fast local memory.",
        TestShape::Heterogeneous, "working set"});
 
   // The floor is the smallest graph's whole time.

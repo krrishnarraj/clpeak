@@ -836,8 +836,7 @@ float storedScale(float s, int dtype)
 // multiplies -- made the Neural Engine's int8 row read *worse* (348 ppm
 // against 294 on the M1 Pro): the ANE keeps the codes and applies the scale
 // after the accumulation, so the exact product is what it computes.  A unit
-// that does round to fp16 first reads a little above its fp16 row instead,
-// which the row descriptions say.
+// that does round to fp16 first reads a little above its fp16 row instead.
 float dequantizedTo(float scale, float code, int dtype)
 {
   (void)dtype;
