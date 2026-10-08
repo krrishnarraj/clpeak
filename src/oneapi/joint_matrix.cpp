@@ -40,13 +40,13 @@
 #ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
 
 namespace clpeak_oneapi {
-float runJmFour(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCount,
-                uint32_t numBlocks, uint32_t blockSize,
-                sycl::ext::oneapi::experimental::matrix::matrix_type at,
-                sycl::ext::oneapi::experimental::matrix::matrix_type bt,
-                sycl::ext::oneapi::experimental::matrix::matrix_type ct,
-                uint32_t M, uint32_t N, uint32_t K, uint32_t trips,
-                unsigned int targetTimeUs, unsigned int forced);
+float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCount,
+                 uint32_t numBlocks, uint32_t blockSize,
+                 sycl::ext::oneapi::experimental::matrix::matrix_type at,
+                 sycl::ext::oneapi::experimental::matrix::matrix_type bt,
+                 sycl::ext::oneapi::experimental::matrix::matrix_type ct,
+                 uint32_t M, uint32_t N, uint32_t K, uint32_t accumulators, uint32_t trips,
+                 unsigned int targetTimeUs, unsigned int forced);
 }
 
 namespace {
@@ -72,8 +72,8 @@ constexpr uint64_t JM_OUT_BYTES = 512ull << 20;
 // parallel_for, and the template arguments already are the distinction.
 template <typename At, typename Bt, typename Acc, int M, int N, int K> struct JmTag;
 
-// The most accumulator a lane may hold for a tile to be timed with four
-// accumulators as well as one (runJmFour): 128 bytes, counted at the
+// The most accumulator a lane may hold for a tile to be timed as blocks on
+// four accumulators (runJmBlock): 128 bytes, counted at the
 // narrowest sub-group the device offers.  Four of Alchemist's 8x8 fp32 tiles
 // at SIMD8 come to exactly that, and so do four 8x16 tiles at SIMD16 on
 // PVC/Xe2; four of Alchemist's 32x32 bf16 tiles would be 2 KB a lane, which
@@ -645,13 +645,14 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     const uint64_t tileElems = (uint64_t)t.M * t.N;
     const bool isInt = jmIsIntAcc(t.ct);
 
-    // One timing of this tile: `fourTrips` 0 is the accumulator chain, else
-    // runJmFour, which stores four tiles a block.  As many blocks as the tile
-    // fits into the shared buffer -- see the sizing note above.  Returns the
+    // One timing of this tile: `blockAccs` 0 is the accumulator chain, else
+    // runJmBlock's sixteen-product blocks on that many accumulators, which
+    // stores that many tiles a block.  As many blocks as the tile fits into
+    // the shared buffer -- see the sizing note above.  Returns the
     // microseconds a launch took (JM_NOT_COMPILED / <= 0 as the runners do)
     // and the ops that launch issued.
-    auto timeTile = [&](uint32_t fourTrips, double &ops) -> float {
-      const uint64_t perBlock = tileElems * (fourTrips ? 4 : 1);
+    auto timeTile = [&](uint32_t blockAccs, double &ops) -> float {
+      const uint64_t perBlock = tileElems * (blockAccs ? blockAccs : 1);
       if (outElems < perBlock)
         return -1.0f;
       uint64_t blocks = std::min<uint64_t>(wantBlocks, outElems / perBlock);
@@ -659,10 +660,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       const uint32_t numBlocks = (uint32_t)blocks;
 
       float us;
-      if (fourTrips)
-        us = clpeak_oneapi::runJmFour(*this, dev, out, sgCount, numBlocks, blockSize,
-                                      t.at, t.bt, t.ct, t.M, t.N, t.K, fourTrips,
-                                      cfg.targetTimeUs, forced);
+      if (blockAccs)
+        us = clpeak_oneapi::runJmBlock(*this, dev, out, sgCount, numBlocks, blockSize,
+                                       t.at, t.bt, t.ct, t.M, t.N, t.K, blockAccs,
+                                       JM_ITERS / 16, cfg.targetTimeUs, forced);
       else if (isInt)
         us = runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize,
                       cfg.targetTimeUs, forced, t);
@@ -692,9 +693,12 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       CLPEAK_VLOG("joint_matrix: %s %s%s -- %u work-items/work-group ran as %u "
                   "sub-group(s), %u blocks\n",
                   t.label.c_str(), t.shape.c_str(),
-                  fourTrips ? " with four accumulators" : "", blockSize, sgPerWG,
-                  numBlocks);
-      const double mads = fourTrips ? 16.0 * fourTrips : (double)JM_ITERS;
+                  blockAccs == 1 ? " as one-accumulator blocks"
+                  : blockAccs ? " as four-accumulator blocks" : "",
+                  blockSize, sgPerWG, numBlocks);
+      // Both shapes issue JM_ITERS mads a sub-group: the blocks as
+      // JM_ITERS / 16 trips of sixteen.
+      const double mads = (double)JM_ITERS;
       ops = (double)numBlocks * (double)sgPerWG * (double)t.volume() * 2.0 * mads;
       return us;
     };
@@ -716,33 +720,52 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     }
     float value = (float)(ops * 1.0e6 / us);
 
-    // And with four accumulators, where the tile leaves room for them
-    // (runJmFour).  A failure here is not an error: the chain already
-    // produced a reading.
+    // And as runJmBlock's sixteen-product blocks: on one accumulator, and --
+    // where the tile leaves room for them -- on four.  A failure here is not
+    // an error: the chain already produced a reading.  Each block reading
+    // faces the fold guard against the chain's.
     logger::EmitOptions opts = jmOpts(t);
-    const uint64_t accBytes = 4ull * tileElems * 4;   // fp32 and int32 alike
-    if (accBytes <= (uint64_t)JM_FOUR_ACC_BYTES_PER_LANE * minSgSize)
+    const float chain = value;
+    const char *shapeNames[3] = {"one multiply a loop step",
+                                 "sixteen a step into one total",
+                                 "sixteen a step into four totals"};
+    std::vector<int> ran(1, 0);
+    int best = 0;
+    for (uint32_t accs : {1u, 4u})
     {
-      double fourOps = 0.0;
-      const float fourUs = timeTile(JM_ITERS / 16, fourOps);
-      if (fourUs > 0.0f)
+      const uint64_t fourAccBytes = 4ull * tileElems * 4;   // fp32 and int32 alike
+      if (accs == 4 && fourAccBytes > (uint64_t)JM_FOUR_ACC_BYTES_PER_LANE * minSgSize)
+        continue;
+      double blockOps = 0.0;
+      const float blockUs = timeTile(accs, blockOps);
+      if (blockUs <= 0.0f)
+        continue;
+      const float block = (float)(blockOps * 1.0e6 / blockUs);
+      CLPEAK_VLOG("joint_matrix: %s %s chain %.1f, blocks on %u accumulator(s) %.1f %s\n",
+                  t.label.c_str(), t.shape.c_str(), chain, accs, block,
+                  isInt ? "ops" : "flops");
+      if (block > chain * MAX_ALT_CHAIN_RATIO)
       {
-        const float four = (float)(fourOps * 1.0e6 / fourUs);
-        CLPEAK_VLOG("joint_matrix: %s %s one accumulator %.1f, four %.1f %s\n",
-                    t.label.c_str(), t.shape.c_str(), value, four,
-                    isInt ? "ops" : "flops");
-        if (four > value * MAX_ALT_CHAIN_RATIO)
-          CLPEAK_VLOG("joint_matrix: %s %s four accumulators %.1fx faster -- "
-                      "rejecting it as a compiler fold\n",
-                      t.label.c_str(), t.shape.c_str(), four / value);
-        else
-        {
-          opts.description += four > value
-              ? "  Timed with one accumulator and with four; this is four."
-              : "  Timed with one accumulator and with four; this is one.";
-          value = std::max(value, four);
-        }
+        CLPEAK_VLOG("joint_matrix: %s %s blocks on %u accumulator(s) %.1fx faster -- "
+                    "rejecting it as a compiler fold\n",
+                    t.label.c_str(), t.shape.c_str(), accs, block / chain);
+        continue;
       }
+      const int shape = accs == 1 ? 1 : 2;
+      ran.push_back(shape);
+      if (block > value)
+      {
+        value = block;
+        best = shape;
+      }
+    }
+    if (ran.size() > 1)
+    {
+      std::string list;
+      for (size_t i = 0; i < ran.size(); i++)
+        list += std::string(i == 0 ? "" : i + 1 == ran.size() ? " and " : ", ") +
+                shapeNames[ran[i]];
+      opts.description += "  Timed as " + list + "; this is " + shapeNames[best] + ".";
     }
     test.emit(t.metric, value, opts);
   }
