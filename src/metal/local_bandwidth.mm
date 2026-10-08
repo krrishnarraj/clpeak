@@ -10,9 +10,8 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest(
         {"local_memory_bandwidth", "Local memory bandwidth", "bps",
          Category::Unknown,
-         "How many bytes per second the GPU moves through threadgroup memory -- "
-         "the small scratchpad a group of threads shares on-chip, which never "
-         "goes out to main memory.",
+         "Bandwidth of threadgroup memory, the on-chip scratchpad a "
+         "threadgroup shares.",
          TestShape::Homogeneous, "vector width"});
 
     const uint32_t tgSize = 256;

@@ -45,30 +45,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
 {
 
   // One note per dtype row, shared by every emit and skip path below.
-  const char *fp32Note = "Full 32-bit precision, on the general compute units "
-                         "rather than the matrix engine.";
-  const char *fp64Note = "Full 64-bit precision, for scientific computing.  Run "
-                         "on a smaller matrix than the other rows, because a "
-                         "full-size one would take long enough to trip the "
-                         "driver's watchdog.";
-  const char *fp16Note = "16-bit inputs -- the everyday precision of AI "
-                         "inference, and usually the fastest row here.  The "
-                         "result is written as fp16 or as fp32, whichever "
-                         "the library runs faster.";
-  const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, "
-                         "trading digits of accuracy for the number range of a "
-                         "full float.";
-  const char *int8Note = "8-bit whole numbers with 32-bit totals -- the format "
-                         "quantized neural networks use.";
+  const char *fp32Note = "fp32 inputs and accumulator, without the matrix "
+                         "engine.";
+  const char *fp64Note = "fp64 inputs and accumulator, on a smaller matrix than "
+                         "the other rows.";
+  const char *fp16Note = "fp16 inputs, fp16 or fp32 output.";
+  const char *bf16Note = "bf16 inputs, fp32 accumulator.";
+  const char *int8Note = "int8 inputs, int32 accumulator.";
 
   auto test = currentDeviceScope->beginTest(
         {"onemkl_gemm", "oneMKL GEMM peak", "flops", Category::Unknown,
-         "Matrix-multiply speed through Intel's own tuned library, on a large "
-         "square problem -- what shipping code reaches on the operation most AI "
-         "work is built from.  The joint_matrix rows drive the same matrix "
-         "engine from a hand-written loop that touches no memory; the library "
-         "brings its own kernels, and can land above or below them.  Each "
-         "reading is a different input format.",
+         "Peak GEMM rate through Intel's oneMKL library, on a large square problem.",
          TestShape::Heterogeneous, "data type"});
 
   auto mklOpts = [&](const char *note) {
@@ -235,8 +222,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       else
       {
         if (forms.size() > 1)
-          opts.description += "  Ran as " + forms[best].name +
-                              ", the fastest of the forms raced.";
+          opts.description += "  Fastest form: " + forms[best].name + ".";
         test.emit(label, (float)(flops * 1.0e6 / meanUs), opts);
       }
     }

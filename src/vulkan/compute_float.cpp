@@ -28,9 +28,8 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Single-precision compute";
   d.resultTag   = "single_precision_compute";
   d.unit        = "flops";
-  d.description = "Peak arithmetic speed of the device's compute units on 32-bit "
-                  "fractional numbers -- the ordinary float type.  Nothing touches "
-                  "memory, so only the arithmetic units limit the rate.";
+  d.description = "Peak fp32 arithmetic rate of the device's ALUs, with no memory "
+                  "traffic.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;
@@ -63,9 +62,7 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Half-precision compute fp16xfp16+fp16";
   d.resultTag   = "half_precision_compute";
   d.unit        = "flops";
-  d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
-                  "size of a normal float, and what graphics and on-device AI mostly "
-                  "run on.  Both the inputs and the running total stay 16-bit here.";
+  d.description = "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;
@@ -101,10 +98,7 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Double-precision compute";
   d.resultTag   = "double_precision_compute";
   d.unit        = "flops";
-  d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
-                  "high-accuracy type scientific computing relies on.  Consumer "
-                  "graphics parts deliberately run these many times slower than "
-                  "32-bit.";
+  d.description = "Peak fp64 arithmetic rate.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;
@@ -143,9 +137,8 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Mixed-precision compute fp16xfp16+fp32";
   d.resultTag   = "mixed_precision_compute";
   d.unit        = "flops";
-  d.description = "Peak speed when the device multiplies 16-bit numbers but keeps "
-                  "the running total in 32 bits -- the accuracy-preserving pattern "
-                  "AI code uses.";
+  d.description = "Peak rate of fp16 multiplies accumulated in fp32, "
+                  "without the matrix engine.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;
@@ -183,9 +176,8 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "BF16 compute bf16xbf16+fp32";
   d.resultTag   = "bfloat16_compute";
   d.unit        = "flops";
-  d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
-                  "digits of accuracy for the same number range as a full float.  "
-                  "The running total is kept in 32 bits.";
+  d.description = "Peak rate of bf16 multiplies accumulated in fp32, "
+                  "without the matrix engine.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;

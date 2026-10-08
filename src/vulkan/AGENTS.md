@@ -64,7 +64,7 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   type runs at the first advertised tile the driver will build: `rankTiles`
   (`vk_peak.cpp`) keeps every tile, best first, and a refusal to build
   (`vk_compute_desc_t::refused`, set by `runComputeKernel`) moves
-  `runCoopMatrix` on to the next; the note names any it refused.  A tile the
+  `runCoopMatrix` on to the next; the note counts any it refused.  A tile the
   driver advertised without a subgroup width (no
   `VK_EXT_cooperative_matrix_maintenance1`) is also timed at each narrower
   width the device can pin (`coopmatSubgroupWidths()` in `vk_peak.h`): the

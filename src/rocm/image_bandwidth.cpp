@@ -9,16 +9,13 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"image_memory_bandwidth", "Image memory bandwidth", "bps",
      Category::Unknown,
-     "How many bytes per second the GPU reads through its texture units, "
-     "which take a different path to memory than plain buffer reads.  Each "
-     "pixel of the image is read exactly once, so caching cannot flatter the "
-     "number.",
+     "Read bandwidth through the texture units, reading each pixel of an image "
+     "once.",
      TestShape::Homogeneous});
 
   // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
   // hence the metric name.
-  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
-                          "colour values, 16 bytes.";
+  const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;

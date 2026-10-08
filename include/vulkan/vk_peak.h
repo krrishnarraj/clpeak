@@ -219,10 +219,10 @@ static inline const char *vkWidthNote(uint32_t width)
 {
   switch (width)
   {
-  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
-  case 2: return "Two values per thread at a time, as one 2-wide vector.";
-  case 4: return "Four values per thread at a time, as one 4-wide vector.";
-  case 8: return "Eight values per thread at a time, as one 8-wide vector.";
+  case 1: return "Scalar, one value per thread.";
+  case 2: return "2-wide vector per thread.";
+  case 4: return "4-wide vector per thread.";
+  case 8: return "8-wide vector per thread.";
   default: return "";
   }
 }

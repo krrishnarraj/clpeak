@@ -81,7 +81,7 @@ struct mtl_compute_desc_t
   const char *resultTag;
   const char *unit;                // "flops" / "ops"
 
-  // One or two plain-language sentences on what the test measures; travels to
+  // One or two sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
 

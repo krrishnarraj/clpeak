@@ -26,10 +26,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Image memory bandwidth";
   testSpec.unit = "bps";
   testSpec.description =
-      "How many bytes per second the device reads through its texture units, "
-      "which take a different path to memory than plain buffer reads.  Each "
-      "pixel of the image is read exactly once, so caching cannot flatter the "
-      "number.";
+      "Image read bandwidth, reading each pixel once.";
   testSpec.shape = TestShape::Homogeneous;
   auto test = currentDeviceScope->beginTest(testSpec);
 
@@ -270,8 +267,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   // The image is RGBA32F, so one fetch returns a whole pixel: four 32-bit
   // values, hence the metric name.
-  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
-                          "colour values, 16 bytes.";
+  const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
 
   // The walk shapes raced.  A row-major sweep and its transpose both hand a
   // warp a 1D run of texels, which is what a linear surface wants; a driver

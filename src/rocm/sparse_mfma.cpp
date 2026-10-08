@@ -31,7 +31,7 @@ struct SparseEntry
   const char *kernelName;
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
   bool isInt;
-  const char *description;  // plain-language explanation, next to the name
+  const char *description;  // what this row is, next to the name
 };
 
 std::string archBaseOf(const std::string &a)
@@ -56,26 +56,22 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp16, "smfmac_fp16",
      16, 16, 32, false,
-     "The matrix cores on 16-bit inputs with structured sparsity: half the "
-     "values in each group of four are known to be zero and are skipped, so "
-     "the hardware does twice the useful work per step."},
+     "fp16 inputs, fp32 accumulator (SMFMAC 16x16x32)."},
     {"bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_bf16, "smfmac_bf16",
      16, 16, 32, false,
-     "The same skip-the-zeros trick on bfloat16, the AI-oriented 16-bit "
-     "format."},
+     "bf16 inputs, fp32 accumulator (SMFMAC 16x16x32)."},
     {"fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp8, "smfmac_fp8",
      16, 16, 64, false,
-     "The same skip-the-zeros trick on 8-bit numbers -- the fastest "
-     "arrangement these matrix cores offer for fractional values."},
+     "fp8 E4M3 inputs (more precision, less range), fp32 accumulator "
+     "(SMFMAC 16x16x64)."},
   };
   static const SparseEntry intEntries[] = {
     {"int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "ops",
      &rocm_kernels::smfmac_int8, "smfmac_int8",
      16, 16, 64, true,
-     "The same skip-the-zeros trick on 8-bit whole numbers, the format "
-     "quantized neural networks use."},
+     "int8 inputs, int32 accumulator (SMFMAC 16x16x64)."},
   };
 
 
@@ -99,11 +95,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
   // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
     {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "flops", Category::Unknown,
-       "The matrix cores with structured sparsity: half the values in each "
-       "group of four are known to be zero and are skipped, so the hardware "
-       "does twice the useful work per step.  Each reading is a different "
-       "input format -- compare them against the dense MFMA rows to see what "
-       "the trick is actually worth.",
+       "Peak rate of the CDNA3+ matrix cores with 2:4 structured sparsity "
+       "(SMFMAC), counted as dense-equivalent work.",
        TestShape::Heterogeneous, "data type"});
 
   for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)

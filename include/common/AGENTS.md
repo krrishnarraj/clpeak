@@ -145,18 +145,21 @@ cross-backend table: the same label means different things in different
 backends.  Vulkan's `int8_dp2` is a second *chain*, not a wider vector.
 
 Where a test reports a value by a non-obvious convention, the description is
-the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on
-unified-memory devices, and OpenCL's test description explains that.
+the place to say so — ROCm's `smfmac` counts its sparse work as
+dense-equivalent, and its test description says that.
 
 `src/cpu/latency.cpp` (`memory_latency`) is the worked example of both levels.
 
-Style: plain language for someone who doesn't know the term in the metric
-name; no "lower/higher is better" (the GUI already orders and scales the
-readings).  Say "the device", not "the GPU": OpenCL, Vulkan and oneAPI
-enumerate CPU devices too and show the same string for them -- and "the host"
-for the side submitting the work, since "the CPU" is ambiguous once the device
-is one.  A claim that only holds for graphics hardware names it as such
-("consumer graphics parts run these many times slower than 32-bit").
+Style: technical and terse — name formats as the metric labels do (fp16,
+int8, fp8 E4M3) instead of glossing them, and keep only a caveat the reader
+needs to read the number ("needs M3 or newer"); no "lower/higher is better"
+(the GUI already orders and scales the readings), and nothing the axis line
+already says ("one row per data type").  Say "the device", not "the GPU":
+OpenCL, Vulkan and oneAPI enumerate CPU devices too and show the same string
+for them -- and "the host" for the side submitting the work, since "the CPU"
+is ambiguous once the device is one.  In those three backends a claim that
+holds only for GPUs (consumer parts' fp64 rate, texture units, PCIe cards)
+stays out of the description.
 
 Trap: the sugar overload takes `const char *`, not `std::string` — a
 std::string parameter makes existing braced calls (`emit(m, v, {true})`)

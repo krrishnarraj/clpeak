@@ -225,11 +225,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         auto t = currentDeviceScope->beginTest(
             {"cublas_gemm", "cuBLASLt GEMM peak",
              "flops", Category::Unknown,
-             "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-             "large square problem.  Where the tensor-core rows show what the "
-             "hardware can do in principle, this shows what shipping code "
-             "reaches on the operation most AI work is built from.  Each "
-             "reading is a different input format.",
+             "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
+             "square problem.",
              TestShape::Heterogeneous, "data type"});
         t.skip("fp32", ResultStatus::Unsupported,
                 "cuBLASLt library not found; GEMM skipped");
@@ -632,43 +629,37 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // One test for all data types -- integer readings carry their own unit.
     auto test = currentDeviceScope->beginTest(
         {"cublas_gemm", "cuBLASLt GEMM peak", "flops", Category::Unknown,
-         "Matrix-multiply speed through NVIDIA's own tuned library, on a "
-         "large square problem.  Where the tensor-core rows show what the "
-         "hardware can do in principle, this shows what shipping code "
-         "reaches on the operation most AI work is built from.  Each "
-         "reading is a different input format.",
+         "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
+         "square problem.",
          TestShape::Heterogeneous, "data type"});
     blasTest = &test;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
         // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
         // tuned kernel set for fp32 + TN.
-        runVariant("fp32", "Full 32-bit precision, on the ordinary shader cores "
-                           "rather than the tensor cores.",
+        runVariant("fp32", "fp32 inputs and accumulator, without the tensor cores.",
                    CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
 
         // fp64: DGEMM on CUDA cores (tensor-core fp64 acceleration kicks in
         // automatically on sm_80+; the heuristic picks the right algo).  NN
         // layout matches fp32 -- DGEMM kernels are tuned for that shape.
-        runVariant("fp64", "Full 64-bit precision, for scientific computing.  "
-                           "Consumer cards run this far slower than the datacenter parts.",
+        runVariant("fp64", "fp64 inputs and accumulator.  Consumer GPUs run it "
+                           "at a small fraction of their fp32 rate.",
                    CUDA_R_64F, CUDA_R_64F, CUBLAS_COMPUTE_64F,
                    CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
 
         // tf32: fp32 inputs, but cuBLASLt internally rounds to TF32 and runs on
         // tensor cores (Ampere+).  Inputs/outputs stay fp32.
         if (dev.info.tf32GemmSupported)
-            runVariant("tf32", "32-bit numbers in and out, but rounded internally "
-                               "to a shorter form so the tensor cores can take them.",
+            runVariant("tf32", "fp32 inputs rounded to tf32, fp32 accumulator.",
                        CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
         // fp16: half inputs + half output + half compute.  scaleType is R_16F so
         // alpha/beta must be 16-bit half values, not float.
         if (dev.info.fp16Supported)
-            runVariant("fp16", "16-bit inputs and totals -- the everyday precision "
-                               "of AI inference, and usually the fastest row here.",
+            runVariant("fp16", "fp16 inputs and accumulator.",
                        CUDA_R_16F, CUDA_R_16F, CUBLAS_COMPUTE_16F,
                        CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
 
@@ -677,9 +668,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // R_32F output matches the dtype combo NVIDIA's published bf16 GEMM
         // peaks are quoted against.
         if (dev.info.bf16Supported)
-            runVariant("bf16", "bfloat16 inputs with 32-bit totals -- 16 bits "
-                               "arranged for AI work, trading digits of accuracy for the "
-                               "number range of a full float.",
+            runVariant("bf16", "bf16 inputs, fp32 accumulator.",
                        CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
@@ -700,13 +689,12 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // cuBLASLt's algorithm coverage, not the tensor cores.
         if (dev.info.fp8MmaSupported)
         {
-            runVariant("fp8_e4m3", "8-bit inputs, in the variant that spends its "
-                                   "bits on accuracy rather than range.",
+            runVariant("fp8_e4m3", "fp8 E4M3 inputs (more precision, less range), "
+                                   "fp32 accumulator.",
                        CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
-            runVariantAB("fp8_e5m2", "8-bit inputs including the variant that "
-                                     "spends its bits on range rather than accuracy -- the "
-                                     "usual choice for inference.",
+            runVariantAB("fp8_e5m2", "fp8 E5M2 x E4M3 inputs, fp32 accumulator.  "
+                                     "cuBLASLt has no E5M2 x E5M2 GEMM.",
                          CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
                          CUBLAS_COMPUTE_32F, CUDA_R_32F,
                          &alpha32, &beta32, /*useTN=*/true);
@@ -719,12 +707,10 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // consumer-only raw-mma microbench): the library FP4 path runs on
         // datacenter sm_100/103 as well, and self-skips where it can't.
         // Declared outside the #if: both branches below use them.
-        const char *mxf4Note = "4-bit inputs with a shared scale factor per block "
-                               "of 32, the open MX format.  The scale is what "
-                               "makes 4 bits usable for real models.";
-        const char *nvf4Note = "NVIDIA's own 4-bit block format, with a finer "
-                               "scale shared by every 16 values instead of every "
-                               "32 -- more accurate than MX at the same width.";
+        const char *mxf4Note = "fp4 E2M1 inputs, one shared scale per 32 values "
+                               "(OCP MX).";
+        const char *nvf4Note = "fp4 E2M1 inputs, one shared scale per 16 values "
+                               "(NVFP4).";
 #if defined(CLPEAK_CUBLASLT_HAS_FP4)
         if (dev.info.fp4GemmSupported)
         {
@@ -754,8 +740,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // int8: 1-byte signed inputs, int32 accumulator + output, int32 compute
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.
     if (dev.info.int8GemmSupported)
-        runVariant("int8", "8-bit whole numbers with 32-bit totals -- the format "
-                           "quantized neural networks use.",
+        runVariant("int8", "int8 inputs, int32 accumulator.",
                    CUDA_R_8I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
@@ -765,8 +750,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // returning 0 results is the canonical "unsupported" signal and we report
     // that line cleanly.
     if (dev.info.int4GemmSupported)
-        runVariant("int4", "4-bit whole numbers.  The library may refuse this "
-                           "even where the hardware claims it.",
+        runVariant("int4", "int4 inputs, int32 accumulator.  cuBLASLt may refuse "
+                           "it even where the hardware claims it.",
                    CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 

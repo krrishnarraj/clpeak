@@ -52,16 +52,11 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
 
   auto test = currentDeviceScope->beginTest(
     {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
-     "How fast data crosses between the host's memory and the device's.  On a "
-     "discrete card that means the PCIe link, which is far narrower than "
-     "either side's own memory and is what makes moving data to the device "
-     "worth avoiding; where the two share one pool of memory the numbers are much "
-     "higher.  Both readings use pinned host memory, the fast path.",
+     "Copy bandwidth between host and device memory.",
      TestShape::Heterogeneous, "direction"});
 
-  const char *h2dNote = "Host to device: sending data across to the device.";
-  const char *d2hNote = "Device to host: reading results back.  Often a little "
-                        "slower than the other direction.";
+  const char *h2dNote = "Host to device.";
+  const char *d2hNote = "Device to host.";
 
   // Host staging memory.  The pinned path is a CL_MEM_ALLOC_HOST_PTR buffer
   // mapped once and left mapped: that pointer is host memory the driver may

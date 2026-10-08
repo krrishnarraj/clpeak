@@ -144,9 +144,7 @@ int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
     {"integer_compute", "Integer compute (32-bit IMAD)", "ops", Category::Unknown,
-     "Peak speed on 32-bit whole numbers -- the arithmetic behind indexing, "
-     "addressing and bit manipulation, which kernels do alongside their "
-     "fractional maths.",
+     "Peak 32-bit integer arithmetic rate.",
      TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;

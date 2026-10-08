@@ -17,11 +17,11 @@ static inline const char *oneapiWidthNote(int width)
 {
   switch (width)
   {
-  case 1:  return "One value per work-item at a time -- the plain, unvectorised case.";
-  case 2:  return "Two values per work-item at a time, as one 2-wide vector.";
-  case 4:  return "Four values per work-item at a time, as one 4-wide vector.";
-  case 8:  return "Eight values per work-item at a time, as one 8-wide vector.";
-  case 16: return "Sixteen values per work-item at a time, the widest vector SYCL offers.";
+  case 1:  return "Scalar, one value per work-item.";
+  case 2:  return "2-wide vector per work-item.";
+  case 4:  return "4-wide vector per work-item.";
+  case 8:  return "8-wide vector per work-item.";
+  case 16: return "16-wide vector per work-item.";
   default: return "";
   }
 }

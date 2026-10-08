@@ -19,13 +19,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   // test with the floating-point ones.
   auto test = currentDeviceScope->beginTest(
       {"wmma", "Tensor cores (WMMA / mma.sync)", "flops", Category::Unknown,
-         "Peak speed of the tensor cores -- dedicated units that "
-         "multiply whole blocks of numbers in one step rather than one value at "
-         "a time.  Each reading is a different input format, and several are one "
-         "format run a second way: with the running total kept narrower, or with "
-         "half the values skipped as known zeros.  Which of them exist at all, "
-         "and how much faster the narrow ones go, is most of what separates one "
-         "generation of NVIDIA hardware from the next.",
+         "Peak matrix-multiply rate of the tensor cores.",
          TestShape::Heterogeneous, "data type"});
 
     // FP16 WMMA
@@ -33,9 +27,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "16-bit inputs with a 32-bit running total -- the "
-                            "everyday precision of AI work.  Uses the "
-                            "portable WMMA 16x16x16 tile.";
+      d.metricDescription = "fp16 inputs, fp32 accumulator (WMMA 16x16x16).  "
+                            "GeForce runs it at half rate; see f16acc.";
       d.unit = "flops";
       d.metricLabel = "fp16";
       d.kernelName = "wmma_fp16";
@@ -57,11 +50,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "The same 16-bit maths, keeping the running total "
-                            "in 16 bits too.  On GeForce cards the 32-bit- "
-                            "total form is deliberately capped at half rate, "
-                            "so this is where the full tensor-core speed "
-                            "shows up.  mma.sync m16n8k16.";
+      d.metricDescription = "fp16 inputs and accumulator (mma.sync m16n8k16).";
       d.unit = "flops";
       d.metricLabel = "fp16 f16acc";
       d.kernelName = "wmma_fp16_f16";
@@ -81,10 +70,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "bfloat16 -- 16 bits arranged for AI work, "
-                            "trading digits of accuracy for the number range "
-                            "of a full float, which makes training far more "
-                            "forgiving.  WMMA 16x16x16.";
+      d.metricDescription = "bf16 inputs, fp32 accumulator (WMMA 16x16x16).";
       d.unit = "flops";
       d.metricLabel = "bf16";
       d.kernelName = "wmma_bf16";
@@ -106,9 +92,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "NVIDIA's trimmed-down stand-in for 32-bit float: "
-                            "the full number range, with accuracy dropped to "
-                            "fit the tensor cores.  mma.sync m16n8k8.";
+      d.metricDescription = "fp32 inputs rounded to tf32, fp32 accumulator "
+                            "(mma.sync m16n8k8).";
       d.unit = "flops";
       d.metricLabel = "tf32";
       d.kernelName = "wmma_tf32";
@@ -128,9 +113,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       double A = 1.3;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "Full 64-bit numbers, for scientific computing "
-                            "rather than AI.  Only the datacenter parts carry "
-                            "this hardware.  WMMA 8x8x4.";
+      d.metricDescription = "fp64 inputs and accumulator (WMMA 8x8x4).  Full "
+                            "rate on datacenter parts only.";
       d.unit = "flops";
       d.metricLabel = "fp64";
       d.kernelName = "wmma_fp64";
@@ -150,10 +134,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "8-bit floats spending their bits on accuracy "
-                            "rather than range.  Half the data of 16-bit per "
-                            "value, so roughly twice the rate.  mma.sync "
-                            "m16n8k32.";
+      d.metricDescription = "fp8 E4M3 inputs, fp32 accumulator (mma.sync "
+                            "m16n8k32).  GeForce runs it at half rate; see "
+                            "f16acc.";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3";
       d.kernelName = "wmma_fp8_e4m3";
@@ -173,10 +156,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "The other 8-bit float, spending its bits on "
-                            "range rather than accuracy -- the one that copes "
-                            "with very large and very small values.  mma.sync "
-                            "m16n8k32.";
+      d.metricDescription = "fp8 E5M2 inputs (more range, less precision), "
+                            "fp32 accumulator (mma.sync m16n8k32).";
       d.unit = "flops";
       d.metricLabel = "fp8_e5m2";
       d.kernelName = "wmma_fp8_e5m2";
@@ -198,11 +179,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "8-bit inputs with the running total kept in 16 "
-                            "bits rather than 32.  As with fp16, GeForce caps "
-                            "the 32-bit-total form at half rate, so this is "
-                            "where the full 8-bit speed shows up.  mma.sync "
-                            "m16n8k32.";
+      d.metricDescription = "fp8 E4M3 inputs, fp16 accumulator (mma.sync "
+                            "m16n8k32).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 f16acc";
       d.kernelName = "wmma_fp8_f16";
@@ -222,10 +200,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "8-bit floats with structured sparsity: half the "
-                            "values in each group of four are known to be "
-                            "zero and are skipped, so the hardware does twice "
-                            "the useful work per step.  mma.sp m16n8k64.";
+      d.metricDescription = "fp8 E4M3 inputs, fp32 accumulator, 2:4 structured "
+                            "sparsity (mma.sp m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 2:4";
       d.kernelName = "wmma_fp8_sparse";
@@ -248,10 +224,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "Both tricks at once -- zeros skipped and the "
-                            "running total kept at 16 bits.  The fastest "
-                            "arrangement these tensor cores offer for 8 bits. "
-                            "mma.sp m16n8k64.";
+      d.metricDescription = "fp8 E4M3 inputs, fp16 accumulator, 2:4 structured "
+                            "sparsity (mma.sp m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 2:4 f16acc";
       d.kernelName = "wmma_fp8_sparse_f16";
@@ -271,12 +245,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "4-bit floats with no shared scale factor.  Read "
-                            "it against the mxf4 and nvf4 rows below, which "
-                            "are the same width with a scale: where those are "
-                            "faster, the hardware only accelerates 4-bit "
-                            "arithmetic when it carries one.  Blackwell and "
-                            "newer only.  mma.sync m16n8k32.";
+      d.metricDescription = "fp4 E2M1 inputs with no block scale (mma.sync "
+                            "m16n8k32).  sm_120+ only, not datacenter "
+                            "Blackwell.";
       d.unit = "flops";
       d.metricLabel = "fp4_e2m1";
       d.kernelName = "wmma_fp4_e2m1";
@@ -296,11 +267,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "4-bit floats with a scale factor shared by each "
-                            "block of 32 values, the open MX format.  The "
-                            "scale is what makes 4 bits usable for real "
-                            "models rather than a curiosity.  mma.sync "
-                            "m16n8k64.";
+      d.metricDescription = "fp4 E2M1 inputs, one shared scale per 32 values "
+                            "(OCP MX, mma.sync m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "mxf4_e2m1";
       d.kernelName = "wmma_mxf4_e2m1";
@@ -320,10 +288,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "NVIDIA's own 4-bit block format, with a finer "
-                            "scale shared by every 16 values instead of every "
-                            "32 -- more accurate than MX at the same width. "
-                            "mma.sync m16n8k64.";
+      d.metricDescription = "fp4 E2M1 inputs, one shared scale per 16 values "
+                            "(NVFP4, mma.sync m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "nvf4_e2m1";
       d.kernelName = "wmma_nvf4_e2m1";
@@ -343,8 +309,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "The MX 4-bit path with zeros skipped as well, "
-                            "two per group of four.  mma.sp m16n8k128.";
+      d.metricDescription = "fp4 E2M1 inputs, one scale per 32 values, 2:4 "
+                            "structured sparsity (OCP MX, mma.sp m16n8k128).";
       d.unit = "flops";
       d.metricLabel = "mxf4_e2m1 2:4";
       d.kernelName = "wmma_mxf4_sparse";
@@ -364,9 +330,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       float A = 1.3f;
       cuda_compute_desc_t d = {};
       d.scope = &test;
-      d.metricDescription = "NVIDIA's 4-bit block format with zeros skipped "
-                            "too -- the fastest arrangement these tensor "
-                            "cores offer.  mma.sp m16n8k128.";
+      d.metricDescription = "fp4 E2M1 inputs, one scale per 16 values, 2:4 "
+                            "structured sparsity (NVFP4, mma.sp m16n8k128).";
       d.unit = "flops";
       d.metricLabel = "nvf4_e2m1 2:4";
       d.kernelName = "wmma_nvf4_sparse";
@@ -390,10 +355,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     int A = 3;
     cuda_compute_desc_t d = {};
     d.scope = &test;
-    d.metricDescription = "8-bit whole numbers with a 32-bit running total -- "
-                          "the format quantized neural networks use when they "
-                          "are squeezed down to run fast on cheaper hardware. "
-                          "Portable WMMA 16x16x16 tile.";
+    d.metricDescription = "int8 inputs, int32 accumulator (WMMA 16x16x16).";
     d.unit = "ops";
     d.metricLabel = "int8";
     d.metricUnit = "ops";
@@ -414,10 +376,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     int A = 3;
     cuda_compute_desc_t d = {};
     d.scope = &test;
-    d.metricDescription = "The same 8-bit whole-number maths on NVIDIA's "
-                          "native tile shape rather than the portable one, "
-                          "which the hardware feeds more efficiently. "
-                          "mma.sync m16n8k32.";
+    d.metricDescription = "int8 inputs, int32 accumulator (mma.sync "
+                          "m16n8k32).";
     d.unit = "ops";
     d.metricLabel = "int8 k32";
     d.metricUnit = "ops";
@@ -440,9 +400,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     int A = 3;
     cuda_compute_desc_t d = {};
     d.scope = &test;
-    d.metricDescription = "8-bit whole numbers with zeros skipped, two per "
-                          "group of four, so the hardware does twice the "
-                          "useful work per step.  mma.sp m16n8k64.";
+    d.metricDescription = "int8 inputs, int32 accumulator, 2:4 structured "
+                          "sparsity (mma.sp m16n8k64).";
     d.unit = "ops";
     d.metricLabel = "int8 2:4";
     d.metricUnit = "ops";
@@ -463,10 +422,9 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     int A = 3;
     cuda_compute_desc_t d = {};
     d.scope = &test;
-    d.metricDescription = "4-bit whole numbers.  Turing through Ada only -- "
-                          "NVIDIA dropped the integer 4-bit path afterwards "
-                          "in favour of the 4-bit float formats above. "
-                          "mma.sync m8n8k32.";
+    d.metricDescription = "int4 inputs, int32 accumulator (mma.sync "
+                          "m8n8k32).  Turing through Ada only (later parts "
+                          "emulate it).";
     d.unit = "ops";
     d.metricLabel = "int4";
     d.metricUnit = "ops";

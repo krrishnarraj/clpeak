@@ -18,11 +18,26 @@ static inline const char *clWidthNote(int width)
 {
   switch (width)
   {
-  case 1:  return "One value per work-item at a time -- the plain, unvectorised case.";
-  case 2:  return "Two values per work-item at a time, as one 2-wide vector.";
-  case 4:  return "Four values per work-item at a time, as one 4-wide vector.";
-  case 8:  return "Eight values per work-item at a time, as one 8-wide vector.";
-  case 16: return "Sixteen values per work-item at a time, the widest vector OpenCL offers.";
+  case 1:  return "Scalar, one value per work-item.";
+  case 2:  return "2-wide vector per work-item.";
+  case 4:  return "4-wide vector per work-item.";
+  case 8:  return "8-wide vector per work-item.";
+  case 16: return "16-wide vector per work-item.";
+  default: return "";
+  }
+}
+
+// The same for int8_dp, whose v2..v16 kernels run that many independent
+// chains of scalar dot products rather than a wider vector.
+static inline const char *clChainNote(int chains)
+{
+  switch (chains)
+  {
+  case 1:  return "One dependent chain of dot products.";
+  case 2:  return "2 independent chains.";
+  case 4:  return "4 independent chains.";
+  case 8:  return "8 independent chains.";
+  case 16: return "16 independent chains.";
   default: return "";
   }
 }
@@ -78,9 +93,9 @@ public:
     static uint64_t ndRangeTotal(const cl::NDRange &range);
 
     // Unified compute benchmark helper — replaces 7 nearly-identical runCompute* methods.
-    // `description` is the plain-language explanation of the test for
-    // non-expert readers (logger::TestSpec::description); the per-width
-    // readings are documented by clWidthNote() inside the helper.  A
+    // `description` is the test's one- or two-sentence explanation
+    // (logger::TestSpec::description); the per-width readings are documented
+    // by clWidthNote() (clChainNote() for int8_dp) inside the helper.  A
     // non-empty `buildError` says `prog` failed to build where it should
     // have, and every reading becomes that error.
     int runComputeTest(cl::CommandQueue &queue, cl::Program &prog,

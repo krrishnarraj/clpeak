@@ -34,17 +34,12 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.display = "Kernel launch latency";
   testSpec.unit = "s";
   testSpec.description =
-      "The overhead of asking the device to do anything at all, measured with "
-      "a shader that does no work.  It is what small, frequent jobs pay before "
-      "any of their own work begins.";
+      "Time to launch an empty kernel, the fixed cost every dispatch pays.";
   testSpec.shape = TestShape::Heterogeneous;
   auto test = currentDeviceScope->beginTest(testSpec);
 
-  const char *dispatchNote = "One way only: from the moment the host submits the "
-                             "work to the moment the device starts running it.";
-  const char *roundtripNote = "The full round trip -- submit, run, and hear back "
-                              "that it finished.  This is what the host waits for "
-                              "if it has nothing else to get on with.";
+  const char *dispatchNote = "Host submit to kernel start, one way.";
+  const char *roundtripNote = "Host submit to completion seen by the host.";
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};

@@ -29,9 +29,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "Integer compute int32";
   d.resultTag   = "integer_compute";
   d.unit        = "ops";
-  d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                  "indexing, addressing and bit manipulation, which kernels do "
-                  "alongside their fractional maths.";
+  d.description = "Peak 32-bit integer arithmetic rate.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
   d.variants    = variants;
@@ -52,18 +50,16 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   // subgroup widths too.
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
-      "One chain of dot products, each waiting on the one before it.",
+      "One dependent chain of dot products.",
       VK_ALT_SHADER(compute_int8_dp_v1) },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
-      "Two independent chains, so the device has a second dot product to get on "
-      "with while the first is still finishing.",
+      "2 independent chains.",
       VK_ALT_SHADER(compute_int8_dp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
     { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size,
-      "Four independent chains -- usually enough to keep the dot-product "
-      "hardware busy with no waiting at all.",
+      "4 independent chains.",
       VK_ALT_SHADER(compute_int8_dp_v4) },
 #endif
   };
@@ -72,9 +68,8 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.title       = "INT8 dot-product compute";
   d.resultTag   = "integer_compute_int8_dp";
   d.unit        = "ops";
-  d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
-                  "four pairs of small whole numbers and sums them in one step -- the "
-                  "workhorse of quantized (compressed) neural networks.";
+  d.description = "Peak rate of the 4-way int8 dot-product instruction, "
+                  "without the matrix engine.";
   d.shape       = TestShape::Homogeneous;
   // Independent chains, not wider vectors: each reading gives the hardware
   // more dot products to have in flight at once.

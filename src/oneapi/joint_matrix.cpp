@@ -207,41 +207,34 @@ static std::string jmBaseName(syclex::matrix_type at, syclex::matrix_type bt)
   return std::string(mtShort(at)) + mtShort(bt);
 }
 
-// Plain-language note for one row, with the tile shape appended so a reader
-// can tell the two bf16 rows on Alchemist apart without decoding the name.
+// Note for one row, with the tile shape appended so a reader can tell the two
+// bf16 rows on Alchemist apart without decoding the name.  The row name says
+// which operand of a mixed-sign pair is the unsigned one.
 static std::string jmNote(const JmTile &t)
 {
   using mt = syclex::matrix_type;
   std::string s;
 
   if (t.at == mt::bf16 && t.bt == mt::bf16)
-    s = "bfloat16 inputs with 32-bit totals -- 16 bits arranged for AI work, "
-        "trading digits of accuracy for the number range of a full float.";
+    s = "bf16 inputs, fp32 accumulator";
   else if (t.at == mt::fp16 && t.bt == mt::fp16)
-    s = "16-bit inputs with 32-bit totals -- the everyday precision of AI "
-        "inference.";
+    s = "fp16 inputs, fp32 accumulator";
   else if (t.at == mt::tf32 && t.bt == mt::tf32)
-    s = "tf32, a trimmed-down stand-in for 32-bit float: it keeps the full "
-        "number range but drops accuracy to fit the matrix engine.  Not every "
-        "Intel part has it.";
+    s = "fp32 inputs rounded to tf32, fp32 accumulator";
   else if (t.at == mt::sint8 && t.bt == mt::sint8)
-    s = "8-bit whole numbers with 32-bit totals, the format quantized neural "
-        "networks use.";
+    s = "int8 inputs, int32 accumulator";
   else if (t.at == mt::uint8 && t.bt == mt::uint8)
-    s = "Unsigned 8-bit whole numbers with 32-bit totals -- the same engine as "
-        "the signed row, reading both operands as 0..255.";
+    s = "uint8 inputs, int32 accumulator";
   else if ((t.at == mt::uint8 && t.bt == mt::sint8) ||
            (t.at == mt::sint8 && t.bt == mt::uint8))
-    s = "Mixed-sign 8-bit whole numbers with 32-bit totals -- one operand "
-        "unsigned, the other signed, which is what quantized networks get when "
-        "unsigned activations meet signed weights.";
+    s = "Mixed-sign 8-bit inputs, int32 accumulator";
   else
-    s = std::string(mtShort(t.at)) + " inputs against " + mtShort(t.bt) +
-        ", accumulating in " + mtShort(t.ct) + ".";
+    s = std::string(mtShort(t.at)) + " x " + mtShort(t.bt) + " inputs, " +
+        mtShort(t.ct) + " accumulator";
 
   if (!t.shape.empty())
-    s += "  Tile " + t.shape + ".";
-  return s;
+    s += " (tile " + t.shape + ")";
+  return s + ".";
 }
 
 // True when this accumulator type makes the combination an integer one.
@@ -520,11 +513,8 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"joint_matrix", "joint_matrix peak",
      "flops", Category::Unknown,
-     "Peak speed of Intel's XMX matrix engine -- dedicated units that multiply "
-     "whole blocks of numbers in one step rather than one value at a time.  "
-     "One reading per input type, sign combination and tile shape the device "
-     "advertises, so the set of readings is itself a description of the "
-     "hardware.",
+     "Peak rate of the device's matrix engine through SYCL joint_matrix.  One "
+     "row per input-type pair and tile shape the device advertises.",
      TestShape::Heterogeneous, "data type"});
 
   auto jmOpts = [&](const JmTile &t) {
@@ -537,8 +527,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
   // Note for the int8 row, used by the paths that skip before any enumeration
   // has happened.  The FP equivalents go through skipAll, which carries no
   // per-reading notes, so they have nothing to declare here.
-  const char *int8Note = "8-bit whole numbers with 32-bit totals, the format "
-                         "quantized neural networks use.";
+  const char *int8Note = "int8 inputs, int32 accumulator.";
 
   auto skipEverything = [&](ResultStatus status, const char *reason) {
     test.skip("bf16", status, reason);
@@ -726,10 +715,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     // faces the fold guard against the chain's.
     logger::EmitOptions opts = jmOpts(t);
     const float chain = value;
-    const char *shapeNames[3] = {"one multiply a loop step",
-                                 "sixteen a step into one total",
-                                 "sixteen a step into four totals"};
-    std::vector<int> ran(1, 0);
+    const char *shapeNames[3] = {"mad chain",
+                                 "16-mad blocks, 1 accumulator",
+                                 "16-mad blocks, 4 accumulators"};
+    int ran = 1;
     int best = 0;
     for (uint32_t accs : {1u, 4u})
     {
@@ -752,21 +741,15 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
         continue;
       }
       const int shape = accs == 1 ? 1 : 2;
-      ran.push_back(shape);
+      ran++;
       if (block > value)
       {
         value = block;
         best = shape;
       }
     }
-    if (ran.size() > 1)
-    {
-      std::string list;
-      for (size_t i = 0; i < ran.size(); i++)
-        list += std::string(i == 0 ? "" : i + 1 == ran.size() ? " and " : ", ") +
-                shapeNames[ran[i]];
-      opts.description += "  Timed as " + list + "; this is " + shapeNames[best] + ".";
-    }
+    if (ran > 1)
+      opts.description += std::string("  Fastest form: ") + shapeNames[best] + ".";
     test.emit(t.metric, value, opts);
   }
 

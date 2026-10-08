@@ -95,8 +95,20 @@ namespace
     VkSpecializationMapEntry entries[4];
     VkSpecializationInfo specInfo;
     CoopPush push;
+    std::string how;  // what goes in the note's parentheses: tile, fallback
     std::string note;
   };
+
+  // A row's note: its description with `how` in parentheses at the end of
+  // its first sentence, ahead of any caveat that follows.
+  std::string coopNote(const char *description, const std::string &how)
+  {
+    const std::string text = description ? description : "";
+    size_t end = text.find('.');
+    if (end == std::string::npos)
+      end = text.size();
+    return text.substr(0, end) + " (" + how + ")" + text.substr(end);
+  }
 
   // Bind a selected tile into a desc: build the spec constants, scale the trip
   // count so work-per-WI stays ~kCoopGroupScale * COOPMAT_WORK_PER_WI
@@ -110,16 +122,15 @@ namespace
   //
   // The caller has already set r.push.A to the fill this dtype wants, and
   // d.metricLabel / d.metricDescription to what this reading is.  `refused`
-  // names the tiles the driver refused to build before this one, if any, so
-  // a reading taken at a fallback says so.
+  // counts the tiles the driver refused to build before this one, so a
+  // reading taken at a fallback says so; --verbose names them.
   //
   // d.altSpirv, the four-accumulator build (shaders/coopmat_chain.glsl), is
   // kept for this tile only where four accumulators fit the lane budget
   // above; it stores four tiles per work-group, so the buffer is sized for
   // four whenever it runs.
   void bindCoopTile(CoopTileRun &r, vk_compute_desc_t &d,
-                    const coopmat_tile_t &t, uint32_t wgSize,
-                    const std::string &refused)
+                    const coopmat_tile_t &t, uint32_t wgSize, size_t refused)
   {
     if (d.altSpirv &&
         4ull * t.M * t.N * d.elemSize > (uint64_t)kAltAccumulatorBytesPerLane * wgSize)
@@ -146,11 +157,11 @@ namespace
     r.specInfo.dataSize = sizeof(r.data);
     r.specInfo.pData = &r.data;
     r.push.trips = (int32_t)trips;
-    r.note = std::string(d.metricDescription ? d.metricDescription : "") +
-             "  Runs at the " + std::to_string(t.M) + "x" + std::to_string(t.N) +
-             "x" + std::to_string(t.K) + " tile this driver advertises for it" +
-             (refused.empty() ? std::string(".")
-                              : ", after it refused to build " + refused + ".");
+    r.how = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" +
+            std::to_string(t.K) + " tile" +
+            (refused ? ", fallback after " + std::to_string(refused) + " refused"
+                     : std::string());
+    r.note = coopNote(d.metricDescription, r.how);
 
     d.specInfo = &r.specInfo;
     d.metricDescription = r.note.c_str();
@@ -230,12 +241,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   // The int8 row carries its own unit (ops) so it shares the test.
   auto test = currentDeviceScope->beginTest(
       {"coopmat", "Cooperative matrix", "flops", Category::Unknown,
-       "The device's matrix engine -- its tensor cores -- which "
-       "multiplies whole small blocks of numbers in one step instead of one "
-       "value at a time.  Each reading is a different input format, run at the "
-       "block shape the driver advertises for it; which formats the engine "
-       "supports, and how much faster the narrow ones go, is most of what "
-       "separates one generation of hardware from the next.",
+       "Peak cooperative-matrix multiply-add rate, on the device's matrix "
+       "engine where it has one.",
        TestShape::Heterogeneous, "data type"});
 
   // Measure one data type at the first of its advertised tiles the driver will
@@ -259,6 +266,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       return;
     }
     std::string refusedTiles;
+    size_t refusedCount = 0;
     for (const coopmat_tile_t &t : tiles)
     {
       const std::vector<uint32_t> widths = coopmatSubgroupWidths(dev.info, t);
@@ -274,7 +282,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         vk_compute_desc_t d = base;
         d.requiredSubgroupSize = i == 0 ? tileSub(t) : widths[i];
         d.pinOnly = i > 0;
-        bindCoopTile(r, d, t, widths[i], refusedTiles);
+        bindCoopTile(r, d, t, widths[i], refusedCount);
         bool widthRefused = false;
         d.refused = &widthRefused;
         if (race)
@@ -292,13 +300,14 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         CLPEAK_VLOG("%s %s: the driver refused to build %s\n", base.resultTag,
                     base.metricLabel, coopmatTileName(t).c_str());
         refusedTiles += (refusedTiles.empty() ? "" : ", ") + coopmatTileName(t);
+        refusedCount++;
         continue;
       }
       if (!race)
         return;
 
-      // The race's reading, at the fastest width, saying which it was and --
-      // where more than one width ran -- what else was timed.
+      // The race's reading, at the fastest width, naming it where more than
+      // one width ran; --verbose lists every width's reading.
       size_t best = 0;
       std::vector<size_t> ran;
       std::string timed;
@@ -317,7 +326,11 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       logger::EmitOptions o;
       if (base.metricUnit)
         o.unit = base.metricUnit;
-      o.description = runs[best].note;
+      o.description = ran.size() > 1
+                          ? coopNote(base.metricDescription,
+                                     runs[best].how + ", fastest at subgroup " +
+                                         std::to_string(widths[best]))
+                          : runs[best].note;
       if (ran.empty())
       {
         test.skip(base.metricLabel, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed", o);
@@ -325,16 +338,6 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       }
       CLPEAK_VLOG("%s %s: %s %s\n", base.resultTag, base.metricLabel, timed.c_str(),
                   base.unit);
-      if (ran.size() > 1)
-      {
-        std::string widthList;
-        for (size_t j = 0; j < ran.size(); j++)
-          widthList += (j == 0 ? "" : j + 1 == ran.size() ? " and " : ", ") +
-                       std::to_string(widths[ran[j]]);
-        o.description += "  The driver names no subgroup width for it, so it was timed at " +
-                         widthList + " lanes; this is the fastest, at " +
-                         std::to_string(widths[best]) + ".";
-      }
       test.emit(base.metricLabel, readings[best], o);
       return;
     }
@@ -361,9 +364,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "fp32";
       d.unit = "flops";
-      d.metricDescription = "Peak speed of the device's matrix engine (its tensor cores) on "
-                            "full 32-bit numbers.  These units multiply whole small blocks "
-                            "of numbers in one step instead of one value at a time.";
+      d.metricDescription = "fp32 inputs and accumulator.";
 
       d.elemSize = sizeof(float);
       if (!dev.info.coopmatFP32.empty())
@@ -389,11 +390,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "fp16";
       d.unit = "flops";
-      d.metricDescription = "The matrix engine on 16-bit inputs with a 32-bit running "
-                            "total -- the everyday precision of AI inference, and the "
-                            "widest-supported row here.  Keeping the total at 32 bits "
-                            "costs accuracy nothing and, on consumer graphics cards, "
-                            "costs half the speed: see the 16-bit-total row below.";
+      d.metricDescription = "fp16 inputs, fp32 accumulator.";
 
       d.elemSize = sizeof(float);
       if (dev.info.float16Supported && !dev.info.coopmatFP16.empty())
@@ -419,10 +416,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "fp16 f16acc";
       d.unit = "flops";
-      d.metricDescription = "The matrix engine on 16-bit inputs with the running total also "
-                            "kept at 16 bits.  Consumer graphics cards run this at twice the "
-                            "rate of the 32-bit total above, which is why a card's headline "
-                            "AI figure is usually this one; server parts run both alike.";
+      d.metricDescription = "fp16 inputs and accumulator.";
 
       d.elemSize = sizeof(float);
       if (!dev.info.float16Supported || dev.info.coopmatFP16F16.empty())
@@ -453,9 +447,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "bf16";
       d.unit = "flops";
-      d.metricDescription = "The matrix engine on bfloat16 -- 16 bits arranged for AI work, "
-                            "trading digits of accuracy for the number range of a full "
-                            "float, which makes training far more forgiving.";
+      d.metricDescription = "bf16 inputs, fp32 accumulator.";
 
       d.elemSize = sizeof(float);
       if (dev.info.bfloat16Supported && !dev.info.coopmatBF16.empty())
@@ -481,9 +473,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "fp8_e4m3";
       d.unit = "flops";
-      d.metricDescription = "The matrix engine on 8-bit numbers, in the variant that spends "
-                            "its bits on accuracy rather than range.  Half the data of fp16 "
-                            "per value, so the newest hardware runs it at roughly twice the rate.";
+      d.metricDescription = "fp8 E4M3 inputs (more precision, less range), fp32 "
+                            "accumulator.";
 
       d.elemSize = sizeof(float);
       // Two gates: the float8 feature must be enabled at device creation
@@ -511,9 +502,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.resultTag = "coopmat";
       d.metricLabel = "fp8_e5m2";
       d.unit = "flops";
-      d.metricDescription = "The same 8-bit matrix path in the other variant, which spends "
-                            "its bits on range rather than accuracy -- the one that copes "
-                            "with very large and very small values.";
+      d.metricDescription = "fp8 E5M2 inputs (more range, less precision), fp32 "
+                            "accumulator.";
 
       d.elemSize = sizeof(float);
       if (dev.info.fp8Supported && !dev.info.coopmatFP8E5M2.empty())
@@ -546,9 +536,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     // opens it, which happens on an integer-only run.
     d.unit = "ops";
     d.metricUnit = "ops";
-    d.metricDescription = "8-bit whole numbers with a 32-bit running total -- the "
-                          "format quantized neural networks use when they are squeezed "
-                          "down to run fast on cheaper hardware.";
+    d.metricDescription = "int8 inputs, int32 accumulator.";
 
     d.elemSize = sizeof(int32_t);
     // Two gates, like fp8: the shader's Int8 capability needs shaderInt8

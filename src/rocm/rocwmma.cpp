@@ -9,16 +9,15 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"rocwmma", "rocWMMA matrix multiply",
      "flops", Category::Unknown,
-     "Matrix-core speed reached through AMD's rocWMMA library rather than the "
-     "raw instructions.  Compare each reading with the WMMA or MFMA row for "
-     "the same format to see what the library layer costs.",
+     "Peak matrix-core rate through AMD's rocWMMA library instead of the raw "
+     "WMMA or MFMA instructions.",
      TestShape::Heterogeneous, "data type"});
 
 #ifndef CLPEAK_ROCM_HAS_ROCWMMA
   {
-    logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
+    logger::EmitOptions o; o.description = "fp16 inputs, fp32 accumulator (rocWMMA 16x16x16).";
     test.skip("fp16", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", o);
-    logger::EmitOptions oi; oi.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; oi.unit = "ops";
+    logger::EmitOptions oi; oi.description = "int8 inputs, int32 accumulator (rocWMMA 16x16x32)."; oi.unit = "ops";
     test.skip("int8", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", oi);
   }
   return 0;
@@ -81,11 +80,11 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
   };
 
   {
-    logger::EmitOptions o; o.description = "16-bit inputs with a 32-bit running total, 16x16x16 tile.";
+    logger::EmitOptions o; o.description = "fp16 inputs, fp32 accumulator (rocWMMA 16x16x16).";
     runOne("fp16", "fp16", "rocwmma_fp16", rocm_kernels::rocwmma_fp16, 16u, sizeof(float), o);
   }
   {
-    logger::EmitOptions o; o.description = "8-bit whole numbers with a 32-bit running total, 16x16x32 tile."; o.unit = "ops";
+    logger::EmitOptions o; o.description = "int8 inputs, int32 accumulator (rocWMMA 16x16x32)."; o.unit = "ops";
     runOne("int8", "int8", "rocwmma_int8", rocm_kernels::rocwmma_int8, 32u, sizeof(int), o);
   }
   return 0;

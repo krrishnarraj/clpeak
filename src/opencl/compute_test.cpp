@@ -33,6 +33,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     if (widths[w] > 1)
       labels[w] += std::to_string(widths[w]);
   }
+  // int8_dp's widths are independent chains, not vectors (see its kernels).
+  auto rowNote = [&](int w) {
+    return which == Benchmark::ComputeInt8DP ? clChainNote(widths[w]) : clWidthNote(widths[w]);
+  };
 
   auto test = currentDeviceScope->beginTest(
     {resultTag, displayName, unit, Category::Unknown, description,
@@ -293,13 +297,13 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           }
         }
 
-        test.emit(labels[w], throughput, clWidthNote(widths[w]));
+        test.emit(labels[w], throughput, rowNote(w));
 
       }
       catch (cl::Error &error)
       {
         std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-        test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+        test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
       }
     }
   }
@@ -316,18 +320,18 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       for (int w = 0; w < 5; w++)
         test.skip(labels[w], ResultStatus::Unsupported,
                   "device's OpenCL compiler did not build these kernels",
-                  clWidthNote(widths[w]));
+                  rowNote(w));
       return 0;
     }
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
     return -1;
   }
   catch (std::exception &e)
   {
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, e.what(), clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, e.what(), rowNote(w));
     return -1;
   }
 

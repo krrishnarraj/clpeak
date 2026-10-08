@@ -50,8 +50,9 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
 - `cuda_compute_desc_t::description` (test) and
   `cuda_compute_variant_t::description` (one reading); `runComputeKernel()`
   forwards both on every path, skips included.
-- `cudaWidthNote()` (`cuda_peak.h`) covers `half`/`half2` and the
-  `float`/`float2`/`float4` bandwidth sweeps.
+- `cudaWidthNote()` (`cuda_peak.h`) covers `half` and the
+  `float`/`float2`/`float4` bandwidth sweeps; packed `half2` carries its own
+  note.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
   *independent chains* (see `compute_int8_dp.cu`).  They carry their own notes,
   and their axis is "chains in flight".
@@ -59,8 +60,8 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
   each.  `runWmma` opens one scope and every block writes
   into it via `cuda_compute_desc_t::scope`; the block's prose goes on
   `metricDescription`
-  and the exact instruction (`mma.sync m16n8k32`) ends the sentence, since the
-  metric label is the data type alone.  The integer rows carry `metricUnit = "ops"` — that override is what makes a
+  and the exact instruction ends it in parentheses (`(mma.sync m16n8k32)`),
+  since the metric label is the data type alone.  The integer rows carry `metricUnit = "ops"` — that override is what makes a
   `wmma_int` twin unnecessary.
 - `cublas_gemm` is likewise one test; `blasOpts()` attaches
   the note and integer rows carry their own unit.

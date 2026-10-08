@@ -30,7 +30,7 @@ struct WmmaEntry
   const char *kernelName;
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
-  const char *description;  // plain-language explanation, next to the name
+  const char *description;  // what this row is, next to the name
 };
 
 std::string archBaseOf(const std::string &a)
@@ -55,36 +55,27 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp16, "wmma_fp16",
      16, 16, 16, false,
-     "Peak speed of the matrix cores -- dedicated units that multiply whole "
-     "16x16 blocks of numbers in one step rather than one value at a time -- "
-     "on 16-bit inputs with a 32-bit running total.  This is the everyday "
-     "precision of AI work."},
+     "fp16 inputs, fp32 accumulator (WMMA 16x16x16)."},
     {"bf16", "WMMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_bf16, "wmma_bf16",
      16, 16, 16, false,
-     "Matrix cores on bfloat16 -- 16 bits arranged for AI work, trading digits "
-     "of accuracy for the number range of a full float, which makes training "
-     "far more forgiving."},
+     "bf16 inputs, fp32 accumulator (WMMA 16x16x16)."},
     {"fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e4m3",
      16, 16, 16, false,
-     "Matrix cores on 8-bit numbers, in the variant that spends its bits on "
-     "accuracy rather than range.  Half the data of 16-bit per value, so it "
-     "runs at roughly twice the rate."},
+     "fp8 E4M3 inputs (more precision, less range), fp32 accumulator "
+     "(WMMA 16x16x16).  RDNA4 only."},
     {"fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e5m2",
      16, 16, 16, false,
-     "The same 8-bit matrix path in the other variant, which spends its bits "
-     "on range rather than accuracy -- the one that copes with very large and "
-     "very small values."},
+     "fp8 E5M2 inputs (more range, less precision), fp32 accumulator "
+     "(WMMA 16x16x16).  RDNA4 only."},
   };
   static const WmmaEntry intEntries[] = {
     {"int8", "WMMA int8xint8+int32 16x16x16", "ops",
      &rocm_kernels::wmma_int8, "wmma_int8",
      16, 16, 16, true,
-     "Matrix cores on 8-bit whole numbers with a 32-bit running total -- the "
-     "format quantized neural networks use when they are squeezed down to run "
-     "fast on cheaper hardware."},
+     "int8 inputs, int32 accumulator (WMMA 16x16x16)."},
   };
 
   const bool rdna = isRdnaWmmaFamily(archBaseOf(dev.info.archName));
@@ -111,12 +102,8 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
   // One scope for the whole family -- all data types in one test.
   auto test = currentDeviceScope->beginTest(
     {"wmma", "Matrix cores (WMMA)", "flops", Category::Unknown,
-       "Peak speed of the matrix cores -- dedicated units that multiply whole "
-       "16x16 blocks of numbers in one step rather than one value at a time. "
-       "Each reading is a different input format; which of them the hardware "
-       "runs, and how much faster the narrow ones go, is most of what "
-       "separates one generation from the next.  RDNA3 (gfx11) and RDNA4 "
-       "(gfx12) only -- the compute cards use MFMA instead.",
+       "Peak rate of the RDNA3 and RDNA4 matrix cores (WMMA, wave32), with no "
+       "memory traffic.  CDNA parts use MFMA instead.",
        TestShape::Heterogeneous, "data type"});
 
   for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)

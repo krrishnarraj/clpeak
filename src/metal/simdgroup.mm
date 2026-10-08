@@ -19,8 +19,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         { "fp16", "simdgroup_matrix_fp16",
           mtl_kernels::simdgroup_matrix_fp16_src,
           mtl_kernels::simdgroup_matrix_fp16_name,
-          "Half-precision inputs with a 32-bit running total -- the format "
-          "Apple's matrix hardware is built around.",
+          "fp16 inputs, fp32 accumulator.",
           nullptr,
           dev.info.simdgroupMatrixFP16Supported
               ? nullptr
@@ -29,8 +28,7 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
         { "bf16", "simdgroup_matrix_bf16",
           mtl_kernels::simdgroup_matrix_bf16_src,
           mtl_kernels::simdgroup_matrix_bf16_name,
-          "bfloat16 inputs -- 16 bits arranged for AI work, trading digits of "
-          "accuracy for a wider number range.",
+          "bf16 inputs, fp32 accumulator.  Needs M3 or newer.",
           nullptr,
           (dev.info.simdgroupMatrixFP16Supported &&
            dev.info.simdgroupMatrixBF16Supported)
@@ -43,11 +41,8 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
     d.title            = "simdgroup_matrix 8x8x8";
     d.resultTag        = "simdgroup_matrix";
     d.unit             = "flops";
-    d.description      = "Peak speed of Apple's matrix instruction, which multiplies "
-                         "whole 8x8 blocks in one step instead of one value at a "
-                         "time -- the GPU's answer to a tensor core.  Each reading "
-                         "is a different input format; all of them accumulate into "
-                         "32-bit floats.";
+    d.description      = "Peak rate of Apple's simdgroup_matrix 8x8x8 "
+                         "multiply-accumulate instruction.";
     d.shape            = TestShape::Heterogeneous;
     d.axis             = "data type";
     d.variants         = variants;

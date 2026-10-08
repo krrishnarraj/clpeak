@@ -16,15 +16,12 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 
   auto test = currentDeviceScope->beginTest(
     {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
-     "How fast data crosses between the host's memory and the device's.  On a "
-     "discrete card that means the PCIe link, which is far narrower than "
-     "either side's own memory; on integrated graphics the two share one pool "
-     "and the numbers are much higher.",
+     "Copy bandwidth between host and device memory.  Both rows use pinned "
+     "host memory.",
      TestShape::Heterogeneous, "direction"});
 
-  const char *h2dNote = "Host to device: sending data across to the device.";
-  const char *d2hNote = "Device to host: reading results back.  Often a little "
-                        "slower than the other direction.";
+  const char *h2dNote = "Host to device.";
+  const char *d2hNote = "Device to host.";
 
   void *dBuf    = sycl::malloc_device(bytes, dev.stream);
   void *hPinned = sycl::malloc_host(bytes, dev.stream);
