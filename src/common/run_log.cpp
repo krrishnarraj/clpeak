@@ -6,6 +6,22 @@
 
 namespace {
 RunLog *g_current = nullptr;
+
+// The warning a side records the moment it starts dropping Debug: in the
+// first dropped entry's scope and time, so it sits where the gap begins.
+LogEntry capNotice(const LogEntry &dropped, std::size_t cap, const char *where)
+{
+    LogEntry e;
+    e.elapsedS    = dropped.elapsedS;
+    e.level       = clpeak::LogLevel::Warning;
+    e.backend     = dropped.backend;
+    e.device      = dropped.device;
+    e.deviceIndex = dropped.deviceIndex;
+    e.test        = dropped.test;
+    e.message     = "log full: debug entries past " + std::to_string(cap >> 20) +
+                    " MiB are left out of " + where + " from here on";
+    return e;
+}
 }
 
 RunLog::RunLog(RunDocument &doc)
@@ -66,7 +82,12 @@ void RunLog::openSidecar(const std::string &outputFile)
         else
         {
             sidecarWriteLocked(runLogHeaderJson(doc.meta));
-            for (const LogEntry &e : doc.log) sidecarWriteLocked(logEntryToJson(e));
+            for (const LogEntry &e : doc.log)
+            {
+                if (e.level == clpeak::LogLevel::Debug)
+                    sidecarDebugBytes += e.message.size();
+                sidecarWriteLocked(logEntryToJson(e));
+            }
         }
     }
     if (!failed.empty())
@@ -102,21 +123,48 @@ void RunLog::record(LogEntry &entry)
 {
     entry.elapsedS = elapsedS();
     std::lock_guard<std::mutex> lock(mutex);
-    appendLocked(entry);
+    appendLocked(entry, /*toDocument=*/true);
 }
 
-void RunLog::appendLocked(LogEntry &entry)
+void RunLog::recordToSidecar(LogEntry &entry)
 {
-    const bool essential = entry.level == clpeak::LogLevel::Error ||
-                           entry.level == clpeak::LogLevel::Warning;
-    if (!essential && messageBytes + entry.message.size() > kMaxMessageBytes)
+    entry.elapsedS = elapsedS();
+    std::lock_guard<std::mutex> lock(mutex);
+    appendLocked(entry, /*toDocument=*/false);
+}
+
+void RunLog::appendLocked(LogEntry &entry, bool toDocument)
+{
+    bool toSidecar = sidecar != nullptr;
+    if (entry.level == clpeak::LogLevel::Debug)
     {
-        dropped++;
-        return;
+        // Each side drops on its own cap, from the first entry that does not
+        // fit on -- a later, shorter one would make a liar of the notice --
+        // and says so on that side only: the sidecar goes on taking what the
+        // document no longer does.
+        const std::size_t n = entry.message.size();
+        if (toDocument)
+        {
+            toDocument = documentDropped == 0 &&
+                         documentDebugBytes + n <= kMaxDocumentDebugBytes;
+            if (toDocument)
+                documentDebugBytes += n;
+            else if (documentDropped++ == 0)
+                doc.log.push_back(capNotice(entry, kMaxDocumentDebugBytes, "the document"));
+        }
+        if (toSidecar)
+        {
+            toSidecar = sidecarDropped == 0 &&
+                        sidecarDebugBytes + n <= kMaxSidecarDebugBytes;
+            if (toSidecar)
+                sidecarDebugBytes += n;
+            else if (sidecarDropped++ == 0)
+                sidecarWriteLocked(
+                    logEntryToJson(capNotice(entry, kMaxSidecarDebugBytes, "this file")));
+        }
     }
-    messageBytes += entry.message.size();
-    doc.log.push_back(entry);
-    sidecarWriteLocked(logEntryToJson(entry));
+    if (toDocument) doc.log.push_back(entry);
+    if (toSidecar) sidecarWriteLocked(logEntryToJson(entry));
 }
 
 void RunLog::onLog(clpeak::LogLevel level, const std::string &source,
@@ -164,12 +212,12 @@ void RunLog::finish()
     std::size_t n;
     {
         std::lock_guard<std::mutex> lock(mutex);
-        n = dropped;
+        n = documentDropped;
     }
     if (n == 0) return;
     clpeak::logMessage(clpeak::LogLevel::Warning, "",
                        "log truncated: " + std::to_string(n) +
-                           " debug/info entries dropped after " +
-                           std::to_string(kMaxMessageBytes >> 20) +
-                           " MiB of messages");
+                           " debug entries left out after " +
+                           std::to_string(kMaxDocumentDebugBytes >> 20) +
+                           " MiB of debug messages");
 }

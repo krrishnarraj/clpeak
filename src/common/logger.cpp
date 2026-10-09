@@ -152,7 +152,8 @@ void logger::log(clpeak::LogLevel level, std::string message, std::string source
     dispatchEvent(e);
 }
 
-void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
+void logger::recordTranscriptLine(const LogEvent &e, const std::string &message,
+                                  bool toDocument)
 {
     if (message.empty()) return;
     RunLog *run = RunLog::current();
@@ -164,7 +165,10 @@ void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
     entry.deviceIndex = e.deviceIndex;
     entry.test        = e.testKey();
     entry.message     = message;
-    run->record(entry);
+    if (toDocument)
+        run->record(entry);
+    else
+        run->recordToSidecar(entry);
 }
 
 void logger::dispatchEvent(const LogEvent &e)
@@ -181,8 +185,9 @@ void logger::mirrorEvent(const LogEvent &e)
     // on the log of every run.  It is what a sidecar left behind by a crash
     // is read for, and a run without --verbose used to leave one that ended
     // at the last warning, minutes before the device that took it down.  The
-    // readings join it under --verbose (mirrorToRunLog), so the log then reads
-    // as the terminal did.
+    // readings join it on the sidecar of every run, since a run that dies
+    // leaves no device tree to hold them, and on the document's log under
+    // --verbose (mirrorToRunLog), which then reads as the terminal did.
     const bool transcript = mirrorToRunLog;
     switch (e.kind)
     {
@@ -216,8 +221,6 @@ void logger::mirrorEvent(const LogEvent &e)
 
     case LogEvent::Kind::Metric:
     {
-        if (!transcript)
-            break;
         UnitInfo unit;
         if (e.metric.hasUnit)
         {
@@ -276,14 +279,14 @@ void logger::mirrorEvent(const LogEvent &e)
         {
             line << "[" << statusString(e.metric.status) << "] " << e.metric.reason;
         }
-        recordTranscriptLine(e, line.str());
+        recordTranscriptLine(e, line.str(), transcript);
         break;
     }
 
     case LogEvent::Kind::TestSkippedAll:
-        if (transcript)
-            recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
-                                      "] " + e.reason);
+        recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
+                                  "] " + e.reason,
+                             transcript);
         break;
 
     default:

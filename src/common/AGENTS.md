@@ -16,8 +16,8 @@ document's `log` — scoped by whichever backend logger is open, timed from the
 run's start, mirrored line by line to the `-o` sidecar — and is dispatched
 as a `Log` event for the channel to render.  The loggers add the run's
 structure to it on every run (a line as each backend, device and test
-starts, so a crash's sidecar ends where the run died), and under
-`--verbose -o` the readings as well.
+starts, so a crash's sidecar ends where the run died), and the readings:
+on the sidecar always, on the document's `log` under `--verbose -o`.
 
 ## Quick Lookups
 
@@ -37,7 +37,7 @@ starts, so a crash's sidecar ends where the run died), and under
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--devices` items that name `backend()`) |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
 | `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, and `runLogHeaderJson()` for the sidecar's first line |
-| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps the log at 4 MiB of Debug/Info, and renders through the attached logger or the host's fallback |
+| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps Debug alone (64 MiB in the document, 128 MiB in the sidecar), and renders through the attached logger or the host's fallback |
 | `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
 | `json.cpp` | Recursive-descent JSON parser, classic-locale numbers. Hand-rolled: it is the only parser clpeak needs, and it is smaller than the XML/CSV line scanners it replaced |
 | `host_info.cpp` | `probeHost()`. Deliberately records no hostname, username or serial — result files get shared |

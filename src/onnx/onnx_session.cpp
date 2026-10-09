@@ -286,8 +286,8 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   // Run(), which over a ladder is tens of thousands of lines saying the
   // output buffer came and went.  The CPU provider's arena does it too: a
   // "Reserving memory in BFCArena" per allocation per Run() was 44,373 of a
-  // Galaxy S24's verbose lines, 3.3 of the log's 4 MiB, and pushed the
-  // run's last 8,452 entries out.  Everything else INFO says (provider
+  // Galaxy S24's verbose lines, 3.3 MB of the 4 MiB the log was capped at
+  // then, and pushed the run's last 8,452 entries out.  Everything else INFO says (provider
   // registration, partitioning, the session options, the pool's creation
   // and the arena's growth) is kept.
   if (level == clpeak::LogLevel::Debug && message &&

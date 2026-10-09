@@ -243,7 +243,7 @@ reproduces what the CLI printed.
 |---|---|
 | `elapsed_s` | seconds since the run started (`generated_at`). Where the run stalled is visible from the gaps |
 | `level` | `error` \| `warning` \| `info` \| `debug` |
-| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints). **Absent for clpeak's own messages** |
+| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `android` (how the OS says the process ended; sidecar only, see below). **Absent for clpeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
 | `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
 
@@ -259,16 +259,17 @@ What each level means, and when it is in the file:
 Every run also records where it is: an `info` line as each backend, device
 and test starts (`Backend: …`, `Device 0: …`, the test's title). Under
 `--verbose` the readings join them, one line each as the terminal showed them,
-so the log is the run's transcript.
+so the log is the run's transcript. (The sidecar below always has them.)
 
 The CLI prints its own warnings and errors inline with the results and
 everything else to stderr under `--verbose`; the GUI shows warnings and errors
 at the foot of a run's results and folds the rest beneath them. The file has
 it all regardless.
 
-The log is capped at 4 MiB of message text; past that, `debug` and `info`
-entries are dropped and a final `warning` says how many. Console captures
-record the first 200 lines of a call and count the rest.
+Only `debug` is capped: past 64 MiB of debug text the log drops further
+`debug` entries, with a `warning` where it starts and a final one saying how
+many. `info`, `warning` and `error` are never dropped. Console captures record
+the first 200 lines of a call and count the rest.
 
 ### The run-log sidecar
 
@@ -289,6 +290,21 @@ the only record of the run; its last line is usually where. It is removed once
 the document has been saved, so one that outlives its run is the record of a
 run the process died in. The GUI adopts one it finds on its next launch and
 offers it for export.
+
+Being that record, the sidecar is not the document's `log` line for line. It
+carries every reading as an `info` line with or without `--verbose`, since a
+run that dies leaves no `devices` to hold them, and it caps `debug` on its own
+at 128 MiB, again with a `warning` where it starts dropping, so the minutes
+before a late crash are still in it.
+
+On Android the app adds one line of its own to such a sidecar on its next
+launch: an `error` with `source: "android"`, after everything the run
+recorded, saying how Android recorded the process's end — `LOW_MEMORY`,
+`SIGNALED`, `CRASH_NATIVE`, `ANR` and the rest of `ApplicationExitInfo`'s
+reasons, with the signal, whether the app was in the foreground and its
+memory at the time — followed, for a native crash, by the tombstone's
+signal, abort message, crashing thread's backtrace and the process's last
+log lines. Its `elapsed_s` is when the process ended.
 
 ## Inventory
 

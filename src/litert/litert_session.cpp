@@ -477,6 +477,10 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   std::string console;   // what the runtime printed while creating
   auto fail = [&](const std::string &what, LiteRtStatus st) -> std::unique_ptr<LitertSession> {
     s->creationLog = console + litertDrainLog(rt);
+    // Under --verbose the mute has already recorded the console line by
+    // line, but only its first ScopedConsoleMute::kMaxLines, and what
+    // explains a failure is usually last.  A failed session's console goes
+    // on whole; one that came up needs no second copy.
     if (!console.empty() && clpeak::verboseEnabled())
       CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
     error = what + ": " + litertStatusText(rt, st);
@@ -539,8 +543,15 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     std::string toml;
     if (dev.vendor == "Qualcomm")
     {
+      // QNN's own log at warnings, not LiteRT's default of INFO: at INFO the
+      // HTP narrates every tensor and node it is handed (QnnDsp <I>
+      // QnnTensor_createGraphTensor, QnnBackend_validateOpConfig, ...), some
+      // 25 KB per session, which on a Galaxy S24 was two thirds of the run
+      // log's debug text by the time LiteRT's NPU tests were half done.  ONNX
+      // Runtime's QNN provider never lets that level through either.
       identifier = "qualcomm";
-      toml = "htp_performance_mode = " +
+      toml = "log_level = " + std::to_string((int)kLiteRtQualcommLogLevelWarn) + "\n" +
+             "htp_performance_mode = " +
              std::to_string((int)kLiteRtQualcommHtpPerformanceModeBurst) + "\n" +
              "dsp_performance_mode = " +
              std::to_string((int)kLiteRtQualcommDspPerformanceModeBurst) + "\n";
@@ -584,8 +595,6 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     return fail(std::string("LiteRT could not compile the model for the ") + s->accelName_, compileSt);
   s->createUs = elapsedUs(t0);
   s->creationLog = console + litertDrainLog(rt);
-  if (!console.empty() && clpeak::verboseEnabled())
-    CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
   // Where a session's time went, for the run log: the host generating the
   // model against the runtime loading and compiling it.  On a phone both
   // can dwarf the measurement that follows.
@@ -736,8 +745,6 @@ bool LitertSession::run(std::string &error)
       sync(ignored);   // the first run's time is to completion, like the rest
     }
     firstRunUs = elapsedUs(t0);
-    if (!console.empty() && clpeak::verboseEnabled())
-      CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     CLPEAK_VLOG("litert: %s: first inference %.0f ms\n", bytes_.description.c_str(), firstRunUs / 1000.0);
   }
   else
@@ -745,6 +752,9 @@ bool LitertSession::run(std::string &error)
                                          outputs_.size(), outputs_.data());
   if (st != kLiteRtStatusOk)
   {
+    // Whole, as for a failed creation.
+    if (!console.empty() && clpeak::verboseEnabled())
+      CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     const std::string logged = console + litertDrainLog(*rt_);
     error = "inference failed: " + litertStatusText(*rt_, st);
     const std::string why = lastLines(logged);

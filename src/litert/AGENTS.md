@@ -118,7 +118,8 @@ mode, the way the ONNX backend asks QNN for "burst": `"qualcomm"`
 TurboBoost (the keys are those of the `litert/c/options/*.cc` TOML
 parsers, the values the vendored enums).  Every vendor's default is a
 power policy for an app, and on sustained work the difference is a large
-multiple.  Unverified on NPU silicon, like the rows themselves.
+multiple.  `"qualcomm"` also sets `log_level` = Warn: QNN at INFO narrates
+every tensor and node, and that is most of a run log.  Unverified on NPU silicon, like the rows themselves.
 
 ## Models are emitted as FlatBuffer bytes, not built with a converter
 

@@ -256,10 +256,11 @@ protected:
 
   virtual void onEvent(const LogEvent &e) = 0;
 
-  // --verbose with -o: record the readings onto the run's log beside the
-  // backend/device/test headers every run records, so the log is a canonical
-  // transcript.  Set by the host through the constructor; both CLI and GUI
-  // use it.
+  // --verbose with -o: record the readings onto the document's log beside
+  // the backend/device/test headers every run records, so the log is a
+  // canonical transcript.  Without it they go to the sidecar alone, which a
+  // run that dies leaves as its only record.  Set by the host through the
+  // constructor; both CLI and GUI use it.
   bool mirrorToRunLog = false;
 
   // ── Context state ──────────────────────────────────────────────────────
@@ -312,9 +313,10 @@ private:
   // (diagnostics) are excluded -- they were already recorded before rendering.
   void mirrorEvent(const LogEvent &e);
 
-  // Record one transcript line scoped to where it fired.  A no-op when no
-  // RunLog is live.
-  void recordTranscriptLine(const LogEvent &e, const std::string &message);
+  // Record one transcript line scoped to where it fired -- on the sidecar
+  // alone unless `toDocument`.  A no-op when no RunLog is live.
+  void recordTranscriptLine(const LogEvent &e, const std::string &message,
+                            bool toDocument = true);
 
   // Scope handles are friends so they can manipulate context state directly.
   friend class BackendScope;

@@ -139,8 +139,9 @@ int main(int argc, char **argv)
 
         auto peak = be.create();
         // --verbose with -o: the base logger mirrors the metric rows onto the
-        // run's log beside the backend/device/test headers it always records,
-        // so the file's `log` reads as the run looked live.
+        // document's log beside the backend/device/test headers it always
+        // records, so the file's `log` reads as the run looked live.  The
+        // sidecar gets them either way.
         const bool mirror = opts.verbose && opts.enableOutput;
         peak->log.reset(
             new LoggerText(std::cout, opts.compareFile, opts.describe, opts.verbose, mirror));

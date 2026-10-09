@@ -35,10 +35,14 @@ class logger;
 //   --verbose exists for -- means it never is, and the sidecar is then the
 //   only record.  It is removed once the document has been saved.
 //
-//   The cap.  A runtime that logs per node per session can produce more
-//   text than a phone wants to share.  Past kMaxMessageBytes of message
-//   text, Debug and Info entries are dropped (and counted); warnings and
-//   errors always get through, and finish() records how much was dropped.
+//   The caps.  A runtime that logs per node per session can produce more
+//   text than a phone wants to share.  Only Debug is capped: Info is where
+//   the run is and what it read, and with warnings and errors it always gets
+//   through.  The document keeps kMaxDocumentDebugBytes of Debug text and
+//   finish() counts what it left out; the sidecar, which is on disk, gone
+//   once the document is saved, and read for the run's last minutes, keeps
+//   kMaxSidecarDebugBytes.  Each says so in a warning the moment it starts
+//   dropping, so a run that dies past its cap says it was cut.
 //
 // Callbacks from vendor runtimes fire on their own threads, so record() is
 // serialised.  Scope is read from the open logger without locking it: the
@@ -84,6 +88,11 @@ public:
     // too, so the event it goes on to render carries the same time.
     void record(LogEntry &entry);
 
+    // The same, onto the sidecar alone: a reading without --verbose, which
+    // the document holds in its device tree and keeps off its log.  A run
+    // that dies leaves no tree, and the sidecar keeps the numbers it got to.
+    void recordToSidecar(LogEntry &entry);
+
     // LogSink: a message with no logger context of its own.  Scoped by the
     // attached logger when there is one, else recorded as-is.
     void onLog(clpeak::LogLevel level, const std::string &source,
@@ -97,15 +106,16 @@ public:
     // the GUI bridge forwards an event.  Unset: stderr, as with no run.
     void setFallbackRenderer(std::function<void(const LogEntry &)> render);
 
-    // Record the truncation summary, if anything was dropped.  Call before
+    // Record how much Debug the document left out, if any.  Call before
     // the document is saved.
     void finish();
 
-    // Message text the log keeps before it starts dropping Debug and Info.
-    static constexpr std::size_t kMaxMessageBytes = 4u << 20;
+    // Debug message text each keeps before it starts dropping Debug.
+    static constexpr std::size_t kMaxDocumentDebugBytes = 64u << 20;
+    static constexpr std::size_t kMaxSidecarDebugBytes  = 128u << 20;
 
 private:
-    void appendLocked(LogEntry &entry);
+    void appendLocked(LogEntry &entry, bool toDocument);
     void sidecarWriteLocked(const std::string &line);
 
     RunDocument &doc;
@@ -117,8 +127,10 @@ private:
     FILE        *sidecar = nullptr;
     std::string  sidecarPath;
 
-    std::size_t  messageBytes = 0;
-    std::size_t  dropped      = 0;
+    std::size_t  documentDebugBytes = 0;
+    std::size_t  documentDropped    = 0;
+    std::size_t  sidecarDebugBytes  = 0;
+    std::size_t  sidecarDropped     = 0;
 };
 
 #endif  // CLPEAK_RUN_LOG_H
