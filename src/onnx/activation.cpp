@@ -50,7 +50,6 @@
 
 #include <chrono>
 #include <cstring>
-#include <map>
 #include <string>
 #include <vector>
 
@@ -81,12 +80,12 @@ namespace
   // The rungs are fixed, so the budget check is the only thing standing between
   // a phone and an out-of-memory kill -- Android ends the process rather than
   // failing an allocation, so a rung has to be declined on an estimate rather
-  // than attempted and recovered from.  The estimate is three times the tensor,
-  // not one: the raw values and the model embedding them are both alive while
-  // the model is built, and the model and ORT's own copy are both alive while
-  // the session is created.
-  static uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
-  constexpr uint64_t kCopiesAtPeak = 3;
+  // than attempted and recovered from.  The estimate is what the session holds
+  // (onnxHeldBytes): the tensor three times over as a constant, and every
+  // tensor of its size the graph computes from it (Variant::intermediates).
+  // The reference computes one, the scaled input, and every operation computes
+  // that and more, so a reference fits wherever an operation of its size does.
+  static uint64_t maxHeldBytes() { return clpeak::memoryBudget(1ull << 30); }
 
   constexpr unsigned int kSizeBudgetUs = 1000000;
 
@@ -123,20 +122,29 @@ namespace
     OnnxActivation act;
     const char *label;
     const char *note; // "<note>, over <size> of activations."
+    // The tensors of the input's size it computes, the scaled input among
+    // them (onnxResidentActivationModel).
+    int intermediates;
   };
 
   const Variant kVariants[] = {
-      {OnnxActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
-      {OnnxActivation::Softmax, "softmax", "Softmax across each row"},
+      {OnnxActivation::Silu, "silu", "SiLU, x times sigmoid(x)", 3},
+      {OnnxActivation::Softmax, "softmax", "Softmax across each row", 2},
       {OnnxActivation::LayerNorm, "layernorm",
-       "Layer norm (each row's mean and variance, then a rescale)"},
+       "Layer norm (each row's mean and variance, then a rescale)", 2},
   };
 
   struct Run
   {
     double us = -1.0;
+    double createUs = 0.0; // the session's build; zero when none was made
     std::string error;
     ResultStatus status = ResultStatus::Ok;
+    // A larger size of the same graph could only fail the same way: its run
+    // failed, or its build ran out of memory or past the compile cap.  Not a
+    // provider declining the graph or placing it on another unit -- Core ML's
+    // planner keeps small work on the CPU and takes the next size up.
+    bool endsLadder = false;
   };
 
   Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int dtype,
@@ -214,8 +222,11 @@ namespace
       {
         r.error = ses.error;
         r.status = onnxFailureStatus(ses.error);
+        r.endsLadder = r.status == ResultStatus::Error ||
+                       onnxReasonIsOutOfMemory(ses.error);
         return r;
       }
+      r.createUs = createUs;
       if (createUs > kOnnxMaxCreateUs)
       {
         CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s > %.1f s, skipping\n",
@@ -227,6 +238,7 @@ namespace
                   std::to_string((long long)(kOnnxMaxCreateUs / 1.0e6)) +
                   " s compilation budget";
         r.status = ResultStatus::Unsupported;
+        r.endsLadder = true;
         rt.api->ReleaseSession(ses.session);
         return r;
       }
@@ -291,8 +303,12 @@ namespace
     }
     if (st)
       r.error = onnxStatusText(rt, st);
-    if (r.us <= 0.0 && r.status == ResultStatus::Ok)
-      r.status = ResultStatus::Error;
+    if (r.us <= 0.0)
+    {
+      if (r.status == ResultStatus::Ok)
+        r.status = ResultStatus::Error;
+      r.endsLadder = true;
+    }
 
     if (inVal)
       rt.api->ReleaseValue(inVal);
@@ -301,6 +317,56 @@ namespace
     rt.api->ReleaseSession(session);
     return r;
   }
+
+  constexpr size_t kNumSizes = sizeof(kSizes) / sizeof(kSizes[0]);
+
+  std::string seconds(double us)
+  {
+    return std::to_string((long long)(us / 1.0e6 + 0.5)) + " s";
+  }
+
+  // One graph's climb through kSizes: the reference's, or one operation's.
+  struct Ladder
+  {
+    double prevUs = 0.0, prevPrevUs = 0.0; // its last two builds
+    size_t prevAt = 0;                     // the size the last was built at
+    std::string ended;                     // why nothing larger is built
+    ResultStatus endedStatus = ResultStatus::Ok;
+
+    void record(size_t si, const Run &r)
+    {
+      if (r.createUs <= 0.0)
+        return;
+      prevPrevUs = prevUs;
+      prevUs = r.createUs;
+      prevAt = si;
+    }
+
+    // The compile cap, checked before paying for the build
+    // (onnxPredictCreateUs); a graph's first build is always paid for, and
+    // seeds the prediction.  Each size is four times the one below it, as
+    // each of onnx-gemm's widths holds four times the weights of the last.
+    // QNN's HTP on a Galaxy S24 Ultra spent 17 s and then 68 s building and
+    // timing softmax at 8 and 32 MB: four times as long at each size.
+    std::string pastCompileCap(size_t si) const
+    {
+      if (prevUs <= 0.0)
+        return std::string();
+      double us = prevUs, before = prevPrevUs;
+      for (size_t k = prevAt; k < si; k++)
+      {
+        const double next = onnxPredictCreateUs(us, before, /*confirming=*/false);
+        before = us;
+        us = next;
+      }
+      if (us <= kOnnxMaxCreateUs)
+        return std::string();
+      return "its " + std::string(kSizes[prevAt].label) + " session took " +
+             seconds(prevUs) + " to create, which predicts about " +
+             seconds(us) + " here, past the " + seconds(kOnnxMaxCreateUs) +
+             " compilation budget";
+    }
+  };
 
 } // namespace
 
@@ -331,43 +397,94 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           ? "  Measured in fp32, which this provider streams faster than fp16."
           : "";
 
+  // One row of the reference graph: 8-16 KB, so essentially all of its time
+  // is what the provider charges to accept a submission.  The guard below
+  // needs it because on a provider that charges 156 us the measurement and
+  // its reference are mostly that charge, and the share the operation
+  // accounts for looks far smaller than it is.  It may fail where the sizes
+  // do not -- Core ML's planner keeps work this small off the Neural Engine
+  // -- and then the guard takes the whole measurement as work, which only
+  // makes it stricter.
+  const Run dispatch = measure(rt, ep, dtype, OnnxActivation::None, 1,
+                               warmupCount, forceIters, specifiedIters);
+  const double dispatchUs = (dispatch.us > 0.0) ? dispatch.us : 0.0;
+  CLPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
+              ep.providerKey.c_str(), dispatchUs);
+
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by
   // every variant -- three variants over one ladder otherwise pay for the
   // identical session three times over, and on providers that compile ahead
   // of time the session is the expensive part.
-  // One row of the same reference graph: 8-16 KB, so essentially all of its
-  // time is what the provider charges to accept a submission.  The guard
-  // below needs it because on a provider that charges 156 us the measurement
-  // and its reference are mostly that charge, and the share the operation
-  // accounts for looks far smaller than it is.
-  std::map<int64_t, Run> floors;
-  auto floorFor = [&](int64_t rows) -> const Run &
+  //
+  // A size whose reference failed has no rows at all.  Subtracting nothing
+  // would publish the scaffolding's time -- the read, the multiply and the
+  // reduction -- as the operation's own: QNN's HTP on a Galaxy S24 Ultra
+  // failed the 128 MB reference at run time (QNN_GRAPH_ERROR_INVALID_HANDLE),
+  // which left silu_128mb with nothing to subtract.  A failure a larger graph
+  // could only repeat (Run::endsLadder) ends the reference's ladder, and with
+  // it every operation's: that run went on to build softmax at 128 MB, and
+  // the process died there.
+  struct Reference
   {
-    auto it = floors.find(rows);
-    if (it == floors.end())
-      it = floors.emplace(rows,
-                          measure(rt, ep, dtype, OnnxActivation::None, rows,
-                                  warmupCount, forceIters, specifiedIters))
-               .first;
-    return it->second;
+    bool tried = false;
+    Run run;
+    std::string reason; // why this size has no reference
   };
-
-  const Run &dispatch = floorFor(1);
-  const double dispatchUs = (dispatch.us > 0.0) ? dispatch.us : 0.0;
-  CLPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
-              ep.providerKey.c_str(), dispatchUs);
+  Reference refs[kNumSizes];
+  Ladder refLadder;
+  auto referenceAt = [&](size_t si, int64_t rows) -> const Reference &
+  {
+    Reference &ref = refs[si];
+    if (ref.tried)
+      return ref;
+    ref.tried = true;
+    if (!refLadder.ended.empty())
+    {
+      ref.run.status = refLadder.endedStatus;
+      ref.reason = refLadder.ended;
+      return ref;
+    }
+    const std::string pastCap = refLadder.pastCompileCap(si);
+    if (!pastCap.empty())
+    {
+      ref.run.status = ResultStatus::Unsupported;
+      ref.reason = "reference graph not built: " + pastCap;
+      return ref;
+    }
+    ref.run = measure(rt, ep, dtype, OnnxActivation::None, rows, warmupCount,
+                      forceIters, specifiedIters);
+    refLadder.record(si, ref.run);
+    if (ref.run.us > 0.0)
+      return ref;
+    const std::string error =
+        ref.run.error.empty() ? std::string("run failed") : ref.run.error;
+    ref.reason = "reference graph failed: " + error;
+    CLPEAK_VLOG("onnx-activation[%s]: %s reference failed (%s)%s\n",
+                ep.providerKey.c_str(), kSizes[si].label, error.c_str(),
+                ref.run.endsLadder ? "; no larger size is attempted" : "");
+    if (ref.run.endsLadder)
+    {
+      refLadder.ended = "reference graph failed at " +
+                        std::string(kSizes[si].label) +
+                        ", so no larger size is attempted: " + error;
+      refLadder.endedStatus = ref.run.status;
+    }
+    return ref;
+  };
 
   for (const Variant &v : kVariants)
   {
     if (clpeak::cancelRequested())
       break;
 
-    for (const Size &sz : kSizes)
+    Ladder ladder;
+    for (size_t si = 0; si < kNumSizes; si++)
     {
       if (clpeak::cancelRequested())
         break;
 
+      const Size &sz = kSizes[si];
       const uint64_t bytes = sz.bytes;
       const int64_t rows = (int64_t)(bytes / ((uint64_t)kCols * es));
       const std::string metric = std::string(v.label) + "_" + sz.label;
@@ -375,20 +492,50 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                                std::to_string(bytes >> 20) +
                                " MB of activations." + widthNote;
 
-      if (bytes * kCopiesAtPeak > maxTensorBytes())
+      if (onnxHeldBytes(ep, bytes, (uint64_t)v.intermediates * bytes) >
+          maxHeldBytes())
       {
         test.skip(metric, ResultStatus::Unsupported,
                   "larger than this machine's memory budget allows", note);
         continue;
       }
+      if (!ladder.ended.empty())
+      {
+        test.skip(metric, ladder.endedStatus, ladder.ended, note);
+        continue;
+      }
+      // Before the reference, which this size would otherwise build for
+      // nothing.
+      const std::string pastCap = ladder.pastCompileCap(si);
+      if (!pastCap.empty())
+      {
+        CLPEAK_VLOG("onnx-activation[%s/%s]: %s not built: %s\n",
+                    ep.providerKey.c_str(), v.label, sz.label,
+                    pastCap.c_str());
+        test.skip(metric, ResultStatus::Unsupported, pastCap, note);
+        continue;
+      }
 
-      const Run &floor = floorFor(rows);
+      const Reference &ref = referenceAt(si, rows);
+      if (ref.run.us <= 0.0)
+      {
+        test.skip(metric, ref.run.status, ref.reason, note);
+        continue;
+      }
       Run full = measure(rt, ep, dtype, v.act, rows, warmupCount, forceIters,
                          specifiedIters);
+      ladder.record(si, full);
       if (full.us <= 0.0)
       {
-        test.skip(metric, full.status,
-                  full.error.empty() ? "run failed" : full.error, note);
+        const std::string error =
+            full.error.empty() ? std::string("run failed") : full.error;
+        test.skip(metric, full.status, error, note);
+        if (full.endsLadder)
+        {
+          ladder.ended =
+              metric + " failed, so no larger size is attempted: " + error;
+          ladder.endedStatus = full.status;
+        }
         continue;
       }
 
@@ -403,7 +550,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // so leaving it in the denominator makes a well-resolved operation look
       // marginal wherever dispatch is expensive.  DirectML charges 156 us and
       // CUDA 69 us against measurements of a few hundred.
-      const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
+      const double floorUs = ref.run.us;
       const double netUs = full.us - floorUs;
       const double workUs = full.us - dispatchUs;
       if (netUs <= 0.0 || workUs <= 0.0 || netUs <= kMinOpShare * workUs)
@@ -425,7 +572,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
                   "floor %.0f us)\n",
                   ep.providerKey.c_str(), v.label,
-                  sz.label, bps, full.us, floorUs);
+                  sz.label, bps / 1.0e9, full.us, floorUs);
       test.emit(metric, (float)bps, note.c_str());
     }
   }

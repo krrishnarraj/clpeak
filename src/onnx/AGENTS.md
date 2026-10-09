@@ -1740,10 +1740,17 @@ rung for its working set, which does not expire either:
   difference in whether 4096 rows counted as an improvement over 2048.
 
   A fixed ladder has no selection to be unstable. It also costs less than the
-  sweep it replaced (nine measurements plus three shared references, always) and
+  sweep it replaced (at most nine measurements plus three shared references) and
   it is what makes the comparison this test exists for a division rather than an
   argument: `silu_32mb` over `onnx-tensor-bw`'s `32mb` is one number about one
   working set.
+
+  Fixed is not unconditional. Each graph — the reference and each operation —
+  stops climbing after a failure a larger size could only repeat (its run
+  failed, it ran out of memory, its compile passed `kOnnxMaxCreateUs`) and
+  before a compile `onnxPredictCreateUs()` puts past the cap; a size whose
+  reference failed has no rows, since subtracting nothing would publish the
+  scaffolding as the operation.
 
 **One ceiling does not come from memory: an ONNX model is a protobuf message,
 and protobuf cannot serialize more than 2 GiB.** Both GEMM operands live inside
@@ -1774,8 +1781,9 @@ admits it on a 16 GB phone that kills the process for it. The writer is part
 of the count: `OnnxGraph::build()` assembles the model in its initializers'
 storage, so building one holds the caller's operands and the model and nothing
 more. It matters most where a rung list is *fixed* rather than swept —
-`onnx-activation` and `onnx-tensor-bw` both always attempt 8 / 32 / 128 MB, so
-their budget check is the only thing that declines the large one.
+`onnx-activation` and `onnx-tensor-bw` both attempt 8 / 32 / 128 MB rather
+than stopping on a rate, so their budget check is the only thing that declines
+the large one.
 
 Where a size *is* fixed, it is fixed because it defines the workload rather
 than because it was convenient, and it is meant to stay fixed forever:
