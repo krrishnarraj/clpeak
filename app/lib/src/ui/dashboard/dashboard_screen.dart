@@ -119,9 +119,7 @@ class _RunLauncher extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Measures peak compute, bandwidth and latency on $deviceLabel. '
-            'Results stream in live and are saved to History. '
-            'Custom… narrows the devices, test categories and time budgets.',
+            'Measures compute, bandwidth and latency on $deviceLabel.',
             style: t.body,
           ),
           const SizedBox(height: 16),
