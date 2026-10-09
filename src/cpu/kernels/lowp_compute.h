@@ -132,7 +132,7 @@ static double runBf16Chain(uint64_t outer)
 // ---- Mixed precision (fp16 mul -> fp32 acc, widening FMLA) ------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-static constexpr int MP_NACC = 16, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
+static constexpr int MP_NACC = 24, MP_OPS_PER_STEP = 16;  // 2 FMLAL x 4 lanes x (mul + add)
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
@@ -144,27 +144,46 @@ static double runMpChain(uint64_t outer)
   // and even an asm("+w") barrier all FAILED on the aarch64 server clang -- the
   // work stays *linear*, so it's always close-form-able.  The robust fix is the
   // fp16 chain's trick: feed the accumulator back as a MULTIPLICAND so the
-  // recurrence is genuinely NONLINEAR (no closed form exists).  FMLAL multiplies
-  // fp16, so narrow acc -> fp16 each step:
-  //   acc <- acc + narrow(acc)*(-decay) + 1*refill   ->  fixed point refill/decay.
-  // The vcvt is what makes it nonlinear (and uncollapsible); the constant refill
-  // keeps acc off zero so the feedback term stays meaningful.
-  const float16x8_t decay  = vdupq_n_f16((float16_t)-0.000977f);  // <0: contracts
-  const float16x8_t refill = vdupq_n_f16((float16_t) 0.001953f);
-  const float16x8_t one    = vdupq_n_f16((float16_t) 1.0f);
-  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
+  // recurrence is genuinely NONLINEAR (no closed form exists).
+  //
+  // It feeds back with no conversion.  The high 16 bits of an fp32 are its
+  // bfloat16, and read as an fp16 they are an ordinary number (2.0f's read 2.0,
+  // 1e-3f's ~0.8; Inf or NaN only from 2^121 up), so each FMLAL multiplies by
+  // element 1 or 3 of its own accumulator's register -- the high halves of fp32
+  // lanes 0 and 1 -- and the loop is FMLALs and nothing else.  Narrowing instead
+  // (vcvt_f16_f32, which clang fills a vector with as FCVTN + FCVTN2) put two
+  // uncounted conversions in every step, and a Cortex-X4 issues FCVTN once a
+  // cycle on two of its four pipes: mp read 23 GFLOPS there against 101 fp32,
+  // where FMLAL runs at the fp32 rate.
+  //
+  // Each source lane pulls itself back toward zero (negative self coefficient,
+  // small positive cross term), so the values settle into a small orbit around
+  // zero: normal, finite, and never frozen.
+  //
+  // 24 chains: an element operand gets no fast forwarding on the X4, and an fp32
+  // result read as fp16 is a precision change besides, so a self-fed step costs
+  // ~5 cycles and 16 chains would leave the four pipes a fifth idle.  The element
+  // register must be v0-v15, so chains 16-23 read the lanes of chains 0-7 rather
+  // than their own -- still values with no closed form.
+  // Low half pairs with element 1 (lane 0's high bits), high half with element 3.
+  static const float16_t kCoef[8] = {
+      (float16_t)-0.0009765625f, (float16_t)0.0001220703125f, (float16_t)-0.00048828125f,
+      (float16_t)0.000244140625f, (float16_t)0.0001220703125f, (float16_t)-0.0009765625f,
+      (float16_t)0.00048828125f, (float16_t)-0.000244140625f};
+  const float16x8_t c = vld1q_f16(kCoef);
+  volatile float vseed = 0.75f;
+  const float seed = vseed;
+  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(seed + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
-      {
-        float16x4_t h  = vcvt_f16_f32(acc[j]);          // narrow: nonlinear feedback
-        float16x8_t hh = vcombine_f16(h, h);
-        acc[j] = vfmlalq_low_f16(acc[j], hh, decay);    // acc += narrow(acc)*(-decay)
-        acc[j] = vfmlalq_high_f16(acc[j], one, refill); // acc += 1*refill (off-zero)
-      }
+        acc[j] = vfmlalq_laneq_low_f16(acc[j], c, vreinterpretq_f16_f32(acc[j % 16]), 1);
+      CPU_UNROLL_FULL
+      for (int j = 0; j < MP_NACC; j++)
+        acc[j] = vfmlalq_laneq_high_f16(acc[j], c, vreinterpretq_f16_f32(acc[j % 16]), 3);
     }
   float32x4_t s = acc[0];
   for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);

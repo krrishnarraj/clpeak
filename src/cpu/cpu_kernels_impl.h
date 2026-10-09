@@ -72,7 +72,7 @@ static const CpuKernelTable *tuTable()
     t.bf16 = {runBf16Chain, (double)INNER * BF16_NACC * BF16_FLOPS_PER_INSTR};
 #endif
 #ifdef CPU_HAS_MP_KERNEL
-    t.mp = {runMpChain, (double)INNER * MP_NACC * MP_OPS_PER_INSTR};
+    t.mp = {runMpChain, (double)INNER * MP_NACC * MP_OPS_PER_STEP};
 #endif
 #ifdef CPU_HAS_INT8DP_KERNEL
     t.int8dp = {runInt8DpChain, (double)INNER * I8_NACC * I8_OPS_PER_INSTR};

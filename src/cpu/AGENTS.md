@@ -181,7 +181,7 @@ changing a kernel.
   `NACC ≈ pipes × latency`), so it does not look like a bug.
 - **Codegen verification is the acceptance test for a new kernel.** `otool -tv` /
   `llvm-objdump --mattr=…`: the hot loop must be `NACC × CPU_UNROLL_K`
-  back-to-back FMA/dot/tile ops with no loads, stores or vector movs. This is how
+  back-to-back FMA/dot/tile ops with no loads, stores, conversions or vector movs. This is how
   every collapse above was caught, and the only check available for an ISA with
   no silicon to hand.
 - **Bandwidth kernels reached through a function pointer must be timed with a
@@ -265,7 +265,10 @@ changing a kernel.
 
 Numbers to sanity-check a change against; anything far off is a bug, not a win.
 
-- **M1 Pro**: fp32 ~796 GFLOPS MT (~90% of theoretical), fp64 ~388, L1 read
+- **M1 Pro**: fp32 ~796 GFLOPS MT (~90% of theoretical), fp64 ~388, mixed
+  precision (FMLAL) ~98 ST / ~760 MT — the fp32 rate, as on the Cortex-X4,
+  whose guide lists FMLAL beside FMLA; well below it means uncounted work in
+  the chain. L1 read
   47.6 B/cycle (99% of the 3×16B load-port ceiling), L1 write ST ~95 GB/s
   (~93% of the 2×16B store bound), AES ~14.6 GB/s ST, SHA-256 ~3.1, SHA-512
   ~2.1, CRC32-C ~25.5 (= exactly 1 `crc32cx`/cycle), string scan 85 GB/s ST,
