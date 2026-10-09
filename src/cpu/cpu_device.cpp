@@ -466,8 +466,12 @@ static void applyTopology(cpu_device_info_t &info, const std::vector<CpuRecord> 
   if (fast.maxMHz > 0)
     info.clockMHz = fast.maxMHz;
   for (const CpuRecord &r : recs)
-    if (r.id == fast.id && !r.key[3].empty() && !fast.l3Bytes)
-      info.l3Unsized = true;
+    if (r.id == fast.id)
+    {
+      info.l1dUnsized = !r.key[1].empty() && !fast.l1dBytes;
+      info.l2Unsized  = !r.key[2].empty() && !fast.l2Bytes;
+      info.l3Unsized  = !r.key[3].empty() && !fast.l3Bytes;
+    }
 }
 
 // Name the ST core for the header when the cores are not all alike: the part
@@ -1071,28 +1075,16 @@ void detectCpuInfo(cpu_device_info_t &info)
   if (!info.l2Sizes.empty())  info.l2TotalBytes  = sum(info.l2Sizes);
   if (!info.l3Sizes.empty())  info.l3TotalBytes  = sum(info.l3Sizes);
 
-  // Sane fallbacks so the cache benchmarks always have a working-set target.
-  // They are assumptions, not sizes: an Android kernel whose device tree gives
-  // none lists its caches without one, and a 32 KB / 512 KB printed in the
-  // header there read as the phone's.  The header leaves them out.
-  if (!info.l1dCacheBytes)
-  {
-    info.l1dCacheBytes = 32ull * 1024;
-    info.l1dAssumed = true;
-  }
-  if (!info.l2CacheBytes)
-  {
-    info.l2CacheBytes = 512ull * 1024;
-    info.l2Assumed = true;
-  }
-  // L3 gets NO fallback: plenty of CPUs genuinely have none (every Apple
-  // Silicon part, Snapdragon X, most phone SoCs), and inventing 8 MB there was
-  // worse than reporting nothing.  It printed an "L3" that does not exist,
-  // pointed the L3 cache-bandwidth and latency rows at a working set that
-  // still fits in L2 (M1 Pro reported an L3 *faster* than its own L2), and
-  // sized the STREAM arrays off 8 MB instead of the ~28 MB really there.
-  // Zero means "no L3" -- or, with l3Unsized, an L3 the OS gives no size for;
-  // the rows that need one skip as Unsupported either way.
+  // No fallback sizes.  A 32 KB / 512 KB guess once stood in for an L1d / L2
+  // the OS gave no size for -- an Android kernel whose device tree has none
+  // lists its caches without one -- and the cache rows then measured a working
+  // set sized for a cache that was not the phone's.  The same went for an
+  // invented 8 MB L3: plenty of CPUs genuinely have none (every Apple Silicon
+  // part, Snapdragon X, most phone SoCs), and the made-up one printed an "L3"
+  // that does not exist, reported an L3 *faster* than the L2 next to it, and
+  // undersized the STREAM arrays.  A size stays 0 when unknown -- with
+  // l1dUnsized / l2Unsized / l3Unsized when the level is listed without one --
+  // and the rows that would need it skip (cacheSizeGap).
   // If totals couldn't be determined, fall back to the per-core size (no breakdown shown).
   if (info.l1dTotalBytes < info.l1dCacheBytes)
     info.l1dTotalBytes = info.l1dCacheBytes;
@@ -1100,6 +1092,23 @@ void detectCpuInfo(cpu_device_info_t &info)
     info.l2TotalBytes = info.l2CacheBytes;
   if (info.l3TotalBytes < info.l3CacheBytes)
     info.l3TotalBytes = info.l3CacheBytes;
+}
+
+const char *cacheSizeGap(const cpu_device_info_t &info, int level)
+{
+  // The level's own size first, so a CPU with no L3 says so whatever else the
+  // OS withheld; then the levels beneath.
+  if (level >= 3 && !info.l3CacheBytes)
+    return info.l3Unsized ? "the OS lists an L3 but gives no size for it"
+                          : "no L3 on this CPU";
+  if (level >= 2 && !info.l2CacheBytes && (level == 2 || info.l2Unsized))
+    return info.l2Unsized ? "the OS lists an L2 but gives no size for it"
+                          : "the OS lists no L2";
+  // Every CPU has an L1d, so one with no size is unknown, listed or not.
+  if (!info.l1dCacheBytes)
+    return info.l1dUnsized ? "the OS lists an L1d but gives no size for it"
+                           : "the OS gives no L1d size";
+  return nullptr;
 }
 
 #endif // ENABLE_CPU

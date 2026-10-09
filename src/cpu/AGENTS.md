@@ -208,7 +208,10 @@ changing a kernel.
   size off at all — a Snapdragon X Elite has 36 MB of aggregate L2 and reports
   none. `l1dTotalBytes + l2TotalBytes + l3Total` at the classic STREAM 4x
   margin covers both; `pickStreamFloats` (`bandwidth.cpp`) and the DRAM
-  pointer-chase (`latency.cpp`) both use it. Single-threaded init puts every
+  pointer-chase (`latency.cpp`) both use it. A level without a size makes
+  that sum a floor, so the STREAM arrays then take the cap instead (the
+  pointer-chase's 256 MB floor already clears any phone's caches).
+  Single-threaded init puts every
   page on one NUMA node and collapses the number.
 - **An MT cache row sizes each thread for the core it is pinned to**: half its
   share of the instance that core reads (the instance over the workers reading
@@ -233,11 +236,15 @@ changing a kernel.
   summed over `hw.perflevel*.cpusperl2` — one sysctl reports one cluster.
   "No L3" is concluded only after every CPU's sysfs and the device tree have
   none; an L3 listed without a size (`l3Unsized`) skips with that reason.
-- **A size the OS never gave is not printed.** arm64 kernels list cache levels
-  without a `size` file when their device tree carries none — Android does,
-  and the emulator reproduces it — so the L1/L2 working sets fall back to
-  32 KB / 512 KB (`l1dAssumed` / `l2Assumed`, logged under `--verbose`) and the
-  header omits those levels instead of presenting the fallback as the phone's.
+- **A cache size the OS never gave is never assumed.** arm64 kernels list cache
+  levels without a `size` file when their device tree carries none — Android
+  does, and the emulator reproduces it. The size stays 0 (`l1dUnsized` /
+  `l2Unsized` / `l3Unsized` say it was listed), the header omits the level,
+  and every cache-bandwidth, L1-write and latency row for it skips as
+  Unsupported with `cacheSizeGap()`'s reason: a level runs only when its own
+  size and every smaller one's are known, since its working set must also
+  clear the cache beneath. A fallback size once stood in, and measured a
+  working set sized for a cache that was not the phone's.
 - **Single-thread rows run on the fastest core, not on cpu0.** `info.cores`
   lists the CPUs the process may run on (its affinity: an Android cpuset,
   taskset, a container) fastest first, ties to the lowest id so a homogeneous

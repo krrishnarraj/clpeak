@@ -229,21 +229,23 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
       TestShape::Heterogeneous, "memory level"};
   auto test = currentDeviceScope->beginTest(spec);
 
-  struct Level { const char *name; uint64_t bytes; const char *note; };
+  // `gap` is why a cache level has no working set (cacheSizeGap): no L3 is a
+  // real answer, and a size the OS withheld is not guessed at -- a walk sized
+  // for a made-up cache times some other level.
+  struct Level { const char *name; uint64_t bytes; const char *gap; const char *note; };
   // The DRAM walk must clear every cache, not just the L3: where the last
   // level is the L2 (Apple Silicon, Snapdragon X) there is no L3 to size off.
+  // Its 256 MB floor clears any phone's caches where the OS sizes none.
   const uint64_t cacheTotal = info.l1dTotalBytes + info.l2TotalBytes +
                               std::max(info.l3TotalBytes, info.l3CacheBytes);
   const Level levels[] = {
-    {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192),
+    {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192), cacheSizeGap(info, 1),
      "Reading from the small cache inside the core."},
-    {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536),
+    {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536), cacheSizeGap(info, 2),
      "Reading from the mid-level cache, after an L1 miss."},
-    // 0 when the CPU has no L3 at all — that row is then Unsupported, not a
-    // second reading of L2 taken over a made-up working set.
-    {"L3",   info.l3CacheBytes ? std::max<uint64_t>(info.l3CacheBytes / 2, 1u << 20) : 0,
+    {"L3",   std::max<uint64_t>(info.l3CacheBytes / 2, 1u << 20), cacheSizeGap(info, 3),
      "Reading from the last-level cache shared between cores."},
-    {"DRAM", std::max<uint64_t>(cacheTotal * 4, 256ull << 20),
+    {"DRAM", std::max<uint64_t>(cacheTotal * 4, 256ull << 20), nullptr,
      "Reading from main memory at random -- the worst case."},
   };
 
@@ -252,19 +254,16 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   std::vector<double> ns(4, -1.0);
   for (int i = 0; i < 4; i++)
   {
-    uint64_t bytes = levels[i].bytes;
-    if (!bytes)
+    if (levels[i].gap)
       continue;
+    const uint64_t bytes = levels[i].bytes;
     pool->run(1, [&, bytes, i](int) { ns[(size_t)i] = chaseLatencyNs(bytes); });
   }
 
   for (int i = 0; i < 4; i++)
   {
-    if (!levels[i].bytes)
-      test.skip(levels[i].name, ResultStatus::Unsupported,
-                info.l3Unsized ? "the OS lists an L3 but gives no size for it"
-                               : "no L3 on this CPU",
-                levels[i].note);
+    if (levels[i].gap)
+      test.skip(levels[i].name, ResultStatus::Unsupported, levels[i].gap, levels[i].note);
     else if (ns[(size_t)i] > 0)
       test.emit(levels[i].name, (float)(ns[(size_t)i] * 1e-9), levels[i].note);
     else

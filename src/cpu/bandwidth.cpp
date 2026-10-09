@@ -88,7 +88,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   // Threadripper (4 CCX x 16 MB L3) it left 256 KB per thread, inside the
   // 512 KB per-core L2, and "L3 MT" came back at 1758 GB/s against "L2 MT" at
   // 1744 -- two different levels reporting the same bandwidth, which is the
-  // tell.  0 means the level is absent and the row skips.
+  // tell.
   // `mtFloor` is twice one instance of the level BELOW, and it is what keeps a
   // split slice from falling out of the level it names: divide too far and the
   // row quietly re-measures the faster cache underneath.  It also covers the
@@ -116,10 +116,8 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
        "One thread reading from the mid-level cache, the next step out.",
        "Every core reading from L2 at once; where L2 is shared, the data is "
        "split between them so it still fits."},
-      {"L3", 3, info.l3CacheBytes
-                 ? std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), cap)
-                 : 0, // 0 = this CPU has no L3 (or none with a size); the loop skips the row
-       info.l3TotalBytes, info.l2CacheBytes * 2, true,
+      {"L3", 3, std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), cap),
+       info.l3TotalBytes, (info.l2CacheBytes ? info.l2CacheBytes : info.l1dCacheBytes) * 2, true,
        "One thread reading from the large cache shared by all cores.",
        "Every core reading from that shared cache at once, each taking a slice "
        "of it."},
@@ -157,9 +155,17 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     }
     return out;
   };
+  // A level runs only with its own size and every smaller one's (cacheSizeGap):
+  // no L3 is a real answer, and a size the OS withheld is not guessed at --
+  // a working set sized for a made-up cache measures some other level.
+  const char *gap[3];
   std::vector<uint64_t> mtBytes[3];
   for (int i = 0; i < 3; i++)
-    mtBytes[i] = mtSlices(levels[i]);
+  {
+    gap[i] = cacheSizeGap(info, levels[i].level);
+    if (!gap[i])
+      mtBytes[i] = mtSlices(levels[i]);
+  }
 
   // Per-thread buffer must hold the largest working set any thread streams.
   // That is usually the L3 set, but on Apple Silicon the per-cluster L2 (e.g.
@@ -167,7 +173,7 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   // L2 and L3 sets, capped so the NT allocation stays bounded.
   uint64_t largestLevel = std::max<uint64_t>(info.l2CacheBytes / 2, info.l3CacheBytes / 2);
   for (int i = 0; i < 3; i++)
-    if (levels[i].bytes)
+    if (!gap[i])
       for (uint64_t b : mtBytes[i])
         largestLevel = std::max(largestLevel, b);
   uint64_t allocBytes = std::min<uint64_t>(std::max<uint64_t>(largestLevel, 65536), cap);
@@ -191,17 +197,10 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   for (int i = 0; i < 3; i++)
   {
     const Level &lvl = levels[i];
-    // A CPU with no L3 (Apple Silicon, Snapdragon X, most phone SoCs) gets the
-    // row as Unsupported rather than a measurement: without a real size the
-    // working set falls back to something that still fits in L2, and the row
-    // silently reports L2 a second time.  The same goes for an L3 the OS lists
-    // without a size.
-    if (lvl.bytes == 0)
+    if (gap[i])
     {
-      const char *why = info.l3Unsized ? "the OS lists an L3 but gives no size for it"
-                                       : "no L3 on this CPU";
-      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported, why, lvl.stNote);
-      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported, why, lvl.mtNote);
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported, gap[i], lvl.stNote);
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported, gap[i], lvl.mtNote);
       continue;
     }
 
@@ -264,6 +263,20 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                            "below the matching read row.",
                            TestShape::Heterogeneous, "operation"};
     auto wtest = currentDeviceScope->beginTest(wspec);
+    const char *wStNote = "One thread storing new values into its own L1.";
+    const char *wMtNote = "Every core storing into its own L1 at the same time.";
+    const char *cStNote = "One thread copying inside L1 -- one read plus one write "
+                          "for every byte moved.";
+    const char *cMtNote = "Every core copying inside its own L1 at the same time.";
+
+    if (gap[0])
+    {
+      wtest.skip("write ST", ResultStatus::Unsupported, gap[0], wStNote);
+      wtest.skip("write MT", ResultStatus::Unsupported, gap[0], wMtNote);
+      wtest.skip("copy ST", ResultStatus::Unsupported, gap[0], cStNote);
+      wtest.skip("copy MT", ResultStatus::Unsupported, gap[0], cMtNote);
+      return 0;
+    }
 
     // A QUARTER of the L1, not half like the read row, and of each worker's own
     // core: stores do not tolerate the overflow reads do (those scale ~7.7x
@@ -304,12 +317,6 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     };
     const std::vector<size_t> wFloatsST((size_t)maxT, wFloats1);
 
-    const char *wStNote = "One thread storing new values into its own L1.";
-    const char *wMtNote = "Every core storing into its own L1 at the same time.";
-    const char *cStNote = "One thread copying inside L1 -- one read plus one write "
-                          "for every byte moved.";
-    const char *cMtNote = "Every core copying inside its own L1 at the same time.";
-
     double ps1  = runWorkload(1, writeBody(wFloatsST), cfg.targetTimeUs, forced);
     double bpsN = runWorkload(maxT, writeBody(wFloats), cfg.targetTimeUs, forced, &wBytes);
     if (ps1 > 0)
@@ -346,15 +353,26 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 // loudly: it just serves part of the read out of cache and reports a number
 // above what the DIMMs can physically do.  4x total cache is the classic STREAM
 // margin; the cap keeps us from hogging memory.  Even split across threads.
+//
+// A level the OS lists without a size makes the sum a floor, not a size, so
+// then the arrays take the cap.  A Galaxy S24 gives no size for any level, so
+// its ~8 MB of L2s and 12 MB L3 sum to nothing, and at the 64 MB floor its
+// "DRAM" row read 71.7 GB/s off an LPDDR5X-8533 bus that carries 68.
+static bool cacheSizesMissing(const cpu_device_info_t &info)
+{
+  return cacheSizeGap(info, 1) || info.l2Unsized || info.l3Unsized;
+}
+
 static size_t pickStreamFloats(const cpu_device_info_t &info, int maxT)
 {
   uint64_t cache = info.l1dTotalBytes + info.l2TotalBytes +
                    std::max(info.l3TotalBytes, info.l3CacheBytes);
-  uint64_t arrayBytes = std::max<uint64_t>(cache * 4, 64ull << 20);
   uint64_t cap = info.totalMemBytes ? std::min<uint64_t>(512ull << 20, info.totalMemBytes / 16)
                                     : (512ull << 20);
   if (cap < cache * 2)
     cap = cache * 2; // always large enough to miss every level
+  uint64_t arrayBytes = cacheSizesMissing(info) ? cap
+                                                : std::max<uint64_t>(cache * 4, 64ull << 20);
   arrayBytes = std::min(arrayBytes, cap);
   size_t N = (size_t)(arrayBytes / sizeof(float));
   N = (N / (size_t)maxT) * (size_t)maxT;
@@ -387,10 +405,11 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   // The one number that decides whether this test measures DRAM at all, so it
   // is worth being able to read it back off a suspicious run: a "DRAM" figure
   // above the memory's rated peak means the array was not big enough.
-  CLPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache, %d threads\n",
+  CLPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache%s, %d threads\n",
               (unsigned long long)((uint64_t)N * sizeof(float) >> 20),
               (unsigned long long)((info.l1dTotalBytes + info.l2TotalBytes +
                                     std::max(info.l3TotalBytes, info.l3CacheBytes)) >> 20),
+              cacheSizesMissing(info) ? " (not every level sized: arrays at the cap)" : "",
               maxT);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi)

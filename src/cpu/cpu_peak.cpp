@@ -322,11 +322,11 @@ int CpuPeak::runAll()
     pool->run(pool->maxThreads(), [](int) {});
     for (const std::string &f : pool->pinFailures())
       CLPEAK_VLOG("[cpu] could not pin a worker to %s\n", f.c_str());
-    if (info.l1dAssumed || info.l2Assumed)
-      CLPEAK_VLOG("[cpu] the OS gives no %s size; working sets assume L1d %llu KB, L2 %llu KB\n",
-                  info.l1dAssumed && info.l2Assumed ? "L1d or L2" : info.l1dAssumed ? "L1d" : "L2",
-                  (unsigned long long)(info.l1dCacheBytes >> 10),
-                  (unsigned long long)(info.l2CacheBytes >> 10));
+    // Each size the OS withheld; a level it lists nowhere (no L3) is not one.
+    const bool withheld[3] = {!info.l1dCacheBytes, info.l2Unsized, info.l3Unsized};
+    for (int lvl = 1; lvl <= 3; lvl++)
+      if (withheld[lvl - 1])
+        CLPEAK_VLOG("[cpu] %s; the cache rows that need it skip\n", cacheSizeGap(info, lvl));
   }
 
   auto backendScope = log->beginBackend("CPU");
@@ -357,14 +357,13 @@ int CpuPeak::runAll()
     props.push_back({"ST core", info.stCore});
   if (info.clockMHz > 0)
     props.push_back({"Clock", std::to_string(info.clockMHz) + " MHz"});
-  // A level the OS gave no size for is left out: the working sets still need
-  // one, but clpeak's fallback is not this CPU's cache.
-  if (!info.l1dAssumed)
+  // A level the OS gave no size for is left out, as are the rows that need it.
+  if (info.l1dTotalBytes)
     props.push_back({"L1d", fmtCacheLevel(info.l1dSizes, info.l1dTotalBytes)});
-  if (!info.l2Assumed)
+  if (info.l2TotalBytes)
     props.push_back({"L2", fmtCacheLevel(info.l2Sizes, info.l2TotalBytes)});
   // Omitted entirely on the many CPUs that have no L3 at all (Apple Silicon,
-  // Snapdragon X, most phone SoCs) — see the fallbacks in cpu_device.cpp.
+  // Snapdragon X, most phone SoCs).
   if (info.l3TotalBytes)
     props.push_back({"L3", fmtCacheLevel(info.l3Sizes, info.l3TotalBytes)});
   if (info.totalMemBytes)

@@ -39,8 +39,9 @@ struct cpu_core_t {
 // Backend-neutral description of the host CPU, filled by detectCpuInfo().
 // Cache sizes drive the cache-bandwidth / memory-latency working-set sizing,
 // and the ISA flags gate the advanced compute tests (bf16 dot, int8 VNNI/
-// dotprod, AMX).  Unknown fields are left at 0/false and the consumer falls
-// back to sane defaults.
+// dotprod, AMX).  Unknown fields are left at 0/false.  A cache size is never
+// assumed: a level the OS gives no size for stays 0, and the rows that would
+// need it skip (cacheSizeGap).
 //
 // The per-instance cache sizes and the clock describe the ST core -- the
 // fastest one, which every single-thread row runs on -- not cpu0, which on a
@@ -73,9 +74,9 @@ struct cpu_device_info_t {
   // Every distinct instance of each level on the chip, so the header can say
   // "12 MB x 2 + 4 MB" where the instances differ; the totals are their sums.
   std::vector<uint64_t> l1dSizes, l2Sizes, l3Sizes;
-  bool l1dAssumed = false;           // the OS gave no L1d / L2 size: the working sets
-  bool l2Assumed  = false;           // use clpeak's fallback, and the header omits it
-  bool l3Unsized  = false;           // the OS lists an L3 but gives no size for it
+  bool l1dUnsized = false;           // the OS lists the level but gives no size for it
+  bool l2Unsized  = false;           // (an Android device tree without sizes); its
+  bool l3Unsized  = false;           // size field stays 0
   uint64_t totalMemBytes = 0;
 
   // ISA capability flags (best-effort runtime detection).
@@ -101,6 +102,12 @@ struct cpu_device_info_t {
 
 // Populate `info` from the host (cpu_device.cpp).
 void detectCpuInfo(cpu_device_info_t &info);
+
+// Why a working set cannot be sized for cache level `level` (1 = L1d, 2 = L2,
+// 3 = L3), or nullptr when it can: that level's size and every smaller level's
+// must be known, since a slice must also stay out of the cache beneath it.  An
+// L2 the OS does not list at all is taken as absent below an L3, not unknown.
+const char *cacheSizeGap(const cpu_device_info_t &info, int level);
 
 // ---------------------------------------------------------------------------
 // Persistent pinned thread pool (thread_pool.cpp).  Workers park on a
