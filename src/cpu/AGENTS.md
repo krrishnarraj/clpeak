@@ -39,11 +39,11 @@ local memory, DRAM ↔ global memory.
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, pinning worker i to the i-th id it is given (the main pool: `info.cores`, fastest first), re-applied at every job |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
-| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run) |
+| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run). A `ChainVariant` can carry other spellings of its work (`alts`), which `emitCompute()` races |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
 | `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains (plus `fp32lat`, the one-accumulator fp32 chain only the SMT test runs), fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
 | `kernels/crypto_compute.h` | AES-128, SHA-256, SHA-512, CRC32-C. `opsPerIter` counts BYTES so `emitCompute()` lands in GB/s. SHA-512 is ARM-only: x86 SHA512 is *detected* but has no kernel, so that row is Unsupported there |
-| `kernels/lowp_compute.h` | fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot, int16 dot, NEON fp8 dot, AVX10.2 bf16 vector FMA |
+| `kernels/lowp_compute.h` | fp16 FMA, bf16 dot, mixed-precision FMLAL, int8 dot (NEON SDOT in four raced spellings), int16 dot, NEON fp8 dot, AVX10.2 bf16 vector FMA |
 | `kernels/matrix_compute.h` | x86 AMX (int8/bf16/fp16/fp8, sharing `amxConfig16x64()`) + ARM NEON SMMLA/BFMMLA |
 | `kernels/string_compute.h` | memchr-style byte scan (incl. the historical SSE4.2 PCMPISTRI row) + Keiser-Lemire UTF-8 validation, over L1-resident buffers. `opsPerIter` counts BYTES |
 | `kernels/sve_compute.h` | SVE/SVE2 compute, bf16/i8mm matrix, fp8 dot, and the SVE `strscan`. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME`; owns the one `#include <arm_sve.h>` |
@@ -51,7 +51,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_tu_registry.h` | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `clpeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
 | `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels, reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or clpeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or clpeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -184,6 +184,13 @@ changing a kernel.
   back-to-back FMA/dot/tile ops with no loads, stores, conversions or vector movs. This is how
   every collapse above was caught, and the only check available for an ISA with
   no silicon to hand.
+- **Race the spellings of a kernel whose rate depends on the core; never pick
+  one per core.** Give the `ChainVariant` the others in `alts`: `emitCompute`
+  warms up, probes every form for a quarter of the budget in each reading,
+  times the fastest (the earlier on a tie) over the whole of it, and names it
+  in the note — a little over (forms / 4 + 1)x the test's time. NEON SDOT is
+  the example: a Cortex-X4 read half the rate its optimization guide lists
+  with a loop of nothing but SDOTs, and 28 accumulators cost an M1 Pro 18%.
 - **Bandwidth kernels reached through a function pointer must be timed with a
   runtime size, and must not share an induction variable with their tail.**
   Compute `nblk` once and walk a single pointer — all three (`readBufferChecksum`,

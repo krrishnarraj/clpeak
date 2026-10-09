@@ -95,7 +95,7 @@ int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
                         TestShape::Homogeneous, "threads"};
   auto test = currentDeviceScope->beginTest(spec);
   if (v.fn)
-    emitCompute(*this, test, "u64", v.opsPerIter, v.fn, cfg);
+    emitCompute(*this, test, "u64", v, cfg);
   else
     test.skip("u64 ST", ResultStatus::Unsupported, "no integer divide kernel");
   return 0;

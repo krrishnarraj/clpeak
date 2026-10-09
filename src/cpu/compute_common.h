@@ -4,37 +4,83 @@
 #ifdef ENABLE_CPU
 
 #include <cpu/cpu_peak.h>
+#include <common/form_race.h>
 #include <common/run_document.h>
 #include "cpu_kernels.h"
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
 // Run one compute variant single-threaded (1T, on the fastest core) and across
-// all logical cores (NT), emitting both metrics.  `chain(iters)` performs
+// all logical cores (NT), emitting both metrics.  `v.fn(iters)` performs
 // `iters` outer iterations of the kernel and returns a sink value (kept live so
-// the compiler can't elide the work); `opsPerIterPerThread` is the op count one
+// the compiler can't elide the work); `v.opsPerIter` is the op count one
 // thread performs in one outer iteration (flops for FP, ops for INT).  `unit`,
 // when non-empty, overrides the test's for these two readings -- what lets an
 // int8 row live inside an otherwise floating-point test.
-template <class ChainFn>
-static void emitCompute(CpuPeak &peak, logger::TestScope &test,
-                        const std::string &label,
-                        double opsPerIterPerThread,
-                        ChainFn chain, benchmark_config_t &cfg,
-                        const char *description = nullptr,
-                        const char *unit = nullptr)
+//
+// A variant with other spellings (ChainVariant::alts) races them in each
+// reading: every form runs for a quarter of the budget, and the fastest -- the
+// earlier on a tie (kFormRaceTie) -- is timed again over the whole of it, so
+// the reading is one measurement rather than the best of several noisy ones.
+// Its note names the form; --verbose logs every form's rate.
+[[maybe_unused]] static void emitCompute(CpuPeak &peak, logger::TestScope &test,
+                                         const std::string &label,
+                                         const clpeak_cpu::ChainVariant &v,
+                                         benchmark_config_t &cfg,
+                                         const char *description = nullptr,
+                                         const char *unit = nullptr)
 {
   const int maxT = peak.pool->maxThreads();
   std::vector<double> sink((size_t)maxT, 0.0);
+  unsigned int forced = peak.forceIters ? peak.specifiedIters : 0;
 
-  CpuPeak::Workload body = [&](int tid, uint64_t iters) {
-    sink[(size_t)tid] += chain(iters);
+  // Ops per second of one form on `nThreads`, timed over `budgetUs`; <= 0 on failure.
+  auto rate = [&](const clpeak_cpu::ChainVariant &f, int nThreads, unsigned int budgetUs) {
+    CpuPeak::Workload body = [&](int tid, uint64_t iters) {
+      sink[(size_t)tid] += f.fn(iters);
+    };
+    return f.opsPerIter * peak.runWorkload(nThreads, body, budgetUs, forced);
   };
 
-  unsigned int forced = peak.forceIters ? peak.specifiedIters : 0;
-  double ips1 = peak.runWorkload(1,    body, cfg.targetTimeUs, forced);
-  double ipsN = peak.runWorkload(maxT, body, cfg.targetTimeUs, forced);
+  std::vector<const clpeak_cpu::ChainVariant *> forms{&v};
+  for (int i = 0; i < v.nAlts; i++)
+    forms.push_back(&v.alts[i]);
+
+  struct Reading { double rate; const clpeak_cpu::ChainVariant *form; };
+  auto measure = [&](int nThreads, const char *threads) -> Reading {
+    if (forms.size() == 1)
+      return {rate(v, nThreads, cfg.targetTimeUs), &v};
+    // A discarded warm-up first: the first probe otherwise runs on a core
+    // still ramping (an M1 Pro's read 312 against its twin's 408), and with
+    // ties going to the earlier form it is the one that loses.
+    rate(v, nThreads, cfg.targetTimeUs / 8);
+    std::vector<double> probe(forms.size());
+    size_t best = 0;
+    for (size_t i = 0; i < forms.size(); i++)
+    {
+      probe[i] = rate(*forms[i], nThreads, cfg.targetTimeUs / 4);
+      if (probe[i] > probe[best] * clpeak::kFormRaceTie)
+        best = i;
+    }
+    if (clpeak::verboseEnabled())
+    {
+      std::string line;
+      for (size_t i = 0; i < forms.size(); i++)
+      {
+        char r[48];
+        snprintf(r, sizeof(r), " %.4g G/s", probe[i] * 1e-9);
+        line += (i ? "; " : "") + std::string(forms[i]->form) + r;
+      }
+      CLPEAK_VLOG("[cpu] %s %s race: %s -- timing %s\n", label.c_str(), threads,
+                  line.c_str(), forms[best]->form);
+    }
+    return {rate(*forms[best], nThreads, cfg.targetTimeUs), forms[best]};
+  };
+
+  const Reading st = measure(1, "ST");
+  const Reading mt = measure(maxT, "MT");
 
   // Keep the accumulated work observable so -O3 can't delete the kernels.
   volatile double keep = 0.0;
@@ -49,21 +95,29 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
   static const char *mtNote = "Every hardware thread at once -- the whole chip, each core "
                               "doing as much as it can.";
 
-  auto opts = [&](const char *threadNote) {
+  // A race names its winner inside the thread note, so the reading keeps to
+  // two sentences.
+  auto opts = [&](const char *threadNote, const Reading &r) {
     logger::EmitOptions o;
-    o.description = description ? std::string(description) + "  " + threadNote
-                                : std::string(threadNote);
+    std::string note = threadNote;
+    if (forms.size() > 1)
+    {
+      note.pop_back();   // the full stop
+      note += " (fastest of " + std::to_string(forms.size()) + " spellings: " +
+              r.form->form + ").";
+    }
+    o.description = description ? std::string(description) + "  " + note : note;
     if (unit) o.unit = unit;
     return o;
   };
 
-  if (ips1 > 0.0) test.emit(label + " ST", (float)(opsPerIterPerThread * ips1), opts(stNote));
-  else            test.skip(label + " ST", ResultStatus::Error, "workload failed",
-                            opts(stNote));
+  if (st.rate > 0.0) test.emit(label + " ST", (float)st.rate, opts(stNote, st));
+  else               test.skip(label + " ST", ResultStatus::Error, "workload failed",
+                               opts(stNote, st));
 
-  if (ipsN > 0.0) test.emit(label + " MT", (float)(opsPerIterPerThread * ipsN), opts(mtNote));
-  else            test.skip(label + " MT", ResultStatus::Error, "workload failed",
-                            opts(mtNote));
+  if (mt.rate > 0.0) test.emit(label + " MT", (float)mt.rate, opts(mtNote, mt));
+  else               test.skip(label + " MT", ResultStatus::Error, "workload failed",
+                               opts(mtNote, mt));
 }
 
 // Why `slot` has no variant on this host.  `cpuLacks` is the call site's
@@ -154,7 +208,7 @@ static void emitCompute(CpuPeak &peak, logger::TestScope &test,
   {
     spec.variant = iv.isa;
     auto test = peak.currentDeviceScope->beginTest(spec);
-    emitCompute(peak, test, metric, iv.v.opsPerIter, iv.v.fn, cfg);
+    emitCompute(peak, test, metric, iv.v, cfg);
   }
 }
 
@@ -256,7 +310,7 @@ struct FamilyRow {
         test.skip(r.metric, ResultStatus::Unsupported, rowReason(r, isa), rowOpts(r));
         continue;
       }
-      emitCompute(peak, test, r.metric, match->v.opsPerIter, match->v.fn, cfg,
+      emitCompute(peak, test, r.metric, match->v, cfg,
                   r.description, r.unit);
     }
   }

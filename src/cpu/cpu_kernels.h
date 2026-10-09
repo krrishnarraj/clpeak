@@ -76,6 +76,13 @@ using CopyFn  = void (*)(float *dst, const float *src, size_t M, uint64_t iters)
 struct ChainVariant {
   ChainFn fn = nullptr;
   double  opsPerIter = 0.0;   // flops/ops one thread performs per outer-iteration
+  // Where the same work has several spellings and which is fastest depends on
+  // the core (how many accumulators, which registers feed the operands), the
+  // others ride in `alts` and emitCompute() races them against this one,
+  // reporting the fastest by its `form`.  Unset when there is one spelling.
+  const char         *form  = nullptr;
+  const ChainVariant *alts  = nullptr;
+  int                 nAlts = 0;
 };
 
 // One feature TU's offered kernels (null entries = not provided by that ISA).

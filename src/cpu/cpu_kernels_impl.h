@@ -76,6 +76,11 @@ static const CpuKernelTable *tuTable()
 #endif
 #ifdef CPU_HAS_INT8DP_KERNEL
     t.int8dp = {runInt8DpChain, (double)INNER * I8_NACC * I8_OPS_PER_INSTR};
+#ifdef CPU_HAS_INT8DP_FORMS
+    t.int8dp.form  = kInt8DpForm;
+    t.int8dp.alts  = kInt8DpAlts;
+    t.int8dp.nAlts = (int)(sizeof(kInt8DpAlts) / sizeof(kInt8DpAlts[0]));
+#endif
 #endif
 #ifdef CPU_HAS_INT16DP_KERNEL
     t.int16dp = {runInt16DpChain, (double)INNER * I16_NACC * I16_OPS_PER_INSTR};

@@ -266,24 +266,63 @@ static double runInt8DpChain(uint64_t outer)
 }
 #elif defined(__ARM_FEATURE_DOTPROD)
 #define CPU_HAS_INT8DP_KERNEL 1
+#define CPU_HAS_INT8DP_FORMS 1
 static constexpr int I8_NACC = 16, I8_OPS_PER_INSTR = 32;
-static double runInt8DpChain(uint64_t outer)
+// SDOT runs in four spellings, raced per reading (ChainVariant::alts).  A
+// Cortex-X4 read 200 GOPS one-thread with the first against 802 for SMMLA,
+// which does twice SDOT's work per instruction -- half the rate its
+// optimization guide gives (both four a cycle, accumulate latency one), from a
+// loop of nothing but SDOTs.  Nothing in the guide says which change of shape
+// recovers it, so each runs:
+//   - 16 accumulators, every dot multiplying the same two registers;
+//   - 28 of them, should the latency be longer than listed;
+//   - four a x four b registers, so no two dots of a step share both operands
+//     and no four consecutive dots read one register;
+//   - each dot multiplying its accumulator's own bytes (a bit-cast): operands
+//     that change every step, like real data.
+enum class I8Form { OnePair, Pairs16, Carried };
+template <int NACC, I8Form F>
+static double runInt8DpForm(uint64_t outer)
 {
-  int32x4_t acc[I8_NACC];
-  const int8x16_t a = vdupq_n_s8(3);
-  const int8x16_t b = vdupq_n_s8(5);
-  for (int j = 0; j < I8_NACC; j++) acc[j] = vdupq_n_s32(0);
+  int32x4_t acc[NACC];
+  volatile int vseed = 3;
+  const int seed = vseed;
+  int8x16_t a[4], b[4];
+  for (int i = 0; i < 4; i++)
+  {
+    a[i] = vdupq_n_s8((int8_t)(seed + i));
+    b[i] = vdupq_n_s8((int8_t)(seed + 2 + i));
+  }
+  for (int j = 0; j < NACC; j++) acc[j] = vdupq_n_s32(F == I8Form::Carried ? seed + j : 0);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
-      for (int j = 0; j < I8_NACC; j++) acc[j] = vdotq_s32(acc[j], a, b);
+      for (int j = 0; j < NACC; j++)
+      {
+        if (F == I8Form::OnePair)
+          acc[j] = vdotq_s32(acc[j], a[0], b[0]);
+        else if (F == I8Form::Pairs16)  // a Latin square over the 4 x 4 pairs
+          acc[j] = vdotq_s32(acc[j], a[j & 3], b[((j & 3) + (j >> 2)) & 3]);
+        else
+          acc[j] = vdotq_s32(acc[j], vreinterpretq_s8_s32(acc[j]), b[0]);
+      }
     }
   int32x4_t s = acc[0];
-  for (int j = 1; j < I8_NACC; j++) s = vaddq_s32(s, acc[j]);
+  for (int j = 1; j < NACC; j++) s = vaddq_s32(s, acc[j]);
   return (double)vaddvq_s32(s);
 }
+static double runInt8DpChain(uint64_t outer) { return runInt8DpForm<I8_NACC, I8Form::OnePair>(outer); }
+static const char *const kInt8DpForm = "16 accumulators, one operand pair";
+static const ChainVariant kInt8DpAlts[] = {
+    {runInt8DpForm<28, I8Form::OnePair>, (double)INNER * 28 * I8_OPS_PER_INSTR,
+     "28 accumulators, one operand pair"},
+    {runInt8DpForm<I8_NACC, I8Form::Pairs16>, (double)INNER * I8_NACC * I8_OPS_PER_INSTR,
+     "16 accumulators, 16 operand pairs"},
+    {runInt8DpForm<24, I8Form::Carried>, (double)INNER * 24 * I8_OPS_PER_INSTR,
+     "24 accumulators, operands from the accumulators"},
+};
 #endif
 
 // ---- INT16 dot product (x86) ------------------------------------------------
