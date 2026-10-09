@@ -12,6 +12,7 @@ import '../model/catalog.dart';
 import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import 'process_exit.dart';
 import 'run_history_store.dart';
 import 'screen_wake.dart';
 
@@ -324,6 +325,9 @@ class BenchmarkService extends ChangeNotifier {
     // Held until _finalize(), which the run's event stream always reaches --
     // it closes on the native `done` event and on a failed launch alike.
     ScreenWake.acquire();
+    // So that Android's record of this process's death names the run, if
+    // the run is what it dies in (ProcessExit).
+    ProcessExit.markRun(_runId);
 
     final resultPath = await _history.filePathFor(_runId!);
     _resultPath = resultPath;
@@ -426,6 +430,7 @@ class BenchmarkService extends ChangeNotifier {
   Future<void> _finalize() async {
     _stopLiveTicker(); // back to immediate notifications
     ScreenWake.release();
+    ProcessExit.markRun(null);
     final startedAt = _startedAt ?? DateTime.now();
     // Indexed only once written: a run whose engine died has no document,
     // just the sidecar History lists on its own.

@@ -299,6 +299,7 @@ class _CrashLogTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final last = log.lastEntry;
+    final exit = log.processExit;
     return CPanel(
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
@@ -352,6 +353,15 @@ class _CrashLogTile extends StatelessWidget {
               'what to attach to a bug report.',
               style: t.monoSmallDim,
             ),
+            if (exit != null) ...[
+              const SizedBox(height: 7),
+              Text(
+                exit.message.split('\n').first,
+                style: t.monoSmall.copyWith(color: t.danger),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
             if (last != null) ...[
               const SizedBox(height: 7),
               Text(

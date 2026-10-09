@@ -272,7 +272,8 @@ class LogEntry {
   final LogLevel level;
 
   /// The library a message was relayed from ("onnxruntime", "vulkan",
-  /// "opencl", "console"); empty for clpeak's own.
+  /// "opencl", "console"), or "android" for how the OS says the process
+  /// ended (ProcessExit); empty for clpeak's own.
   final String source;
 
   /// The scope the line fired in; empty where no such scope was open.

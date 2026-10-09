@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import 'process_exit.dart';
 
 /// Persists every run under `<base>/runs/`:
 ///   `<id>.clpeak.json`  the run document, written by the NATIVE side
@@ -25,9 +26,14 @@ import '../model/run_summary.dart';
 /// round trip through FFI would buy nothing — and history stays readable even
 /// when the native library cannot be loaded at all.
 class RunHistoryStore {
-  RunHistoryStore({Directory? directoryOverride}) : _override = directoryOverride;
+  RunHistoryStore({
+    Directory? directoryOverride,
+    Future<List<ProcessExitRecord>> Function()? processExits,
+  })  : _override = directoryOverride,
+        _processExits = processExits ?? ProcessExit.records;
 
   final Directory? _override;
+  final Future<List<ProcessExitRecord>> Function() _processExits;
   Directory? _dir;
 
   /// Suffix rather than plain `.json`: it names the format at a glance in a
@@ -202,6 +208,7 @@ class RunHistoryStore {
   /// not a crash.
   Future<List<CrashLog>> listCrashLogs({String? inFlightId}) async {
     final dir = await runsDirectory();
+    await _appendProcessExits(dir);
     final out = <CrashLog>[];
     await for (final f in dir.list()) {
       if (f is! File || !f.path.endsWith(logSuffix)) continue;
@@ -219,6 +226,76 @@ class RunHistoryStore {
     }
     out.sort((a, b) => b.startedAt.compareTo(a.startedAt));
     return out;
+  }
+
+  /// Android's record of how the process ended (ProcessExit), appended
+  /// once to the sidecar of the run it ended -- after everything the run
+  /// recorded, which is where it happened -- so the file a user exports
+  /// says whether a driver crashed or the phone ran out of memory.
+  Future<void> _appendProcessExits(Directory dir) async {
+    final List<ProcessExitRecord> exits;
+    try {
+      exits = await _processExits();
+    } catch (_) {
+      return;
+    }
+    for (final exit in exits) {
+      if (exit.runId.isEmpty || p.basename(exit.runId) != exit.runId) continue;
+      final log = File(p.join(dir.path, logFileNameFor(exit.runId)));
+      try {
+        if (!await log.exists() ||
+            await File(p.join(dir.path, fileNameFor(exit.runId))).exists()) {
+          continue;
+        }
+        final raf = await log.open(mode: FileMode.append);
+        try {
+          final size = await raf.length();
+          final head = await _readAt(raf, 0, 64 << 10);
+          final tail = await _readAt(
+              raf, size > _exitTail ? size - _exitTail : 0, _exitTail);
+          // Records stay with Android across launches; one already appended
+          // is in the tail, since nothing writes after it.
+          if (tail.contains(_exitMarker)) continue;
+          DateTime? started;
+          final nl = head.indexOf('\n');
+          if (nl > 0) {
+            try {
+              final header =
+                  jsonDecode(head.substring(0, nl)) as Map<String, dynamic>;
+              started =
+                  DateTime.tryParse(header['generated_at'] as String? ?? '');
+            } catch (_) {}
+          }
+          final entry = jsonEncode({
+            'elapsed_s': started == null
+                ? 0
+                : exit.at.difference(started).inMilliseconds / 1000.0,
+            'level': 'error',
+            'source': 'android',
+            'message': exit.message,
+          });
+          // A crash can cut the last line short; the entry starts its own.
+          final prefix = tail.isEmpty || tail.endsWith('\n') ? '' : '\n';
+          await raf.setPosition(size);
+          await raf.writeString('$prefix$entry\n');
+          await raf.flush();
+        } finally {
+          await raf.close();
+        }
+      } catch (_) {
+        // A diagnosis, never a reason for the listing to fail.
+      }
+    }
+  }
+
+  // An appended exit entry is bounded (ProcessExitRecord.message keeps
+  // tens of KB) and is the file's last line, so it is always in this much.
+  static const _exitTail = 256 << 10;
+  static const _exitMarker = '"source":"android"';
+
+  static Future<String> _readAt(RandomAccessFile raf, int at, int max) async {
+    await raf.setPosition(at);
+    return utf8.decode(await raf.read(max), allowMalformed: true);
   }
 
   Future<File> crashLogFile(CrashLog log) async {
@@ -374,6 +451,7 @@ class CrashLog {
     required this.entries,
     required this.backends,
     required this.lastEntry,
+    this.processExit,
   });
 
   final String id;
@@ -392,56 +470,73 @@ class CrashLog {
   /// usually says where.
   final LogEntry? lastEntry;
 
+  /// How Android says the process ended (`source: "android"`, appended on
+  /// a later launch by RunHistoryStore) — what the run's own lines cannot
+  /// say.  Not counted in [entries], and never the [lastEntry].
+  final LogEntry? processExit;
+
   /// Parse a sidecar, or null when it is not one (no header line, or a
-  /// header from a format this build does not read).
+  /// header from a format this build does not read).  Streamed: a verbose
+  /// run's sidecar can be tens of MB.
   static Future<CrashLog?> read(File file, {required String id}) async {
-    List<String> lines;
-    try {
-      lines = await file.readAsLines();
-    } catch (_) {
-      return null;
-    }
-    if (lines.isEmpty) return null;
-    Map<String, dynamic> header;
-    try {
-      header = jsonDecode(lines.first) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-    if (header['schema'] != 'clpeak/run-log' ||
-        (header['format_version'] as num?)?.toInt() != formatVersion) {
-      return null;
-    }
+    Map<String, dynamic>? header;
     final backends = <String>[];
     LogEntry? last;
+    LogEntry? exit;
     var count = 0;
-    for (final line in lines.skip(1)) {
-      if (line.trim().isEmpty) continue;
-      try {
-        final entry =
-            LogEntry.fromJson(jsonDecode(line) as Map<String, dynamic>);
-        count++;
-        last = entry;
-        if (entry.backend.isNotEmpty && !backends.contains(entry.backend)) {
-          backends.add(entry.backend);
+    try {
+      await for (final line in file
+          .openRead()
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())) {
+        if (header == null) {
+          try {
+            header = jsonDecode(line) as Map<String, dynamic>;
+          } catch (_) {
+            return null;
+          }
+          if (header['schema'] != 'clpeak/run-log' ||
+              (header['format_version'] as num?)?.toInt() != formatVersion) {
+            return null;
+          }
+          continue;
         }
-      } catch (_) {
-        // A line cut short by the crash itself.
+        if (line.trim().isEmpty) continue;
+        try {
+          final entry =
+              LogEntry.fromJson(jsonDecode(line) as Map<String, dynamic>);
+          if (entry.source == 'android') {
+            exit = entry;
+            continue;
+          }
+          count++;
+          last = entry;
+          if (entry.backend.isNotEmpty && !backends.contains(entry.backend)) {
+            backends.add(entry.backend);
+          }
+        } catch (_) {
+          // A line cut short by the crash itself.
+        }
       }
+    } catch (_) {
+      return null;
     }
+    final h = header;
+    if (h == null) return null;
     final stat = await file.stat();
     return CrashLog(
       id: id,
       fileName: p.basename(file.path),
-      startedAt: DateTime.tryParse(header['generated_at'] as String? ?? '') ??
+      startedAt: DateTime.tryParse(h['generated_at'] as String? ?? '') ??
           stat.modified,
-      clpeakVersion: header['clpeak_version'] as String? ?? '',
-      verbose: (header['invocation'] as Map<String, dynamic>?)?['verbose']
+      clpeakVersion: h['clpeak_version'] as String? ?? '',
+      verbose: (h['invocation'] as Map<String, dynamic>?)?['verbose']
               as bool? ??
           false,
       entries: count,
       backends: backends,
       lastEntry: last,
+      processExit: exit,
     );
   }
 }

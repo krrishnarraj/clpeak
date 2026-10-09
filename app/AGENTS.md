@@ -128,7 +128,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   document is written, so one left behind is a crashed run's only record.
   History lists it under "Runs that did not finish" (`_CrashLogTile`) with
   export and delete; the in-flight run's own sidecar is excluded by
-  `BenchmarkService.inFlightRunId`.  On desktop the engine process dies
+  `BenchmarkService.inFlightRunId`.  On Android the run's id is stamped on
+  the process while it is in flight, and the listing first appends
+  Android's record of that process's death -- reason, memory, the native
+  tombstone -- to the run's sidecar (`lib/src/services/process_exit.dart`,
+  with its platform half in `MainActivity.kt`).  On desktop the engine process dies
   instead of the app: `ChildRun` ends the run with a synthesized `done`,
   `BenchmarkService.runFailure` says how, the results screen shows it over
   the readings that arrived, and nothing is indexed -- there is no document

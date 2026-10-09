@@ -7,9 +7,11 @@
 // Pure Dart — no native bridge needed.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:clpeak/src/ffi/clpeak_events.dart';
 import 'package:clpeak/src/model/run_document.dart';
+import 'package:clpeak/src/services/process_exit.dart';
 import 'package:clpeak/src/services/run_history_store.dart';
 import 'package:clpeak/src/services/settings_service.dart';
 import 'package:clpeak/src/theme/clpeak_theme.dart';
@@ -43,6 +45,33 @@ String _line(String level, String message,
       if (backend.isNotEmpty) 'backend': backend,
       'message': message,
     });
+
+// A protobuf message from {field: value}: int as a varint, String and
+// Uint8List (a nested message) length-delimited.
+Uint8List _pb(Map<int, Object> fields) {
+  final out = BytesBuilder();
+  void varint(int v) {
+    var x = BigInt.from(v).toUnsigned(64);
+    while (x >= BigInt.from(0x80)) {
+      out.addByte((x & BigInt.from(0x7f)).toInt() | 0x80);
+      x >>= 7;
+    }
+    out.addByte(x.toInt());
+  }
+
+  fields.forEach((field, value) {
+    if (value is int) {
+      varint(field << 3);
+      varint(value);
+    } else {
+      final bytes = value is String ? utf8.encode(value) : value as Uint8List;
+      varint(field << 3 | 2);
+      varint(bytes.length);
+      out.add(bytes);
+    }
+  });
+  return out.toBytes();
+}
 
 void main() {
   group('log events', () {
@@ -180,6 +209,104 @@ void main() {
       await File('${dir.path}/junk.clpeak.log').writeAsString('not json');
       final store = RunHistoryStore(directoryOverride: dir);
       expect(await store.listCrashLogs(), isEmpty);
+    });
+
+    test('how Android says the process ended is appended to its run, once',
+        () async {
+      final log = File('${dir.path}/20260915_060557.clpeak.log');
+      await log.writeAsString([
+        _header(),
+        _line('info', 'Backend: ONNX', backend: 'ONNX'),
+        '{"elapsed_s": 9.1, "level": "info", "mes',
+      ].join('\n'));
+      await File('${dir.path}/done.clpeak.log').writeAsString(_header());
+      await File('${dir.path}/done.clpeak.json')
+          .writeAsString(jsonEncode({'format_version': 3, 'devices': []}));
+
+      final store = RunHistoryStore(
+        directoryOverride: dir,
+        processExits: () async => [
+          ProcessExitRecord(
+            runId: '20260915_060557',
+            at: DateTime.utc(2026, 9, 15, 7, 6, 0),
+            reason: 'LOW_MEMORY',
+            description: 'lmk',
+            importance: 100,
+            pssKb: 3 << 20,
+          ),
+          ProcessExitRecord(
+              runId: 'done', at: DateTime.utc(2026), reason: 'SIGNALED'),
+          ProcessExitRecord(
+              runId: 'gone', at: DateTime.utc(2026), reason: 'SIGNALED'),
+        ],
+      );
+      for (var i = 0; i < 2; i++) {
+        final logs = await store.listCrashLogs();
+        expect(logs, hasLength(1));
+        final exit = logs.single.processExit!;
+        expect(exit.level, LogLevel.error);
+        expect(exit.message,
+            'process ended: LOW_MEMORY (foreground, pss 3072 MB): lmk');
+        expect(exit.elapsedSeconds, closeTo(3603, 0.01));
+        // The run's own last line is still the run's.
+        expect(logs.single.lastEntry!.message, 'Backend: ONNX');
+        expect(logs.single.entries, 1);
+      }
+      final lines = log.readAsLinesSync();
+      expect(lines.where((l) => l.contains('"source":"android"')),
+          hasLength(1));
+      // On a line of its own after the one the crash cut short.
+      expect(lines.last, startsWith('{"elapsed_s":'));
+    });
+
+    test('a native crash reads as debuggerd prints it', () {
+      final frame = _pb({
+        1: 0x4e8cc,
+        4: 'abort',
+        5: 164,
+        6: '/apex/com.android.runtime/lib64/bionic/libc.so',
+        8: 'abc123',
+      });
+      final thread = _pb({1: 4242, 2: 'clpeak-run', 4: frame});
+      final tombstone = _pb({
+        6: 4242,
+        10: _pb({1: 6, 2: 'SIGABRT', 3: -6, 4: 'SI_TKILL'}),
+        14: 'QNN graph execute error',
+        16: _pb({1: 4242, 2: thread}),
+        18: _pb({
+          1: 'main',
+          2: _pb({
+            1: '10-08 18:34:39.000',
+            2: 1,
+            3: 4242,
+            4: 6,
+            5: 'QnnDsp',
+            6: 'boom\n',
+          }),
+        }),
+      });
+      final text = ProcessExitRecord(
+        runId: 'r',
+        at: DateTime.utc(2026),
+        reason: 'CRASH_NATIVE',
+        status: 6,
+        importance: 100,
+        trace: tombstone,
+      ).message;
+      expect(
+          text,
+          'process ended: CRASH_NATIVE (signal 6, foreground)\n'
+          'signal 6 (SIGABRT), code -6 (SI_TKILL)\n'
+          "Abort message: 'QNN graph execute error'\n"
+          'backtrace (thread 4242 "clpeak-run"):\n'
+          '  #00 pc 000000000004e8cc  '
+          '/apex/com.android.runtime/lib64/bionic/libc.so (abort+164) '
+          '(BuildId: abc123)\n'
+          'log (last 1 lines):\n'
+          '  10-08 18:34:39.000 1 4242 E QnnDsp: boom');
+      // A tombstone cut short says so rather than throwing.
+      expect(tombstoneText(Uint8List.sublistView(tombstone, 0, 9)),
+          startsWith('tombstone of 9 bytes could not be read'));
     });
   });
 
