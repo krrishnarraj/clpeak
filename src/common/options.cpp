@@ -249,7 +249,7 @@ static std::string helpText()
   helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time-gpu calibration)");
   helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
   helpLine(s, "--max-time-gpu ms", "how long a GPU may be kept busy in one go (default:\n"
-                                   "1500 ms): every backend but CPU sizes a test's timed\n"
+                                   "1000 ms): every backend but CPU sizes a test's timed\n"
                                    "phase to it, and ONNX Runtime, LiteRT and Core ML stop\n"
                                    "a GPU's size sweep before one run would take longer.\n"
                                    "Set it lower if you hit a GPU watchdog");

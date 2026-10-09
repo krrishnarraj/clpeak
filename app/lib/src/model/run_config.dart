@@ -8,7 +8,7 @@ enum RunPreset { full, custom }
 /// index.  For single-platform backends platformIndex is the synthetic 0.
 typedef DeviceRef = ({int platformIndex, int deviceIndex});
 
-const int kDefaultMaxTimeMs = 1500;
+const int kDefaultMaxTimeMs = 1000;
 const int kDefaultMaxTimeCpuMs = 2000;
 
 /// User-selected run configuration → CLI argv.

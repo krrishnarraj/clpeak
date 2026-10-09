@@ -352,13 +352,13 @@ static inline uint64_t targetGlobalThreads(uint32_t numCUs)
 // predicted to take longer.  A driver resets a GPU that one submission
 // holds too long: Windows' TDR and older Qualcomm kernel drivers allow 2 s,
 // and a Galaxy S24's Adreno 750 ran a 0.93 s submission and was reset 2.8 s
-// into a 7.4 s one, so its limit lies between those.  1500 ms is under the
+// into a 7.4 s one, so its limit lies between those.  1000 ms is under the
 // 2 s, and far past the M1's clock ramp (220-440 ms), so the batch is timed
 // at steady clocks.  This is the single source of truth -- CliOptions,
 // benchmark_config_t::forDevice, and the backend constructors all read it.
-// Keep the "1500 ms" mention in the --help text in src/common/options.cpp
+// Keep the "1000 ms" mention in the --help text in src/common/options.cpp
 // in sync.
-static const unsigned int DEFAULT_TARGET_TIME_US = 1500000;
+static const unsigned int DEFAULT_TARGET_TIME_US = 1000000;
 
 // The native CPU backend has no GPU watchdog to dodge, and its per-test timed
 // phases complete much faster, so a longer budget steadies the numbers against
