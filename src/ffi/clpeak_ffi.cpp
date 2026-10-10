@@ -10,6 +10,7 @@
 #include <common/peak.h>
 #include <common/host_info.h>
 #include <common/keep_awake.h>
+#include <common/thermal.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
 #include <common/console_mute.h>
@@ -349,6 +350,9 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     // any OS idle timer; on Android and iOS it is a no-op and the app keeps
     // the screen on itself (include/common/keep_awake.h).
     clpeak::KeepAwake keepAwake;
+    // And paused while the OS says the device is too hot (thermal.h) --
+    // on a phone, where it matters.
+    clpeak::ThermalWatch thermalWatch;
 
     for (const auto &be : backendRegistry())
     {

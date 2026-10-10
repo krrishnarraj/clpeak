@@ -82,6 +82,11 @@ class BenchmarkService extends ChangeNotifier {
 
   String currentBackend = '';
   String currentTest = '';
+
+  /// The run is paused until the device cools: the latest of the native
+  /// side's "thermal status ..." lines is the pause's warning, not the info
+  /// line that ends it (src/common/thermal.cpp).
+  bool coolingDown = false;
   int completedTests = 0;
   int exitCode = 0;
   bool cancelled = false;
@@ -312,6 +317,7 @@ class BenchmarkService extends ChangeNotifier {
     _document = RunDocument();
     currentBackend = '';
     currentTest = '';
+    coolingDown = false;
     completedTests = 0;
     exitCode = 0;
     cancelled = false;
@@ -418,6 +424,10 @@ class BenchmarkService extends ChangeNotifier {
         // The same entry the native side records on the file's `log`, so
         // the live view and the reopened run show one stream.
         _document.log.add(entry);
+        if (entry.source.isEmpty &&
+            entry.message.startsWith('thermal status ')) {
+          coolingDown = entry.level == LogLevel.warning;
+        }
       case DoneEvent():
         break; // handled via onDone/result
       case DeviceEndEvent():

@@ -12,6 +12,7 @@ add_library(peak_common STATIC
     keep_awake.cpp
     run_document.cpp
     run_log.cpp
+    thermal.cpp
     units.cpp
 )
 # dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.
@@ -39,6 +40,13 @@ elseif(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     find_library(COMMON_COREFOUNDATION_FRAMEWORK CoreFoundation)
     target_link_libraries(peak_common PUBLIC
         ${COMMON_IOKIT_FRAMEWORK} ${COMMON_COREFOUNDATION_FRAMEWORK})
+endif()
+# A run pauses while the OS says the device is too hot (include/common/thermal.h):
+# Android's AThermal is reached through a libandroid opened at run time, iOS's
+# thermal state through Foundation, which APPLE already links.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_sources(peak_common PRIVATE thermal_ios.mm)
+    set_source_files_properties(thermal_ios.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 endif()
 # logger.cpp (base) + logger_text.cpp (shared text formatter, writes to an
 # injectable std::ostream) live here.  Consumers that need a non-text channel

@@ -9,6 +9,7 @@
 #include <common/logger_text.h>
 #include <common/host_info.h>
 #include <common/keep_awake.h>
+#include <common/thermal.h>
 #include <common/console_mute.h>
 #include <version.h>
 #include <iostream>
@@ -125,6 +126,8 @@ int main(int argc, char **argv)
     // Held until main returns: the run is compute with no user input, which
     // every OS idle timer counts as idle (include/common/keep_awake.h).
     clpeak::KeepAwake keepAwake;
+    // And paused while the OS says the device is too hot (thermal.h).
+    clpeak::ThermalWatch thermalWatch;
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,

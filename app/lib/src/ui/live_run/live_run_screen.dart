@@ -71,11 +71,13 @@ class _StatusPanel extends StatelessWidget {
     final t = CP.of(context);
     final statusText = cancelling
         ? 'Cancelling — finishing the current test…'
-        : service.currentTest.isNotEmpty
-            ? service.currentTest
-            : service.currentBackend.isNotEmpty
-                ? 'Preparing ${service.currentBackend}…'
-                : 'Starting…';
+        : service.coolingDown
+            ? 'Paused — the device is hot; resuming once it cools…'
+            : service.currentTest.isNotEmpty
+                ? service.currentTest
+                : service.currentBackend.isNotEmpty
+                    ? 'Preparing ${service.currentBackend}…'
+                    : 'Starting…';
 
     return CPanel(
       child: Column(
