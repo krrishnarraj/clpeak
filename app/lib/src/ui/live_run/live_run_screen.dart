@@ -86,20 +86,22 @@ class _StatusPanel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Static block rather than a spinner, for the same reason the
                 // rule under the header is static.
                 Container(
                   width: 3,
                   height: 15,
+                  margin: const EdgeInsets.only(top: 2),
                   color: cancelling ? t.dim : t.text,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(statusText,
-                      style: t.mono,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
+                  // Wraps rather than ellipsizes: the tail ("once it cools…",
+                  // a test name) is what tells this status apart, so cutting
+                  // it hides exactly the meaningful part.
+                  child: Text(statusText, style: t.mono),
                 ),
               ],
             ),
