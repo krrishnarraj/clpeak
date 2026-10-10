@@ -468,9 +468,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (view == OnnxReduceView::Rank4 && L.rank4From == 0)
         L.rank4From = D;
 
-      double per_iter_us = -1.0;
-      if (timeRuns(rt, g, 1 + warmupCount) > 0.0) // compile + warmup
-        per_iter_us = timeRuns(rt, g, 1);         // calibration probe
+      const double per_iter_us =
+          warmAndProbe([&](unsigned n) { return timeRuns(rt, g, n); }, warmupCount);
       if (per_iter_us <= 0.0)
       {
         logFailure(D, "run failed", g.error);

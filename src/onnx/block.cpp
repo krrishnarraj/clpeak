@@ -635,9 +635,7 @@ namespace
       return -1.0;
     }
 
-    double per_iter_us = -1.0;
-    if (timeRuns(rt, r, 1 + warmup) > 0.0) // graph compile + warmup
-      per_iter_us = timeRuns(rt, r, 1);    // calibration probe
+    const double per_iter_us = warmAndProbe([&](unsigned n) { return timeRuns(rt, r, n); }, warmup);
     if (per_iter_us <= 0.0)
     {
       error = r.error.empty() ? "run failed" : r.error;

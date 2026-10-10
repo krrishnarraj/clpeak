@@ -440,9 +440,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         }
 
-        double per_iter_us = -1.0;
-        if (timeRuns(rt, c, 1 + warmupCount) > 0.0)
-          per_iter_us = timeRuns(rt, c, 1);
+        const double per_iter_us =
+            warmAndProbe([&](unsigned n) { return timeRuns(rt, c, n); }, warmupCount);
         if (profileThis)
         {
           std::string ranIn;

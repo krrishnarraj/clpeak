@@ -226,17 +226,14 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
                std::chrono::steady_clock::now() - a).count() / (double)n;
   };
 
-  if (!st && run(1 + warmup) > 0.0)
+  const double probe = st ? -1.0 : warmAndProbe(run, warmup);
+  if (probe > 0.0)
   {
-    double probe = run(1);
-    if (probe > 0.0)
-    {
-      unsigned int iters = pickIters(probe, 1000000u, forceIters ? forced : 0,
-                                     kOnnxMaxIters);
-      // The probe was one whole pass; when the budget affords only one, it
-      // already is the measurement.
-      r.us = (iters > 1) ? run(iters) : probe;
-    }
+    unsigned int iters = pickIters(probe, 1000000u, forceIters ? forced : 0,
+                                   kOnnxMaxIters);
+    // The probe was one whole pass; when the budget affords only one, it
+    // already is the measurement.
+    r.us = (iters > 1) ? run(iters) : probe;
   }
   if (st)
     r.error = onnxStatusText(rt, st);

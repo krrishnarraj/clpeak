@@ -387,6 +387,40 @@ static const unsigned int DEFAULT_CPU_TARGET_TIME_US = 2000000;  // 2000 ms
 unsigned int pickIters(double per_iter_us, unsigned int target_us,
                        unsigned int forced, unsigned int max_iters = 10000);
 
+// A run this long is its own warm-up.  An ML runtime's rung warms its graph
+// before the probe that sizes the timed batch: one run for the runtime's
+// lazy compilation, then --warmup more for clocks and caches.  At the top of
+// a ladder one run is seconds of unbroken load -- a Galaxy S24's CPU took
+// 28 s per run of a 4096-wide fp32 chain, and ran it four times for one
+// reading, heating the phone so the reading fell -- where a clock ramp takes
+// milliseconds.
+constexpr double kSelfWarmingRunUs = 1.0e6;
+
+// Warm a graph and return its probe: one timed run, in microseconds, <= 0 if
+// a run failed.  `run(n)` runs the graph n times and returns the mean per
+// run, <= 0 on failure.  The first run is never timed: runtimes compile on
+// it.  When it lasted kSelfWarmingRunUs the probe follows at once, and a
+// probe that lasts as long stands -- the warm-up would only have repeated
+// it.  A shorter probe says the first run was mostly compilation, and the
+// warm-up goes ahead with the probe counted as one of its runs.
+template <class RunN>
+double warmAndProbe(RunN &&run, unsigned int warmup)
+{
+  const double first = run(1);
+  if (first <= 0.0)
+    return first;
+  if (first >= kSelfWarmingRunUs)
+  {
+    const double probe = run(1);
+    if (probe <= 0.0 || probe >= kSelfWarmingRunUs || warmup == 0)
+      return probe;
+    warmup--;
+  }
+  if (warmup > 0 && run(warmup) <= 0.0)
+    return -1.0;
+  return run(1);
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark data initialisation
 // ---------------------------------------------------------------------------

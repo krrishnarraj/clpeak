@@ -8,6 +8,8 @@
 //   1. warmup   1 + warmupCount untimed predictions.  The extra one is not a
 //               spare: the Neural Engine finishes specialising on the first
 //               prediction, so run one is a different event from run two.
+//               A prediction of a second or more is its own warm-up
+//               (warmAndProbe, include/common/common.h).
 //   2. probe    exactly one timed prediction, to size the batch.
 //   3. timed    pickIters(probe, budget, forced, kCoremlMaxIters) predictions;
 //               when the budget affords only one, the probe already is the
@@ -49,14 +51,7 @@ inline CoremlMeasurement coremlMeasure(CoremlSession &s, unsigned warmupCount,
                                        unsigned maxIters = kCoremlMaxIters)
 {
   CoremlMeasurement m;
-  if (s.timeRuns(1 + warmupCount, m.error) < 0.0)
-  {
-    m.status = ResultStatus::Error;
-    if (m.error.empty())
-      m.error = "prediction failed";
-    return m;
-  }
-  m.probeUs = s.timeRuns(1, m.error);
+  m.probeUs = warmAndProbe([&](unsigned n) { return s.timeRuns(n, m.error); }, warmupCount);
   if (m.probeUs <= 0.0)
   {
     m.status = ResultStatus::Error;

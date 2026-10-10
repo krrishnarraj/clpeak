@@ -8,7 +8,8 @@
 //   1. warmup   1 + warmupCount untimed inferences.  The extra one is not a
 //               spare: XNNPACK packs weights and the GPU accelerator finishes
 //               compiling and uploading on the first run, so run one is a
-//               different event from run two.
+//               different event from run two.  A run of a second or more
+//               is its own warm-up (warmAndProbe, include/common/common.h).
 //   2. probe    exactly one timed inference, to size the batch.
 //   3. timed    pickIters(probe, budget, forced, kLitertMaxIters) inferences;
 //               when the budget affords only one, the probe already is the
@@ -78,19 +79,12 @@ inline LitertMeasurement litertMeasure(LitertSession &s, unsigned warmupCount, u
                                        unsigned maxIters = kLitertMaxIters, bool syncEach = false)
 {
   LitertMeasurement m;
-  if (s.timeRuns(1 + warmupCount, m.error, syncEach) < 0.0)
+  m.probeUs = warmAndProbe([&](unsigned n) { return s.timeRuns(n, m.error, syncEach); }, warmupCount);
+  if (m.probeUs <= 0.0)
   {
     if (m.error.empty())
       m.error = "inference failed";
     m.status = litertFailureStatus(m.error);
-    return m;
-  }
-  m.probeUs = s.timeRuns(1, m.error, syncEach);
-  if (m.probeUs <= 0.0)
-  {
-    m.status = ResultStatus::Error;
-    if (m.error.empty())
-      m.error = "inference failed";
     return m;
   }
   m.iters = pickIters(m.probeUs, budgetUs, forceIters ? forced : 0, maxIters);

@@ -1420,7 +1420,9 @@ a long time not following it:
 
 1. **warmup** — `1 + warmupCount` runs, untimed. The extra `1` is not a spare:
    several providers compile lazily on first inference, so run one is a
-   different event from run two.
+   different event from run two. A run of a second or more is its own
+   warm-up: `warmAndProbe()` (`include/common/common.h`) probes straight after
+   a first run that long, and keeps the probe if it lasted as long.
 2. **probe** — exactly **one** timed run. It exists to size the next batch and
    nothing else, so one is enough, and on a provider where a run costs seconds
    the difference between one and three is most of the test. Probing with three
