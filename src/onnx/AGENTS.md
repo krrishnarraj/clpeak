@@ -1683,8 +1683,9 @@ long: ONNX Runtime's WebGPU provider submits every sixteen dispatches, so a
 Galaxy S24 got a 4096-wide fp32 chain as 7.4 s of work, which the per-multiply
 cap had allowed, and lost the device. Only a GPU: those watchdogs guard a
 device that also drives a display, and an NPU drives none. A ladder's first rung has no rate to predict
-from, so on a GPU `gemm.cpp` first times one run of a 512-wide chain
-(`kScoutDim`) and predicts from that; the scout is not a rung.
+from, so on a GPU or a CPU (`mlLadderScouts()`) `gemm.cpp` first times one run
+of a 512-wide chain (`kScoutDim`) and predicts from that; the scout is not a
+rung, and a row it says is too slow for 1024 climbs from 512 instead.
 
 ## Report asymptotes, not readings at a size someone picked
 

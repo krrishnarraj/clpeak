@@ -511,6 +511,19 @@ inline double gpuRunCapUs(DeviceType type, const benchmark_config_t &cfg)
   return type == DeviceType::Gpu ? (double)cfg.targetTimeUs : 0.0;
 }
 
+// Whether an ML runtime's matmul ladder on a device of `type` times a scout
+// -- a chain an eighth of its first size's work -- before that size.  The
+// scout's rate predicts the first size for the caps on one run and one
+// multiply, and a row too slow for the first size starts at the scout's
+// instead: on a mid-range phone's CPU LiteRT's int16x8 ran a 1024-wide chain
+// at 38 s a run, five times for one reading.  Not on an NPU, where a scout
+// is one more compile and no format has come near the caps at the first
+// size.
+inline bool mlLadderScouts(DeviceType type)
+{
+  return type != DeviceType::Accelerator;
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics.  Everything clpeak has to say outside a reading -- a missing
 // library, a failed kernel build, a calibration decision -- is one message

@@ -91,11 +91,12 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
-// On a GPU one run is bounded too, at --max-time-gpu (gpuRunCapUs), and each
-// operator's first rung, which has no rate to be predicted from, is predicted
-// from a chain this wide timed once beforehand -- the ONNX ladder's rule, for
-// its reason (src/onnx/gemm.cpp).  The scout is no rung: the row neither
-// publishes it nor counts it toward the plateau.
+// On a GPU one run is bounded too, at --max-time-gpu (gpuRunCapUs).  Each
+// form's first rung, which has no rate to be predicted from, is predicted
+// from a chain this wide timed once beforehand (mlLadderScouts) -- the ONNX
+// ladder's rule, for its reason (src/onnx/gemm.cpp).  The scout is no rung:
+// the row neither publishes it nor counts it toward the plateau.  A form it
+// says is too slow for kMinDim climbs from kScoutDim instead.
 constexpr int64_t kScoutDim = 512;
 
 // Per-size budget for the timed phase.
@@ -172,6 +173,7 @@ std::string formName(const LitertForm &form, bool kernelsRaced)
 struct Lane
 {
   std::string kernel;
+  int64_t startDim = kMinDim;   // kScoutDim when the scout says kMinDim is too slow
   int rungs = 0, strikes = 0;
   double best = 0.0;
   int64_t bestDim = 0;
@@ -304,9 +306,10 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     auto what = [&](size_t f) { return formName(forms[f], plan.gpuInt8KernelChoice); };
     auto whose = [&](size_t f) { return raced ? what(f) : std::string(); };
 
-    // On a GPU each form's first rung is predicted from a kScoutDim chain; a
-    // scout that cannot be built or run leaves it unpredicted.
-    for (size_t f = 0; f < nf && runCapUs > 0.0; f++)
+    // Each form's first rung is predicted from a kScoutDim chain
+    // (mlLadderScouts); a scout that cannot be built or run leaves it
+    // unpredicted.
+    for (size_t f = 0; f < nf && mlLadderScouts(dev.deviceType); f++)
     {
       if (!race.runs(f) || clpeak::cancelRequested())
         continue;
@@ -323,15 +326,24 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       if (us > 0.0)
       {
         lanes[f].lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim * (double)kScoutDim * kChainLayers / us;
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms\n", dev.displayName.c_str(), label,
-                    (long long)kScoutDim, kChainLayers, what(f).c_str(), us / 1.0e3);
+        const double firstUs = 2.0 * (double)kMinDim * (double)kMinDim * (double)kMinDim * kChainLayers /
+                               lanes[f].lastRate;
+        if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / kChainLayers > kMaxIterUs)
+          lanes[f].startDim = kScoutDim;
+        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
+                    (long long)kScoutDim, kChainLayers, what(f).c_str(), us / 1.0e3,
+                    lanes[f].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
+                                                   : "");
       }
       else
         CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
                     dev.displayName.c_str(), label, (long long)kScoutDim, what(f).c_str(), err.c_str());
     }
 
-    for (int64_t D = kMinDim; D <= kMaxDim && !race.done() && wrongRow.empty(); D *= 2)
+    int64_t firstDim = kMinDim;
+    for (const Lane &ln : lanes)
+      firstDim = std::min(firstDim, ln.startDim);
+    for (int64_t D = firstDim; D <= kMaxDim && !race.done() && wrongRow.empty(); D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
@@ -349,7 +361,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
       for (size_t f = 0; f < nf && wrongRow.empty(); f++)
       {
-        if (!race.runs(f))
+        if (!race.runs(f) || D < lanes[f].startDim)
           continue;
         Lane &ln = lanes[f];
         const LitertPlan fp = litertFormPlan(plan, forms[f]);
@@ -372,8 +384,10 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
           {
             char buf[32];
             std::snprintf(buf, sizeof buf, "%.1f", runUs / 1.0e6);
-            ln.fail("at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
-                        std::to_string(D) + "-wide one would take about " + buf + " s a run, " +
+            ln.fail((D == kScoutDim ? "a " + std::to_string(kScoutDim) + "-wide chain took about " + buf +
+                                          " s a run, "
+                                    : "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
+                                          std::to_string(D) + "-wide one would take about " + buf + " s a run, ") +
                         (runTooLong ? "longer than --max-time-gpu lets one run hold a GPU -- a driver may "
                                       "reset a GPU held longer -- "
                                     : "longer than one multiply may take, ") +
@@ -385,7 +399,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         }
         // The compile cap, checked before paying for the build; the first
         // size always builds, since its time seeds the prediction.
-        if (D > kMinDim && ln.prevCreateUs > 0.0)
+        if (D > ln.startDim && ln.prevCreateUs > 0.0)
         {
           const double predictedUs =
               litertPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, ln.strikes > 0);
@@ -564,7 +578,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         // A size that compiled past the cap anyway is kept, and ends this
         // form's climb.  The first may exceed it once: its time seeds the
         // prediction.
-        else if (race.runs(f) && D != kMinDim && cu > kLitertMaxChainCreateUs)
+        else if (race.runs(f) && D != ln.startDim && cu > kLitertMaxChainCreateUs)
         {
           CLPEAK_VLOG("litert-gemm[%s/%s]: %s create %.1f s > %.1f s at %lld-wide layers, stopping\n",
                       dev.displayName.c_str(), label, form.c_str(), cu / 1.0e6, kLitertMaxChainCreateUs / 1.0e6,

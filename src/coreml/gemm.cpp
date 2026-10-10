@@ -85,11 +85,12 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
-// On a GPU one prediction is bounded too, at --max-time-gpu (gpuRunCapUs),
-// and each layout's first rung, which has no rate to be predicted from, is
-// predicted from a chain this wide timed once beforehand -- the ONNX ladder's
-// rule, for its reason (src/onnx/gemm.cpp).  The scout is no rung: the row
-// neither publishes it nor counts it toward the plateau.
+// On a GPU one prediction is bounded too, at --max-time-gpu (gpuRunCapUs).
+// Each layout's first rung, which has no rate to be predicted from, is
+// predicted from a chain this wide timed once beforehand (mlLadderScouts) --
+// the ONNX ladder's rule, for its reason (src/onnx/gemm.cpp).  The scout is
+// no rung: the row neither publishes it nor counts it toward the plateau.  A
+// layout it says is too slow for kMinDim climbs from kScoutDim instead.
 constexpr int64_t kScoutDim = 512;
 
 // Per-size budget for the timed phase.
@@ -222,15 +223,16 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       }
     struct Lane
     {
+      int64_t startDim = kMinDim;   // kScoutDim when the scout says kMinDim is too slow
       int rungs = 0;
       double lastRate = 0.0, prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
       std::string offDeviceNote, glueNote;
     } lanes[2];
 
-    // On a GPU each layout's first rung is predicted from a kScoutDim chain;
-    // a scout that cannot be built, is sent to another unit or cannot run
-    // leaves it unpredicted.
-    for (int t = 0; t < 2 && runCapUs > 0.0; t++)
+    // Each layout's first rung is predicted from a kScoutDim chain
+    // (mlLadderScouts); a scout that cannot be built, is sent to another
+    // unit or cannot run leaves it unpredicted.
+    for (int t = 0; t < 2 && mlLadderScouts(dev.deviceType); t++)
     {
       if (!race.runs(t) || clpeak::cancelRequested())
         continue;
@@ -246,8 +248,14 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       if (us > 0.0)
       {
         lanes[t].lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim * (double)kScoutDim * kChainLayers / us;
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms\n", dev.displayName.c_str(), label,
-                    (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3);
+        const double firstUs = 2.0 * (double)kMinDim * (double)kMinDim * (double)kMinDim * kChainLayers /
+                               lanes[t].lastRate;
+        if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / kChainLayers > kMaxIterUs)
+          lanes[t].startDim = kScoutDim;
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
+                    (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3,
+                    lanes[t].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
+                                                   : "");
       }
       else
         CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
@@ -255,7 +263,8 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                     err.empty() ? "no reason given" : err.c_str());
     }
 
-    for (int64_t D = kMinDim; D <= kMaxDim && !race.done(); D *= 2)
+    const int64_t firstDim = std::min(lanes[0].startDim, lanes[1].startDim);
+    for (int64_t D = firstDim; D <= kMaxDim && !race.done(); D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
@@ -273,7 +282,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       for (int t = 0; t < 2 && !wrong; t++)
       {
-        if (!race.runs(t))
+        if (!race.runs(t) || D < lanes[t].startDim)
           continue;
         Lane &ln = lanes[t];
         const char *layout = coremlLayoutName(t);
@@ -297,8 +306,11 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           {
             char buf[32];
             std::snprintf(buf, sizeof buf, "%.1f", runUs / 1.0e6);
-            firstErr = "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
-                       std::to_string(D) + "-wide one would take about " + buf + " s a prediction, " +
+            firstErr = (D == kScoutDim ? "a " + std::to_string(kScoutDim) + "-wide chain took about " + buf +
+                                             " s a prediction, "
+                                       : "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
+                                             std::to_string(D) + "-wide one would take about " + buf +
+                                             " s a prediction, ") +
                        (runTooLong ? "longer than --max-time-gpu lets one run hold a GPU -- a driver "
                                      "may reset a GPU held longer -- "
                                    : "longer than one multiply may take, ") +
@@ -310,7 +322,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         }
         // The compile cap, checked before paying for the build; the first
         // size always builds, since its time seeds the prediction.
-        if (D > kMinDim && ln.prevCreateUs > 0.0)
+        if (D > ln.startDim && ln.prevCreateUs > 0.0)
         {
           const double predictedUs =
               coremlPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, strikes > 0);
@@ -449,7 +461,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         // A size that compiled past the cap anyway is kept, and ends this
         // layout's climb.  The first may exceed it once: its time seeds the
         // prediction.
-        else if (D != kMinDim && cu > kCoremlMaxChainCreateUs)
+        else if (D != ln.startDim && cu > kCoremlMaxChainCreateUs)
         {
           CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s create %.1f s > %.1f s, stopping\n",
                       dev.displayName.c_str(), label, (long long)D, layout, cu / 1.0e6,

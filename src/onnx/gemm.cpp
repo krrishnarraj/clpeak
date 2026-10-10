@@ -122,10 +122,11 @@ namespace
   // GFLOPS -- and the device was reset 2.8 s in.
   //
   // The first rung has no rate to be predicted from, and a 1024-wide chain is
-  // 34 GFLOP: past 1.5 s on a GPU slower than 23 GFLOPS.  So on a GPU a chain
-  // this wide, an eighth of the work, is timed first and stands in for the
-  // rung before.  It is no rung itself: the row neither publishes it nor
-  // counts it toward the plateau.
+  // 34 GFLOP: past 1.5 s on a GPU slower than 23 GFLOPS.  So a chain this
+  // wide, an eighth of the work, is timed first (mlLadderScouts) and stands
+  // in for the rung before.  It is no rung itself: the row neither publishes
+  // it nor counts it toward the plateau.  A row it says is too slow for
+  // kMinDim climbs from kScoutDim instead.
   constexpr int64_t kScoutDim = 512;
 
   // Everything a rung holds at once (onnxHeldBytes: the operands, and every
@@ -259,11 +260,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
              (layers > 1 ? "-wide chain" : "-cube multiply");
     };
 
-    // On a GPU the first rung is predicted from a kScoutDim chain.  A scout
-    // that cannot be built or run leaves it unpredicted, as it is everywhere
-    // else.
+    // The first rung is predicted from a kScoutDim chain (mlLadderScouts).
+    // A scout that cannot be built or run leaves it unpredicted, as it is on
+    // an NPU.
     double scoutUs = 0.0;
-    if (runCapUs > 0.0 && !clpeak::cancelRequested())
+    int64_t startDim = kMinDim;
+    if (mlLadderScouts(ep.deviceType) && !clpeak::cancelRequested())
     {
       GemmSetup s = makeSetup(rt, ep, v, kScoutDim, /*profile=*/false,
                               pr.actDtype, pr.reduceInFloat, pr.wgtDtype,
@@ -274,9 +276,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim *
                    (double)kScoutDim * layers / scoutUs;
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d scout %.1f ms\n",
+        const double firstUs =
+            2.0 * (double)kMinDim * (double)kMinDim * (double)kMinDim * layers / lastRate;
+        if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / layers > kMaxIterUs)
+          startDim = kScoutDim;
+        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d scout %.1f ms%s\n",
                     ep.providerKey.c_str(), tag, (long long)kScoutDim, layers,
-                    scoutUs / 1.0e3);
+                    scoutUs / 1.0e3,
+                    startDim == kScoutDim
+                        ? ", too slow for the first size: climbing from the scout's"
+                        : "");
       }
       else
       {
@@ -287,7 +296,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       destroySetup(rt, s);
     }
 
-    for (int64_t D = kMinDim; D <= kMaxDim; D *= 2)
+    for (int64_t D = startDim; D <= kMaxDim; D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
@@ -342,8 +351,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           {
             char buf[96];
             std::snprintf(buf, sizeof buf, "%.1f s", predictedUs / 1.0e6);
-            L.err = "at the rate " + sizeName(kScoutDim) + " ran, " +
-                    sizeName(D) + " would take about " + buf + " a run, " +
+            L.err = (D == kScoutDim
+                         ? sizeName(kScoutDim) + " took about " + buf + " a run, "
+                         : "at the rate " + sizeName(kScoutDim) + " ran, " +
+                               sizeName(D) + " would take about " + buf + " a run, ") +
                     (runTooLong
                          ? "longer than --max-time-gpu lets one run hold a "
                            "GPU -- a driver may reset a GPU held longer -- "
@@ -358,7 +369,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // The compile cap, checked before paying for the build
       // (onnxPredictCreateUs).  The first rung is always attempted -- its time
       // seeds the prediction.
-      if (D > kMinDim && prevCreateUs > 0.0)
+      if (D > startDim && prevCreateUs > 0.0)
       {
         const double predictedUs = onnxPredictCreateUs(
             prevCreateUs, prevPrevCreateUs, /*confirming=*/strikes > 0);
@@ -677,7 +688,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // A rung that compiled past the cap anyway is kept, and ends the
       // ladder.  The first rung is allowed past it once -- its time seeds
       // the prediction above; truncating it would discard a valid peak.
-      if (D != kMinDim && createUs > kOnnxMaxCreateUs)
+      if (D != startDim && createUs > kOnnxMaxCreateUs)
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create %.1f s > %.1f s, stopping\n",
                     ep.providerKey.c_str(), tag,
