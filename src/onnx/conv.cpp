@@ -533,6 +533,14 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             best = rate;
             bestSpatial = sp;
           }
+          if (ladderDropEnds(rate, best, 4.0 * mean_us))
+          {
+            CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld fell to %.0f%% of the best, and the next "
+                        "size would take ~%.0f s a pass, stopping\n",
+                        ep.providerKey.c_str(), row.c_str(), (long long)sp, (long long)sp,
+                        100.0 * rate / best, 4.0 * mean_us / 1.0e6);
+            break;
+          }
           if (++strikes >= kOnnxPlateauStrikes)
           {
             CLPEAK_VLOG("onnx-conv[%s/%s]: plateau past %lldx%lld\n",

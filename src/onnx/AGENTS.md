@@ -1698,7 +1698,9 @@ rung for its working set, which does not expire either:
 
 - **`onnx-gemm`** doubles its layer width from 1024 until the rate plateaus —
   each size must beat the best so far by more than 10% (`kOnnxPlateauGain`),
-  and two sizes in a row that do not end the climb — and reports the peak with
+  two sizes in a row that do not end the climb, and so does one that falls
+  below 90% of the best where the next size would take 8 s a run
+  (`ladderDropEnds()`) — and reports the peak with
   the width that produced it; `onnx-conv` climbs its feature maps the same way.
   "The best this device can do at any size" means the same thing in ten years
   as it does now; "the rate at 4096" does not. The search is bounded by an

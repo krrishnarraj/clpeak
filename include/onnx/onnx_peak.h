@@ -52,8 +52,10 @@ constexpr unsigned int kOnnxMaxIters = 500;
 // optional: a size that lands badly and the next that recovers is ordinary --
 // QNN's unsigned int8 matmul read 3.98, 3.66, 13.2 TOPS across 2048..8192,
 // and ONNX Runtime's CPU EP 1.01, 1.02, 1.27, 1.49 across 1024..8192 -- and a
-// ladder stopped at the first flat step reports a third of the device.  A
-// slow device plateaus early and pays for fewer compiles.
+// ladder stopped at the first flat step reports a third of the device.  The
+// grace is withheld only from a size that fell where the next one would cost
+// seconds a run (ladderDropEnds, include/common/common.h).  A slow device
+// plateaus early and pays for fewer compiles.
 constexpr double kOnnxPlateauGain = 1.10;
 constexpr int kOnnxPlateauStrikes = 2;
 

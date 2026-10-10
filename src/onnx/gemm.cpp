@@ -641,6 +641,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           L.best = rate;
           L.bestDim = D;
         }
+        if (ladderDropEnds(rate, L.best, 8.0 * mean_us))
+        {
+          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 fell to %.0f%% of the best, and the next "
+                      "size would take ~%.0f s a run, stopping\n",
+                      ep.providerKey.c_str(), tag, (long long)D, 100.0 * rate / L.best,
+                      8.0 * mean_us / 1.0e6);
+          break;
+        }
         if (++strikes >= kOnnxPlateauStrikes)
         {
           CLPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld^3\n",

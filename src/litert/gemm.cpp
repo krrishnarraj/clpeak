@@ -80,7 +80,9 @@ constexpr int kChainLayers = 16;
 constexpr int64_t kSeedWidth = 64;
 
 // A size counts as an improvement only if it beats the best so far by this
-// much; two failures in a row end the search.
+// much; two failures in a row end the search, and so does one that fell
+// where the next size would cost seconds (ladderDropEnds,
+// include/common/common.h).
 constexpr double kImproveFactor = 1.03;
 constexpr int kMaxStrikes = 2;
 
@@ -550,7 +552,15 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
             ln.best = r;
             ln.bestDim = D;
           }
-          if (++ln.strikes >= kMaxStrikes)
+          if (ladderDropEnds(r, ln.best, 8.0 * m.meanUs))
+          {
+            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s fell to %.0f%% of the best, and the next size "
+                        "would take ~%.0f s a run, stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, form.c_str(), 100.0 * r / ln.best,
+                        8.0 * m.meanUs / 1.0e6);
+            race.drop(f);
+          }
+          else if (++ln.strikes >= kMaxStrikes)
           {
             CLPEAK_VLOG("litert-gemm[%s/%s]: %s: no further gain past %lld-wide layers\n",
                         dev.displayName.c_str(), label, form.c_str(), (long long)ln.bestDim);

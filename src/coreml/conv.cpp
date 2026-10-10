@@ -28,6 +28,9 @@ namespace
 constexpr int64_t kChannels = 256;
 constexpr int64_t kMinSpatial = 32;
 constexpr int64_t kMaxSpatial = 4096;
+// The gemm ladder's climb (gemm.cpp): a size gains by kImproveFactor, two
+// that do not end the climb, and so does one that fell where the next size
+// would cost seconds (ladderDropEnds).
 constexpr double kImproveFactor = 1.03;
 constexpr int kMaxStrikes = 2;
 constexpr double kMaxIterUs = 2.0e6;
@@ -263,6 +266,14 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           {
             best = rate;
             bestSp = sp;
+          }
+          if (ladderDropEnds(rate, best, 4.0 * m.meanUs))
+          {
+            CLPEAK_VLOG("coreml-conv[%s/%s]: %lld fell to %.0f%% of the best, and the next size would take "
+                        "~%.0f s a prediction, stopping\n",
+                        dev.displayName.c_str(), row.c_str(), (long long)sp, 100.0 * rate / best,
+                        4.0 * m.meanUs / 1.0e6);
+            break;
           }
           if (++strikes >= kMaxStrikes)
             break;

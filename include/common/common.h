@@ -421,6 +421,26 @@ double warmAndProbe(RunN &&run, unsigned int warmup)
   return run(1);
 }
 
+// When an ML runtime's ladder stops climbing at a size that fell: below
+// kLadderDropShare of the row's best, with one run of the next size
+// predicted at kLadderDropRunUs or more.  A ladder grants one size without
+// gain past the best, because a dip the next size recovers from is
+// ordinary -- QNN's int8 matmul read 3.98, 3.66, 13.2 TOPS across
+// 2048..8192; ONNX Runtime's CPU provider on a Threadripper reads 650, 590
+// and, half the time, 1630 GFLOPS fp32 across 1024..4096; Core ML's CPU
+// depthwise convolution 28, 19, 35.  Where the next size is cheap it keeps
+// that chance: the Threadripper's was predicted at 4 s a run.  Where one run
+// of it is seconds of every core, as on a phone, it is heat spent on a
+// falling ladder: on a Galaxy S24's CPU two such sizes, predicted at 12.6
+// and 12.8 s a run, read 0.32x and 0.40x of their rows' best.
+constexpr double kLadderDropShare = 0.90;
+constexpr double kLadderDropRunUs = 8.0e6;
+
+inline bool ladderDropEnds(double rate, double best, double nextRunUs)
+{
+  return rate < best * kLadderDropShare && nextRunUs >= kLadderDropRunUs;
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark data initialisation
 // ---------------------------------------------------------------------------
