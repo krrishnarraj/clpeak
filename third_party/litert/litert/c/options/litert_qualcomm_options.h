@@ -285,6 +285,20 @@ LiteRtStatus LrtQualcommOptionsGetHtpPerfCtrlMode(
     LrtQualcommOptions options,
     LrtQualcommOptionsHtpPerfCtrlMode* htp_perf_ctrl_mode);
 
+// Selects the HTP Process Domain session. The default is unsigned, preserving
+// the existing HTP device configuration and performance behavior.
+typedef enum LrtQualcommOptionsHtpPdSession {
+  kLiteRtQualcommHtpUnsignedPd = 0,
+  kLiteRtQualcommHtpSignedPd = 1,
+  kLiteRtQualcommHtpAdaptivePd = 2,
+} LrtQualcommOptionsHtpPdSession;
+
+LiteRtStatus LrtQualcommOptionsSetHtpPdSession(
+    LrtQualcommOptions options, LrtQualcommOptionsHtpPdSession htp_pd_session);
+
+LiteRtStatus LrtQualcommOptionsGetHtpPdSession(
+    LrtQualcommOptions options, LrtQualcommOptionsHtpPdSession* htp_pd_session);
+
 typedef enum LrtQualcommOptionsDspPerfCtrlMode {
   kLiteRtQualcommDspPerfCtrlModeManual = 0,
   kLiteRtQualcommDspPerfCtrlModeAuto = 1,
@@ -298,6 +312,31 @@ LiteRtStatus LrtQualcommOptionsGetDspPerfCtrlMode(
     LrtQualcommOptions options,
     LrtQualcommOptionsDspPerfCtrlMode* dsp_perf_ctrl_mode);
 
+// Selects the DSP Process Domain session. The default is unsigned. Adaptive
+// selects unsigned only when the DSP advertises unsigned PD support.
+typedef enum LrtQualcommOptionsDspPdSession {
+  kLiteRtQualcommDspUnsignedPd = 0,
+  kLiteRtQualcommDspSignedPd = 1,
+  kLiteRtQualcommDspAdaptivePd = 2,
+} LrtQualcommOptionsDspPdSession;
+
+LiteRtStatus LrtQualcommOptionsSetDspPdSession(
+    LrtQualcommOptions options, LrtQualcommOptionsDspPdSession dsp_pd_session);
+
+LiteRtStatus LrtQualcommOptionsGetDspPdSession(
+    LrtQualcommOptions options, LrtQualcommOptionsDspPdSession* dsp_pd_session);
+
+typedef enum LrtQualcommOptionsDspEncoding {
+  kLiteRtQualcommDspEncodingStatic = 0,
+  kLiteRtQualcommDspEncodingDynamic = 1,
+} LrtQualcommOptionsDspEncoding;
+
+LiteRtStatus LrtQualcommOptionsSetDspEncoding(
+    LrtQualcommOptions options, LrtQualcommOptionsDspEncoding dsp_encoding);
+
+LiteRtStatus LrtQualcommOptionsGetDspEncoding(
+    LrtQualcommOptions options, LrtQualcommOptionsDspEncoding* dsp_encoding);
+
 LiteRtStatus LrtQualcommOptionsSetIrJsonDir(LrtQualcommOptions options,
                                             const char* ir_json_dir);
 
@@ -309,6 +348,12 @@ LiteRtStatus LrtQualcommOptionsSetDlcDir(LrtQualcommOptions options,
 
 LiteRtStatus LrtQualcommOptionsGetDlcDir(LrtQualcommOptions options,
                                          const char** dlc_dir);
+
+LiteRtStatus LrtQualcommOptionsSetGraphTransform(LrtQualcommOptions options,
+                                                 const char* graph_transform);
+
+LiteRtStatus LrtQualcommOptionsGetGraphTransform(LrtQualcommOptions options,
+                                                 const char** graph_transform);
 
 LiteRtStatus LrtQualcommOptionsSetVtcmSize(LrtQualcommOptions options,
                                            uint32_t vtcm_size);
@@ -357,6 +402,7 @@ typedef enum LrtQualcommOptionsBackend {
   kLiteRtQualcommBackendHtp,
   kLiteRtQualcommBackendDsp,
   kLiteRtQualcommBackendIr,
+  kLiteRtQualcommBackendLpai,
 } LrtQualcommOptionsBackend;
 
 LiteRtStatus LrtQualcommOptionsSetBackend(
@@ -377,7 +423,6 @@ LiteRtStatus LrtQualcommOptionsSetSchematicDir(LrtQualcommOptions options,
 LiteRtStatus LrtQualcommOptionsGetSchematicDir(LrtQualcommOptions options,
                                                const char** schematic_dir);
 
-
 LiteRtStatus LrtQualcommOptionsSetCustomOpPackage(
     LrtQualcommOptions options, const char* name,
     const char* interface_provider, const char* compile_package_path,
@@ -387,6 +432,113 @@ LiteRtStatus LrtQualcommOptionsGetCustomOpPackage(
     LrtQualcommOptions options, const char** name,
     const char** interface_provider, const char** compile_package_path,
     const char** dispatch_package_path, const char** target);
+
+// LPAI OPTIONS ////////////////////////////////////////////////////////////////
+
+typedef enum LrtQualcommOptionsLpaiTarget {
+  kLiteRtQualcommLpaiTargetX86 = 0,
+  kLiteRtQualcommLpaiTargetArm = 1,
+  kLiteRtQualcommLpaiTargetAdsp = 2,
+  kLiteRtQualcommLpaiTargetTensilica = 3,
+} LrtQualcommOptionsLpaiTarget;
+
+LiteRtStatus LrtQualcommOptionsSetLpaiTarget(
+    LrtQualcommOptions options, LrtQualcommOptionsLpaiTarget lpai_target);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiTarget(
+    LrtQualcommOptions options, LrtQualcommOptionsLpaiTarget* lpai_target);
+
+LiteRtStatus LrtQualcommOptionsSetLpaiFps(LrtQualcommOptions options,
+                                          uint32_t lpai_fps);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiFps(LrtQualcommOptions options,
+                                          uint32_t* lpai_fps);
+
+LiteRtStatus LrtQualcommOptionsSetLpaiFtrtRatio(LrtQualcommOptions options,
+                                                uint32_t lpai_ftrt_ratio);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiFtrtRatio(LrtQualcommOptions options,
+                                                uint32_t* lpai_ftrt_ratio);
+typedef enum LrtQualcommOptionsLpaiClientPerfType {
+  kLiteRtQualcommLpaiClientPerfTypeDefault = 0,
+  kLiteRtQualcommLpaiClientPerfTypeRealTime = 1,
+  kLiteRtQualcommLpaiClientPerfTypeNonRealTime = 2,
+} LrtQualcommOptionsLpaiClientPerfType;
+
+LiteRtStatus LrtQualcommOptionsSetLpaiClientPerfType(
+    LrtQualcommOptions options,
+    LrtQualcommOptionsLpaiClientPerfType lpai_client_perf_type);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiClientPerfType(
+    LrtQualcommOptions options,
+    LrtQualcommOptionsLpaiClientPerfType* lpai_client_perf_type);
+
+typedef enum LrtQualcommOptionsLpaiCoreAffinityType {
+  kLiteRtQualcommLpaiCoreAffinityTypeDefault = 0,
+  kLiteRtQualcommLpaiCoreAffinityTypeSoft = 1,
+  kLiteRtQualcommLpaiCoreAffinityTypeHard = 2,
+} LrtQualcommOptionsLpaiCoreAffinityType;
+
+LiteRtStatus LrtQualcommOptionsSetLpaiCoreAffinityType(
+    LrtQualcommOptions options,
+    LrtQualcommOptionsLpaiCoreAffinityType lpai_core_affinity_type);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiCoreAffinityType(
+    LrtQualcommOptions options,
+    LrtQualcommOptionsLpaiCoreAffinityType* lpai_core_affinity_type);
+
+LiteRtStatus LrtQualcommOptionsSetLpaiCoreSelection(
+    LrtQualcommOptions options, uint32_t lpai_core_selection);
+
+LiteRtStatus LrtQualcommOptionsGetLpaiCoreSelection(
+    LrtQualcommOptions options, uint32_t* lpai_core_selection);
+
+// qnn_lib_dir
+
+// Sets the directory where CPU host QNN SDK shared libraries (libQnnSystem.so,
+// libQnnHtp.so, etc.) are located.
+// When set, this directory takes top priority when loading QNN host libraries.
+// If not set (or if loading from this path fails), library loading falls back
+// to the plugin directory (shared_library_dir), and finally to standard system
+// dynamic loader search paths (preserving backward compatibility).
+// Also acts as a fallback directory for configuring ADSP_LIBRARY_PATH if
+// dsp_skel_dir is not explicitly set.
+// The `qnn_lib_dir` string is copied into the `options` object, so the caller
+// retains ownership of it and does not need to keep it alive.
+LiteRtStatus LrtQualcommOptionsSetQnnLibDir(LrtQualcommOptions options,
+                                            const char* qnn_lib_dir);
+
+// Retrieves the configured CPU host QNN shared library directory.
+// Returns an empty string if not set.
+// The returned string pointer is owned by the `options` object. It remains
+// valid until the value is overwritten by LrtQualcommOptionsSetQnnLibDir() or
+// until `options` is destroyed, whichever comes first. Callers that need the
+// value beyond that point must make their own copy.
+LiteRtStatus LrtQualcommOptionsGetQnnLibDir(LrtQualcommOptions options,
+                                            const char** qnn_lib_dir);
+
+// dsp_skel_dir
+
+// Sets the directory where Hexagon DSP Skel shared libraries
+// (libQnnHtpV*Skel.so) are located. Used to configure ADSP_LIBRARY_PATH for
+// FastRPC.
+// When set, this directory takes top priority for ADSP_LIBRARY_PATH.
+// If not set, ADSP_LIBRARY_PATH falls back to qnn_lib_dir (if provided), and
+// finally to the plugin directory (shared_library_dir), preserving backward
+// compatibility.
+// The `dsp_skel_dir` string is copied into the `options` object, so the caller
+// retains ownership of it and does not need to keep it alive.
+LiteRtStatus LrtQualcommOptionsSetDspSkelDir(LrtQualcommOptions options,
+                                             const char* dsp_skel_dir);
+
+// Retrieves the configured DSP Skel shared library directory.
+// Returns an empty string if not set.
+// The returned string pointer is owned by the `options` object. It remains
+// valid until the value is overwritten by LrtQualcommOptionsSetDspSkelDir() or
+// until `options` is destroyed, whichever comes first. Callers that need the
+// value beyond that point must make their own copy.
+LiteRtStatus LrtQualcommOptionsGetDspSkelDir(LrtQualcommOptions options,
+                                             const char** dsp_skel_dir);
 
 #ifdef __cplusplus
 }  // extern "C"
