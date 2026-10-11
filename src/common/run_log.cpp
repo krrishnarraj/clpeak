@@ -1,8 +1,16 @@
 #include <common/run_log.h>
 #include <common/logger.h>
 
+#include <cerrno>
 #include <cstdio>
+#include <system_error>
 #include <utility>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <share.h>
+#include <windows.h>
+#endif
 
 namespace {
 RunLog *g_current = nullptr;
@@ -69,14 +77,33 @@ void RunLog::openSidecar(const std::string &outputFile)
         std::lock_guard<std::mutex> lock(mutex);
         if (sidecar) return;
         sidecarPath = sidecarPathFor(outputFile);
-#ifdef _MSC_VER
-        (void)fopen_s(&sidecar, sidecarPath.c_str(), "wb");
+        errno = 0;
+#ifdef _WIN32
+        // Not fopen_s: it opens the file unshared, so nothing can read the
+        // sidecar while this run writes it -- which is when a hung run's
+        // sidecar is read.  Readers in, other writers out.
+        SetLastError(0);
+        sidecar = _fsopen(sidecarPath.c_str(), "wb", _SH_DENYWR);
 #else
         sidecar = std::fopen(sidecarPath.c_str(), "wb");
 #endif
         if (!sidecar)
         {
+            // Windows' own reason where there is one: a file another process
+            // is writing reads "being used by another process", where errno
+            // says only "Permission denied".  It can be the run before:
+            // Windows Error Reporting keeps a crashed process alive, handles
+            // and all, while it collects the crash.
+            std::string why;
+#ifdef _WIN32
+            if (const DWORD err = GetLastError())
+                why = std::system_category().message(static_cast<int>(err));
+#endif
+            if (why.empty() && errno != 0)
+                why = std::generic_category().message(errno);
             failed = sidecarPath;
+            if (!why.empty())
+                failed += " (" + why + ")";
             sidecarPath.clear();
         }
         else
