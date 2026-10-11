@@ -64,7 +64,10 @@ class LiveResultsScreen extends StatelessWidget {
                       'Some backends reported errors (status ${service.exitCode}). '
                       'Results below may be incomplete.',
                 ),
-              Expanded(child: ResultsBody(document: service.document)),
+              Expanded(
+                  child: ResultsBody(
+                      document: service.document,
+                      showDiagnostics: service.runVerbose)),
             ],
           ),
         ),

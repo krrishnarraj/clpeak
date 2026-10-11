@@ -83,6 +83,11 @@ class BenchmarkService extends ChangeNotifier {
   String currentBackend = '';
   String currentTest = '';
 
+  /// Whether the in-flight (or just-finished) run records verbose
+  /// diagnostics (`--verbose`).  The live view hides its DIAGNOSTICS panel
+  /// when this is false, so a non-verbose run shows no diagnostics UI.
+  bool runVerbose = false;
+
   /// The run is paused until the device cools: the latest of the native
   /// side's "thermal status ..." lines is the pause's warning, not the info
   /// line that ends it (src/common/thermal.cpp).
@@ -321,6 +326,7 @@ class BenchmarkService extends ChangeNotifier {
     _document = RunDocument();
     currentBackend = '';
     currentTest = '';
+    runVerbose = verbose;
     coolingDown = false;
     completedTests = 0;
     exitCode = 0;

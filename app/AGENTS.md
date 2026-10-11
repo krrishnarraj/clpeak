@@ -119,7 +119,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `_DiagnosticsSection` at the foot of `results_body.dart` is counts-only
   (total lines + a pointer at the exported file): rendering per-line rows
   made the GUI sluggish on phones during heavy runs, so the file a user
-  exports is where the contents are read.  Settings → "Verbose diagnostics"
+  exports is where the contents are read.  The live run (and its
+  just-finished results) hides the section unless that run was started
+  verbose (`BenchmarkService.runVerbose` → `ResultsBody.showDiagnostics`);
+  saved runs always show it when the file holds a log.  Settings → "Verbose diagnostics"
   (`settings_screen.dart`) turns debug-level recording on for every run and
   links to the issue tracker, which is how a problem on a phone reaches a
   maintainer

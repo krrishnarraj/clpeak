@@ -51,6 +51,7 @@ class LiveRunScreen extends StatelessWidget {
                 document: service.document,
                 header: _StatusPanel(
                     service: service, cancelling: cancelling),
+                showDiagnostics: service.runVerbose,
               ),
             ),
           ],
