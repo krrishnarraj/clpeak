@@ -28,6 +28,7 @@
 #include "litert_model.h"
 #include "litert_session.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -158,6 +159,9 @@ struct Point
   // Where the variant races forms (VariantResult::forms): the one this
   // point's time is.
   size_t form = 0;
+  // The slowest form's time: every form runs at every point, so this, not
+  // `us`, is what the variant's next point holds a GPU for.
+  double slowestUs = -1.0;
   bool nonFinite = false;   // the timed graph returned NaN or infinity
   // The kernel the projections ran as in that form, for a format whose
   // weights are integer (litertRateUnit, litertKernelNote): empty until
@@ -350,6 +354,9 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     pt = pts[w];
     pt.form = w;
+    for (size_t f = 0; f < nf; f++)
+      if (rate[f] > 0.0)
+        pt.slowestUs = std::max(pt.slowestUs, pts[f].us);
   };
 
   // Everything that has to be true before a variant is worth timing: the
@@ -455,6 +462,23 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     return std::string();
   };
 
+  // The rate a prompt is predicted from.  Off a GPU, the last point timed,
+  // whichever variant's.  On a GPU, the variant's own longest prompt so far
+  // at its slowest form -- every usable variant has its 64-token one, from
+  // validateVariant -- and the last point's only where it has none:
+  // formats run several times apart, and so do forms, and a 512-token pass
+  // predicted from another's rate can hold a GPU far longer than one run may
+  // (src/onnx/block.cpp, kBorrowedRateMargin, has the case).
+  auto promptRate = [&](const VariantResult &vr, int64_t seq) -> double
+  {
+    double rate = refPrefillRate;
+    if (runCapUs > 0.0)
+      for (const auto &[s, p] : vr.prefill)
+        if (s < seq && p.slowestUs > 0.0)
+          rate = blockFlops(s, s) / p.slowestUs;
+    return rate;
+  };
+
   auto measurePrefill = [&](size_t vi, int64_t seq)
   {
     VariantResult &vr = results[vi];
@@ -462,7 +486,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     Point pt;
     const double flops = blockFlops(seq, seq);
-    if (std::string slow = tooSlow(flops, refPrefillRate, "one pass"); !slow.empty())
+    if (std::string slow = tooSlow(flops, promptRate(vr, seq), "one pass"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
       pt.error = slow;

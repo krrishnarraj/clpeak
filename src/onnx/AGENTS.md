@@ -1685,7 +1685,15 @@ cap had allowed, and lost the device. Only a GPU: those watchdogs guard a
 device that also drives a display, and an NPU drives none. A ladder's first rung has no rate to predict
 from, so on a GPU or a CPU (`mlLadderScouts()`) `gemm.cpp` first times one run
 of a 512-wide chain (`kScoutDim`) and predicts from that; the scout is not a
-rung, and a row it says is too slow for 1024 climbs from 512 instead.
+rung, and a row it says is too slow for 1024 climbs from 512 instead.  The
+block's prompts on a GPU are predicted from the precision's own points, never
+another's alone: precisions run several times apart, and WebGPU on a
+Mali-G615 ran fp32 for 4.57 s a pass on fp16's prediction under a 1 s cap.
+Here a first prompt past 64 tokens borrows the last precision's rate only
+with eight times the room under the cap and otherwise times its own 64-token
+prompt first (`firstPromptRate`); the LiteRT and Core ML blocks, which time
+every precision's first prompt to validate it, predict from that, at the
+slowest form or layout still racing.
 
 ## Report asymptotes, not readings at a size someone picked
 

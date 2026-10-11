@@ -90,6 +90,16 @@ namespace
   // measuring it cannot be measured properly anyway, so it is skipped.
   constexpr unsigned int kBlockBudgetUs = 5000000;
 
+  // On a GPU, a rate borrowed from another precision predicts a variant's
+  // first prompt only with this much room under --max-time-gpu.  Precisions
+  // run several times apart: through WebGPU on a Mali-G615 the 512-token
+  // pass took 4.57 s in fp32 against fp16's 0.87, and fp16's rate let it
+  // past a 1 s cap.  Any closer, the variant's own 64-token prompt -- an
+  // eighth of the 512-token pass's arithmetic, as the gemm ladders' scout is
+  // of their first size -- is timed first and predicts it
+  // (firstPromptRate).
+  constexpr double kBorrowedRateMargin = 8.0;
+
   // Why a point whose one pass is `flops` at `rate` -- flops per microsecond,
   // from the last point timed, 0 before any -- is not worth timing, or empty
   // when it is: past the whole budget for measuring it, or on a GPU past what
@@ -798,8 +808,48 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // has no measurement of its own to predict from, and letting all six pay
   // full price on a provider that has already proved itself slow is how this
   // test would come to take tens of minutes.  The most recent measured rate
-  // is the estimate: precisions differ by a factor of a few, not orders.
+  // is the estimate: precisions differ by a factor of a few, not orders --
+  // close enough to judge the budget, not to hold a GPU to one run
+  // (firstPromptRate).
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
+
+  // The rate a variant's first prompt is predicted from.  Off a GPU, and for
+  // a variant whose prompts start at the 64-token one, the last variant's.
+  // On a GPU a longer first prompt goes on another precision's rate only
+  // with kBorrowedRateMargin of room under the cap; nearer, or with no rate
+  // yet, the variant's own 64-token prompt is timed first -- one run to
+  // compile and warm, one timed -- and that predicts it.  A scout that
+  // cannot be built or run leaves the borrowed rate.
+  auto firstPromptRate = [&](const Variant &v, const VariantResult &vr) -> double
+  {
+    const std::vector<int64_t> prompts = promptsFor(v);
+    if (runCapUs <= 0.0 || prompts.empty() || prompts.front() <= kPromptLadder[0] ||
+        clpeak::cancelRequested())
+      return refPrefillRate;
+    const double flops = blockFlops(prompts.front(), prompts.front());
+    if (refPrefillRate > 0.0 && flops / refPrefillRate * kBorrowedRateMargin <= runCapUs)
+      return refPrefillRate;
+    BlockRun s = makeRun(rt, ep, v, false, kDecodeKv, kPromptLadder[0],
+                         vr.qActDtype, /*profile=*/false);
+    double us = 0.0;
+    if (s.session && timeRuns(rt, s, 1) > 0.0) // compile + warmup
+      us = timeRuns(rt, s, 1);
+    destroyRun(rt, s);
+    if (us <= 0.0)
+    {
+      CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout failed, the first "
+                  "prompt predicted from the last variant's rate: %s\n",
+                  ep.providerKey.c_str(), v.label,
+                  (long long)kPromptLadder[0], s.error.c_str());
+      return refPrefillRate;
+    }
+    const double rate = blockFlops(kPromptLadder[0], kPromptLadder[0]) / us;
+    CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout %.1f ms, predicting "
+                "%.2f s for prefill_s%lld\n",
+                ep.providerKey.c_str(), v.label, (long long)kPromptLadder[0],
+                us / 1.0e3, flops / rate / 1.0e6, (long long)prompts.front());
+    return rate;
+  };
 
   // A prompt row's provenance: the fp16 form's, or -- where the layer's
   // floating-point parts ran in fp32 because that was faster -- the fp32
@@ -1059,8 +1109,9 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         emitPrefillTo(testFlops, v, vr);
         continue;
       }
-      // affordability uses refPrefillRate which is shared across all variants
-      double prefillRate = refPrefillRate;
+      // Affordability: the last variant's rate, or on a GPU perhaps this
+      // one's own (firstPromptRate); then each prompt predicts the next.
+      double prefillRate = firstPromptRate(v, vr);
       for (int64_t seq : promptsFor(v))
       {
         if (clpeak::cancelRequested()) break;
@@ -1105,7 +1156,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         emitPrefillTo(testOps, v, vr);
         continue;
       }
-      double prefillRate = refPrefillRate;
+      double prefillRate = firstPromptRate(v, vr);
       for (int64_t seq : promptsFor(v))
       {
         if (clpeak::cancelRequested()) break;
@@ -1338,7 +1389,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           {
             Point pt;
             const double flops = blockFlops(kPrefillSeq, kPrefillSeq);
-            if (std::string slow = tooSlow(flops, refPrefillRate, runCapUs, "one pass");
+            if (std::string slow = tooSlow(flops, firstPromptRate(v, vr), runCapUs, "one pass");
                 !slow.empty())
             {
               pt.status = ResultStatus::Error;

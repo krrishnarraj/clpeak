@@ -160,6 +160,9 @@ struct Point
   bool wrong = false;         // the answer came back NaN or infinite
   bool transposed = false;    // the weight layout `us` was measured in
   double createUs = 0.0;
+  // The slowest layout's time among those the race still runs: what the
+  // variant's next point holds a GPU for, which `us` may not be.
+  double slowestUs = -1.0;
 };
 
 struct VariantResult
@@ -322,6 +325,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       race.settle(rate, createUs);
       const bool t = one[1].us < one[0].us;
       pt = one[t];
+      pt.slowestUs = race.runs(!t) ? one[!t].us : one[t].us;
       return;
     }
     if (ok[0] || ok[1])
@@ -330,6 +334,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       if (tried[!t] && !one[!t].plannerDeclined)
         race.drop(!t);
       pt = one[t];
+      pt.slowestUs = pt.us;
       return;
     }
     // Neither ran.  The planner's size decision first, since it settles
@@ -485,6 +490,23 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     return std::string();
   };
 
+  // The rate a prompt is predicted from.  Off a GPU, the last point timed,
+  // whichever variant's.  On a GPU, the variant's own longest prompt so far
+  // at the slowest layout still racing -- validateVariant timed its first --
+  // and the last point's only where it has none: formats run several times
+  // apart, and so do layouts, and a 512-token pass predicted from another's
+  // rate can hold a GPU far longer than one prediction may
+  // (src/onnx/block.cpp, kBorrowedRateMargin, has the case).
+  auto promptRate = [&](const VariantResult &vr, int64_t seq) -> double
+  {
+    double rate = refPrefillRate;
+    if (runCapUs > 0.0)
+      for (const auto &[s, p] : vr.prefill)
+        if (s < seq && p.slowestUs > 0.0)
+          rate = blockFlops(s, s) / p.slowestUs;
+    return rate;
+  };
+
   auto measurePrefill = [&](const Variant &v, VariantResult &vr, int64_t seq)
   {
     auto it = vr.prefill.find(seq);
@@ -492,7 +514,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       return;
     Point pt;
     const double flops = blockFlops(seq, seq);
-    if (std::string slow = tooSlow(flops, refPrefillRate, "one pass"); !slow.empty())
+    if (std::string slow = tooSlow(flops, promptRate(vr, seq), "one pass"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
       pt.error = slow;
