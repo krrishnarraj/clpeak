@@ -244,10 +244,11 @@ struct BuildInfo {
 // selective run is not a full one even though the file looks the same shape.
 struct Invocation {
     std::vector<std::string> argv;
-    unsigned targetTimeUs    = 0;
-    unsigned targetTimeUsCpu = 0;
-    unsigned warmup          = 0;
-    unsigned iters           = 0;   // 0 = calibrated per test, not forced
+    unsigned targetTimeUs      = 0;
+    unsigned targetTimeUsCpu   = 0;
+    unsigned targetTimeUsMlGpu = 0;
+    unsigned warmup            = 0;
+    unsigned iters             = 0;   // 0 = calibrated per test, not forced
     std::vector<std::string> categories;  // enabled category names
     std::vector<std::string> tests;       // empty = every test enabled
 

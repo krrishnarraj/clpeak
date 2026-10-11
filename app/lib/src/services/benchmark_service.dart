@@ -268,7 +268,9 @@ class BenchmarkService extends ChangeNotifier {
       _catalogError = null;
 
       final fresh = RunConfig.allDevices(_catalog,
-          maxTimeMs: _config.maxTimeMs, maxTimeCpuMs: _config.maxTimeCpuMs);
+          maxTimeMs: _config.maxTimeMs,
+          maxTimeMlGpuMs: _config.maxTimeMlGpuMs,
+          maxTimeCpuMs: _config.maxTimeCpuMs);
       for (final backend in _catalog.usable) {
         final previous = _config.selectedDevices[backend.name];
         if (previous == null) continue; // newly present: keep it all selected
@@ -286,7 +288,9 @@ class BenchmarkService extends ChangeNotifier {
       _catalogError = e.toString();
       _catalog = BackendCatalog(const []);
       _config = RunConfig.allDevices(_catalog,
-          maxTimeMs: _config.maxTimeMs, maxTimeCpuMs: _config.maxTimeCpuMs);
+          maxTimeMs: _config.maxTimeMs,
+          maxTimeMlGpuMs: _config.maxTimeMlGpuMs,
+          maxTimeCpuMs: _config.maxTimeCpuMs);
     } finally {
       _loadingCatalog = false;
       _catalogReady = true;

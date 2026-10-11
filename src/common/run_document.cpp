@@ -201,13 +201,14 @@ void writeInvocation(JsonWriter &w, const Invocation &inv)
         for (const std::string &a : inv.argv) w.rawString(a);
         w.endArray();
     }
-    if (inv.targetTimeUs)    w.uint("target_time_us",     inv.targetTimeUs);
-    if (inv.targetTimeUsCpu) w.uint("target_time_us_cpu", inv.targetTimeUsCpu);
-    if (inv.warmup)          w.uint("warmup",             inv.warmup);
+    if (inv.targetTimeUs)      w.uint("target_time_us",        inv.targetTimeUs);
+    if (inv.targetTimeUsCpu)   w.uint("target_time_us_cpu",    inv.targetTimeUsCpu);
+    if (inv.targetTimeUsMlGpu) w.uint("target_time_us_ml_gpu", inv.targetTimeUsMlGpu);
+    if (inv.warmup)            w.uint("warmup",                inv.warmup);
     // Absent means "calibrated per test", which is the normal mode; a number
     // means the run was pinned to it with -i and is not comparable to one that
     // was not.
-    if (inv.iters)           w.uint("iters",              inv.iters);
+    if (inv.iters)             w.uint("iters",                 inv.iters);
     if (!inv.categories.empty())
     {
         w.beginArray("categories");
@@ -433,10 +434,11 @@ void readInvocation(const JsonValue &v, Invocation &inv)
     if (!v.isObject()) return;
     if (const JsonValue *a = v.find("argv"))
         for (const JsonValue &x : a->items()) inv.argv.push_back(x.asString());
-    inv.targetTimeUs    = static_cast<unsigned>(v.num("target_time_us"));
-    inv.targetTimeUsCpu = static_cast<unsigned>(v.num("target_time_us_cpu"));
-    inv.warmup          = static_cast<unsigned>(v.num("warmup"));
-    inv.iters           = static_cast<unsigned>(v.num("iters"));
+    inv.targetTimeUs      = static_cast<unsigned>(v.num("target_time_us"));
+    inv.targetTimeUsCpu   = static_cast<unsigned>(v.num("target_time_us_cpu"));
+    inv.targetTimeUsMlGpu = static_cast<unsigned>(v.num("target_time_us_ml_gpu"));
+    inv.warmup            = static_cast<unsigned>(v.num("warmup"));
+    inv.iters             = static_cast<unsigned>(v.num("iters"));
     if (const JsonValue *c = v.find("categories"))
         for (const JsonValue &x : c->items()) inv.categories.push_back(x.asString());
     if (const JsonValue *t = v.find("tests"))

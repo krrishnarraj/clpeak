@@ -308,6 +308,14 @@ OnnxRuntimeStatus onnxRuntimeStatus()
 OnnxPeak::OnnxPeak() = default;
 OnnxPeak::~OnnxPeak() = default;
 
+void OnnxPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
+
 int OnnxPeak::runAll()
 {
   const OrtRuntime *rt = ortRuntime();

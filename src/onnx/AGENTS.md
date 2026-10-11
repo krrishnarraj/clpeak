@@ -32,7 +32,7 @@ backend.
 
 | File | Purpose |
 |------|---------|
-| `onnx_peak.cpp` | `OnnxPeak` class: `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
+| `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxHeldBytes()` — what a session holds, every memory gate's count |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
@@ -1676,7 +1676,7 @@ dispatch: a chain's sixteen summed stopped CPU providers at a quarter of the
 width their kernels peak at.
 
 **On a GPU, one run is bounded as well** — the same pair again, at
-`--max-time-gpu` (`gpuRunCapUs()`, `include/common/common.h`), in `gemm.cpp`,
+`--max-time-ml-gpu` (`gpuRunCapUs()`, `include/common/common.h`), in `gemm.cpp`,
 `conv.cpp` and the block's affordability gate. A runtime can hand a GPU a whole
 graph as one submission, and a driver resets a GPU one submission holds too
 long: ONNX Runtime's WebGPU provider submits every sixteen dispatches, so a

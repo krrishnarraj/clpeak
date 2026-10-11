@@ -500,6 +500,14 @@ static std::string pendingNote()
 LitertPeak::LitertPeak() = default;
 LitertPeak::~LitertPeak() = default;
 
+void LitertPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
+
 int LitertPeak::runAll()
 {
   const LitertRuntime *rt = litertRuntime();

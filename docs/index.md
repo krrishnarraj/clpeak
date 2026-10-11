@@ -265,7 +265,8 @@ clpeak --onnx --transformer-block # the decoder block on every ONNX provider
 clpeak --describe                 # what each test and each reading measures
 clpeak -o run.clpeak.json         # save the run as JSON
 clpeak --compare run.clpeak.json  # run again and compare with a saved run
-clpeak --max-time-gpu 500         # keep a GPU busy at most 500 ms at a time
+clpeak --max-time-gpu 250         # keep a GPU busy at most 250 ms at a time
+clpeak --max-time-ml-gpu 500      # the same for one ONNX / LiteRT / Core ML run
 ```
 
 `clpeak --help` lists every flag. Every flag parses in every build, so a

@@ -8,7 +8,8 @@ enum RunPreset { full, custom }
 /// index.  For single-platform backends platformIndex is the synthetic 0.
 typedef DeviceRef = ({int platformIndex, int deviceIndex});
 
-const int kDefaultMaxTimeMs = 1000;
+const int kDefaultMaxTimeMs = 500;
+const int kDefaultMaxTimeMlGpuMs = 1000;
 const int kDefaultMaxTimeCpuMs = 2000;
 
 /// User-selected run configuration → CLI argv.
@@ -17,6 +18,7 @@ class RunConfig {
     Map<String, Set<DeviceRef>>? selectedDevices,
     Set<BenchCategory>? categories,
     this.maxTimeMs = kDefaultMaxTimeMs,
+    this.maxTimeMlGpuMs = kDefaultMaxTimeMlGpuMs,
     this.maxTimeCpuMs = kDefaultMaxTimeCpuMs,
   })  : selectedDevices = selectedDevices ?? {},
         categories = categories ?? BenchCategory.selectable.toSet();
@@ -29,11 +31,13 @@ class RunConfig {
   final Set<BenchCategory> categories;
 
   int maxTimeMs;
+  int maxTimeMlGpuMs;
   int maxTimeCpuMs;
 
   /// Select every device of every usable backend.
   factory RunConfig.allDevices(BackendCatalog catalog,
       {int maxTimeMs = kDefaultMaxTimeMs,
+      int maxTimeMlGpuMs = kDefaultMaxTimeMlGpuMs,
       int maxTimeCpuMs = kDefaultMaxTimeCpuMs}) {
     final selected = <String, Set<DeviceRef>>{};
     for (final b in catalog.usable) {
@@ -48,6 +52,7 @@ class RunConfig {
     return RunConfig(
         selectedDevices: selected,
         maxTimeMs: maxTimeMs,
+        maxTimeMlGpuMs: maxTimeMlGpuMs,
         maxTimeCpuMs: maxTimeCpuMs);
   }
 
@@ -115,6 +120,9 @@ class RunConfig {
 
     if (maxTimeMs != kDefaultMaxTimeMs) {
       args.addAll(['--max-time-gpu', '$maxTimeMs']);
+    }
+    if (maxTimeMlGpuMs != kDefaultMaxTimeMlGpuMs) {
+      args.addAll(['--max-time-ml-gpu', '$maxTimeMlGpuMs']);
     }
     if (maxTimeCpuMs != kDefaultMaxTimeCpuMs) {
       args.addAll(['--max-time-cpu', '$maxTimeCpuMs']);

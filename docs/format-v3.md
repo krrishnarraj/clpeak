@@ -41,7 +41,8 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 
   "invocation": {
     "argv": ["clpeak", "--verbose", "-o", "run.clpeak.json"],
-    "target_time_us": 500000, "target_time_us_cpu": 2000000, "warmup": 2,
+    "target_time_us": 500000, "target_time_us_ml_gpu": 1000000,
+    "target_time_us_cpu": 2000000, "warmup": 2,
     "categories": ["compute", "bandwidth", "latency"],
     "verbose": true
   },
@@ -109,6 +110,11 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 | `devices` | one entry per benchmarked device |
 | `inventory` | `--verbose` only: what `--list-devices` would have shown (see *Inventory*) |
 | `log` | the diagnostic stream, in order (see *Log*). The warnings in it are usually the only record of *why* something is absent |
+
+`invocation.target_time_us`, `target_time_us_ml_gpu` and `target_time_us_cpu`
+are the `--max-time-gpu`, `--max-time-ml-gpu` and `--max-time-cpu` budgets in
+microseconds; a file written before `--max-time-ml-gpu` existed has no
+`target_time_us_ml_gpu`.
 
 `invocation.tests` is written only when the run was narrowed to specific tests;
 `invocation.iters` only when pinned with `-i` (absent means each test was

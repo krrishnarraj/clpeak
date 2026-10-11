@@ -224,6 +224,7 @@ public:
   // the inventory and the device selector all read it from here.
   static constexpr Backend kBackend = Backend::Onnx;
   Backend backend() const override { return kBackend; }
+  void applyOptions(const CliOptions &opts) override;
   int runAll() override;
 
   static BackendInventory enumerate();

@@ -82,7 +82,7 @@ double convFlops(const Shape &v, int64_t spatial)
 int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
   // The longest one prediction may be predicted to take: on a GPU,
-  // --max-time-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  // --max-time-ml-gpu (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
@@ -161,7 +161,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         if (lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / lastRate > runCapUs)
         {
           CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a prediction, past "
-                      "--max-time-gpu (%.2f s), stopping\n",
+                      "--max-time-ml-gpu (%.2f s), stopping\n",
                       dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
                       runCapUs / 1.0e6);
           break;
@@ -282,7 +282,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           break;
         if (runCapUs > 0.0 && m.probeUs > runCapUs)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-gpu (%.2f s), "
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-ml-gpu (%.2f s), "
                       "stopping\n",
                       dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
           break;

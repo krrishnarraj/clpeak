@@ -61,7 +61,9 @@ class RunConfigScreen extends StatelessWidget {
                     'Per-test measurement window. Longer budgets steady the '
                     'numbers; shorter budgets finish faster. The GPU budget '
                     'is also the longest a GPU is kept busy in one go, which '
-                    'keeps the driver from resetting it.',
+                    'keeps the driver from resetting it. The ML budget is the '
+                    'longest one ONNX Runtime, LiteRT or Core ML run may keep '
+                    'a GPU busy; their size sweeps stop before that.',
                     style: t.body,
                   ),
                   const SizedBox(height: 14),
@@ -76,6 +78,16 @@ class RunConfigScreen extends StatelessWidget {
                           defaultValue: kDefaultMaxTimeMs,
                           onChanged: (v) =>
                               service.updateConfig((c) => c.maxTimeMs = v),
+                        ),
+                        Container(height: 1, color: t.line),
+                        _BudgetSlider(
+                          label: 'ML on GPU',
+                          value: config.maxTimeMlGpuMs,
+                          min: 100,
+                          max: 2000,
+                          defaultValue: kDefaultMaxTimeMlGpuMs,
+                          onChanged: (v) => service
+                              .updateConfig((c) => c.maxTimeMlGpuMs = v),
                         ),
                         Container(height: 1, color: t.line),
                         _BudgetSlider(

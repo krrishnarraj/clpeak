@@ -91,7 +91,7 @@ namespace
   constexpr unsigned int kBlockBudgetUs = 5000000;
 
   // On a GPU, a rate borrowed from another precision predicts a variant's
-  // first prompt only with this much room under --max-time-gpu.  Precisions
+  // first prompt only with this much room under --max-time-ml-gpu.  Precisions
   // run several times apart: through WebGPU on a Mali-G615 the 512-token
   // pass took 4.57 s in fp32 against fp16's 0.87, and fp16's rate let it
   // past a 1 s cap.  Any closer, the variant's own 64-token prompt -- an
@@ -119,7 +119,7 @@ namespace
       char buf[32];
       std::snprintf(buf, sizeof buf, "%.1f", us / 1.0e6);
       return std::string(what) + " would keep this GPU busy for about " + buf +
-             " s, longer than --max-time-gpu lets one run hold it -- a driver "
+             " s, longer than --max-time-ml-gpu lets one run hold it -- a driver "
              "may reset a GPU held longer";
     }
     return std::string();
@@ -756,7 +756,7 @@ namespace
 int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        benchmark_config_t &cfg)
 {
-  // The longest one pass may be predicted to take: on a GPU, --max-time-gpu
+  // The longest one pass may be predicted to take: on a GPU, --max-time-ml-gpu
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
@@ -1198,7 +1198,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (it != vr.prefill.end() && it->second.us > 0.0 && runCapUs > 0.0 &&
             it->second.us > runCapUs)
           CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: the "
-                      "fp16 form held the GPU %.2f s a run, past --max-time-gpu "
+                      "fp16 form held the GPU %.2f s a run, past --max-time-ml-gpu "
                       "(%.2f s)\n",
                       ep.providerKey.c_str(), v.label, it->second.us / 1.0e6,
                       runCapUs / 1.0e6);

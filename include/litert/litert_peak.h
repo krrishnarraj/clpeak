@@ -99,6 +99,7 @@ public:
 
   static constexpr Backend kBackend = Backend::Litert;
   Backend backend() const override { return kBackend; }
+  void applyOptions(const CliOptions &opts) override;
   int runAll() override;
 
   static BackendInventory enumerate();

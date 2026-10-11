@@ -30,7 +30,7 @@ micro-graphs on all three side by side.
 
 | File | Purpose |
 |------|---------|
-| `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
+| `coreml_peak.mm` | `CoreMLPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
@@ -45,7 +45,7 @@ micro-graphs on all three side by side.
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — the smallest work the planner sends to the unit, and model creation |
 
 On the GPU, gemm, conv and the block also hold one prediction to
-`--max-time-gpu` (`gpuRunCapUs()`), and gemm predicts each layout's first
+`--max-time-ml-gpu` (`gpuRunCapUs()`), and gemm predicts each layout's first
 rung from one prediction of a 512-wide chain -- the ONNX backend's rule, for
 its reason (`src/onnx/AGENTS.md`, "Bound a ladder on what it measured").
 

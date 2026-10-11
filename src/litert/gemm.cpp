@@ -93,7 +93,7 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
-// On a GPU one run is bounded too, at --max-time-gpu (gpuRunCapUs).  Each
+// On a GPU one run is bounded too, at --max-time-ml-gpu (gpuRunCapUs).  Each
 // form's first rung, which has no rate to be predicted from, is predicted
 // from a chain this wide timed once beforehand (mlLadderScouts) -- the ONNX
 // ladder's rule, for its reason (src/onnx/gemm.cpp).  The scout is no rung:
@@ -226,7 +226,7 @@ std::string winnerWords(const std::vector<LitertForm> &forms, bool kernelsRaced,
 
 int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev, benchmark_config_t &cfg)
 {
-  // The longest one run may be predicted to take: on a GPU, --max-time-gpu
+  // The longest one run may be predicted to take: on a GPU, --max-time-ml-gpu
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
 
@@ -374,7 +374,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         {
           if (runTooLong)
             CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would keep the GPU busy ~%.2f s a run, past "
-                        "--max-time-gpu (%.2f s), stopping\n",
+                        "--max-time-ml-gpu (%.2f s), stopping\n",
                         dev.displayName.c_str(), label, (long long)D, form.c_str(), runUs / 1.0e6,
                         runCapUs / 1.0e6);
           else
@@ -390,7 +390,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
                                           " s a run, "
                                     : "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
                                           std::to_string(D) + "-wide one would take about " + buf + " s a run, ") +
-                        (runTooLong ? "longer than --max-time-gpu lets one run hold a GPU -- a driver may "
+                        (runTooLong ? "longer than --max-time-ml-gpu lets one run hold a GPU -- a driver may "
                                       "reset a GPU held longer -- "
                                     : "longer than one multiply may take, ") +
                         "so no size was measured",
@@ -579,7 +579,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         }
         else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.2f s a run, past --max-time-gpu (%.2f s), "
+          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.2f s a run, past --max-time-ml-gpu (%.2f s), "
                       "stopping\n",
                       dev.displayName.c_str(), label, (long long)D, form.c_str(), m.probeUs / 1.0e6,
                       runCapUs / 1.0e6);

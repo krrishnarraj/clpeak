@@ -212,7 +212,7 @@ CoremlBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
 int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
   // The longest one prediction may be predicted to take: on a GPU,
-  // --max-time-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  // --max-time-ml-gpu (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
   constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
@@ -485,7 +485,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       char buf[32];
       std::snprintf(buf, sizeof buf, "%.1f", us / 1.0e6);
       return std::string(what) + " would keep this GPU busy for about " + buf +
-             " s, longer than --max-time-gpu lets one run hold it -- a driver may reset a GPU held longer";
+             " s, longer than --max-time-ml-gpu lets one run hold it -- a driver may reset a GPU held longer";
     }
     return std::string();
   };

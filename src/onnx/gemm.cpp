@@ -113,7 +113,7 @@ namespace
   // against 1.47 -- at the price of iterations of up to half a minute there.
   constexpr double kMaxIterUs = 2.0e6; // one multiply, predicted
 
-  // On a GPU one run is bounded too (gpuRunCapUs, --max-time-gpu): a chain
+  // On a GPU one run is bounded too (gpuRunCapUs, --max-time-ml-gpu): a chain
   // can reach the device as one submission, and a driver resets a GPU that
   // one submission holds too long.  ONNX Runtime's WebGPU provider submits
   // every sixteen dispatches, and on a Galaxy S24 the multiply cap let the
@@ -169,7 +169,7 @@ namespace
 int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
-  // The longest one run may be predicted to take: on a GPU, --max-time-gpu
+  // The longest one run may be predicted to take: on a GPU, --max-time-ml-gpu
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
@@ -336,7 +336,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           if (runTooLong)
             CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d would keep the GPU "
-                        "busy ~%.2f s a run, past --max-time-gpu (%.2f s), "
+                        "busy ~%.2f s a run, past --max-time-ml-gpu (%.2f s), "
                         "stopping\n",
                         ep.providerKey.c_str(), tag, (long long)D, layers,
                         predictedUs / 1.0e6, runCapUs / 1.0e6);
@@ -356,7 +356,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                          : "at the rate " + sizeName(kScoutDim) + " ran, " +
                                sizeName(D) + " would take about " + buf + " a run, ") +
                     (runTooLong
-                         ? "longer than --max-time-gpu lets one run hold a "
+                         ? "longer than --max-time-ml-gpu lets one run hold a "
                            "GPU -- a driver may reset a GPU held longer -- "
                          : "longer than one multiply may take, ") +
                     "so no size was measured";
@@ -681,12 +681,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
       // The same for a GPU's run (gpuRunCapUs): this one held the device
-      // longer than --max-time-gpu and survived it, and the next would hold
+      // longer than --max-time-ml-gpu and survived it, and the next would hold
       // it eight times as long.
       if (runCapUs > 0.0 && per_iter_us > runCapUs)
       {
         CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d measured %.2f s a run, "
-                    "past --max-time-gpu (%.2f s), stopping\n",
+                    "past --max-time-ml-gpu (%.2f s), stopping\n",
                     ep.providerKey.c_str(), tag, (long long)D, layers,
                     per_iter_us / 1.0e6, runCapUs / 1.0e6);
         endedOnWork = true;

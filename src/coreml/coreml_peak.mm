@@ -116,6 +116,14 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
 CoreMLPeak::CoreMLPeak() = default;
 CoreMLPeak::~CoreMLPeak() = default;
 
+void CoreMLPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
+
 int CoreMLPeak::runAll()
 {
   std::string why;

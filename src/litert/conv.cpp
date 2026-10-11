@@ -113,7 +113,7 @@ struct ConvLane
 
 int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev, benchmark_config_t &cfg)
 {
-  // The longest one pass may be predicted to take: on a GPU, --max-time-gpu
+  // The longest one pass may be predicted to take: on a GPU, --max-time-ml-gpu
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
 
@@ -223,7 +223,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           if (ln.lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / ln.lastRate > runCapUs)
           {
             CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s would keep the GPU busy ~%.2f s a pass, past "
-                        "--max-time-gpu (%.2f s), stopping\n",
+                        "--max-time-ml-gpu (%.2f s), stopping\n",
                         dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(),
                         convFlops(v, sp) / ln.lastRate / 1.0e6, runCapUs / 1.0e6);
             race.drop(f);
@@ -345,7 +345,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             race.drop(f);
           else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s measured %.2f s a pass, past --max-time-gpu (%.2f s), "
+            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s measured %.2f s a pass, past --max-time-ml-gpu (%.2f s), "
                         "stopping\n",
                         dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), m.probeUs / 1.0e6,
                         runCapUs / 1.0e6);

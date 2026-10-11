@@ -249,10 +249,13 @@ static std::string helpText()
   helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time-gpu calibration)");
   helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
   helpLine(s, "--max-time-gpu ms", "how long a GPU may be kept busy in one go (default:\n"
-                                   "1000 ms): every backend but CPU sizes a test's timed\n"
-                                   "phase to it, and ONNX Runtime, LiteRT and Core ML stop\n"
-                                   "a GPU's size sweep before one run would take longer.\n"
-                                   "Set it lower if you hit a GPU watchdog");
+                                   "500 ms): every backend but CPU, ONNX Runtime, LiteRT\n"
+                                   "and Core ML sizes a test's timed phase to it.  Set it\n"
+                                   "lower if you hit a GPU watchdog");
+  helpLine(s, "--max-time-ml-gpu ms", "the longest one run of ONNX Runtime, LiteRT or Core ML\n"
+                                      "may keep a GPU busy (default: 1000 ms): a GPU's size\n"
+                                      "sweep stops before one run would take longer.  Set it\n"
+                                      "lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
   helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
                            "with -o, record them in the file's log, with the device\n"
@@ -533,7 +536,8 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       out.warmupCount = parsed;
       continue;
     }
-    if (!strcmp(a, "--max-time-gpu") || !strcmp(a, "--max-time-cpu"))
+    if (!strcmp(a, "--max-time-gpu") || !strcmp(a, "--max-time-ml-gpu") ||
+        !strcmp(a, "--max-time-cpu"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -544,6 +548,8 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         return invalidValue(err, a, v);
       if (!strcmp(a, "--max-time-gpu"))
         out.targetTimeUs = parsed * 1000u; // ms -> us
+      else if (!strcmp(a, "--max-time-ml-gpu"))
+        out.targetTimeUsMlGpu = parsed * 1000u;
       else
         out.targetTimeUsCpu = parsed * 1000u;
       continue;
@@ -754,6 +760,7 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
 
   inv.targetTimeUs = opts.targetTimeUs;
   inv.targetTimeUsCpu = opts.targetTimeUsCpu;
+  inv.targetTimeUsMlGpu = opts.targetTimeUsMlGpu;
   inv.warmup = opts.warmupCount;
   // Only when pinned with -i.  Left at 0 the run calibrated each test to a
   // time budget instead, which is the normal mode and the comparable one.

@@ -85,6 +85,9 @@ struct CliOptions {
   unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time-gpu, in us
   // CPU backend uses its own (longer) budget; --max-time-gpu does not affect it.
   unsigned int targetTimeUsCpu = DEFAULT_CPU_TARGET_TIME_US; // --max-time-cpu, in us
+  // The ML backends (ONNX Runtime, LiteRT, Core ML) bound one GPU run with
+  // their own budget (gpuRunCapUs); neither of the above affects them.
+  unsigned int targetTimeUsMlGpu = DEFAULT_ML_GPU_TARGET_TIME_US; // --max-time-ml-gpu, in us
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode

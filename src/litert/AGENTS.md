@@ -33,7 +33,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 
 | File | Purpose |
 |------|---------|
-| `litert_peak.cpp` | `LitertPeak`: `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name) |
+| `litert_peak.cpp` | `LitertPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name) |
 | `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
@@ -48,7 +48,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / round trip / d2h through LiteRT's tensor buffers |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — a one-operator graph, a 256-cube matmul, and compiled-model creation |
 
-On a GPU, gemm, conv and the block also hold one run to `--max-time-gpu`
+On a GPU, gemm, conv and the block also hold one run to `--max-time-ml-gpu`
 (`gpuRunCapUs()`), and gemm predicts each operator's first rung from one run
 of a 512-wide chain -- the ONNX backend's rule, for its reason
 (`src/onnx/AGENTS.md`, "Bound a ladder on what it measured").

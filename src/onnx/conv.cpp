@@ -269,7 +269,7 @@ namespace
 int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                       benchmark_config_t &cfg)
 {
-  // The longest one pass may be predicted to take: on a GPU, --max-time-gpu
+  // The longest one pass may be predicted to take: on a GPU, --max-time-ml-gpu
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
@@ -379,7 +379,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             convFlops(v, sp) / lastRate > runCapUs)
         {
           CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would keep the GPU busy "
-                      "~%.2f s a pass, past --max-time-gpu (%.2f s), "
+                      "~%.2f s a pass, past --max-time-ml-gpu (%.2f s), "
                       "stopping\n",
                       ep.providerKey.c_str(), row.c_str(), (long long)sp,
                       (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
@@ -566,7 +566,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (runCapUs > 0.0 && per_iter_us > runCapUs)
         {
           CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.2f s a pass, "
-                      "past --max-time-gpu (%.2f s), stopping\n",
+                      "past --max-time-ml-gpu (%.2f s), stopping\n",
                       ep.providerKey.c_str(), row.c_str(), (long long)sp,
                       (long long)sp, per_iter_us / 1.0e6, runCapUs / 1.0e6);
           break;
