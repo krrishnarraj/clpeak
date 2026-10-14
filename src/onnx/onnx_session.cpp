@@ -792,6 +792,12 @@ static std::string uniqueProfilePrefixPath()
 // reject the model while creating the session, though, after ORT has already
 // opened a profile file and before there is a session to end. The unique
 // prefix above gives that failure path a safe cleanup target.
+//
+// Names are compared in the platform's own encoding.  The walk crosses every
+// file in the temp directory, and on Windows path::string() converts to the
+// ANSI code page and *throws* on a name that has no spelling there -- one
+// such file in %TEMP% then killed the run at the first refused session,
+// whatever the runtime or provider.
 static void removeProfileArtifacts(const std::string &prefix)
 {
   if (prefix.empty())
@@ -800,13 +806,15 @@ static void removeProfileArtifacts(const std::string &prefix)
   const std::filesystem::path prefixPath(prefix);
   const std::filesystem::path dir = prefixPath.parent_path().empty()
       ? std::filesystem::path(".") : prefixPath.parent_path();
-  const std::string namePrefix = prefixPath.filename().string();
+  const std::filesystem::path::string_type namePrefix =
+      prefixPath.filename().native();
 
   std::error_code ec;
   std::filesystem::directory_iterator it(dir, ec), end;
   for (; !ec && it != end; it.increment(ec))
   {
-    const std::string name = it->path().filename().string();
+    const std::filesystem::path::string_type name =
+        it->path().filename().native();
     if (name.compare(0, namePrefix.size(), namePrefix) != 0)
       continue;
 

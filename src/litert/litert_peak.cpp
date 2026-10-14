@@ -71,7 +71,17 @@ std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
   {
     std::vector<std::string> names;
     for (; !ec && it != end; it.increment(ec))
-      names.push_back(it->path().filename().string());
+    {
+      // On Windows string() throws for a name the ANSI code page cannot
+      // spell; no shim is named that way, so such a file is passed over.
+      try
+      {
+        names.push_back(it->path().filename().string());
+      }
+      catch (const std::system_error &)
+      {
+      }
+    }
     for (const auto &v : kNpuVendors)
       for (const std::string &name : names)
         if ((name.rfind("libLiteRtDispatch_", 0) == 0 || name.rfind("LiteRtDispatch", 0) == 0) &&
