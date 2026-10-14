@@ -46,7 +46,9 @@
 // int8_qdq chain at 1.24 TOPS against 702 GOPS, as int8 multiplies
 // (`convolution_int8(conv_generic)`) rather than a float kernel between
 // quantize and dequantize passes, and the Metal accelerator has none.  So
-// int8_qdq is four forms there.  The row reports the fastest and names it.
+// int8_qdq is four forms there -- eight on a LiteRT that also has the
+// IrModel pipeline, which every GPU row races against the GraphFloat32 one
+// (litertWithPipelines).  The row reports the fastest and names it.
 //
 // LiteRT's own answer is the guard.  The runtime keeps the CPU as a fallback
 // for any operation an accelerator declines and says nothing about it in
@@ -149,8 +151,9 @@ const Variant kVariants[] = {
 // int8's layers as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as
 // many positions as the layer is wide -- the same multiply-accumulates in
 // the operator NPU compilers were first built for -- and, where the GPU has
-// 8-bit kernels for the format, each with them disallowed and allowed.  The
-// first listed carries on through a tie.
+// 8-bit kernels for the format, each with them disallowed and allowed; on a
+// GPU with two graph pipelines, each through both.  The first listed
+// carries on through a tie.
 std::vector<LitertForm> formsFor(LitertFormat f, const LitertPlan &plan)
 {
   const bool ops = f == LitertFormat::Int8Qdq;
@@ -158,16 +161,13 @@ std::vector<LitertForm> formsFor(LitertFormat f, const LitertPlan &plan)
   for (int conv = 0; conv <= (ops ? 1 : 0); conv++)
     for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
       forms.push_back(LitertForm{conv == 1, k == 1, false});
-  return forms;
+  return litertWithPipelines(std::move(forms), plan);
 }
 
 // One form in a row's words.
-std::string formName(const LitertForm &form, bool kernelsRaced)
+std::string formName(const LitertForm &form, const LitertPlan &plan)
 {
-  std::string s = form.conv1x1 ? "1x1 convolutions" : "FULLY_CONNECTED operators";
-  if (kernelsRaced)
-    s += form.gpuInt8Kernels ? " with the GPU's 8-bit kernels" : " without the GPU's 8-bit kernels";
-  return s;
+  return (form.conv1x1 ? "1x1 convolutions" : "FULLY_CONNECTED operators") + litertGpuFormWords(plan, form);
 }
 
 // One form's climb up the ladder: its own caps, compile history, fold
@@ -211,15 +211,14 @@ std::string foldReason(const std::string &form, const char *tail)
 
 // A raced row's winner (clpeak::MultiFormRace), in the words that follow
 // "Fastest at N-wide layers": how its layers were written where that was
-// raced, and whether the GPU's 8-bit kernels were allowed where that was.
-std::string winnerWords(const std::vector<LitertForm> &forms, bool kernelsRaced, size_t win)
+// raced, whether the GPU's 8-bit kernels were allowed where that was, and
+// which pipeline built its GPU graph where that was.
+std::string winnerWords(const std::vector<LitertForm> &forms, const LitertPlan &plan, size_t win)
 {
   std::string s;
   if (forms.front().conv1x1 != forms.back().conv1x1)
     s += forms[win].conv1x1 ? " as 1x1 convolutions" : " as FULLY_CONNECTED";
-  if (kernelsRaced)
-    s += forms[win].gpuInt8Kernels ? " with the GPU's 8-bit kernels" : " without the GPU's 8-bit kernels";
-  return s;
+  return s + litertGpuFormWords(plan, forms[win]);
 }
 
 } // namespace
@@ -305,7 +304,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     std::string wrongRow;   // a NaN from any form withholds the row
     // A form in the log's words, and in a reason's, which names it only
     // where the row has more than one.
-    auto what = [&](size_t f) { return formName(forms[f], plan.gpuInt8KernelChoice); };
+    auto what = [&](size_t f) { return formName(forms[f], plan); };
     auto whose = [&](size_t f) { return raced ? what(f) : std::string(); };
 
     // Each form's first rung is predicted from a kScoutDim chain
@@ -641,7 +640,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       // In the unit litertRateUnit gives the format and the winner's kernel:
       // a weight-only one's in ops where it multiplied int8.
       o.unit = std::strcmp(litertRateUnit(plan, win.kernel, dev.accel), "ops") == 0 ? "ops" : "";
-      const std::string winner = raced ? winnerWords(forms, plan.gpuInt8KernelChoice, w) : std::string();
+      const std::string winner = raced ? winnerWords(forms, plan, w) : std::string();
       o.description += "  Fastest at " + std::to_string(win.bestDim) + "-wide layers" + winner;
       if (!win.kernel.empty())
         o.description += std::string(winner.empty() ? ", as `" : ", run as `") + win.kernel + "`" +

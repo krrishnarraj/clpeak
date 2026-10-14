@@ -64,9 +64,10 @@ const char *litertAccelName(LitertAccel a);   // "CPU" / "GPU" / "NPU"
 
 // How a raced format's graph is written and run (gemm.cpp, conv.cpp,
 // block.cpp, each with its numbers): the operator its layers are, whether a
-// GPU may use its 8-bit kernels, and whether an integer graph's inputs and
-// outputs are float.  The first two are raced on rate; the last is settled
-// by the answer (LitertPeak::resolveIo), since it moves no rate.
+// GPU may use its 8-bit kernels, which of its graph pipelines builds it, and
+// whether an integer graph's inputs and outputs are float.  All but the last
+// are raced on rate; that one is settled by the answer
+// (LitertPeak::resolveIo), since it moves no rate.
 struct LitertForm
 {
   // The layers as 1x1 CONV_2Ds over a grid of positions, not FULLY_CONNECTED.
@@ -79,6 +80,10 @@ struct LitertForm
   // An integer format's graph takes and returns float32, quantized inside it
   // (QUANTIZE in, DEQUANTIZE out), the converter's default form.
   bool floatIo = false;
+  // GPU: use_ir_model -- the accelerator builds its GPU graph through the
+  // IrModel pipeline LiteRT 2.3.0 added beside the GraphFloat32 one
+  // (LitertPlan::gpuPipelineChoice).
+  bool gpuIrModel = false;
 };
 
 struct litert_device_info_t
@@ -152,8 +157,8 @@ public:
                        LitertForm form);
 
 private:
-  // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo)
-  std::map<std::tuple<int, int, bool, bool, bool>, AnswerCheck> answerChecks_;
+  // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo, gpuIrModel)
+  std::map<std::tuple<int, int, bool, bool, bool, bool>, AnswerCheck> answerChecks_;
 };
 
 // The accelerators this machine can actually run, accelerators first and the

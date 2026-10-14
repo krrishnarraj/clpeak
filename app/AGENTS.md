@@ -38,31 +38,35 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   by listing a directory, which an APK's internal `lib/` is not), and
   Gradle refuses an incomplete Qualcomm set or libraries an older script
   left in the base.  MediaTek's and Google Tensor's runtimes are system
-  libraries on the device.  See NPU delivery below and
-  `src/litert/AGENTS.md`, Packaging.
+  libraries on the device; Samsung's shims are published nowhere.  See NPU
+  delivery below and `src/litert/AGENTS.md`, Packaging.
 - NPU delivery (Android, Play): each NPU module is a dynamic feature
   module -- `android/npu/<module>/AndroidManifest.xml` names its device
   groups, `android/npu/module.gradle.kts` builds them all, and
   `settings.gradle.kts` includes those staged -- that Play installs with
-  the app only on the chipsets of its groups, the layout of LiteRT's own
-  NPU zip: `qualcomm_runtime` (the QNN runtime and both stacks' Qualcomm
-  libraries) on every whitelisted Snapdragon, `qualcomm_runtime_vNN` (one
-  Hexagon generation's Skel/Stub) on that generation's, and
-  `google_tensor_runtime` on Tensor G3–G6; any other phone downloads
-  none.  The whitelist is `android/app/device_targeting_configuration.xml`.
+  the app only on the chipsets of its groups: `qualcomm_runtime` (the QNN
+  runtime and both stacks' Qualcomm libraries) on every whitelisted
+  Snapdragon, `qualcomm_runtime_vNN` (one Hexagon generation's Skel/Stub) on
+  that generation's, `google_tensor_runtime` on Tensor G3–G6 and
+  `mediatek_runtime` on the Dimensity chipsets LiteRT's MediaTek plugin
+  names; any other phone downloads none.  The whitelist is
+  `android/app/device_targeting_configuration.xml`.
   Play matches the exact pair the phone reports (`ro.soc.manufacturer`,
   `ro.soc.model`) and has no vendor-wide selector, so a chipset missing
   there gets no NPU libraries and lists no NPU, silently.  **Keep the
   whitelist current, from time to time as new chipsets reach phones and at
   every LiteRT bump**: diff it against LiteRT's
   `litert/vendors/qualcomm/supported_soc.csv` (chipset → Hexagon
-  generation) and the Tensor models in
-  `litert/python/aot/vendors/google_tensor/target.py`, at the tag
-  `third_party/litert/README.md` pins, and add each new chipset to its
-  generation's group under both "QTI" and "Qualcomm" (Play cannot tell
-  them apart).  A chipset with no published generation stays out until
-  one is published (SM8735, SM7750 and SM7635 at LiteRT 2.2.0) -- the
-  wrong Skel loads nothing.  A new generation needs a module directory and
+  generation), the Tensor models in
+  `litert/python/aot/vendors/google_tensor/target.py` and the MediaTek
+  models in `kPluginSocModels` (`litert/vendors/mediatek/compiler/
+  compiler_plugin.cc`) and `litert/vendors/mediatek/supported_soc.csv`,
+  at the tag `third_party/litert/README.md` pins, and add each new
+  Snapdragon to its generation's group under both "QTI" and "Qualcomm"
+  (Play cannot tell them apart), each MediaTek under "Mediatek".  A
+  chipset with no published generation stays out until one is published
+  (SM8735, SM7750 and SM7635 at LiteRT 2.3.0) -- the wrong Skel loads
+  nothing.  A new generation needs a module directory and
   a group of its own; `fetch_android_npu.sh` stops on a Skel with no
   module.  bundletool refuses a bundle whose modules carry native
   libraries for different ABI sets, so each module also builds an empty
@@ -79,7 +83,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
   `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
   own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
-  and its Metal accelerator, device and simulator slices, ~31 MB, from its
+  and its Metal accelerator, device and simulator slices, ~42 MB, from its
   litert bucket -- and stages them under `ios/clpeak_native/embed-{device,
   simulator}/`, from where the Runner's embed phase copies and signs them
   into `Frameworks/` to be dlopen'd; `--no-litert` leaves the backend out,

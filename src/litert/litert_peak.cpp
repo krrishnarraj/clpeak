@@ -113,9 +113,9 @@ bool nameCarriesTag(const std::string &name, const std::string &tag)
 // Why one vendor's shims in `dir` would not load, or empty.  LiteRT does
 // say, but as the cause of an error several layers up, beside whatever
 // failed after it; the linker's own sentence is the reason a person needs
-// -- an APK carrying Qualcomm's compiler plugin without a QNN library it is
-// linked against reads `dlopen failed: library "libQnnIr.so" not found` --
-// so each is opened here first, with the flags LiteRT opens it with on
+// -- a shim missing a library it is linked against reads `dlopen failed:
+// library "libQnnIr.so" not found` (LiteRT 2.2.0's Qualcomm plugin, packaged
+// without that QNN library) -- so each is opened here first, with the flags LiteRT opens it with on
 // Android (litert_dispatch.cc, compiler_plugin.cc).  The handles stay open:
 // LiteRT opens the same files next and is handed them.  Android only:
 // elsewhere LiteRT opens a compiler plugin RTLD_DEEPBIND, which only the
@@ -257,9 +257,14 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
 
 // The GPU accelerator library that registered, from what LiteRT logged
 // while the environment came up ("Dynamically loaded GPU accelerator
-// (libLiteRtMetalAccelerator.dylib) registered.").
+// (libLiteRtMetalAccelerator.dylib) registered.") -- or, from a model's
+// creation, the API it fell back to: since 2.3.0 the OpenCL accelerator
+// runs on OpenGL ES where there is no OpenCL ("OpenCL not supported on this
+// platform. Using OpenGL instead.", ml_drift_cl_gl_accelerator.cc).
 std::string gpuBackendFrom(const std::string &log)
 {
+  if (log.find("Using OpenGL instead") != std::string::npos)
+    return "OpenGL";
   if (log.find("MetalAccelerator") != std::string::npos)
     return "Metal";
   if (log.find("OpenClAccelerator") != std::string::npos || log.find("ClGlAccelerator") != std::string::npos)
@@ -393,12 +398,13 @@ std::vector<litert_device_info_t> litertUsableDevices(
 
     // GPU: the accelerator library beside the runtime, whichever API it is
     // built on.  The environment comes up first, on its own: which library
-    // registered is in its log, and the OpenCL one dereferences a null
-    // (strlen inside libLiteRtClGlAccelerator, LiteRT 2.2.0) when it
-    // compiles a model on a machine with no OpenCL library at all -- an
-    // emulator, a box without a driver -- rather than declining.  So when
-    // that is the accelerator, an OpenCL library has to be loadable before
-    // a model is sent to it.
+    // registered is in its log, and LiteRT 2.2.0's OpenCL one dereferences
+    // a null (strlen inside libLiteRtClGlAccelerator) when it compiles a
+    // model on a machine with no OpenCL library at all -- an emulator, a
+    // box without a driver -- rather than declining.  So when that is the
+    // accelerator of such a runtime, an OpenCL library has to be loadable
+    // before a model is sent to it.  2.3.0's (ABI 1.1.0) runs on OpenGL ES
+    // there instead, and the probe's log names the API that answered.
     {
       litert_device_info_t dev;
       dev.accel = LitertAccel::Gpu;
@@ -410,7 +416,7 @@ std::vector<litert_device_info_t> litertUsableDevices(
       if (ok)
       {
         dev.vendor = gpuBackendFrom(litertEnvironmentLog(dev.accel));
-        if (dev.vendor == "OpenCL")
+        if (dev.vendor == "OpenCL" && !rt.abi11)
         {
           void *cl = clpeak::dynOpen({
 #if defined(__ANDROID__)
@@ -425,16 +431,16 @@ std::vector<litert_device_info_t> litertUsableDevices(
           {
             ok = false;
             reason = "LiteRT's GPU accelerator here is the OpenCL one and no OpenCL library can be "
-                     "loaded; the accelerator crashes rather than declining in that case (LiteRT "
-                     "2.2.0), so no model is sent to it";
+                     "loaded; this LiteRT's accelerator crashes rather than declining in that case "
+                     "(2.3.0 runs on OpenGL ES instead), so no model is sent to it";
           }
           // The handle is kept: the accelerator dlopens the same library.
         }
       }
       if (ok && probeAccel(rt, dev, reason, log))
       {
-        if (dev.vendor.empty())
-          dev.vendor = gpuBackendFrom(log);
+        if (const std::string probed = gpuBackendFrom(log); !probed.empty())
+          dev.vendor = probed;
         if (!dev.vendor.empty())
           dev.displayName += " (" + dev.vendor + ")";
         g_devs.push_back(dev);

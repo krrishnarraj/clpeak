@@ -34,15 +34,15 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | File | Purpose |
 |------|---------|
 | `litert_peak.cpp` | `LitertPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name) |
-| `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
+| `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists), and reads the library's own ABI from what it exports (`abiVersion`, `abi11`); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
 | `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback), `litertHeldBytes()` (what a session holds: every memory gate's count), `litertRateUnit()` (a rate row's unit) |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels (`clpeak::MultiFormRace`) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels and every row its two graph pipelines (`clpeak::MultiFormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm; and the answer checks behind every rate row (`answerCheck`, per form, with the never-written marker; `resolveIo`; `wrongAnswer`) |
-| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size; a GPU's int8 rows race its 8-bit kernels |
-| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq and where the projections multiplied int8), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels point by point |
+| `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size; a GPU's int8 rows race its 8-bit kernels, and every row its two graph pipelines |
+| `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq and where the projections multiplied int8), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels, and every variant its two graph pipelines, point by point |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / round trip / d2h through LiteRT's tensor buffers |
@@ -86,6 +86,14 @@ hole (`--litert-lib <wheel>/libLiteRt.so --list-devices` died in
 libonnxruntime.so's exit handler).  That wheel also lacks
 `LiteRtGetStatusString` -- the Android AAR and macOS wheel of the same
 version export it -- which is why that symbol is OPTIONAL.
+
+**The ABI a run reports is the library's, not the headers'.**  LiteRT has
+no call that says its version, and `--litert-lib` takes any wheel, so
+`litertRuntime()` reads it from the exports: ABI 1.1.0 (LiteRT 2.3.0) added
+`LiteRtCompiledModelIsNonCpuFullyAccelerated`, and a library without it is
+1.0.0.  `LitertRuntime::abi11` is what the fences for faults 2.3.0 fixed
+key on (below), so an older runtime keeps them.  A later ABI needs its own
+new entry point added to the probe.
 
 **One LiteRT per process.**  The first library that loads is the one for
 the process (`litertSetLibraryOverride()`): until one has, a choice applies
@@ -287,6 +295,20 @@ kernel name from one profiled run says which kernel it was.
   rather than withholding the row, and the accuracy row reads
   FULLY_CONNECTED without the 8-bit kernels, with what the other forms read
   beside it.
+- **Every GPU row of gemm, conv and the block races the accelerator's two
+  graph pipelines** on a runtime that has both (LiteRT 2.3.0, ABI 1.1.0):
+  ML Drift turns a model into its GPU graph through GraphFloat32, or
+  through the IrModel pipeline when the GPU options say `use_ir_model`
+  (`LitertPlan::gpuPipelineChoice`, `LitertForm::gpuIrModel`,
+  `litertWithPipelines()`), and the two choose kernels and refuse operators
+  differently.  Every form above runs through both, the GraphFloat32 ones
+  first so they keep a tie, and the row names the pipeline that won.  On an
+  M1 Pro's Metal the two tie, timed side by side: within 1% on the matmul
+  chain and on every convolution at every size, so the pipeline a row names
+  there is noise; the IrModel one refused the int8 convolutions, and its
+  answers matched to the ppm.  The race costs the GPU device half again
+  (352 s against 234 on the M1 Pro; the block twice, since it races every
+  point), and is what says whether an Adreno or a Mali differs.
 - `int16x8` has no XNNPACK kernel: the CPU row is the runtime's reference
   kernel, three orders of magnitude slower, which is the honest number for
   a format that only an NPU implements -- and, sixteen multiplies to a
@@ -318,12 +340,15 @@ explicit graph gave 207).
 ## The runtime's own answer is the guard
 
 `LiteRtCompiledModelIsFullyAccelerated()` says whether every operation
-landed on the accelerator selected; LiteRT otherwise keeps the CPU as a
-silent fallback and a matmul it handed back would be timed on the CPU under
-the accelerator's name.  Every GPU and NPU session checks it and a row it
-fails reports unsupported with the reason.  Sessions select *only* the
-target accelerator in their options, so partial delegation is what the
-check catches rather than being masked by a second accelerator.
+landed on an accelerator; LiteRT otherwise keeps the CPU as a silent
+fallback and a matmul it handed back would be timed on the CPU under the
+accelerator's name.  It counts XNNPACK's delegate as an accelerator, so
+where the runtime has ABI 1.1.0's `LiteRtCompiledModelIsNonCpuFullyAccelerated`
+-- every operation on a GPU or NPU delegate, none on the CPU's -- that is
+asked too.  Every GPU and NPU session checks them and a row they fail
+reports unsupported with the reason.  Sessions select *only* the target
+accelerator in their options, so partial delegation is what the check
+catches rather than being masked by a second accelerator.
 
 The profiler (`enable_profiling = true`, `LiteRtCompiledModelGetProfiler`)
 is the second witness: one profiled run per variant at the smallest size
@@ -350,40 +375,53 @@ and uploading every constant twice was the other half of that six minutes.
 
 Five faults in LiteRT 2.2.0's GPU accelerator would take the whole run
 down, and a benchmark that dies to prove a point has proved the wrong one.
-Each is fenced in `litertPlanFor()` or `litert_session.cpp` with the fault
-recorded in the row's reason, so lifting the fence when a release fixes it
-is a one-line change:
+Each is fenced in `litertPlanFor()`, `litert_session.cpp` or
+`litert_peak.cpp` with the fault recorded in the row's reason, so lifting
+the fence when a release fixes it is a one-line change.  2.3.0 fixed three
+of them in whole or part, re-tested on an M1 Pro and an arm64 emulator
+(2026-10-11/14): those fences now apply to an ABI 1.0.0 runtime only
+(`LitertRuntime::abi11`), and `NOTES.md` lists every gate.
 
 - **Unsupported tensor types abort the process.**  The graph reader
   `CHECK`s that a tensor is fp32/fp16/int8/uint8/int4/int2/bool/int32
   (`object_reader.cc`) and glog aborts on anything else -- int16, bfloat16,
-  float8 -- rather than declining.  Those formats are never sent to the GPU.
+  float8 -- rather than declining.  Those formats are never sent to such a
+  GPU.  2.3.0 declines bfloat16 and float8, and its refusal is the row; it
+  declines an int16 FULLY_CONNECTED too, but in the sixteen-layer chain it
+  took another operator whose input is int16 and aborted reading it, so
+  `int16x8` is never sent to any GPU.
 - **Blockwise int4 corrupts the heap.**  The weight conversion transposes
   the packed nibbles with an 8-bit 16×16 transpose microkernel
   (`xnn_x8_transposec_ukernel__16x16_reuse_dec_zip_neon`) that runs past the
   buffer; guard malloc catches it on the first model, a normal run dies some
   rungs later.  Per-row int4 goes through a different path and is safe, but
   it is not the format language models ship in, so the blocked format is not
-  sent to the GPU rather than measured as something else.
+  sent to the GPU rather than measured as something else.  Still so in
+  2.3.0, through both pipelines.
 - **A composite with a constant input aborts the process.**  The graph
   reader CHECK-fails on `CanReadValue(node_input_index)` (`object_reader.cc`)
   when a `STABLEHLO_COMPOSITE`'s operand is a constant tensor, which the
   block's decode form has (its K/V cache); the composite variant's decode
-  rows are not sent to the GPU, its prefill rows are.
+  rows are not sent to the GPU, its prefill rows are.  Still so in 2.3.0,
+  whose IrModel pipeline answers NaN there instead.
 - **The OpenCL accelerator crashes without an OpenCL library.**  On a
   machine with no `libOpenCL` at all (an emulator, a box without a driver)
   `libLiteRtClGlAccelerator` dereferences a null inside `strlen` when it
   compiles its first model instead of declining.  `litertUsableDevices()`
   brings the GPU environment up on its own first, reads which accelerator
   library registered, and when it is the OpenCL one requires an OpenCL
-  library to be loadable before any model is sent.
+  library to be loadable before any model is sent.  2.3.0's runs on OpenGL
+  ES there instead ("OpenCL not supported on this platform. Using OpenGL
+  instead."), and the device is named after the API the probe's log says
+  answered: "GPU via LiteRT (OpenGL)".
 - **The Metal accelerator leaks a residency set per compiled model** and
   `IOGPUMetalCommandQueue` asserts on the 33rd ("command queue residency
   set limit of 32 exceeded").  The `enable_metal_residency_set` option does
   not stop it and neither does an autorelease pool; only a new command
   queue does, so on Apple the GPU environment is torn down and rebuilt
   every `kGpuModelsPerEnvironment` (24) compiled models, between sessions,
-  for ~300 ms of Metal initialisation each time.
+  for ~300 ms of Metal initialisation each time.  2.3.0 compiled 125 models
+  in one environment, and keeps it.
 
 Verify a new format or accelerator path under guard malloc
 (`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) before trusting a run
@@ -395,8 +433,8 @@ quantized model's GPU graph on float staging tensors (TFLite's
 `quant_conversion_map_`), and the Metal and WebGPU `Invoke`s dequantize the
 int8 inputs into them and quantize the outputs back (`DequantizeInputs` /
 `QuantizeOutputs`); the OpenCL one, `ml_drift_delegate/delegate/
-delegate_opencl.cc`, calls neither -- in v2.2.0 and on main as of
-2026-10-07.  So with int8 inputs and outputs the GPU computes from a staging
+delegate_opencl.cc`, calls neither -- in v2.2.0, in v2.3.0 and on main as
+of 2026-10-07.  So with int8 inputs and outputs the GPU computes from a staging
 tensor nothing wrote, and the output keeps whatever its buffer held: an
 Adreno 750 and a Mali-G710 both read 2.5 million ppm.  The one sign LiteRT
 gives is `Failed to get buffer requirements for tensor` for each int8 input
@@ -536,11 +574,17 @@ budgets.
 
 ## Packaging
 
-- **Android**: `app/android/app/build.gradle.kts` packages the
-  `com.google.ai.edge.litert` AAR (arm64: `libLiteRt.so` 5.5 MB +
-  `libLiteRtClGlAccelerator.so` 3.1 MB); its manifest's `uses-native-library`
-  entries merge into ours.  NPU dispatch and compiler-plugin shims come from
-  the release's `litert_npu_runtime_libraries_jit.zip` via
+- **Android**: `app/android/app/build.gradle.kts` packages two
+  `com.google.ai.edge.litert` AARs, `litert` (arm64: `libLiteRt.so`, 5.6 MB)
+  and `litert-gpu` (`libLiteRtClGlAccelerator.so`, 3.3 MB), without the
+  `litert-api` both depend on -- its Kotlin surface, a JNI library, Guava
+  and Play's AI delivery client, none of which clpeak calls.  That AAR also
+  carries LiteRT's `uses-native-library` list (OpenCL, FastRPC, the Tensor
+  and MediaTek NPU system libraries), so the app's manifest repeats it,
+  plus `libneuronusdk_adapter.10.mtk.so`, which LiteRT opens on a
+  NeuroPilot 10 phone and its list leaves out.  NPU dispatch and
+  compiler-plugin shims come from Google's Maven too, one AAR per vendor
+  (`litert-npu-runtime-{qualcomm,google-tensor,mediatek}`), via
   `tools/fetch_android_npu.sh` (every vendor's) into the NPU modules
   under `app/android/npu/`, and the build packages whatever is staged
   there -- there is no other switch.  Play installs a module only on
@@ -565,64 +609,70 @@ budgets.
   records `ro.soc.model` as the device detail.  That listing is also why an
   app carrying shims extracts its native libraries at install
   (`useLegacyPackaging`): an APK's internal `lib/` path can be dlopen'd but
-  not listed.  Google's zip gates the Tensor module to G3–G6 (Pixel 8 and
-  later); a Tensor G2 (Pixel 7a) is not served.  MediaTek and Google
-  Tensor runtimes are system libraries on the device.  Qualcomm's is
+  not listed.  The Tensor module goes to G3–G6 (Pixel 8 and later), the
+  chipsets LiteRT's Tensor compiler targets; a Tensor G2 (Pixel 7a) is not
+  served.  The MediaTek module goes to every chipset its compiler plugin
+  names (Dimensity 700-class MT6853 to MT6993, and the MT81xx tablets).
+  MediaTek and Google Tensor runtimes are system libraries on the device,
+  and Samsung's shims are published nowhere (LiteRT builds them from source
+  against Samsung's own SDK), so an Exynos lists no NPU.  Qualcomm's is
   bundled, and the script stages it with the shims, one QNN build for both
   backends: `com.qualcomm.qti:qnn-runtime:2.50.0` from Maven Central (every
   Hexagon generation's Skel/Stub plus `libQnnHtp`, `libQnnSystem` and the
   86 MB `libQnnHtpPrepare` the JIT needs; 67 MB compressed, arm64 only),
-  Qualcomm's ONNX Runtime QNN plugin (`onnxruntime-android-qnn:2.6.0`, 4 MB,
-  which the app registers by soname when the APK carries it), and
-  `libQnnIr.so` / `libQnnSaver.so`, which the Maven package lacks and the
-  compiler plugin is linked against (DT_NEEDED, no symbol bound):
-  `QnnManager` opens libQnnIr only for the IR backend (`qnn_backend`, or a
-  `dlc_dir`) and libQnnSaver only for `saver_output_dir`, none of which
-  clpeak sets, but bionic refuses a library one of whose DT_NEEDED entries
-  is missing, and with no plugin LiteRT compiles nothing for the NPU ("No
-  compiler plugin found").  Those two come from the QAIRT SDK of the Maven
-  package's build (2.50.0.260828: the same `v2.50.0.260828221209` build
-  id, the same LICENSE.pdf and NOTICE.txt), read out of the 2.6 GB zip on
-  Qualcomm's software center by HTTP range (python3, about 3 MB).
+  and Qualcomm's ONNX Runtime QNN plugin (`onnxruntime-android-qnn:2.6.0`,
+  4 MB, which the app registers by soname when the APK carries it).  The
+  Maven package has no `libQnnIr.so` / `libQnnSaver.so`, and none is
+  needed: `QnnManager` opens libQnnIr only for the IR backend
+  (`qnn_backend`, or a `dlc_dir`) and libQnnSaver only for
+  `saver_output_dir`, none of which clpeak sets.  (2.2.0's Android compiler
+  plugin was linked against both, and bionic refuses a library one of whose
+  DT_NEEDED entries is missing; 2.3.0's links no QNN library, and on an
+  arm64 emulator it loads without them.)
   `build.gradle.kts` refuses a Qualcomm set with any QNN library missing
-  (`qualcommStagingProblem`), and on Android `litertUsableDevices()` opens
-  a single vendor's shims itself before the probe, so a library an APK
-  lacks is the device's skip reason in the linker's words (`dlopen failed:
-  library "libQnnIr.so" not found`).  2.50 is newer than the 2.47 LiteRT
-  2.2.0's shims were built against (the zip's `fetch_qualcomm_library.sh`
-  names it): `QnnManager` accepts a newer API minor with a warning and
-  refuses only a major mismatch, and the ONNX plugin was validated against
-  2.50 -- one runtime for both stacks, to be confirmed on a Snapdragon.
+  (`npuStagingProblem`), and on Android `litertUsableDevices()` opens a
+  single vendor's shims itself before the probe, so a shim that cannot load
+  is the device's skip reason in the linker's words (`dlopen failed:
+  library "..." not found`).  QAIRT 2.50.0.260828 is the build
+  LiteRT 2.3.0's shims were built against (`third_party/qairt/
+  workspace.bzl` at the tag) and the one the ONNX plugin was validated
+  against -- one runtime for both stacks, to be confirmed on a Snapdragon.
   The DSP's loader finds the Skel through `ADSP_LIBRARY_PATH`, which
   LiteRT points at the dispatch directory (prepending when the variable is
   already set); with
   the shims in a directory of their own, `litertStageNpuVendor()` sets it
-  to the lib dir first.  NPU needs API 31+ and arm64.  Unverified on Snapdragon and
-  Tensor silicon: the APK builds and packages (137 MB with QNN and both
-  vendors' shims), every staged shim's DT_NEEDED resolves to a library in
-  it or the platform's, and on an arm64 emulator the Qualcomm plugin loads
-  and its `QnnManager` takes the 2.50 runtime as far as "No Snapdragon SOC
-  detected"; the testers' runs are the proof.
+  to the lib dir first.  NPU needs API 31+ and arm64.  Unverified on
+  Snapdragon, Tensor and MediaTek silicon: the APK builds and packages
+  every vendor's shims and QNN, every staged shim's DT_NEEDED resolves to
+  a library in it or the platform's, and on an arm64 emulator the Qualcomm
+  plugin loads and its `QnnManager` takes the 2.50 runtime as far as "No
+  Snapdragon SOC detected"; the testers' runs are the proof.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
+  Google's bucket (`storage.googleapis.com/litert/binaries/<version>/
+  {macos_arm64,linux_x86_64,linux_arm64,windows_x86_64}/`) has the runtime
+  and its GPU accelerator for each, the quickest way to try a release.
 - **Verified on Android** with the CLI built against the NDK (root
   CMakeLists with `android.toolchain.cmake`, every other backend off) and
   pushed to an arm64 emulator beside the AAR's two `.so` files: every test
   runs on XNNPACK, the numeric-error rows match macOS bit for bit, the GPU
   is declined for lack of OpenCL, and the fp32 block is skipped by the
-  memory gate on 4 GB.  The release APK builds with the AAR's `litert-api`
-  excluded (it repeats the AAR's namespace, which AGP 9 rejects) and R8
-  told not to chase the AAR's unused Java classes.
+  memory gate on 4 GB.  The release APK builds with `litert-api` excluded
+  and R8 told not to chase the AARs' unused Java classes.
 - **iOS**: the same dlopen design, unlike ONNX Runtime, because Google
   builds LiteRT for iOS as plain dylibs meant for an app's `Frameworks/`
   directory (install name `@rpath/libLiteRt.dylib`, rpath
   `@executable_path/Frameworks`, iOS 15) and iOS will load a library that
-  sits inside the signed bundle.  They are on neither CocoaPods (the
-  `LiteRTC` pod is the old Interpreter API, nightlies that stopped in June
-  2025) nor the GitHub release; Google publishes them per version in its
-  bucket, `storage.googleapis.com/litert/binaries/<version>/{ios_arm64,
-  ios_sim_arm64}/{libLiteRt,libLiteRtMetalAccelerator}.dylib`, ~8 MB each
+  sits inside the signed bundle.  They are not on CocoaPods (the `LiteRTC`
+  pod is the old Interpreter API, nightlies that stopped in June 2025);
+  Google publishes them per version in its bucket,
+  `storage.googleapis.com/litert/binaries/<version>/{ios_arm64,
+  ios_sim_arm64}/{libLiteRt,libLiteRtMetalAccelerator}.dylib`, 8-13 MB each
   (the `litert_prebuilts.zip` beside them carries only the accelerator).
+  The GitHub release's `CLiteRT.xcframework` (since 2.3.0, behind its Swift
+  package) is a different build of the runtime: it exports no profiler
+  (`LiteRtStartProfiler` and its kin), so a GPU row could not name its
+  kernel, and the bucket's stay.
   `tools/build_ios_native.sh` fetches the version named by the vendored
   headers' tag (`third_party/litert/README.md`), caches them under
   `build-ios/litert/<version>/`, stages them in `app/ios/clpeak_native/
@@ -637,10 +687,12 @@ budgets.
   does (`libLiteRt.dylib.framework`, the layout of its 2.1.5 upload).  An
   App Store submission may want that wrapping (bare dylibs have drawn
   ITMS-90171); the app has not been submitted, so this is untested.  All 49
-  entry points the backend resolves are exported by both 2.2.0 slices
-  (431 `LiteRt*` symbols, the macOS wheel's set), XNNPACK is built in, and
-  the runtime's own search list on iOS is `libLiteRtGpuAccelerator`,
-  `libLiteRtMetalAccelerator`, `libLiteRtWebGpuAccelerator`.  The settings
+  entry points the backend resolves are exported by both 2.3.0 slices
+  (438 `LiteRt*` symbols, the macOS bucket build's set), XNNPACK is built
+  in, and the runtime's own search list on iOS is `libLiteRtGpuAccelerator`,
+  `libLiteRtMetalAccelerator`, `LiteRtMetalAccelerator` (a framework's
+  executable, the layout of the release's xcframework),
+  `libLiteRtWebGpuAccelerator`, each joined to `RuntimeLibraryDir`.  The settings
   picker is fixed on iOS, as for ONNX Runtime: `--litert-lib` could only
   name a file the platform refuses to load.  `--no-litert` leaves the
   backend out of the framework; `CLPEAK_IOS_LITERT_DIR` points at a local

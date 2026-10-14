@@ -277,15 +277,49 @@ inline std::string litertKernelNote(const LitertPlan &p, const std::string &kern
 }
 
 // The session config a plan asks for on a device, in one form (its GPU
-// kernel policy; the rest of a form is the graph's, litertFormPlan).
+// kernel policy and pipeline; the rest of a form is the graph's,
+// litertFormPlan).
 inline LitertSessionConfig litertConfigFor(const LitertPlan &p, const LitertForm &form, bool profile = false)
 {
   LitertSessionConfig cfg;
   cfg.gpuPrecision = p.gpuPrecision;
   cfg.gpuInt8Kernels = p.gpuInt8KernelChoice && form.gpuInt8Kernels;
   cfg.gpuShareConstants = cfg.gpuInt8Kernels && p.gpuShareConstants;
+  cfg.gpuIrModel = p.gpuPipelineChoice && form.gpuIrModel;
   cfg.profile = profile;
   return cfg;
+}
+
+// Every form again through the GPU accelerator's IrModel pipeline, where the
+// plan races the two (LitertPlan::gpuPipelineChoice), after the GraphFloat32
+// ones, so those carry on through a tie.  On an M1 Pro's Metal the two tie
+// -- within 1% on the matmul chain and the convolutions at every size --
+// and the IrModel one refuses the int8 convolutions (LiteRT 2.3.0).  The
+// race is what shows whether an Adreno or a Mali differs.
+inline std::vector<LitertForm> litertWithPipelines(std::vector<LitertForm> forms, const LitertPlan &p)
+{
+  if (!p.gpuPipelineChoice)
+    return forms;
+  const size_t n = forms.size();
+  for (size_t i = 0; i < n; i++)
+  {
+    LitertForm ir = forms[i];
+    ir.gpuIrModel = true;
+    forms.push_back(ir);
+  }
+  return forms;
+}
+
+// The GPU choices a form makes, in a row's words, for the ones the plan
+// races: " without the GPU's 8-bit kernels through the IrModel pipeline".
+inline std::string litertGpuFormWords(const LitertPlan &p, const LitertForm &form)
+{
+  std::string s;
+  if (p.gpuInt8KernelChoice)
+    s += form.gpuInt8Kernels ? " with the GPU's 8-bit kernels" : " without the GPU's 8-bit kernels";
+  if (p.gpuPipelineChoice)
+    s += form.gpuIrModel ? " through the IrModel pipeline" : " through the GraphFloat32 pipeline";
+  return s;
 }
 inline LitertSessionConfig litertConfigFor(const LitertPlan &p, bool profile = false)
 {

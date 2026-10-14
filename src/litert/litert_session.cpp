@@ -140,7 +140,8 @@ std::string lastLines(const std::string &log, int keep = 3)
   // An error LiteRT passes up keeps its cause on the next line, after "└ "
   // (litert_macros.h); one cause can hold another.  The cause is what says
   // what went wrong -- `dlopen failed: library "libQnnIr.so" not found`
-  // under "Failed to load plugin at: ... with error:" -- and it carries no
+  // under "Failed to load plugin at: ... with error:", from LiteRT 2.2.0's
+  // Qualcomm plugin packaged without that library -- and it carries no
   // severity of its own, so it joins the line it belongs to.
   static const char kCause[] = "\xE2\x94\x94";   // U+2514
   std::vector<std::string> lines;
@@ -252,15 +253,18 @@ struct EnvRecord
 std::mutex g_envMutex;
 std::map<int, EnvRecord> g_envs;   // by accelerator
 
-// The Metal accelerator adds a residency set to its command queue for every
-// compiled model and never removes one, and IOGPUMetalCommandQueue asserts
-// -- an abort -- on the 33rd ("command queue residency set limit of 32
-// exceeded").  Disabling the sets through the GPU options does not stop it,
-// and neither does draining an autorelease pool; only a new command queue
-// does, which means a new environment.  So on Apple the GPU environment is
-// torn down and rebuilt after this many models, between sessions, at the
-// cost of ~300 ms of Metal initialisation each time.  A doubling ladder
-// over nine formats compiles that many models before its second test.
+// The Metal accelerator of LiteRT 2.2.0 adds a residency set to its
+// command queue for every compiled model and never removes one, and
+// IOGPUMetalCommandQueue asserts -- an abort -- on the 33rd ("command queue
+// residency set limit of 32 exceeded").  Disabling the sets through the GPU
+// options does not stop it, and neither does draining an autorelease pool;
+// only a new command queue does, which means a new environment.  So on
+// Apple the GPU environment of such a runtime is torn down and rebuilt
+// after this many models, between sessions, at the cost of ~300 ms of Metal
+// initialisation each time.  A doubling ladder over nine formats compiles
+// that many models before its second test.  2.3.0 (ABI 1.1.0) reworked its
+// residency and compiled 125 models in one environment on an M1 Pro, so its
+// environment is kept (LitertRuntime::abi11).
 #ifdef __APPLE__
 constexpr int kGpuModelsPerEnvironment = 24;
 #else
@@ -303,7 +307,7 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
     g_envs.erase(it);
     it = g_envs.end();
   }
-  if (it != g_envs.end() && it->second.env && accel == LitertAccel::Gpu &&
+  if (it != g_envs.end() && it->second.env && accel == LitertAccel::Gpu && !rt.abi11 &&
       kGpuModelsPerEnvironment > 0 && it->second.models >= kGpuModelsPerEnvironment &&
       it->second.live == 0)
   {
@@ -526,6 +530,8 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
       toml += "allow_src_quantized_fc_conv_ops = true\n";
     if (cfg.gpuShareConstants)
       toml += "enable_constant_tensors_sharing = true\n";
+    if (cfg.gpuIrModel)
+      toml += "use_ir_model = true\n";
     if (!toml.empty() && !addOpaque(rt, s->options_, "gpu_options", toml, optErr))
       return fail(optErr, kLiteRtStatusErrorInvalidArgument);
   }
@@ -602,11 +608,22 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
               s->bytes_.description.c_str(), (double)s->bytes_.size() / 1048576.0, s->bytes_.buildUs / 1000.0,
               s->accelName_.c_str(), s->createUs / 1000.0);
 
+  // Every operation on the accelerator, by the runtime's own count.  The
+  // older answer counts what any delegate took, the CPU's XNNPACK one
+  // included; ABI 1.1.0's also requires that the CPU took nothing, which is
+  // the claim a GPU or NPU row makes, so it is asked as well where the
+  // runtime has it.
   if (dev.accel != LitertAccel::Cpu)
   {
     bool full = false;
     st = rt.api.LiteRtCompiledModelIsFullyAccelerated(s->compiled_, &full);
     s->fullyAccelerated_ = (st == kLiteRtStatusOk) && full;
+    if (s->fullyAccelerated_ && rt.api.LiteRtCompiledModelIsNonCpuFullyAccelerated)
+    {
+      bool nonCpu = false;
+      st = rt.api.LiteRtCompiledModelIsNonCpuFullyAccelerated(s->compiled_, &nonCpu);
+      s->fullyAccelerated_ = (st == kLiteRtStatusOk) && nonCpu;
+    }
   }
 
   // ---- buffers -------------------------------------------------------------

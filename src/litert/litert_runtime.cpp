@@ -153,7 +153,8 @@ static void loadRuntime()
   if (cur.path.empty())
     cur.path = resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
   cur.libraryDir = dirOf(cur.path);
-  cur.abiVersion = LITERT_RUNTIME_ABI_VERSION;
+  cur.abi11 = cur.api.LiteRtCompiledModelIsNonCpuFullyAccelerated != nullptr;
+  cur.abiVersion = cur.abi11 ? "1.1.0" : "1.0.0";
 
   // Deliberately never dlclosed: see the header.  The library is fixed from
   // here on.

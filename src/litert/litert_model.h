@@ -73,6 +73,11 @@ struct LitertPlan
   // delegate ("Only quantized int8, int4, and int2 weights are supported for
   // sharing", Metal, LiteRT 2.2.0), so int8_qdq allows the kernels alone.
   bool gpuShareConstants = false;
+  // The GPU accelerator has two pipelines that turn a model into its GPU
+  // graph, the GraphFloat32 one and, since LiteRT 2.3.0 (ABI 1.1.0), the
+  // IrModel one (use_ir_model), with different kernel choices and different
+  // refusals (LitertForm::gpuIrModel): the rate rows race the two.
+  bool gpuPipelineChoice = false;
   // An integer plan's graph takes and returns float32 and quantizes inside
   // the graph -- QUANTIZE after each input, DEQUANTIZE before each output --
   // instead of exchanging int8 or int16 tensors (LitertForm::floatIo).

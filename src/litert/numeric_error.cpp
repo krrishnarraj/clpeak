@@ -234,6 +234,8 @@ std::string formWords(const LitertForm &form)
     s += std::string(s.empty() ? "" : ",") + " with the GPU's 8-bit kernels allowed";
   if (form.floatIo)
     s += std::string(s.empty() ? "" : ",") + " with float inputs and outputs";
+  if (form.gpuIrModel)
+    s += std::string(s.empty() ? "" : ",") + " through the IrModel pipeline";
   return s;
 }
 
@@ -249,7 +251,8 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   LitertForm k = form;
   k.gpuInt8Kernels = k.gpuInt8Kernels && base.gpuInt8KernelChoice;
   k.floatIo = k.floatIo && litertIoType(litertFormPlan(base, k)) != base.act;
-  const auto key = std::make_tuple((int)dev.accel, (int)f, k.conv1x1, k.gpuInt8Kernels, k.floatIo);
+  k.gpuIrModel = k.gpuIrModel && base.gpuPipelineChoice;
+  const auto key = std::make_tuple((int)dev.accel, (int)f, k.conv1x1, k.gpuInt8Kernels, k.floatIo, k.gpuIrModel);
   auto found = answerChecks_.find(key);
   if (found != answerChecks_.end())
     return found->second;
@@ -508,7 +511,8 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     // One sentence after the format's: an integer format the accelerator
     // answered only with float inputs and outputs, and what its own int8 or
     // int16 ones gave; then the other forms the rate rows race -- int8's
-    // layers as 1x1 convolutions (gemm.cpp), and on the GPU its 8-bit kernels.
+    // layers as 1x1 convolutions (gemm.cpp), and on the GPU its 8-bit
+    // kernels and its IrModel pipeline.
     std::string extra;
     if (form.floatIo)
     {
@@ -527,6 +531,9 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
                       "with 8-bit kernels"});
     if (conv && plan.gpuInt8KernelChoice)
       alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{true, true, false})), "both ways"});
+    if (plan.gpuPipelineChoice)
+      alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{false, false, false, true})),
+                      "through the IrModel pipeline"});
     if (!alts.empty())
     {
       extra += extra.empty() ? "Other forms gave " : "; other forms gave ";

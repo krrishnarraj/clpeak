@@ -139,24 +139,48 @@ stay measured.  Lifting either is deleting its `if`.
   of releases known to crash) and run `clpeak --coreml --transformer-block`
   on the CPU and GPU compute units (`--devices coreml:1,coreml:2`).
 
-## LiteRT backend, GPU accelerator (LiteRT 2.2.0)
+## LiteRT backend, GPU accelerator (LiteRT 2.2.0 and 2.3.0)
 
 `src/litert/AGENTS.md` § "What the accelerator libraries do wrong" has the
-full account of each.
+full account of each.  2.3.0 fixed the bfloat16 and float8 aborts, the
+Metal residency leak and the crash without OpenCL; those gates now stand
+only for an older runtime handed in with `--litert-lib`
+(`LitertRuntime::abi11` false: no
+`LiteRtCompiledModelIsNonCpuFullyAccelerated`, ABI 1.0.0), and go when
+clpeak stops running those.
 
-### bf16, int16x8 and fp8_weight are never sent to the GPU
+### int16x8 is never sent to the GPU
 
 - **Gate**: `litertPlanFor()` in `src/litert/litert_model.cpp`, the
-  `gpuAborts` branches.
+  `Int16x8` branch.
 - **Withheld**: on the GPU device, `litert_gemm` and `litert_numeric_error`
-  rows `bf16`, `int16x8`, `fp8_weight`; `litert_block_*` rows `bf16` and
-  `fp8_weight`.
+  row `int16x8`.
 - **Fault**: the graph reader `CHECK`s that a tensor is
-  fp32/fp16/int8/uint8/int4/int2/bool/int32 (`object_reader.cc`, "Tensor
-  type(INT16) is not supported") and glog aborts on anything else.
-- **To lift**: delete the `gpuAborts` calls and run `clpeak --litert --gemm`
-  on the GPU device: a declined format comes back as a refusal in the
-  runtime's own words, an accepted one is measured.
+  fp32/fp16/int8/uint8/int4/int2/bool/int32 (`object_reader.cc`) and glog
+  aborts on anything else.  2.3.0's GraphFloat32 pipeline declines a
+  FULLY_CONNECTED with an int16 input ("Tensor type(INT16) is not
+  supported"), but in the sixteen-layer chain it took one other operator,
+  whose input is int16, and aborted reading it; its IrModel pipeline aborts
+  on the QUANTIZE that writes int16 in the float-boundary form ("Type
+  invalid for quantized tensor", `ir_model_builder_helper.cc`).
+- **Seen**: 2.2.0 and 2.3.0 (M1 Pro, 2026-10-11).
+- **To lift**: delete the branch's GPU clause and run `clpeak --litert
+  --gemm --numeric-error` on the GPU device: the chain, not the single
+  matmul, is the graph that found it.
+
+### bf16 and fp8_weight are never sent to a pre-2.3.0 GPU
+
+- **Gate**: `litertPlanFor()`, the `gpuAborts` branches, on an ABI 1.0.0
+  runtime only.
+- **Withheld**: on the GPU device, `litert_gemm` and `litert_numeric_error`
+  rows `bf16` and `fp8_weight`; `litert_block_*` rows `bf16` and
+  `fp8_weight`.
+- **Fault**: the graph reader's type `CHECK` above, on bfloat16 and float8
+  tensors.
+- **Seen**: 2.2.0.  2.3.0 declines both, through both pipelines, in the
+  matmul, the chain and the block (M1 Pro, 2026-10-14).
+- **To lift**: delete the `gpuAborts` calls once pre-2.3.0 runtimes are not
+  run.
 
 ### Blockwise int4_weight is never sent to the GPU
 
@@ -165,9 +189,11 @@ full account of each.
   `litert_block_*` rows `int4_weight`.
 - **Fault**: the weight conversion transposes the packed nibbles with an
   8-bit 16x16 transpose microkernel
-  (`xnn_x8_transposec_ukernel__16x16_reuse_dec_zip_neon`) that runs past the
-  buffer; guard malloc catches it on the first model, a normal run dies some
-  rungs later (4096-cubed on an M1 Pro).
+  (`xnn_x8_transposec_ukernel__16x16_reuse_dec_zip_neon`, called from
+  `ml_drift::RearrangeWeightsInt8AsUint4`) that runs past the buffer; guard
+  malloc catches it on the first model, a normal run dies some rungs later
+  (4096-cubed on an M1 Pro).
+- **Seen**: 2.2.0 and 2.3.0, through both of 2.3.0's graph pipelines.
 - **To lift**: delete the branch and verify under guard malloc
   (`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) before trusting a run
   that merely completes: the overrun completed several runs first.
@@ -181,33 +207,37 @@ full account of each.
 - **Fault**: the graph reader `CHECK`-fails `CanReadValue(node_input_index)`
   (`object_reader.cc`) on a `STABLEHLO_COMPOSITE` whose operand is a constant
   tensor, which decode's K/V cache is.
+- **Seen**: 2.2.0 and 2.3.0.  2.3.0's IrModel pipeline does not abort, but
+  its answer is NaN, which the non-finite guard would withhold anyway.
 - **To lift**: delete `decodeFence` and run `clpeak --litert
   --transformer-block` on the GPU device.
 
-### The GPU device is withheld when no OpenCL library can be loaded
+### A pre-2.3.0 GPU device is withheld when no OpenCL library can be loaded
 
 - **Gate**: `litertUsableDevices()` in `src/litert/litert_peak.cpp`: when the
-  registered accelerator is the OpenCL one, an OpenCL library must be
-  loadable before any model is sent.
+  registered accelerator is the OpenCL one and the runtime is ABI 1.0.0, an
+  OpenCL library must be loadable before any model is sent.
 - **Withheld**: the whole GPU device, on a machine with no `libOpenCL` (an
   emulator, a box without a driver).
 - **Fault**: `libLiteRtClGlAccelerator` dereferences a null inside `strlen`
   when it compiles its first model, instead of declining.
-- **To lift**: delete the check and run `clpeak --litert --list-devices`
-  followed by any test on such a machine.
+- **Seen**: 2.2.0.  2.3.0's falls back to OpenGL ES ("OpenCL not supported
+  on this platform. Using OpenGL instead.") and answers right (arm64
+  emulator, 2026-10-11); the device is then named "(OpenGL)".
+- **To lift**: delete the check once pre-2.3.0 runtimes are not run.
 
-### The Metal GPU environment is torn down and rebuilt every 24 models
+### A pre-2.3.0 Metal GPU environment is rebuilt every 24 models
 
 - **Gate**: `kGpuModelsPerEnvironment` (24) in
-  `src/litert/litert_session.cpp`.  Nothing is withheld; it costs ~300 ms of
-  Metal initialisation per rebuild.
+  `src/litert/litert_session.cpp`, on an ABI 1.0.0 runtime only.  Nothing is
+  withheld; it costs ~300 ms of Metal initialisation per rebuild.
 - **Fault**: the Metal accelerator leaks a residency set per compiled model
   and `IOGPUMetalCommandQueue` asserts on the 33rd ("command queue residency
   set limit of 32 exceeded").  `enable_metal_residency_set` does not stop it
   and neither does an autorelease pool; only a new command queue does.
-- **To lift**: set the constant to 0 (no limit) and run a full
-  `clpeak --litert` on Apple silicon: more than 32 compiled models in one
-  environment without the assert is a fixed release.
+- **Seen**: 2.2.0 (asserts at the 33rd model).  2.3.0 compiled 125 in one
+  environment without it (M1 Pro, 2026-10-11).
+- **To lift**: delete the constant once pre-2.3.0 runtimes are not run.
 
 ## Vulkan backend
 

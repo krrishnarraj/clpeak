@@ -129,20 +129,27 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
   {
     const LitertPlan plan = litertPlanFor(fmt.f, dev.accel);
     // The forms a row races: on a GPU with 8-bit kernels for the format,
-    // with them disallowed and allowed (gemm.cpp has why).  Each is checked
-    // once, as the same product written as a 1x1 convolution -- the conv1x1
-    // row's own graph, and for the 3x3 and the depthwise the nearest one
-    // there is -- in the inputs and outputs it answers right with.  A form
-    // whose answer is wrong leaves every shape's race.
+    // with them disallowed and allowed, and on one with two graph pipelines
+    // each through both (gemm.cpp has why).  Each is checked once, as the
+    // same product written as a 1x1 convolution -- the conv1x1 row's own
+    // graph, and for the 3x3 and the depthwise the nearest one there is --
+    // in the inputs and outputs it answers right with.  A form whose answer
+    // is wrong leaves every shape's race.
     std::vector<LitertForm> forms;
     std::vector<std::string> wrong;
     if (plan.applies)
+    {
+      std::vector<LitertForm> asked;
       for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
+        asked.push_back(LitertForm{true, k == 1, false});
+      for (const LitertForm &a : litertWithPipelines(std::move(asked), plan))
       {
-        const LitertForm form = resolveIo(rt, dev, fmt.f, LitertForm{true, k == 1, false});
-        forms.push_back(LitertForm{false, form.gpuInt8Kernels, form.floatIo});
+        LitertForm form = resolveIo(rt, dev, fmt.f, a);
         wrong.push_back(wrongAnswer(rt, dev, fmt.f, form));
+        form.conv1x1 = false;
+        forms.push_back(form);
       }
+    }
     const size_t nf = forms.size();
     const bool raced = nf > 1;
     size_t wrongCount = 0;
@@ -174,10 +181,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         if (!wrong[f].empty())
           race.drop(f);
       std::vector<ConvLane> lanes(nf);
-      auto what = [&](size_t f) {
-        return raced ? std::string(forms[f].gpuInt8Kernels ? " with" : " without") + " the GPU's 8-bit kernels"
-                     : std::string();
-      };
+      auto what = [&](size_t f) { return raced ? litertGpuFormWords(plan, forms[f]) : std::string(); };
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial && !race.done(); sp *= 2)
       {

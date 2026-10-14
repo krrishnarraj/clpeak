@@ -3,8 +3,8 @@
     <!-- The ONNX Runtime and LiteRT AARs are packaged for their .so files
          alone (see build.gradle.kts), but the manifest merger brings their
          Java-side declarations along too.  The permissions below are dropped
-         again; the AARs' uses-native-library entries are kept, since those
-         are what let the runtimes reach vendor libraries on Android 12+.
+         again; the uses-native-library entries are what let the runtimes
+         reach vendor libraries on Android 12+, and are kept.
          Nothing in clpeak talks to the network: url_launcher opens links in
          the external browser and share_plus hands a local file to the system
          share sheet.  src/debug and src/profile put INTERNET back for the
@@ -16,7 +16,8 @@
     <uses-permission
         android:name="android.permission.ACCESS_NETWORK_STATE"
         tools:node="remove" />
-    <!-- LiteRT's AiPack model downloader, which clpeak never uses. -->
+    <!-- LiteRT's AiPack model downloader, which clpeak never uses (its
+         litert-api AAR asks for these, should it come back in). -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE"
         tools:node="remove" />
@@ -54,11 +55,51 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- Android 12+ linker namespaces hide vendor libraries; this grants
-             the OpenCL stub access to the real vendor driver at runtime. -->
-        <uses-native-library
-            android:name="libOpenCL.so"
-            android:required="false" />
+        <!-- Android 12+ linker namespaces hide vendor libraries from an app
+             that does not name them here.  Every one is optional: a phone
+             without it loads nothing by that name, as before.  LiteRT's own
+             list is in its litert-api AAR, which the build leaves out
+             (build.gradle.kts), so it is repeated here, as of 2.3.0. -->
+        <!-- OpenCL: clpeak's OpenCL stub and LiteRT's GPU accelerator, which
+             also opens a Pixel's and a car's own names for it. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <!-- Qualcomm NPU: FastRPC, which the QNN runtime's Stub libraries
+             link against, for LiteRT and the ONNX Runtime QNN plugin alike. -->
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <!-- Google Tensor NPU. -->
+        <uses-native-library android:name="libedgetpu_util.so" android:required="false" />
+        <uses-native-library android:name="libedgetpu_litert.so" android:required="false" />
+        <!-- MediaTek NPU: the NeuroPilot runtime is the phone's own.  LiteRT
+             also tries libneuronusdk_adapter.10.mtk.so on a NeuroPilot 10
+             phone (neuron_adapter_api.cc), which its list leaves out. -->
+        <uses-native-library android:name="libneuron_sys_util.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuronusdk_adapter.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuronusdk_adapter.9.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuronusdk_adapter.10.mtk.so" android:required="false" />
+        <uses-native-library android:name="libneuron_adapter_mgvi.so" android:required="false" />
+        <uses-native-library android:name="libapuwareutils_v2.mtk.so" android:required="false" />
+        <uses-native-library android:name="libapuwareutils.mtk.so" android:required="false" />
+        <uses-native-library android:name="libapuwareapusys_v2.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop25_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop25_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_25_pub.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_config.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpup30_mtk_nn.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpup30_mtk_cv.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_runtime_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_engine_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpu_pattern_30.mtk.so" android:required="false" />
+        <uses-native-library android:name="libmvpuop30_mtk_nn.mtk.so" android:required="false" />
         <!-- ONNX Runtime's AAR registers a ContentProvider that Android runs
              at process start: it System.loadLibrary()s the 32 MB runtime
              before Flutter is up and starts ORT's telemetry client (a

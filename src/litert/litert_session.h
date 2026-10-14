@@ -30,6 +30,9 @@ struct LitertSessionConfig
   // GPU: enable_constant_tensors_sharing, which the option above is
   // documented to need (LitertPlan::gpuShareConstants says for which graphs).
   bool gpuShareConstants = false;
+  // GPU: build the GPU graph through the IrModel pipeline (use_ir_model,
+  // ABI 1.1.0).  LitertForm::gpuIrModel.
+  bool gpuIrModel = false;
   // CPU: XNNPACK threads; 0 = every hardware thread.
   int cpuThreads = 0;
   // Record per-operation events so profileOps() can name what ran where.

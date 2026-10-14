@@ -13,7 +13,7 @@ plugins {
 // vendor's libraries and nobody else's.  Qualcomm's set serves two stacks,
 // one QNN runtime under both:
 //  - LiteRT, through its Qualcomm shims (libLiteRtDispatch_Qualcomm.so and
-//    the compiler plugin), built against QAIRT 2.47 for LiteRT 2.2.0;
+//    the compiler plugin), built against QAIRT 2.50 for LiteRT 2.3.0;
 //  - ONNX Runtime, through Qualcomm's plugin execution provider
 //    (libonnxruntime_providers_qnn.so, which the app registers on the
 //    packaged onnxruntime at run time by its bare soname, see
@@ -35,20 +35,17 @@ val npuStaged = npuModules.isNotEmpty()
 // them, or null.  The shims and the ONNX plugin run nothing on their own:
 // they open the QNN runtime at run time (libQnnHtp and libQnnSystem,
 // through them libQnnHtpPrepare and the Skel/Stub of the phone's Hexagon
-// generation), and LiteRT's compiler plugin is also linked against
-// libQnnIr.so and libQnnSaver.so -- it never calls either, but Android's
-// linker refuses a library one of whose DT_NEEDED entries it cannot find,
-// and without the plugin LiteRT compiles nothing for the NPU.  A partial
-// set builds an APK that installs, runs and lists no Hexagon NPU on any
-// Snapdragon (the Play build of 3.0.1 on a Galaxy S24 Ultra carried the
-// shims alone), so the build stops instead.  So does a set an older fetch
-// script staged into the base, which every phone would download.
+// generation).  A partial set builds an APK that installs, runs and lists
+// no Hexagon NPU on any Snapdragon (the Play build of 3.0.1 on a Galaxy S24
+// Ultra carried the shims alone), so the build stops instead.  So does a
+// set an older fetch script staged into the base, which every phone would
+// download.
 val npuStagingProblem: String? = run {
     val legacy = file("src/main/jniLibs/arm64-v8a").list()?.filter { it.endsWith(".so") } ?: emptyList()
     val common = npuDir.resolve("qualcomm_runtime/jniLibs/arm64-v8a").list()?.toSet() ?: emptySet()
     val qualcomm = npuModules.any { it.name.startsWith("qualcomm_runtime") }
     val missing = listOf(
-        "libQnnHtp.so", "libQnnSystem.so", "libQnnHtpPrepare.so", "libQnnIr.so", "libQnnSaver.so",
+        "libQnnHtp.so", "libQnnSystem.so", "libQnnHtpPrepare.so",
     ).filter { it !in common }
     if (legacy.isNotEmpty())
         "app/src/main/jniLibs/arm64-v8a holds ${legacy.size} NPU libraries an older " +
@@ -155,17 +152,21 @@ dependencies {
     // with it is unused (clpeak talks to the C API through the FFI library).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
-    // LiteRT: jni/<abi>/libLiteRt.so plus its OpenCL GPU accelerator
-    // (libLiteRtClGlAccelerator.so), 8.6 MB for arm64-v8a.  The AAR's own
-    // manifest carries the `uses-native-library` declarations the runtime
-    // needs on Android 12+ (libOpenCL, Qualcomm's libcdsprpc, the Google
-    // Tensor and MediaTek NPU system libraries) and the merger brings them
-    // into ours.  NPU dispatch libraries are not on Maven: see
-    // tools/fetch_android_npu.sh, which stages them into the NPU modules (../npu/).
-    // The AAR's Kotlin/Java surface (and the `litert-api` it depends on,
-    // which declares the same namespace and trips AGP 9's uniqueness
-    // check) is unused: only the .so files are wanted.
-    implementation("com.google.ai.edge.litert:litert:2.2.0") {
+    // LiteRT: jni/<abi>/libLiteRt.so from `litert` and its OpenCL GPU
+    // accelerator (libLiteRtClGlAccelerator.so) from `litert-gpu`, which
+    // has shipped apart since 2.3.0; 8.9 MB for arm64-v8a.  Both depend on
+    // `litert-api`, the Kotlin surface clpeak never calls (the C API is
+    // reached through the FFI library): with it would come its JNI library,
+    // Guava, coroutines and Play's AI delivery client, so it is left out --
+    // and with it the `uses-native-library` declarations it carries, which
+    // AndroidManifest.xml makes itself.  The vendors' NPU shims are Maven
+    // packages too, but each is a module of its own that Play installs on
+    // its chipsets only: see tools/fetch_android_npu.sh, which stages them
+    // into the NPU modules (../npu/).
+    implementation("com.google.ai.edge.litert:litert:2.3.0") {
+        exclude(group = "com.google.ai.edge.litert", module = "litert-api")
+    }
+    implementation("com.google.ai.edge.litert:litert-gpu:2.3.0") {
         exclude(group = "com.google.ai.edge.litert", module = "litert-api")
     }
 }

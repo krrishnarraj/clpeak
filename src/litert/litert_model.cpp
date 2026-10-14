@@ -1,6 +1,7 @@
 #ifdef ENABLE_LITERT
 
 #include "litert_model.h"
+#include "litert_runtime.h"
 
 #include <algorithm>
 #include <atomic>
@@ -48,15 +49,22 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
 {
   LitertPlan p;
   // The GPU accelerator's graph reader accepts fp32, fp16, int8, uint8,
-  // int4, int2, bool and int32 tensors and CHECK-fails on anything else --
-  // an abort, not a refusal (object_reader.cc, LiteRT 2.2.0: "Tensor
+  // int4, int2, bool and int32 tensors and, in LiteRT 2.2.0, CHECK-failed on
+  // anything else -- an abort, not a refusal (object_reader.cc: "Tensor
   // type(INT16) is not supported" followed by the process dying).  A
   // benchmark that takes the whole run down with it to prove that would be
-  // proving the wrong thing, so those formats never reach the GPU.
+  // proving the wrong thing, so those formats never reach such a GPU.
+  // 2.3.0 (ABI 1.1.0) declines bfloat16 and float8 and returns, and its
+  // refusal is the row's reason; int16 aborts it still (below).
+  const LitertRuntime *rt = litertRuntime();
+  const bool gpuDeclinesTypes = rt && rt->abi11;
+  p.gpuPipelineChoice = accel == LitertAccel::Gpu && rt && rt->abi11;
   auto gpuAborts = [&](const char *type) {
+    if (gpuDeclinesTypes)
+      return;
     p.applies = false;
-    p.whyNot = std::string("the GPU accelerator's graph reader aborts the process on ") + type +
-               " tensors rather than declining them (LiteRT 2.2.0), so this format is not sent to it";
+    p.whyNot = std::string("this LiteRT's GPU accelerator aborts the process on ") + type +
+               " tensors rather than declining them (fixed in LiteRT 2.3.0), so this format is not sent to it";
   };
   switch (f)
   {
@@ -104,8 +112,18 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     p.gpuInt8KernelChoice = accel == LitertAccel::Gpu;
     break;
   case LitertFormat::Int16x8:
+    // int16 still aborts 2.3.0, both ways.  Its GraphFloat32 pipeline
+    // declines a FULLY_CONNECTED with an int16 input, but in the sixteen-layer
+    // chain it took another operator whose input is int16 and CHECK-failed
+    // reading it (object_reader.cc); its IrModel pipeline CHECK-fails on the
+    // QUANTIZE that writes int16 in the float-boundary form ("Type invalid
+    // for quantized tensor", ir_model_builder_helper.cc).
     if (accel == LitertAccel::Gpu)
-      gpuAborts("int16");
+    {
+      p.applies = false;
+      p.whyNot = "the GPU accelerator aborts the process on int16 tensors rather than declining them "
+                 "(LiteRT 2.2.0 and 2.3.0), so this format is not sent to it";
+    }
     p.act = TfType::I16;
     p.weight = TfType::I8;
     p.perChannel = true;
@@ -126,7 +144,8 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     // with an 8-bit 16x16 transpose microkernel (xnn_x8_transposec_ukernel)
     // that runs past the buffer, which guard malloc catches on the first
     // model and a normal run pays for as a heap corruption some rungs later
-    // (4096-cubed on an M1 Pro).  Per-row int4 goes through a different
+    // (4096-cubed on an M1 Pro).  Still so in 2.3.0, through both of its
+    // graph pipelines (RearrangeWeightsInt8AsUint4).  Per-row int4 goes through a different
     // path and is safe, but it is not the format language models ship in,
     // and a row that measures a different format under the same label
     // would mislead more than a refusal does.
@@ -135,7 +154,7 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
       p.applies = false;
       p.whyNot = "the GPU accelerator's blockwise int4 weight conversion overruns its buffer "
                  "(an 8-bit transpose microkernel reads and writes past the packed nibbles, "
-                 "LiteRT 2.2.0) and corrupts the heap, so this format is not sent to it";
+                 "LiteRT 2.2.0 and 2.3.0) and corrupts the heap, so this format is not sent to it";
     }
     p.weight = TfType::I4;
     p.weightBlock = 32;

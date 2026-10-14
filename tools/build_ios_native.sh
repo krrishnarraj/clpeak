@@ -85,10 +85,13 @@ EXTRA_ARGS+=(-DCLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK="$ORT_XCFRAMEWORK")
 # @executable_path/Frameworks), and iOS will dlopen a library that is inside
 # the signed bundle -- so the backend keeps the load-on-demand design it has
 # everywhere else, and only the packaging is new.  The binaries are not on
-# CocoaPods (the LiteRTC pod is the old Interpreter API) nor in the GitHub
-# release; Google publishes them per version in its litert bucket, the
-# runtime and the Metal accelerator for the device and the simulator, ~8 MB
-# each.  The version is the one the vendored headers came from
+# CocoaPods (the LiteRTC pod is the old Interpreter API); Google publishes
+# them per version in its litert bucket, the runtime and the Metal
+# accelerator for the device and the simulator, 8-13 MB each.  The GitHub
+# release's CLiteRT.xcframework (since 2.3.0, for its Swift package) is not
+# the same runtime: it is built without the profiler (LiteRtStartProfiler
+# and its kin), which names the kernel behind every GPU row.  The version
+# is the one the vendored headers came from
 # (third_party/litert/README.md): the ABI is checked at load, and a mismatch
 # is a backend that reports itself absent.  Cached under build-ios/.
 LITERT_VERSION="${CLPEAK_IOS_LITERT_VERSION:-$(sed -n 's/^- \*\*Tag:\*\* `v\([0-9.]*\)`.*/\1/p' \

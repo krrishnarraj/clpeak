@@ -177,22 +177,24 @@ struct VariantResult
   ResultStatus skipStatus = ResultStatus::Unsupported;
   std::map<int64_t, Point> prefill, decode;
   // The forms the variant runs in (LitertForm): on a GPU with 8-bit kernels
-  // for the format, with them disallowed and allowed, each regime racing the
-  // two as gemm.cpp does; one form everywhere else.
+  // for the format, with them disallowed and allowed, and on one with two
+  // graph pipelines each through both, each regime racing them as gemm.cpp
+  // does; one form everywhere else.
   std::vector<LitertForm> forms;
   clpeak::MultiFormRace prefillRace{1}, decodeRace{1};
 };
 
 // Why a variant's decode form cannot be sent to this accelerator, or empty.
 // The GPU accelerator's graph reader CHECK-fails -- an abort, not a refusal
-// (object_reader.cc, "CanReadValue(node_input_index)", LiteRT 2.2.0) -- on a
-// composite whose input is a constant, and decode's cache is one; prefill,
-// whose K and V are computed, is fine.
+// (object_reader.cc, "CanReadValue(node_input_index)", LiteRT 2.2.0 and
+// 2.3.0) -- on a composite whose input is a constant, and decode's cache is
+// one; prefill, whose K and V are computed, is fine.  2.3.0's IrModel
+// pipeline does not abort, but answers NaN.
 std::string decodeFence(const Variant &v, LitertAccel accel)
 {
   if (v.composite && accel == LitertAccel::Gpu)
     return "the GPU accelerator aborts the process on a composite with a constant input "
-           "(LiteRT 2.2.0), and decode's cache is a constant, so only prefill is sent to it";
+           "(LiteRT 2.2.0 and 2.3.0), and decode's cache is a constant, so only prefill is sent to it";
   return std::string();
 }
 
@@ -233,9 +235,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     auto s = LitertSession::create(rt, dev, litertBlockModel(plan, shapeFor(v, decode, kvLen, prefillSeq)),
                                    litertConfigFor(plan, form), err);
     const std::string what = (decode ? "decode_kv" + std::to_string(kvLen) : "prefill_s" + std::to_string(prefillSeq)) +
-                             (plan.gpuInt8KernelChoice
-                                  ? std::string(form.gpuInt8Kernels ? " with" : " without") + " 8-bit kernels"
-                                  : std::string());
+                             litertGpuFormWords(plan, form);
     if (!s)
     {
       CLPEAK_VLOG("litert-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
@@ -380,9 +380,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     // accelerator that cannot return an int8 tensor still runs it.
     vr.forms.clear();
     std::string firstWrong;
+    std::vector<LitertForm> asked;
     for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
+      asked.push_back(LitertForm{false, k == 1, true});
+    for (const LitertForm &form : litertWithPipelines(std::move(asked), plan))
     {
-      const LitertForm form{false, k == 1, true};
       const std::string wrong = wrongAnswer(rt, dev, v.f, form);
       if (wrong.empty())
         vr.forms.push_back(form);
@@ -533,11 +535,8 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (ps && ps->onDevice() && litertBindScalar(*ps, sp, err))
         kernel = litertMatMulKernel(ps->profileOps(err));
       CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'%s%s\n", dev.displayName.c_str(),
-                  v.label, (long long)seq,
-                  plan.gpuInt8KernelChoice
-                      ? (vr.forms[f].gpuInt8Kernels ? " with 8-bit kernels" : " without 8-bit kernels")
-                      : "",
-                  kernel.c_str(), err.empty() ? "" : ": ", err.c_str());
+                  v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str(),
+                  err.empty() ? "" : ": ", err.c_str());
       if (litertKernelArithmetic(kernel, dev.accel) == LitertArithmetic::Unknown)
       {
         CLPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",
@@ -582,7 +581,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     const VariantResult &vr = results[vi];
     if (vr.forms.size() < 2 || pt.us <= 0.0)
       return std::string();
-    return vr.forms[pt.form].gpuInt8Kernels ? ", with the GPU's 8-bit kernels" : ", without the GPU's 8-bit kernels";
+    return "," + litertGpuFormWords(plans[vi], vr.forms[pt.form]);
   };
 
   auto emitPrefillTo = [&](logger::TestScope &test, size_t vi)

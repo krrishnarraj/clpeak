@@ -10,14 +10,21 @@
   Qualcomm: one group per Hexagon generation, which picks the Skel/Stub
   module (qualcomm_runtime_vNN) beside the shared qualcomm_runtime.  The
   generations are LiteRT's own (litert/vendors/qualcomm/supported_soc.csv,
-  v2.2.0): every row at v68 or later, less automotive (SA*) parts; v65/v66
-  rows have no HTP.  SC8380XP is Snapdragon X Elite, in the Snapdragon
-  Googlebooks (Android laptops).  Each chipset is listed under both
+  v2.3.0): every row at v68 or later, less automotive (SA*) parts; v65/v66
+  rows have no HTP.  SC8380XP and SC8480XP are Snapdragon X Elite and X2
+  Elite, in the Snapdragon Googlebooks (Android laptops).  Each chipset is listed under both
   manufacturer names, as LiteRT's AI Pack export does: Play cannot tell
   "Qualcomm" from "QTI".
 
   Google Tensor: G3 and later, the chipsets LiteRT's Tensor module serves
   (litert/python/aot/vendors/google_tensor/target.py).
+
+  MediaTek: every chipset LiteRT's compiler plugin names
+  (kPluginSocModels in litert/vendors/mediatek/compiler/compiler_plugin.cc),
+  under "Mediatek" as LiteRT's AI Pack export writes it, and every model
+  string in litert/vendors/mediatek/supported_soc.csv besides (some carry a
+  package suffix).  On-device compilation asks the phone's own NeuroPilot runtime,
+  so the shims are all a phone downloads.
 -->
 <config:device-targeting-config xmlns:config="http://schemas.android.com/apk/config">
 
@@ -121,11 +128,13 @@
     <config:device-group name="qualcomm_v81">
         <config:device-selector>
             <config:system-on-chip manufacturer="QTI" model="SAR2230P"/>
+            <config:system-on-chip manufacturer="QTI" model="SC8480XP"/>
             <config:system-on-chip manufacturer="QTI" model="SM8845"/>
             <config:system-on-chip manufacturer="QTI" model="SM8845P"/>
             <config:system-on-chip manufacturer="QTI" model="SM8850"/>
             <config:system-on-chip manufacturer="QTI" model="SW6100"/>
             <config:system-on-chip manufacturer="Qualcomm" model="SAR2230P"/>
+            <config:system-on-chip manufacturer="Qualcomm" model="SC8480XP"/>
             <config:system-on-chip manufacturer="Qualcomm" model="SM8845"/>
             <config:system-on-chip manufacturer="Qualcomm" model="SM8845P"/>
             <config:system-on-chip manufacturer="Qualcomm" model="SM8850"/>
@@ -139,6 +148,35 @@
             <config:system-on-chip manufacturer="Google" model="Tensor G4"/>
             <config:system-on-chip manufacturer="Google" model="Tensor G5"/>
             <config:system-on-chip manufacturer="Google" model="Tensor G6"/>
+        </config:device-selector>
+    </config:device-group>
+
+    <config:device-group name="mediatek">
+        <config:device-selector>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6853"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6877"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6878"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6879"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6886"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6893"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6895"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6895Z/CZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6895Z/TCZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6895Z_A/TCZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6895Z_B/TCZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6897"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6983"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6983W/CZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6983Z/CZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6983Z/TCZA"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6985"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6989"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6991"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT6993"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT8171"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT8188"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT8189"/>
+            <config:system-on-chip manufacturer="Mediatek" model="MT8196"/>
         </config:device-selector>
     </config:device-group>
 
