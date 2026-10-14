@@ -233,24 +233,28 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             race.drop(f);
             continue;
           }
-          if (sp > kMinSpatial && ln.prevCreateUs > 0.0 && ln.prevCreateUs * 4.0 > kLitertMaxCreateUs)
+          // A doubled map compiles in up to four times the time -- above
+          // what every session here costs whatever its graph
+          // (litertCreateFloorUs), which on a MediaTek APU is 15 s and alone
+          // would end the climb after its first size.
+          if (sp > kMinSpatial && ln.prevCreateUs > 0.0)
           {
-            race.drop(f);
-            continue;
+            const double floorUs = std::min(litertCreateFloorUs(dev.accel), ln.prevCreateUs);
+            const double predictedUs = floorUs + (ln.prevCreateUs - floorUs) * 4.0;
+            if (predictedUs > kLitertMaxCreateUs)
+            {
+              CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s predicted create %.1f s > %.1f s, stopping\n",
+                          dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), predictedUs / 1.0e6,
+                          kLitertMaxCreateUs / 1.0e6);
+              race.drop(f);
+              continue;
+            }
           }
 
           if (ln.rungs == 0 && ln.kernel.empty())
-          {
-            std::string err;
-            auto ps = LitertSession::create(rt, dev,
-                                            litertConvModel(fp, kChannels, sp, v.kernel, v.stride, v.depthwise),
-                                            litertConfigFor(fp, forms[f], true), err);
-            if (ps && ps->onDevice() && litertBindScalar(*ps, fp, err))
-            {
-              std::string perr;
-              ln.kernel = litertMatMulKernel(ps->profileOps(perr));
-            }
-          }
+            ln.kernel = litertProfiledKernel(
+                rt, dev, [&] { return litertConvModel(fp, kChannels, sp, v.kernel, v.stride, v.depthwise); },
+                litertConfigFor(fp, forms[f], true), fp);
 
           std::string err;
           auto s = LitertSession::create(rt, dev, litertConvModel(fp, kChannels, sp, v.kernel, v.stride, v.depthwise),

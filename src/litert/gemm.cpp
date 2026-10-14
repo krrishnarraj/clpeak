@@ -135,7 +135,7 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {LitertFormat::Fp32, "Full 32-bit precision."},
+    {LitertFormat::Fp32, "Full 32-bit precision, unless the numeric-error row says otherwise."},
     {LitertFormat::Fp16, "16-bit weights and arithmetic."},
     {LitertFormat::Fp16Acc32, "The GPU's fp16 policy with fp32 accumulation."},
     {LitertFormat::Bf16, "bfloat16 weights and arithmetic."},
@@ -422,17 +422,12 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         // never touches a timed session.
         if (ln.rungs == 0 && ln.kernel.empty())
         {
-          std::string err;
-          auto ps = LitertSession::create(rt, dev,
-                                          litertMatMulChainModel(fp, D, kChainLayers, kSeedWidth, forms[f].conv1x1),
-                                          litertConfigFor(fp, forms[f], true), err);
-          if (ps && ps->onDevice() && litertBindScalar(*ps, fp, err))
-          {
-            std::string perr;
-            ln.kernel = litertMatMulKernel(ps->profileOps(perr));
+          ln.kernel = litertProfiledKernel(
+              rt, dev, [&] { return litertMatMulChainModel(fp, D, kChainLayers, kSeedWidth, forms[f].conv1x1); },
+              litertConfigFor(fp, forms[f], true), fp);
+          if (!ln.kernel.empty())
             CLPEAK_VLOG("litert-gemm[%s/%s]: %s kernel '%s'\n", dev.displayName.c_str(), label, form.c_str(),
                         ln.kernel.c_str());
-          }
         }
 
         std::string err;

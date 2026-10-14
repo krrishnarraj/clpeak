@@ -508,8 +508,10 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   // says whether they were multiplied as integers -- the unit of a
   // weight-only row, and a full-integer row's word on a float kernel
   // (litertRateUnit, litertKernelNote).  A profile that names no kernel
-  // whose arithmetic can be read ends the profiling on this accelerator: the
-  // next would not either, and on an NPU each is another compile.
+  // whose arithmetic can be read ends the block's profiling on this
+  // accelerator: the next would not either, and on an NPU each is another
+  // compile (one that names no kernel at all ends every test's,
+  // litertProfiledKernel).
   bool profileReadable = true;
   auto profilePrefill = [&](size_t vi, int64_t seq)
   {
@@ -523,20 +525,16 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     pt.profiled = true;
     auto kernelOf = [&](size_t f) -> std::string
     {
-      if (!profileReadable || clpeak::cancelRequested())
+      if (!profileReadable || !litertProfilesNameKernels(dev.accel))
         return std::string();
-      std::string err;
-      auto ps = LitertSession::create(rt, dev, litertBlockModel(plan, shapeFor(v, false, kDecodeKv, seq)),
-                                      litertConfigFor(plan, vr.forms[f], true), err);
       LitertPlan sp = plan;
       if (sp.act == clpeak_tflite::TfType::I8)
         sp.act = clpeak_tflite::TfType::F32;
-      std::string kernel;
-      if (ps && ps->onDevice() && litertBindScalar(*ps, sp, err))
-        kernel = litertMatMulKernel(ps->profileOps(err));
-      CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'%s%s\n", dev.displayName.c_str(),
-                  v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str(),
-                  err.empty() ? "" : ": ", err.c_str());
+      const std::string kernel = litertProfiledKernel(
+          rt, dev, [&] { return litertBlockModel(plan, shapeFor(v, false, kDecodeKv, seq)); },
+          litertConfigFor(plan, vr.forms[f], true), sp);
+      CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'\n", dev.displayName.c_str(),
+                  v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str());
       if (litertKernelArithmetic(kernel, dev.accel) == LitertArithmetic::Unknown)
       {
         CLPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",

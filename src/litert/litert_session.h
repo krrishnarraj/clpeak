@@ -105,8 +105,9 @@ public:
   // One profiled run: the operator events LiteRT recorded, each as
   // "TAG [source]" where the source says whether the interpreter (CPU
   // reference kernels), a delegate (XNNPACK, the GPU accelerator) or the
-  // LiteRT runtime itself executed it.  Empty when profiling is off.
-  std::vector<std::string> profileOps(std::string &error);
+  // LiteRT runtime itself executed it.  Empty when profiling is off;
+  // `runFailed`, when given, says whether it was the graph's run that failed.
+  std::vector<std::string> profileOps(std::string &error, bool *runFailed = nullptr);
 
   // What LiteRT logged while this session was created (already relayed to
   // the run log); the last few lines are what a refusal reason quotes.
@@ -123,6 +124,7 @@ private:
   std::vector<LiteRtTensorBuffer> inputs_, outputs_;
   std::vector<size_t> inputBytes_, outputBytes_;
   bool fullyAccelerated_ = true;
+  std::string took_;   // partitionWords: what a compiler plugin took, when not all
   bool profile_ = false;
   bool holdsEnv_ = false;
   bool ran_ = false;
@@ -146,7 +148,25 @@ bool litertPrepareEnvironment(const LitertRuntime &rt, LitertAccel accel, std::s
 std::string litertEnvironmentLog(LitertAccel accel);
 
 // Tear down an accelerator's environment; the next session rebuilds it.
-// No session may be alive on it.
+// No session may be alive on it.  What its sessions taught -- the warnings
+// they print anyway, the floor and the profiles below -- goes with it.
 void litertResetEnvironment(const LitertRuntime &rt, LitertAccel accel);
+
+// The least time a session on this accelerator has taken to create, in
+// microseconds (0 before the first): what creating one costs whatever its
+// graph, which a ladder sets apart before scaling the rest with the size.
+// On a Dimensity 7300 every NPU session took 15 s, from a 64-value
+// multiply up: LiteRT 2.3.0's MediaTek compiler plugin loads the
+// NeuronAdapter three times a compile, and each load first spends 5 s
+// failing to ask NeuroPilot's service its version
+// (GetNeuroPilotMagicNumber; the "Magic number" line never comes).
+double litertCreateFloorUs(LitertAccel accel);
+
+// Whether a profile on this accelerator can still name a kernel: false once
+// a profiled run that worked named none (litertNoteUnnamedProfile).  An NPU's
+// dispatch is one operator to LiteRT's profiler, whatever its graph, so
+// every profile there names nothing, and each costs a compile of its own.
+bool litertProfilesNameKernels(LitertAccel accel);
+void litertNoteUnnamedProfile(LitertAccel accel);
 
 #endif // CLPEAK_LITERT_SESSION_H

@@ -95,6 +95,12 @@ struct LitertPlan
   // on a phone that memory is the difference between a rung that runs and
   // one the budget refuses.  The accelerator folds the dequantize at load.
   bool halfConstants = false;
+  // A float FULLY_CONNECTED carries a zero bias of its activation type
+  // rather than none (fcHasBias in litert_model.cpp has why: an NPU
+  // compiler that writes in the missing one can type it wrong).  Only where
+  // it is needed: on XNNPACK a resident fp16 gemv read a few percent slower
+  // with it.
+  bool floatBias = false;
 };
 LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 

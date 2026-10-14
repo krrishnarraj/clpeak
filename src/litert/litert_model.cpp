@@ -86,6 +86,12 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     }
     else
       p.act = p.weight = TfType::F16;
+    // MediaTek's compiler plugin writes the bias a FULLY_CONNECTED left out
+    // as int32 for any input but fp32 (AddZeroBiasForConvBase, LiteRT
+    // 2.3.0), which no fp16 operator takes: a Dimensity 7300's APU took none
+    // of a bias-less fp16 graph's operators, while it ran the fp16
+    // convolutions, which carry their own.
+    p.floatBias = accel == LitertAccel::Npu;
     break;
   case LitertFormat::Fp16Acc32:
     if (accel != LitertAccel::Gpu)
@@ -832,9 +838,11 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
 // graphs do, because a converted model always has one and an accelerator's
 // int8 kernel is written for that form (Mali's int8 path returned a wrong
 // answer for the bias-less form on a Pixel 7a; whether the bias is what it
-// wanted is what the next run there says).  The int16 plan stays bias-less:
-// its reference kernel wants an int64 bias and nothing else runs it.
-bool fcHasBias(const LitertPlan &p) { return p.act == TfType::I8 && p.weight == TfType::I8; }
+// wanted is what the next run there says).  So does a plan that asks
+// (LitertPlan::floatBias): a compiler that writes in the bias a layer left
+// out can get its type wrong.  The int16 plan stays bias-less: its reference
+// kernel wants an int64 bias and nothing else runs it.
+bool fcHasBias(const LitertPlan &p) { return (p.act == TfType::I8 && p.weight == TfType::I8) || p.floatBias; }
 
 // The int32 zero bias of an integer FULLY_CONNECTED: one per output row,
 // at the product of the input and weight scales.
@@ -953,9 +961,10 @@ int convVersion(const LitertPlan &p, bool depthwise)
 }
 
 // The zero bias a CONV_2D carries -- its kernels want one ("Tensor at index
-// 2 was optional but was expected"): int32 at the product of the input and
-// weight scales for an integer plan, the activation type otherwise.
-int addConvBias(Recipe &r, const LitertPlan &p, int64_t N, float aScale, float wScale)
+// 2 was optional but was expected") -- and a FULLY_CONNECTED where
+// fcHasBias says: int32 at the product of the input and weight scales for an
+// integer plan, the activation type otherwise.
+int addZeroBias(Recipe &r, const LitertPlan &p, int64_t N, float aScale, float wScale)
 {
   if (isInteger(p.act))
     return addFcBias(r, N, aScale, wScale);
@@ -1015,7 +1024,7 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   const int as = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "As", 0, aq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
   const bool bias = fcHasBias(p);
-  const int b = bias ? addFcBias(r, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
+  const int b = bias ? addZeroBias(r, p, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant cq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int c = r.m.addTensor(0, {1, (int32_t)M, (int32_t)N}, p.act, "C", 0, cq);
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
@@ -1098,8 +1107,7 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
                    float mag, float outScale) -> int {
     float wScale = 1.0f;
     const int w = weight(name + "_w", D, K, seed, mag, wScale);
-    const int b = conv1x1 ? addConvBias(r, p, D, inScale, wScale)
-                          : (bias ? addFcBias(r, D, inScale, wScale) : -1);
+    const int b = conv1x1 || bias ? addZeroBias(r, p, D, inScale, wScale) : -1;
     const int out = r.m.addTensor(0, shape(D), p.act, name, 0, actQuant(p, outScale));
     if (conv1x1)
       r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {in, w, b}, {out}, conv1x1Options());
@@ -1150,7 +1158,7 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
   const Fill *wf = nullptr;
   const int w = addWeight(r, p, N, K, seedW, &wf, conv1x1);
   const bool bias = fcHasBias(p);
-  const int b = conv1x1 ? addConvBias(r, p, N, aScale, wScale) : (bias ? addFcBias(r, N, aScale, wScale) : -1);
+  const int b = conv1x1 || bias ? addZeroBias(r, p, N, aScale, wScale) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const std::vector<int32_t> yShape =
       conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N};
@@ -1181,7 +1189,7 @@ TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t 
   const int x = r.m.addTensor(0, {1, 1, (int32_t)K}, p.act, "x", 0, xq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
   const bool bias = fcHasBias(p);
-  const int b = bias ? addFcBias(r, N, xScale, litertWeightScale(bitsOf(p.weight))) : -1;
+  const int b = bias ? addZeroBias(r, p, N, xScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int y = r.m.addTensor(0, {1, 1, (int32_t)N}, p.act, "y", 0, yq);
   r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
@@ -1372,7 +1380,7 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
                            ? litertWeightScale(bitsOf(p.weight)) *
                                  (2.0f / std::sqrt((float)((depthwise ? 1 : channels) * kernel * kernel)))
                            : 1.0f;
-  const int bias = addConvBias(r, p, channels, aScale, wScale);
+  const int bias = addZeroBias(r, p, channels, aScale, wScale);
   // The output's scale: a fan-in-deep dot product of the activations and
   // the shrunk weights lands within the activations' own range.
   const TfQuant yq = actQuant(p, aScale);
@@ -1553,7 +1561,9 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     if (!qdq)
     {
       const int out = tensor(outShape, name);
-      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, false), {in, w, -1}, {out}, fcOptions(p));
+      const bool bias = fcHasBias(p);
+      const int b = bias ? addZeroBias(r, p, N, 1.0f, 1.0f) : -1;
+      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {in, w, b}, {out}, fcOptions(p));
       return out;
     }
     // W8A8: quantize in, integer multiply, dequantize out.

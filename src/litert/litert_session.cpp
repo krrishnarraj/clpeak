@@ -5,11 +5,15 @@
 #include <common/common.h>
 #include <common/console_mute.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 
 #include "litert/c/litert_profiler_event.h"
@@ -129,13 +133,19 @@ std::string withoutLocations(std::string s)
   return s.substr(from, s.find_last_not_of(' ') + 1 - from);
 }
 
-// The last error or warning lines of what the runtime said -- its sink log
-// and whatever it printed to the console -- for a row reason.  LiteRT's own
-// lines look like "ERROR: [file.cc:12] text"; TFLite's kernel errors reach
-// stderr as "ERROR: tflite/kernels/x.cc:302 text"; the accelerator
-// libraries' glog lines ("E0000 ...") carry their severity in the first
-// letter.  Only the sentence survives.
-std::string lastLines(const std::string &log, int keep = 3)
+// The error and warning lines of what the runtime said -- its sink log and
+// whatever it printed to the console -- each down to its sentence, in order.
+// LiteRT's own lines look like "ERROR: [file.cc:12] text"; TFLite's kernel
+// errors reach stderr as "ERROR: tflite/kernels/x.cc:302 text"; the
+// accelerator libraries' glog lines ("E0000 ...") carry their severity in
+// the first letter.
+struct Said
+{
+  std::string text;
+  bool error = false;
+};
+
+std::vector<Said> warningsAndErrors(const std::string &log)
 {
   // An error LiteRT passes up keeps its cause on the next line, after "└ "
   // (litert_macros.h); one cause can hold another.  The cause is what says
@@ -144,7 +154,7 @@ std::string lastLines(const std::string &log, int keep = 3)
   // Qualcomm plugin packaged without that library -- and it carries no
   // severity of its own, so it joins the line it belongs to.
   static const char kCause[] = "\xE2\x94\x94";   // U+2514
-  std::vector<std::string> lines;
+  std::vector<Said> lines;
   bool open = false;   // the line before was kept: a cause continues it
   size_t pos = 0;
   while (pos < log.size())
@@ -159,14 +169,16 @@ std::string lastLines(const std::string &log, int keep = 3)
       const std::string cause = withoutLocations(l.substr(sizeof(kCause) - 1));
       if (!open || cause.empty())
         continue;
-      std::string &line = lines.back();
+      std::string &line = lines.back().text;
       line += line.empty() ? cause : (line.back() == ':' ? " " : ": ") + cause;
       continue;
     }
     open = false;
     const bool glogBad = (l.size() > 5 && (l[0] == 'E' || l[0] == 'W') && l[1] == '0');
-    if (levelOf(l) == clpeak::LogLevel::Debug && !glogBad)
+    const clpeak::LogLevel level = levelOf(l);
+    if (level == clpeak::LogLevel::Debug && !glogBad)
       continue;
+    const bool error = glogBad ? l[0] == 'E' : level == clpeak::LogLevel::Error;
     if (glogBad)
     {
       // "E0000 00:00:123.456 7 file.cc:9] text"
@@ -193,17 +205,85 @@ std::string lastLines(const std::string &log, int keep = 3)
           l = l.substr(sp + 1);
       }
     }
-    lines.push_back(withoutLocations(l));   // kept even when empty: its cause may follow
+    lines.push_back({withoutLocations(l), error});   // kept even when empty: its cause may follow
     open = true;
   }
-  std::vector<std::string> said;
-  for (std::string &l : lines)
+  for (Said &l : lines)
   {
     // A location with no cause after it leaves its colon behind.
-    while (!l.empty() && (l.back() == ':' || l.back() == ' '))
-      l.pop_back();
-    if (!l.empty() && (said.empty() || said.back() != l))
-      said.push_back(std::move(l));
+    while (!l.text.empty() && (l.text.back() == ':' || l.text.back() == ' '))
+      l.text.pop_back();
+  }
+  return lines;
+}
+
+// A warning with its numbers taken out, for telling one said again with
+// another buffer size or tensor index from a new one.
+std::string warningKey(const std::string &text)
+{
+  std::string key;
+  for (char c : text)
+    if (!std::isdigit((unsigned char)c))
+      key += c;
+    else if (key.empty() || key.back() != '#')
+      key += '#';
+  return key;
+}
+
+// Per accelerator, the warnings its sessions printed on the way to coming
+// up fine: routine, and so no reason for a later one failing.  MediaTek's
+// NPU stack warns on every session that the NeuronAdapter lacks an optional
+// symbol (NeuronExecution_setConfig, NeuroPilot 8) and what buffer sizes its
+// dispatch asked Neuron for; quoted as the reason a graph was refused, they
+// stood in for the refusal itself.
+std::mutex g_routineMutex;
+std::map<int, std::set<std::string>> g_routineWarnings;
+
+void noteRoutine(LitertAccel accel, const std::string &log)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  std::set<std::string> &seen = g_routineWarnings[(int)accel];
+  for (const Said &l : warningsAndErrors(log))
+    if (!l.error && !l.text.empty())
+      seen.insert(warningKey(l.text));
+}
+
+// Per accelerator, the least time a session took to create: the part of a
+// creation that does not grow with its graph (litertCreateFloorUs).
+std::map<int, double> g_createFloorUs;
+
+void noteCreate(LitertAccel accel, double us)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  auto it = g_createFloorUs.find((int)accel);
+  if (it == g_createFloorUs.end() || us < it->second)
+    g_createFloorUs[(int)accel] = us;
+}
+
+// Accelerators where a profiled run that worked named no kernel
+// (litertProfilesNameKernels).
+std::set<int> g_unnamedProfiles;
+
+// The last few lines of what the runtime said while failing, for a row
+// reason, less the warnings its sessions on this accelerator print anyway.
+std::string lastLines(const std::string &log, LitertAccel accel, int keep = 3)
+{
+  std::set<std::string> routine;
+  {
+    std::lock_guard<std::mutex> lock(g_routineMutex);
+    auto it = g_routineWarnings.find((int)accel);
+    if (it != g_routineWarnings.end())
+      routine = it->second;
+  }
+  std::vector<std::string> said;
+  for (const Said &l : warningsAndErrors(log))
+  {
+    if (l.text.empty() || (!l.error && routine.count(warningKey(l.text))))
+      continue;
+    // A line said again counts where it was said last: a compiler refusing
+    // operator after operator alternates two lines.
+    said.erase(std::remove(said.begin(), said.end(), l.text), said.end());
+    said.push_back(l.text);
   }
   std::string out;
   const size_t from = said.size() > (size_t)keep ? said.size() - keep : 0;
@@ -214,6 +294,34 @@ std::string lastLines(const std::string &log, int keep = 3)
     out += said[i];
   }
   return out;
+}
+
+// What a compiler plugin took of the graph, from LiteRT's account of its
+// partitioning ("Partitioned subgraph<0>, selected 2 ops, from a total of 19
+// ops.", compiler_plugin.cc, at INFO): "the NPU compiler took 2 of the
+// graph's 19 operators", or empty when it took them all or none was asked.
+// It is the refusal when a vendor's own lines leave it out -- MediaTek's say
+// nothing when Neuron declines operators its plugin had legalized.
+std::string partitionWords(const std::string &log, const std::string &accelName)
+{
+  static const char kMark[] = "Partitioned subgraph<";
+  long long taken = 0, total = 0;
+  for (size_t at = log.find(kMark); at != std::string::npos; at = log.find(kMark, at + 1))
+  {
+    long long k = 0, m = 0;
+    if (std::sscanf(log.c_str() + at, "Partitioned subgraph<%*d>, selected %lld ops, from a total of %lld ops", &k,
+                    &m) == 2)
+    {
+      taken += k;
+      total += m;
+    }
+  }
+  if (total <= 0 || taken >= total)
+    return std::string();
+  if (total == 1)
+    return "the " + accelName + " compiler did not take the graph's one operator";
+  return "the " + accelName + " compiler took " + (taken == 0 ? std::string("none") : std::to_string(taken)) +
+         " of the graph's " + std::to_string(total) + " operators";
 }
 
 // ---------------------------------------------------------------------------
@@ -369,7 +477,7 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
   {
     error = "LiteRT could not create an environment for the " + std::string(litertAccelName(accel)) +
             ": " + litertStatusText(rt, st);
-    const std::string why = lastLines(logged);
+    const std::string why = lastLines(logged, accel);
     if (!why.empty())
       error += " (" + why + ")";
     rec.error = error;
@@ -444,6 +552,29 @@ void litertResetEnvironment(const LitertRuntime &rt, LitertAccel accel)
     it->second.api.LiteRtDestroyEnvironment(it->second.env);
   g_envs.erase(it);
   litertDrainLog(rt);
+  std::lock_guard<std::mutex> routineLock(g_routineMutex);
+  g_routineWarnings.erase((int)accel);
+  g_createFloorUs.erase((int)accel);
+  g_unnamedProfiles.erase((int)accel);
+}
+
+bool litertProfilesNameKernels(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  return g_unnamedProfiles.count((int)accel) == 0;
+}
+
+void litertNoteUnnamedProfile(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  g_unnamedProfiles.insert((int)accel);
+}
+
+double litertCreateFloorUs(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  auto it = g_createFloorUs.find((int)accel);
+  return it == g_createFloorUs.end() ? 0.0 : it->second;
 }
 
 std::string litertEnvironmentLog(LitertAccel accel)
@@ -488,7 +619,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     if (!console.empty() && clpeak::verboseEnabled())
       CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
     error = what + ": " + litertStatusText(rt, st);
-    const std::string why = lastLines(s->creationLog);
+    std::string why = lastLines(s->creationLog, dev.accel);
+    if (const std::string took = partitionWords(s->creationLog, s->accelName_); !took.empty())
+      why = why.empty() ? took : took + "; " + why;
     if (!why.empty())
       error += " (" + why + ")";
     return nullptr;
@@ -601,6 +734,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     return fail(std::string("LiteRT could not compile the model for the ") + s->accelName_, compileSt);
   s->createUs = elapsedUs(t0);
   s->creationLog = console + litertDrainLog(rt);
+  noteRoutine(dev.accel, s->creationLog);
+  noteCreate(dev.accel, s->createUs);
+  s->took_ = partitionWords(s->creationLog, s->accelName_);
   // Where a session's time went, for the run log: the host generating the
   // model against the runtime loading and compiling it.  On a phone both
   // can dwarf the measurement that follows.
@@ -705,7 +841,8 @@ std::string LitertSession::offDevice() const
   if (fullyAccelerated_)
     return std::string();
   return "LiteRT handed part of this graph back to the CPU: the " + accelName_ +
-         " accelerator did not take every operation, so this would not be a " + accelName_ + " number";
+         " accelerator did not take every operation" + (took_.empty() ? "" : " (" + took_ + ")") +
+         ", so this would not be a " + accelName_ + " number";
 }
 
 bool LitertSession::writeInput(size_t i, const void *data, size_t bytes, std::string &error)
@@ -774,7 +911,7 @@ bool LitertSession::run(std::string &error)
       CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     const std::string logged = console + litertDrainLog(*rt_);
     error = "inference failed: " + litertStatusText(*rt_, st);
-    const std::string why = lastLines(logged);
+    const std::string why = lastLines(logged, accel_);
     if (!why.empty())
       error += " (" + why + ")";
     return false;
@@ -867,9 +1004,11 @@ bool LitertSession::fillOutput(size_t i, uint8_t byte, std::string &error)
   return true;
 }
 
-std::vector<std::string> LitertSession::profileOps(std::string &error)
+std::vector<std::string> LitertSession::profileOps(std::string &error, bool *runFailed)
 {
   std::vector<std::string> out;
+  if (runFailed)
+    *runFailed = false;
   if (!profile_ || !rt_->api.LiteRtCompiledModelGetProfiler || !rt_->api.LiteRtStartProfiler ||
       !rt_->api.LiteRtStopProfiler || !rt_->api.LiteRtGetNumProfilerEvents ||
       !rt_->api.LiteRtGetProfilerEvents)
@@ -889,7 +1028,11 @@ std::vector<std::string> LitertSession::profileOps(std::string &error)
   const bool ok = run(error);
   rt_->api.LiteRtStopProfiler(prof);
   if (!ok)
+  {
+    if (runFailed)
+      *runFailed = true;
     return out;
+  }
   int n = 0;
   if (rt_->api.LiteRtGetNumProfilerEvents(prof, &n) != kLiteRtStatusOk || n <= 0)
     return out;

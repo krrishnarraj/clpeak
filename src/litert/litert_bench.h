@@ -193,6 +193,35 @@ inline std::string litertMatMulKernel(const std::vector<std::string> &ops)
   return best;
 }
 
+// The kernel a graph's multiplies ran as, from one profiled run in a session
+// of its own -- profiling costs enough on the GPU (every kernel waited on)
+// that it never touches a timed session.  `model` builds the graph, only if
+// it is to be profiled; `bind` is the plan its inputs are filled as.  Empty
+// when the session could not be made, ran off the device or failed to run;
+// and from the first profile that ran and named no kernel on, none is taken
+// on this accelerator (litertProfilesNameKernels): on a MediaTek APU each
+// was another 15 s compile, for nothing.
+template <typename BuildModel>
+std::string litertProfiledKernel(const LitertRuntime &rt, const litert_device_info_t &dev, BuildModel &&model,
+                                 const LitertSessionConfig &cfg, const LitertPlan &bind)
+{
+  if (!litertProfilesNameKernels(dev.accel) || clpeak::cancelRequested())
+    return std::string();
+  std::string err;
+  auto ps = LitertSession::create(rt, dev, model(), cfg, err);
+  if (!ps || !ps->onDevice() || !litertBindScalar(*ps, bind, err))
+    return std::string();
+  bool runFailed = false;
+  const std::string kernel = litertMatMulKernel(ps->profileOps(err, &runFailed));
+  if (kernel.empty() && !runFailed)
+  {
+    CLPEAK_VLOG("litert[%s]: a profiled run named no kernel%s%s, so no more are taken on this device\n",
+                dev.displayName.c_str(), err.empty() ? "" : ": ", err.c_str());
+    litertNoteUnnamedProfile(dev.accel);
+  }
+  return kernel;
+}
+
 // What a profiled kernel tag says its multiplies were, if anything.
 // XNNPACK names an operator by the types it packed, its input's first after
 // the layout: `Fully Connected (NC, QD8, F32, QC8W)` multiplies int8

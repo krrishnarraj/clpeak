@@ -219,7 +219,10 @@ kernel name from one profiled run says which kernel it was.
   no arithmetic (an NPU's), the format's unit stands.  gemm and conv profile
   every form they race; the block profiles its projections at each prompt it
   reports, in the form that won there, for the formats whose weights are
-  integer, until a profile names nothing it can read.
+  integer, until a profile names nothing it can read.  Once a profiled run
+  that worked names no kernel at all, no test on that device takes another
+  (`litertProfiledKernel()`): an NPU's dispatch is one operator to the
+  profiler, and each profile is a compile of its own.
 - **A fast kernel can be a wrong one, and a right one's answer can fail to
   come back.**  The accuracy measurement is memoised per device, format and
   form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
@@ -454,7 +457,11 @@ the *first inference* on the CPU, not at compile time ("input->type !=
 kTfLiteFloat32 (BFLOAT16 != FLOAT32)").  So creation, environment setup and
 the first `run()` of every session are wrapped in `ScopedConsoleMute
 (Capture::Always)`, and `lastLines()` distils whatever came out into the
-sentence the row quotes.  Later runs are bare: a mute is two `dup2` calls a
+sentence the row quotes -- less the warnings the accelerator's sessions print
+on their way to working (MediaTek's NPU stack warns on every one), and led by
+LiteRT's count of what a compiler plugin took when it took less than the
+graph (`partitionWords()`), which is the refusal a vendor's own lines can
+leave out.  Later runs are bare: a mute is two `dup2` calls a
 timed loop must not pay.  A refusal that arrives as "failed to prepare" is
 reported as unsupported, not as an error: it is the runtime saying it has
 no kernel for the format.
@@ -641,12 +648,16 @@ budgets.
   LiteRT points at the dispatch directory (prepending when the variable is
   already set); with
   the shims in a directory of their own, `litertStageNpuVendor()` sets it
-  to the lib dir first.  NPU needs API 31+ and arm64.  Unverified on
-  Snapdragon, Tensor and MediaTek silicon: the APK builds and packages
-  every vendor's shims and QNN, every staged shim's DT_NEEDED resolves to
-  a library in it or the platform's, and on an arm64 emulator the Qualcomm
-  plugin loads and its `QnnManager` takes the 2.50 runtime as far as "No
-  Snapdragon SOC detected"; the testers' runs are the proof.
+  to the lib dir first.  NPU needs API 31+ and arm64.  MediaTek's runs:
+  a Dimensity 7300 (MT6878, NeuroPilot 8.2) lists its APU through the Maven
+  shims and runs fp32 (in a narrower type, by its numeric-error row), int8
+  and int16x8; every session there costs ~15 s whatever its graph
+  (`litertCreateFloorUs()` has why), which the ladders' compile predictions
+  set apart.  Unverified on Snapdragon and Tensor silicon: the APK builds and
+  packages every vendor's shims and QNN, every staged shim's DT_NEEDED
+  resolves to a library in it or the platform's, and on an arm64 emulator
+  the Qualcomm plugin loads and its `QnnManager` takes the 2.50 runtime as
+  far as "No Snapdragon SOC detected"; the testers' runs are the proof.
 - **Desktop**: `--litert-lib` at a pip wheel's `libLiteRt.{so,dylib,dll}`;
   the GPU accelerator and the Intel OpenVINO NPU dispatch sit beside it.
   Google's bucket (`storage.googleapis.com/litert/binaries/<version>/
