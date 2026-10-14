@@ -62,6 +62,16 @@ public:
     // The run's RunLog, or nullptr outside a run.
     static RunLog *current();
 
+    // A line from the app hosting the run rather than from the run itself --
+    // the app leaving the screen, say -- recorded on the in-flight run's log
+    // and sidecar with `source`, and rendered nowhere.  A no-op outside a
+    // run.  Safe from any thread at any moment of the run, which onLog() is
+    // not: it neither reads the open logger nor outlives the RunLog, and
+    // once finish() has run the document may be being written, so a later
+    // note reaches the sidecar alone.
+    static void hostNote(clpeak::LogLevel level, const std::string &source,
+                         const std::string &message);
+
     // Seconds since this RunLog was created -- the run's t=0, which is also
     // what `generated_at` names.
     double elapsedS() const;
@@ -131,6 +141,7 @@ private:
     std::size_t  documentDropped    = 0;
     std::size_t  sidecarDebugBytes  = 0;
     std::size_t  sidecarDropped     = 0;
+    bool         finished           = false;   // finish() has run (hostNote)
 };
 
 #endif  // CLPEAK_RUN_LOG_H

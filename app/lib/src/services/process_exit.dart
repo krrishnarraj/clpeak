@@ -104,15 +104,34 @@ class ProcessExitRecord {
       if (pssKb > 0) 'pss ${_mb(pssKb)}',
       if (rssKb > 0) 'rss ${_mb(rssKb)}',
     ];
+    final said = plainWords;
     final head = StringBuffer('process ended: $reason')
       ..write(facts.isEmpty ? '' : ' (${facts.join(', ')})')
-      ..write(description.isEmpty ? '' : ': $description');
+      ..write(description.isEmpty ? '' : ': $description')
+      ..write(said == null ? '' : ' -- $said');
     final t = trace;
     if (t == null || t.isEmpty) return head.toString();
     final body = reason == 'CRASH_NATIVE'
         ? tombstoneText(t)
         : _head(utf8.decode(t, allowMalformed: true), 32 << 10);
     return '$head\n$body';
+  }
+
+  /// What a low-memory end means, which the reason alone does not say: an
+  /// app off screen is the first Android ends when memory is wanted, and
+  /// one that is ended there was not running anyway -- Android pauses it --
+  /// so its run stopped when it left the screen.  Only on screen did the
+  /// run itself, or what ran beside it, use the memory up.
+  String? get plainWords {
+    if (reason != 'LOW_MEMORY' || importance == 0) return null;
+    if (importance >= 400) {
+      return 'the app was off screen, where Android pauses it, and was ended '
+          'to free memory for others';
+    }
+    if (importance <= 200) {
+      return 'the phone ran out of memory with the app on screen';
+    }
+    return null;
   }
 
   static String _mb(int kb) => '${(kb / 1024).toStringAsFixed(0)} MB';

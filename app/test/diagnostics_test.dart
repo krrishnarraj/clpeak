@@ -211,6 +211,22 @@ void main() {
       expect(await store.listCrashLogs(), isEmpty);
     });
 
+    test('a low-memory end off screen says the app was in the background',
+        () {
+      final exit = ProcessExitRecord(
+        runId: 'r',
+        at: DateTime.utc(2026),
+        reason: 'LOW_MEMORY',
+        importance: 400,
+        rssKb: 211 << 10,
+      );
+      expect(
+          exit.message,
+          'process ended: LOW_MEMORY (cached, rss 211 MB) -- the app was off '
+          'screen, where Android pauses it, and was ended to free memory for '
+          'others');
+    });
+
     test('how Android says the process ended is appended to its run, once',
         () async {
       final log = File('${dir.path}/20260915_060557.clpeak.log');
@@ -246,7 +262,8 @@ void main() {
         final exit = logs.single.processExit!;
         expect(exit.level, LogLevel.error);
         expect(exit.message,
-            'process ended: LOW_MEMORY (foreground, pss 3072 MB): lmk');
+            'process ended: LOW_MEMORY (foreground, pss 3072 MB): lmk -- '
+            'the phone ran out of memory with the app on screen');
         expect(exit.elapsedSeconds, closeTo(3603, 0.01));
         // The run's own last line is still the run's.
         expect(logs.single.lastEntry!.message, 'Backend: ONNX');

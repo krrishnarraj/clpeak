@@ -385,6 +385,34 @@ class BenchmarkService extends ChangeNotifier {
     return AppExitResponse.exit;
   }
 
+  bool _offScreen = false;
+
+  /// App-lifecycle hook: a run's log says when the app left the screen and
+  /// when it came back.  On a phone the run is this process, and one that
+  /// is off screen is paused by Android and iOS and the first ended when
+  /// memory is wanted: a Galaxy S24's run stopped mid-test and its record
+  /// read "LOW_MEMORY (cached, rss 211 MB)" thirteen minutes later, which
+  /// looked like a crash.  These lines say what happened.  Desktop runs live
+  /// in the engine process, which nothing pauses.
+  void onLifecycleState(AppLifecycleState state) {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    final run = _run;
+    if (state == AppLifecycleState.hidden && !_offScreen) {
+      _offScreen = true;
+      if (isRunning && run != null) {
+        run.note(
+            LogLevel.warning,
+            'the app left the screen: the phone may pause it, and end it to '
+            'free memory, and the run with it');
+      }
+    } else if (state == AppLifecycleState.resumed && _offScreen) {
+      _offScreen = false;
+      if (isRunning && run != null) {
+        run.note(LogLevel.info, 'the app is back on screen');
+      }
+    }
+  }
+
   /// Back to the dashboard after viewing a finished run.
   void reset() {
     if (isRunning) return;

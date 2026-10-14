@@ -14,6 +14,9 @@
 
 namespace {
 RunLog *g_current = nullptr;
+// Held while g_current changes and while a host note uses it, so a note
+// from another thread never meets a RunLog that is going away.
+std::mutex g_currentMutex;
 
 // The warning a side records the moment it starts dropping Debug: in the
 // first dropped entry's scope and time, so it sits where the gap begins.
@@ -35,14 +38,20 @@ LogEntry capNotice(const LogEntry &dropped, std::size_t cap, const char *where)
 RunLog::RunLog(RunDocument &doc)
     : doc(doc), start(std::chrono::steady_clock::now())
 {
-    g_current = this;
+    {
+        std::lock_guard<std::mutex> lock(g_currentMutex);
+        g_current = this;
+    }
     clpeak::setLogSink(this);
 }
 
 RunLog::~RunLog()
 {
     if (clpeak::logSink() == this) clpeak::setLogSink(nullptr);
-    if (g_current == this) g_current = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_currentMutex);
+        if (g_current == this) g_current = nullptr;
+    }
     // Not removed: a RunLog that goes away without closeSidecar(true) is a
     // run whose document was never saved, and the sidecar is its record.
     closeSidecar(false);
@@ -153,6 +162,21 @@ void RunLog::record(LogEntry &entry)
     appendLocked(entry, /*toDocument=*/true);
 }
 
+void RunLog::hostNote(clpeak::LogLevel level, const std::string &source,
+                      const std::string &message)
+{
+    std::lock_guard<std::mutex> current(g_currentMutex);
+    RunLog *log = g_current;
+    if (!log || message.empty()) return;
+    LogEntry e;
+    e.level    = level;
+    e.source   = source;
+    e.message  = message;
+    e.elapsedS = log->elapsedS();
+    std::lock_guard<std::mutex> lock(log->mutex);
+    log->appendLocked(e, /*toDocument=*/!log->finished);
+}
+
 void RunLog::recordToSidecar(LogEntry &entry)
 {
     entry.elapsedS = elapsedS();
@@ -241,10 +265,12 @@ void RunLog::finish()
         std::lock_guard<std::mutex> lock(mutex);
         n = documentDropped;
     }
-    if (n == 0) return;
-    clpeak::logMessage(clpeak::LogLevel::Warning, "",
-                       "log truncated: " + std::to_string(n) +
-                           " debug entries left out after " +
-                           std::to_string(kMaxDocumentDebugBytes >> 20) +
-                           " MiB of debug messages");
+    if (n > 0)
+        clpeak::logMessage(clpeak::LogLevel::Warning, "",
+                           "log truncated: " + std::to_string(n) +
+                               " debug entries left out after " +
+                               std::to_string(kMaxDocumentDebugBytes >> 20) +
+                               " MiB of debug messages");
+    std::lock_guard<std::mutex> lock(mutex);
+    finished = true;
 }

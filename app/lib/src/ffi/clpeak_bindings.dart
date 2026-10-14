@@ -28,6 +28,8 @@ typedef ClpeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
 typedef ClpeakRequestCancel = void Function();
+typedef _NoteNative = Void Function(Int32 level, Pointer<Utf8> message);
+typedef _Note = void Function(int level, Pointer<Utf8> message);
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _SetOnnxEpLibsNative = Void Function(Pointer<Utf8> spec);
@@ -41,7 +43,7 @@ typedef _SetLitertStageNative = Void Function(Pointer<Utf8> dir);
 typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
 typedef _LitertStatusNative = Pointer<Utf8> Function();
 
-/// Thin, manual dart:ffi bindings over the 12 clpeak_* symbols.
+/// Thin, manual dart:ffi bindings over the 13 clpeak_* symbols.
 class ClpeakBindings {
   ClpeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
@@ -55,6 +57,7 @@ class ClpeakBindings {
         requestCancel =
             lib.lookupFunction<_RequestCancelNative, ClpeakRequestCancel>(
                 'clpeak_request_cancel'),
+        _note = lib.lookupFunction<_NoteNative, _Note>('clpeak_note'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
         _setOnnxEpLibraries =
@@ -81,6 +84,7 @@ class ClpeakBindings {
   final _FreeString _freeString;
   final ClpeakLaunch launch;
   final ClpeakRequestCancel requestCancel;
+  final _Note _note;
   final _SetOnnxLib _setOnnxLibrary;
   final _SetOnnxEpLibs _setOnnxEpLibraries;
   final _SetOnnxWinml _setOnnxWinml;
@@ -88,6 +92,19 @@ class ClpeakBindings {
   final _SetLitertLib _setLitertLibrary;
   final _SetLitertStage _setLitertNpuStageDir;
   final _LitertStatusNative _litertStatus;
+
+  /// A line of the app's own on the in-flight run's log (clpeak_note):
+  /// the document's `log` and the sidecar, source "app".  A no-op outside
+  /// a run.  [level] is the native clpeak::LogLevel, which [LogLevel]'s
+  /// order mirrors.
+  void note(int level, String message) {
+    final ptr = message.toNativeUtf8();
+    try {
+      _note(level, ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
 
   /// clpeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();

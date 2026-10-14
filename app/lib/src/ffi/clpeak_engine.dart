@@ -246,6 +246,11 @@ class ChildRun implements EngineRun {
     _send('cancel'); // before the process is up, it is sent once it is
   }
 
+  /// Dropped: the engine process is not the one a desktop pauses or ends
+  /// with the app's window, and its stdin carries only a cancel.
+  @override
+  void note(LogLevel level, String message) {}
+
   void _send(String line) {
     final process = _process;
     if (process == null) return;

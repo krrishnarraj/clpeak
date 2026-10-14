@@ -236,6 +236,16 @@ CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
 // The flag auto-resets at the start of the next clpeak_launch().
 CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
 
+// ---- Host notes ------------------------------------------------------------------
+
+// Record a line from the app on the in-flight run's log -- the document's
+// `log` and the sidecar -- with source "app", at `level` (0 error, 1 warning,
+// 2 info, 3 debug: clpeak::LogLevel).  For what only the app sees: it left
+// the screen, where a phone may pause or end its process and the run with
+// it.  Not an event: the app already knows.  A no-op outside a run.  Safe to
+// call from any thread.
+CLPEAK_FFI_EXPORT void clpeak_note(int level, const char *message);
+
 // ---- Engine process (desktop) ----------------------------------------------------
 //
 // The desktop app runs its catalog and its runs in `clpeak-engine`, a process

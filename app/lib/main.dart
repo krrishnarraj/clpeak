@@ -51,7 +51,11 @@ Future<void> main() async {
 
   // On quit during a run: cancel and let the engine save partial results
   // before this process exits.
-  AppLifecycleListener(onExitRequested: service.onExitRequested);
+  // On a phone, whether the app is on screen decides whether a run goes
+  // on: the run's log records it leaving and coming back.
+  AppLifecycleListener(
+      onExitRequested: service.onExitRequested,
+      onStateChange: service.onLifecycleState);
 
   // Dev hook: CLPEAK_AUTORUN=1 starts a run at launch (used by automated UI
   // verification; harmless otherwise).  Waits for the catalog: device

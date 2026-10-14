@@ -248,6 +248,12 @@ void clpeak_request_cancel(void)
     clpeak::requestCancel();
 }
 
+void clpeak_note(int level, const char *message)
+{
+    if (!message || level < 0 || level > (int)clpeak::LogLevel::Debug) return;
+    RunLog::hostNote((clpeak::LogLevel)level, "app", message);
+}
+
 int clpeak_launch(int argc, const char **argv,
                   ClpeakEventCallback on_event, void *user_data)
 {
