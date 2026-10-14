@@ -1504,7 +1504,9 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     const int xp = r.actConstant(fp, {(int32_t)d, (int32_t)sw}, "Xp", d, sw, 0x5eed5eedu,
                                  2.0f * std::sqrt(3.0f / (float)sw));
     x = tensor(xShape, "X");
-    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, false), {xs, xp, -1}, {x}, fcOptions(fp));
+    const bool bias = fcHasBias(fp);
+    const int b = bias ? addZeroBias(r, fp, d, 1.0f, 1.0f) : -1;
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, bias), {xs, xp, b}, {x}, fcOptions(fp));
   }
   else
   {

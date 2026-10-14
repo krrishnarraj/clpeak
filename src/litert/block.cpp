@@ -182,6 +182,9 @@ struct VariantResult
   // does; one form everywhere else.
   std::vector<LitertForm> forms;
   clpeak::MultiFormRace prefillRace{1}, decodeRace{1};
+  // The failure that took a regime's last racing form out: what a longer
+  // prompt or context, which then has no form left to run it, reports.
+  Point prefillLeft, decodeLeft;
 };
 
 // Why a variant's decode form cannot be sent to this accelerator, or empty.
@@ -308,6 +311,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   {
     VariantResult &vr = results[vi];
     clpeak::MultiFormRace &race = decode ? vr.decodeRace : vr.prefillRace;
+    Point &left = decode ? vr.decodeLeft : vr.prefillLeft;
     const size_t nf = vr.forms.size();
     std::vector<Point> pts(nf);
     std::vector<double> rate(nf, 0.0), build(nf, 0.0);
@@ -322,7 +326,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         build[f] = pts[f].createUs;
       }
       else
+      {
         race.drop(f);
+        if (!pts[f].error.empty())
+          left = pts[f];
+      }
     }
     // A NaN from either form withholds the point, as in gemm.cpp: the other
     // form is no alibi for the accelerator.
@@ -345,6 +353,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     {
       if (failed != nf)
         pt = pts[failed];
+      else if (!left.error.empty())
+      {
+        pt.status = left.status;
+        pt.error = "not run, as a smaller size already failed: " + left.error;
+      }
       else
       {
         pt.status = ResultStatus::Error;
