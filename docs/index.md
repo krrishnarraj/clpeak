@@ -143,7 +143,8 @@ export as JSON.
 
 Each release has a zip per platform with the CLI and the app. The `cuda`,
 `rocm` and `oneapi` variants add the backends that need a vendor SDK at build
-time. On macOS the `.dmg` holds the app.
+time. On macOS the `.dmg` holds the app. Windows binaries are signed under
+the [code signing policy](code-signing.html).
 
 <div id="release-list">
   <p class="rel-note">
