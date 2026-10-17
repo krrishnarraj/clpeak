@@ -12,6 +12,7 @@
 #include <sycl/ext/oneapi/bfloat16.hpp>
 #define CLPEAK_ONEAPI_JM_HAS_BF16 1
 #endif
+#include "joint_matrix_spread.h"
 
 // A joint_matrix tile timed as blocks of sixteen products a loop trip -- the
 // shapes runJointMatrix (joint_matrix.cpp) races against its accumulator
@@ -47,31 +48,32 @@ static T jmFillStep(T v, int k)
 
 // Both shapes are the Vulkan backend's cooperative-matrix run
 // (src/vulkan/shaders/coopmat_chain.glsl): four A tiles and four B tiles,
-// sixteen distinct products a trip in a straight-line block, and a trip
-// count passed in at run time so nothing lets the compiler unroll or fold
-// the run.  joint_matrix.cpp passes JM_ITERS / 16 trips, the same 256 mads a
-// sub-group as its chain.
+// sixteen distinct products a trip in a straight-line block, a trip count
+// passed in at run time so nothing lets the compiler unroll or fold the run,
+// and tiles spread on a branch the host never takes, so no compiler can hold
+// one as a single value (joint_matrix_spread.h).  joint_matrix.cpp passes
+// JM_ITERS / 16 trips, the same 256 mads a sub-group as its chain.
 //
 // ACCS 1 carries the sixteen on one accumulator -- Vulkan's plain build.  The
 // chain in joint_matrix.cpp (runJmVariant) runs one mad a loop trip, and a
 // back-edge between every MulAdd is what Vulkan's coopmat_chain.glsl measured
 // halving an A380's rate.  On an Arc A380 (driver 9034) Vulkan's block read
-// 30.8 TFLOPS fp16 and 61.5 TOPS int8 on one accumulator, where the chain
-// here read 15.5 and 31.0.
+// 30.8 TFLOPS fp16 and 61.5 TOPS int8 on one accumulator.
 //
 // ACCS 4 carries them on four (Vulkan's CM_CHAIN_ALT), each B tile meeting all
 // four accumulators in a row.  Alchemist forwards no accumulator from one DPAS
 // to the next (IGC's hasDpasFwdAndDoubleSrcReadSupression is Xe3P-only), and
 // what IGC does issue back to back is a run of DPAS that write different
-// accumulators and read the same B tile (canInSameDPASMacro).  On the A380 it
-// read 22.9 TFLOPS fp16 and 45.5 TOPS int8 here, and 26.2 and 52.3 in Vulkan.
-// Every accumulator is stored, so a block takes ACCS tiles of the buffer.
+// accumulators and read the same B tile (canInSameDPASMacro).  On the A380
+// Vulkan read 26.2 TFLOPS fp16 and 52.3 TOPS int8 this way, behind its one
+// accumulator.  Every accumulator is stored, so a block takes ACCS tiles of
+// the buffer.
 template <int ACCS, typename At, typename Bt, typename Acc, int M, int N, int K,
           typename FillA, typename FillB>
 static float runJmBlockVariant(OneapiPeak &peak, OneapiDevice &dev,
                                Acc *outBuf, uint32_t *sgCountBuf,
                                uint32_t numBlocks, uint32_t blockSize,
-                               FillA aFill, FillB bFill, uint32_t trips,
+                               FillA aFill, FillB bFill, uint32_t trips, uint32_t spread,
                                unsigned int targetTimeUs, unsigned int forced)
 {
   static_assert(ACCS == 1 || ACCS == 4, "a block runs on one accumulator or four");
@@ -102,6 +104,17 @@ static float runJmBlockVariant(OneapiPeak &peak, OneapiDevice &dev,
           syclex::joint_matrix_fill(sg, b1, b1f);
           syclex::joint_matrix_fill(sg, b2, b2f);
           syclex::joint_matrix_fill(sg, b3, b3f);
+          if (spread != 0)
+          {
+            clpeak_oneapi::jmSpread(sg, a0);
+            clpeak_oneapi::jmSpread(sg, a1);
+            clpeak_oneapi::jmSpread(sg, a2);
+            clpeak_oneapi::jmSpread(sg, a3);
+            clpeak_oneapi::jmSpread(sg, b0);
+            clpeak_oneapi::jmSpread(sg, b1);
+            clpeak_oneapi::jmSpread(sg, b2);
+            clpeak_oneapi::jmSpread(sg, b3);
+          }
 
           // JM_SG_COUNT_NOTE in joint_matrix.cpp: the host counts the ops per
           // sub-group, from the count reported here.
@@ -194,7 +207,7 @@ static float runJmBlockShape(OneapiPeak &peak, OneapiDevice &dev,
                              void *out, uint32_t *sgCount,
                              uint32_t numBlocks, uint32_t blockSize,
                              FillA aFill, FillB bFill, uint32_t M, uint32_t N,
-                             uint32_t accumulators, uint32_t trips,
+                             uint32_t accumulators, uint32_t trips, uint32_t spread,
                              unsigned int targetTimeUs, unsigned int forced)
 {
 #define CLPEAK_JM_CASE_BLOCK(MM, NN)                                            \
@@ -203,11 +216,11 @@ static float runJmBlockShape(OneapiPeak &peak, OneapiDevice &dev,
     if (accumulators == 1)                                                      \
       return runJmBlockVariant<1, At, Bt, Acc, MM, NN, K, FillA, FillB>(         \
           peak, dev, (Acc *)out, sgCount, numBlocks, blockSize,                  \
-          aFill, bFill, trips, targetTimeUs, forced);                            \
+          aFill, bFill, trips, spread, targetTimeUs, forced);                    \
     if (accumulators == 4)                                                      \
       return runJmBlockVariant<4, At, Bt, Acc, MM, NN, K, FillA, FillB>(         \
           peak, dev, (Acc *)out, sgCount, numBlocks, blockSize,                  \
-          aFill, bFill, trips, targetTimeUs, forced);                            \
+          aFill, bFill, trips, spread, targetTimeUs, forced);                    \
   }
   CLPEAK_JM_BLOCK_SHAPES(CLPEAK_JM_CASE_BLOCK)
 #undef CLPEAK_JM_CASE_BLOCK
@@ -221,12 +234,13 @@ namespace clpeak_oneapi {
 // One tile as sixteen-product blocks on `accumulators` (1 or 4), `trips`
 // trips of them: the microseconds a launch took (OneapiPeak::runKernel), or -1
 // when it failed or the tile has no instantiation here.  The types are
-// dispatched as runJmFp and runJmInt dispatch the chain's, and filled alike.
+// dispatched as runJmFp and runJmInt dispatch the chain's, and filled alike;
+// `spread` is the flag the host leaves 0 (joint_matrix_spread.h).
 float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCount,
                  uint32_t numBlocks, uint32_t blockSize,
                  syclex::matrix_type at, syclex::matrix_type bt, syclex::matrix_type ct,
                  uint32_t M, uint32_t N, uint32_t K, uint32_t accumulators, uint32_t trips,
-                 unsigned int targetTimeUs, unsigned int forced)
+                 uint32_t spread, unsigned int targetTimeUs, unsigned int forced)
 {
   using mt = syclex::matrix_type;
   if (ct == mt::fp32)
@@ -236,16 +250,18 @@ float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCou
     if (at == mt::bf16 && bt == mt::bf16 && K == 16)
       return runJmBlockShape<bfloat16, bfloat16, float, 16>(
           peak, dev, out, sgCount, numBlocks, blockSize,
-          (bfloat16)1.f, (bfloat16)1.f, M, N, accumulators, trips, targetTimeUs, forced);
+          (bfloat16)1.f, (bfloat16)1.f, M, N, accumulators, trips, spread,
+          targetTimeUs, forced);
 #endif
     if (at == mt::fp16 && bt == mt::fp16 && K == 16)
       return runJmBlockShape<sycl::half, sycl::half, float, 16>(
           peak, dev, out, sgCount, numBlocks, blockSize,
-          (sycl::half)1.f, (sycl::half)1.f, M, N, accumulators, trips, targetTimeUs, forced);
+          (sycl::half)1.f, (sycl::half)1.f, M, N, accumulators, trips, spread,
+          targetTimeUs, forced);
     if (at == mt::tf32 && bt == mt::tf32 && K == 8)
       return runJmBlockShape<syclex::precision::tf32, syclex::precision::tf32, float, 8>(
           peak, dev, out, sgCount, numBlocks, blockSize,
-          1.f, 1.f, M, N, accumulators, trips, targetTimeUs, forced);
+          1.f, 1.f, M, N, accumulators, trips, spread, targetTimeUs, forced);
     return -1.0f;
   }
   if (ct != mt::sint32 || K != 32)
@@ -253,19 +269,19 @@ float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCou
   if (at == mt::sint8 && bt == mt::sint8)
     return runJmBlockShape<int8_t, int8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (int8_t)1, (int8_t)1, M, N, accumulators, trips, targetTimeUs, forced);
+        (int8_t)1, (int8_t)1, M, N, accumulators, trips, spread, targetTimeUs, forced);
   if (at == mt::uint8 && bt == mt::uint8)
     return runJmBlockShape<uint8_t, uint8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (uint8_t)1, (uint8_t)1, M, N, accumulators, trips, targetTimeUs, forced);
+        (uint8_t)1, (uint8_t)1, M, N, accumulators, trips, spread, targetTimeUs, forced);
   if (at == mt::uint8 && bt == mt::sint8)
     return runJmBlockShape<uint8_t, int8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (uint8_t)1, (int8_t)1, M, N, accumulators, trips, targetTimeUs, forced);
+        (uint8_t)1, (int8_t)1, M, N, accumulators, trips, spread, targetTimeUs, forced);
   if (at == mt::sint8 && bt == mt::uint8)
     return runJmBlockShape<int8_t, uint8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (int8_t)1, (uint8_t)1, M, N, accumulators, trips, targetTimeUs, forced);
+        (int8_t)1, (uint8_t)1, M, N, accumulators, trips, spread, targetTimeUs, forced);
   return -1.0f;
 }
 
