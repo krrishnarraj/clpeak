@@ -71,7 +71,7 @@ constexpr uint64_t JM_OUT_BYTES = 512ull << 20;
 
 // Per-instantiation kernel-name tag: SYCL needs a distinct type per
 // parallel_for, and the template arguments already are the distinction.
-template <typename At, typename Bt, typename Acc, int M, int N, int K> struct JmTag;
+template <typename At, typename Bt, typename Acc, int M, int N, int K, bool SPREAD> struct JmTag;
 
 // The most accumulator a lane may hold for a tile to be timed as blocks on
 // four accumulators (runJmBlock): 128 bytes, counted at the
@@ -362,8 +362,17 @@ static void finalizeTiles(std::vector<JmTile> &tiles)
 // (bfloat16, sycl::half, precision::tf32, int8_t, uint8_t); FillA/FillB are
 // the types used to fill A/B (float for tf32, otherwise == At/Bt); Acc is the
 // accumulator/output element type.  M, N and K are the compile-time tile.
-// `spread` is the flag the host leaves 0 (joint_matrix_spread.h).
-template <typename At, typename Bt, typename Acc, int M, int N, int K,
+//
+// SPREAD builds A and B the way every block kernel does, behind `spread`, the
+// flag the host leaves 0 (joint_matrix_spread.h).  Without it they stay
+// filled, one value to IGC, which holds such a tile in a few registers and
+// copies it out to full width at each DPAS.  That costs issue slots where the
+// tiles fit the registers, and is what keeps a tile that does not fit out of
+// spills: an A380's bf16 32x32x16 tile, whose accumulator alone fills its
+// 128 registers at SIMD8, read 18.7 TFLOPS on filled tiles and 2.25 on
+// spread ones, where its 8x8x16 chain read 15.5 and 16.3.  So the chain is
+// timed both ways and the faster is kept.
+template <typename At, typename Bt, typename Acc, int M, int N, int K, bool SPREAD,
           typename FillA, typename FillB>
 static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
                           Acc *outBuf, uint32_t *sgCountBuf,
@@ -375,7 +384,7 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
 
   auto submit = [=](sycl::queue &q) -> sycl::event {
     return q.submit([&](sycl::handler &h) {
-      h.parallel_for<JmTag<At, Bt, Acc, M, N, K>>(
+      h.parallel_for<JmTag<At, Bt, Acc, M, N, K, SPREAD>>(
         sycl::nd_range<1>(totalThreads, blockSize),
         [=](sycl::nd_item<1> it) {
           auto sg = it.get_sub_group();
@@ -387,10 +396,13 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
           syclex::joint_matrix_fill(sg, a, aFill);
           syclex::joint_matrix_fill(sg, b, bFill);
           syclex::joint_matrix_fill(sg, c, (Acc)0);
-          if (spread != 0)
+          if constexpr (SPREAD)
           {
-            clpeak_oneapi::jmSpread(sg, a);
-            clpeak_oneapi::jmSpread(sg, b);
+            if (spread != 0)
+            {
+              clpeak_oneapi::jmSpread(sg, a);
+              clpeak_oneapi::jmSpread(sg, b);
+            }
           }
           #pragma unroll 1
           for (uint32_t i = 0; i < JM_ITERS; i++)
@@ -436,15 +448,19 @@ template <typename At, typename Bt, typename Acc, int K, typename FillA, typenam
 static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
                              Acc *out, uint32_t *sgCount,
                              uint32_t numBlocks, uint32_t blockSize,
-                             FillA aFill, FillB bFill, uint32_t spread,
+                             FillA aFill, FillB bFill, uint32_t spread, bool spreadTiles,
                              unsigned int targetTimeUs, unsigned int forced,
                              uint32_t M, uint32_t N)
 {
 #define CLPEAK_JM_CASE(MM, NN)                                                  \
   if (M == (MM) && N == (NN))                                                   \
-    return runJmVariant<At, Bt, Acc, MM, NN, K, FillA, FillB>(                   \
-        peak, dev, out, sgCount, numBlocks, blockSize,                           \
-        aFill, bFill, spread, targetTimeUs, forced);
+    return spreadTiles                                                          \
+        ? runJmVariant<At, Bt, Acc, MM, NN, K, true, FillA, FillB>(              \
+              peak, dev, out, sgCount, numBlocks, blockSize,                     \
+              aFill, bFill, spread, targetTimeUs, forced)                        \
+        : runJmVariant<At, Bt, Acc, MM, NN, K, false, FillA, FillB>(             \
+              peak, dev, out, sgCount, numBlocks, blockSize,                     \
+              aFill, bFill, spread, targetTimeUs, forced);
   CLPEAK_JM_SHAPES(CLPEAK_JM_CASE)
 #undef CLPEAK_JM_CASE
   return JM_NOT_COMPILED;
@@ -455,7 +471,7 @@ static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
 // asks for a different K has no instantiation and says so.
 static float runJmFp(OneapiPeak &peak, OneapiDevice &dev,
                      float *out, uint32_t *sgCount,
-                     uint32_t numBlocks, uint32_t blockSize, uint32_t spread,
+                     uint32_t numBlocks, uint32_t blockSize, uint32_t spread, bool spreadTiles,
                      unsigned int targetTimeUs, unsigned int forced, const JmTile &t)
 {
   using mt = syclex::matrix_type;
@@ -465,18 +481,18 @@ static float runJmFp(OneapiPeak &peak, OneapiDevice &dev,
   if (t.at == mt::bf16 && t.bt == mt::bf16 && t.K == 16)
     return dispatchJmShape<bfloat16, bfloat16, float, 16>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (bfloat16)1.f, (bfloat16)1.f, spread, targetTimeUs, forced, t.M, t.N);
+        (bfloat16)1.f, (bfloat16)1.f, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
 #endif
   if (t.at == mt::fp16 && t.bt == mt::fp16 && t.K == 16)
     return dispatchJmShape<sycl::half, sycl::half, float, 16>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (sycl::half)1.f, (sycl::half)1.f, spread, targetTimeUs, forced, t.M, t.N);
+        (sycl::half)1.f, (sycl::half)1.f, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
 
   // tf32: the matrix element type is precision::tf32, filled with a float.
   if (t.at == mt::tf32 && t.bt == mt::tf32 && t.K == 8)
     return dispatchJmShape<syclex::precision::tf32, syclex::precision::tf32, float, 8>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        1.f, 1.f, spread, targetTimeUs, forced, t.M, t.N);
+        1.f, 1.f, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
 
   return JM_NOT_COMPILED;
 }
@@ -484,7 +500,7 @@ static float runJmFp(OneapiPeak &peak, OneapiDevice &dev,
 // Integer tiles: int32 accumulator, all four signed/unsigned 8-bit A/B pairs.
 static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
                       int32_t *out, uint32_t *sgCount,
-                      uint32_t numBlocks, uint32_t blockSize, uint32_t spread,
+                      uint32_t numBlocks, uint32_t blockSize, uint32_t spread, bool spreadTiles,
                       unsigned int targetTimeUs, unsigned int forced, const JmTile &t)
 {
   using mt = syclex::matrix_type;
@@ -493,19 +509,19 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
   if (t.at == mt::sint8 && t.bt == mt::sint8)
     return dispatchJmShape<int8_t, int8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (int8_t)1, (int8_t)1, spread, targetTimeUs, forced, t.M, t.N);
+        (int8_t)1, (int8_t)1, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
   if (t.at == mt::uint8 && t.bt == mt::uint8)
     return dispatchJmShape<uint8_t, uint8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (uint8_t)1, (uint8_t)1, spread, targetTimeUs, forced, t.M, t.N);
+        (uint8_t)1, (uint8_t)1, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
   if (t.at == mt::uint8 && t.bt == mt::sint8)
     return dispatchJmShape<uint8_t, int8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (uint8_t)1, (int8_t)1, spread, targetTimeUs, forced, t.M, t.N);
+        (uint8_t)1, (int8_t)1, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
   if (t.at == mt::sint8 && t.bt == mt::uint8)
     return dispatchJmShape<int8_t, uint8_t, int32_t, 32>(
         peak, dev, out, sgCount, numBlocks, blockSize,
-        (int8_t)1, (uint8_t)1, spread, targetTimeUs, forced, t.M, t.N);
+        (int8_t)1, (uint8_t)1, spread, spreadTiles, targetTimeUs, forced, t.M, t.N);
 
   return JM_NOT_COMPILED;
 }
@@ -646,13 +662,14 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     const uint64_t tileElems = (uint64_t)t.M * t.N;
     const bool isInt = jmIsIntAcc(t.ct);
 
-    // One timing of this tile: `blockAccs` 0 is the accumulator chain, else
+    // One timing of this tile: `blockAccs` 0 is the accumulator chain, on
+    // spread tiles or filled ones as `spreadTiles` says (runJmVariant), else
     // runJmBlock's sixteen-product blocks on that many accumulators, which
     // stores that many tiles a block.  As many blocks as the tile fits into
     // the shared buffer -- see the sizing note above.  Returns the
     // microseconds a launch took (JM_NOT_COMPILED / <= 0 as the runners do)
     // and the ops that launch issued.
-    auto timeTile = [&](uint32_t blockAccs, double &ops) -> float {
+    auto timeTile = [&](uint32_t blockAccs, bool spreadTiles, double &ops) -> float {
       const uint64_t perBlock = tileElems * (blockAccs ? blockAccs : 1);
       if (outElems < perBlock)
         return -1.0f;
@@ -667,10 +684,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
                                        JM_ITERS / 16, spread, cfg.targetTimeUs, forced);
       else if (isInt)
         us = runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize, spread,
-                      cfg.targetTimeUs, forced, t);
+                      spreadTiles, cfg.targetTimeUs, forced, t);
       else
         us = runJmFp(*this, dev, (float *)out, sgCount, numBlocks, blockSize, spread,
-                     cfg.targetTimeUs, forced, t);
+                     spreadTiles, cfg.targetTimeUs, forced, t);
       if (us <= 0.0f)
         return us;
 
@@ -695,7 +712,8 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
                   "sub-group(s), %u blocks\n",
                   t.label.c_str(), t.shape.c_str(),
                   blockAccs == 1 ? " as one-accumulator blocks"
-                  : blockAccs ? " as four-accumulator blocks" : "",
+                  : blockAccs ? " as four-accumulator blocks"
+                  : spreadTiles ? " as a chain" : " as a chain on filled tiles",
                   blockSize, sgPerWG, numBlocks);
       // Both shapes issue JM_ITERS mads a sub-group: the blocks as
       // JM_ITERS / 16 trips of sixteen.
@@ -704,8 +722,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       return us;
     };
 
+    // The chain on filled tiles first: it is the form this test has always
+    // run, so it is what every other form faces the fold guard against.
     double ops = 0.0;
-    const float us = timeTile(0, ops);
+    const float us = timeTile(0, false, ops);
     if (us == JM_NOT_COMPILED)
     {
       test.skip(t.metric, ResultStatus::Unsupported,
@@ -721,42 +741,44 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     }
     float value = (float)(ops * 1.0e6 / us);
 
-    // And as runJmBlock's sixteen-product blocks: on one accumulator, and --
-    // where the tile leaves room for them -- on four.  A failure here is not
-    // an error: the chain already produced a reading.  Each block reading
-    // faces the fold guard against the chain's.
+    // And on spread tiles, then as runJmBlock's sixteen-product blocks: on
+    // one accumulator, and -- where the tile leaves room for them -- on four
+    // (the blocks spread their tiles always: they are built only for tiles
+    // that fit the registers).  A failure here is not an error: the chain
+    // already produced a reading.
     logger::EmitOptions opts = jmOpts(t);
     const float chain = value;
-    const char *shapeNames[3] = {"mad chain",
+    const char *shapeNames[4] = {"mad chain on filled tiles",
+                                 "mad chain",
                                  "16-mad blocks, 1 accumulator",
                                  "16-mad blocks, 4 accumulators"};
     int ran = 1;
     int best = 0;
-    for (uint32_t accs : {1u, 4u})
+    for (int shape : {1, 2, 3})
     {
+      const uint32_t accs = shape == 1 ? 0u : shape == 2 ? 1u : 4u;
       const uint64_t fourAccBytes = 4ull * tileElems * 4;   // fp32 and int32 alike
       if (accs == 4 && fourAccBytes > (uint64_t)JM_FOUR_ACC_BYTES_PER_LANE * minSgSize)
         continue;
-      double blockOps = 0.0;
-      const float blockUs = timeTile(accs, blockOps);
-      if (blockUs <= 0.0f)
+      double formOps = 0.0;
+      const float formUs = timeTile(accs, true, formOps);
+      if (formUs <= 0.0f)
         continue;
-      const float block = (float)(blockOps * 1.0e6 / blockUs);
-      CLPEAK_VLOG("joint_matrix: %s %s chain %.1f, blocks on %u accumulator(s) %.1f %s\n",
-                  t.label.c_str(), t.shape.c_str(), chain, accs, block,
+      const float form = (float)(formOps * 1.0e6 / formUs);
+      CLPEAK_VLOG("joint_matrix: %s %s chain on filled tiles %.1f, %s %.1f %s\n",
+                  t.label.c_str(), t.shape.c_str(), chain, shapeNames[shape], form,
                   isInt ? "ops" : "flops");
-      if (block > chain * MAX_ALT_CHAIN_RATIO)
+      if (form > chain * MAX_ALT_CHAIN_RATIO)
       {
-        CLPEAK_VLOG("joint_matrix: %s %s blocks on %u accumulator(s) %.1fx faster -- "
-                    "rejecting it as a compiler fold\n",
-                    t.label.c_str(), t.shape.c_str(), accs, block / chain);
+        CLPEAK_VLOG("joint_matrix: %s %s %s %.1fx faster -- rejecting it as a "
+                    "compiler fold\n",
+                    t.label.c_str(), t.shape.c_str(), shapeNames[shape], form / chain);
         continue;
       }
-      const int shape = accs == 1 ? 1 : 2;
       ran++;
-      if (block > value)
+      if (form > value)
       {
-        value = block;
+        value = form;
         best = shape;
       }
     }

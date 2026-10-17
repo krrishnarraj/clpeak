@@ -1,9 +1,11 @@
 #ifndef CLPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
 #define CLPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
 
-// The per-lane refill every joint_matrix kernel in this backend runs its A
-// and B tiles through: the chain in joint_matrix.cpp and the blocks in
-// joint_matrix_block.cpp.  Include it after <sycl/ext/oneapi/matrix/matrix.hpp>.
+// The per-lane refill the joint_matrix kernels in this backend run their A
+// and B tiles through: the blocks in joint_matrix_block.cpp always, the
+// chain in joint_matrix.cpp in one of the two forms it is raced in (why
+// there are two: runJmVariant).  Include it after
+// <sycl/ext/oneapi/matrix/matrix.hpp>.
 //
 // The kernels build their tiles with joint_matrix_fill from a kernel
 // argument.  IGC lowers a fill to that one value inserted into every element
