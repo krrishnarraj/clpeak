@@ -201,6 +201,22 @@ std::string decodeFence(const Variant &v, LitertAccel accel)
   return std::string();
 }
 
+// Why a variant cannot be sent to this device at all, or empty.  The WebGPU
+// accelerator segfaults compiling any graph with the composite in it,
+// prefill's too: marking the decomposition subgraph as one to skip
+// (Subgraph::MarkSubgraphAsDelegationSkippable, in the accelerator's own
+// copy of TFLite), it reads the runtime's subgraph list 24 bytes before
+// where libLiteRt keeps it (offset 0x230 against 0x248 in the ai-edge-litert
+// 2.3.0 Linux wheel; 2.2.0's dies on the same graph) and dereferences the
+// null it finds there.
+std::string variantFence(const Variant &v, const litert_device_info_t &dev)
+{
+  if (v.composite && dev.accel == LitertAccel::Gpu && dev.vendor == "WebGPU")
+    return "the WebGPU accelerator crashes the process compiling a composite (LiteRT 2.2.0 and 2.3.0), "
+           "so this variant is not sent to it";
+  return std::string();
+}
+
 LitertBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t prefillSeq)
 {
   LitertBlockShape sh;
@@ -385,6 +401,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     if (!plan.applies)
     {
       vr.skipReason = plan.whyNot;
+      return false;
+    }
+    if (const std::string fence = variantFence(v, dev); !fence.empty())
+    {
+      vr.skipReason = fence;
       return false;
     }
     // The forms it runs in, each gated on the format's answer in that form

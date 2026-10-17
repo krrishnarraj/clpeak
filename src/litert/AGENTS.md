@@ -278,7 +278,10 @@ kernel name from one profiled run says which kernel it was.
   sharing takes int8, int4 and int2 weights alone, and the int32 bias every
   full-integer FULLY_CONNECTED and CONV_2D carries fails the whole delegate
   ("Only quantized int8, int4, and int2 weights are supported for sharing",
-  Metal).  The Metal accelerator has no 8-bit kernels: every int8_qdq form
+  Metal).  It is never sent to the WebGPU accelerator, which crashes on it
+  (below) and runs its 8-bit kernels without it: `int8_weight`'s answer
+  moves from 1212 ppm to 3926 when they are allowed.  The Metal
+  accelerator has no 8-bit kernels: every int8_qdq form
   runs `convolution1x1(conv_wave_matrix)` and ties, at 10430 ppm; for
   int8_weight the sharing converts the weights on the GPU and runs a
   generic `convolution(conv_wave_matrix)` at the same rate, ready five times
@@ -376,10 +379,10 @@ and uploading every constant twice was the other half of that six minutes.
 
 ## What the accelerator libraries do wrong, and how the backend stays up
 
-Five faults in LiteRT 2.2.0's GPU accelerator would take the whole run
+Six faults in LiteRT 2.2.0's GPU accelerators would take the whole run
 down, and a benchmark that dies to prove a point has proved the wrong one.
-Each is fenced in `litertPlanFor()`, `litert_session.cpp` or
-`litert_peak.cpp` with the fault recorded in the row's reason, so lifting
+Each is fenced in `litertPlanFor()`, `litert_session.cpp`,
+`litert_peak.cpp` or `block.cpp` with the fault recorded in the row's reason, so lifting
 the fence when a release fixes it is a one-line change.  2.3.0 fixed three
 of them in whole or part, re-tested on an M1 Pro and an arm64 emulator
 (2026-10-11/14): those fences now apply to an ABI 1.0.0 runtime only
@@ -405,8 +408,9 @@ of them in whole or part, re-tested on an M1 Pro and an arm64 emulator
   reader CHECK-fails on `CanReadValue(node_input_index)` (`object_reader.cc`)
   when a `STABLEHLO_COMPOSITE`'s operand is a constant tensor, which the
   block's decode form has (its K/V cache); the composite variant's decode
-  rows are not sent to the GPU, its prefill rows are.  Still so in 2.3.0,
-  whose IrModel pipeline answers NaN there instead.
+  rows are not sent to the GPU, its prefill rows are (except to WebGPU,
+  below).  Still so in 2.3.0, whose IrModel pipeline answers NaN there
+  instead.
 - **The OpenCL accelerator crashes without an OpenCL library.**  On a
   machine with no `libOpenCL` at all (an emulator, a box without a driver)
   `libLiteRtClGlAccelerator` dereferences a null inside `strlen` when it
@@ -425,6 +429,17 @@ of them in whole or part, re-tested on an M1 Pro and an arm64 emulator
   every `kGpuModelsPerEnvironment` (24) compiled models, between sessions,
   for ~300 ms of Metal initialisation each time.  2.3.0 compiled 125 models
   in one environment, and keeps it.
+- **The WebGPU accelerator reads the runtime's subgraph through the wrong
+  layout.**  It carries its own copy of TFLite and reaches into the
+  runtime's `tflite::Subgraph` (`TfLiteContext::impl_`) through it, and the
+  two copies disagree on that class: in the ai-edge-litert 2.3.0 Linux
+  wheel libLiteRt keeps its list of subgraphs at offset 0x248 and the
+  accelerator reads it at 0x230.  What reaches in segfaults inside
+  `LiteRtCreateCompiledModel`, in 2.2.0 as in 2.3.0.  Constant tensor
+  sharing does, on any model, so `LitertSession::create()` never sends it
+  there (its 8-bit kernels run without it); so does a
+  `STABLEHLO_COMPOSITE`, prefill's included, so the block's composite
+  variant is not sent there at all (`variantFence`).
 
 Verify a new format or accelerator path under guard malloc
 (`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) before trusting a run
@@ -493,9 +508,18 @@ the first test that trips it latches `deviceLost`, the rest of that device's
 tests are skipped, and a `Warning` after the scope says the numbers already
 shown for it are unreliable.  This is the only backend that needs it because
 it is the only one whose device can die mid-run while still reporting OK.
-Raising `RLIMIT_NOFILE` delays the loss but the desktop WebGPU delegate stays
-unreliable (it also silently no-ops some rungs without losing the device), so
-clpeak flags rather than trusts it.
+
+**What ran the descriptors out was the timed batch.**  Dawn takes a fence
+for every queue submission and recycles them only when the device is next
+polled, which the WebGPU accelerator does when an output is read, and
+NVIDIA's Linux driver holds a descriptor (`/dev/nvidia0`) for every fence:
+on the RTX 5060 box a 500-run batch read once at its end took ~950, met the
+process's limit of 1024, and lost the device in the gemm test's first
+1024-wide rung.  So on WebGPU `timeRuns()` reads an output back every
+`kWebGpuRunsPerRead` (64) runs; the pool stays at its high-water mark, and
+the whole device's run then held under 270 descriptors, its gemm ladders
+level from rung to rung.  The watch stays for whatever else can lose a
+device.
 
 **The loss does not stay inside this backend.**  Its environment -- the
 Dawn device and whatever Vulkan objects and descriptors it leaked -- used

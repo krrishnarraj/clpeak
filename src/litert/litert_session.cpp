@@ -531,6 +531,21 @@ bool addOpaque(const LitertRuntime &rt, LiteRtOptions options, const char *ident
   return true;
 }
 
+// The most runs a timed batch leaves in flight on the WebGPU accelerator
+// before it reads one back.  Dawn takes a fence for every queue submission
+// and recycles them only when the device is next polled, which LiteRT's
+// WebGPU accelerator does when an output is read; NVIDIA's Linux driver
+// holds a file descriptor (/dev/nvidia0) for every fence.  A batch of 500
+// runs read once at its end took ~950 descriptors on an RTX 5060 (LiteRT
+// 2.3.0, driver 610.57), about two a run, reached the process's limit of
+// 1024 and lost the device in the gemm test's first 1024-wide rung
+// ("Ran out of file descriptors": vkCreateFence failed with
+// VK_ERROR_OUT_OF_HOST_MEMORY).  The pool stays at its high-water mark; with
+// this bound the device's every test ran in under 270 descriptors.  Each
+// read drains the queue: it added ~4 us a run to the 50 us of a batched
+// dispatch there, under half a percent of a millisecond's run.
+constexpr unsigned kWebGpuRunsPerRead = 64;
+
 } // namespace
 
 bool litertPrepareEnvironment(const LitertRuntime &rt, LitertAccel accel, std::string &error)
@@ -603,6 +618,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   s->profile_ = cfg.profile;
   s->accel_ = dev.accel;
   s->accelName_ = litertAccelName(dev.accel);
+  const bool webGpu = dev.accel == LitertAccel::Gpu && dev.vendor == "WebGPU";
+  if (webGpu)
+    s->runsPerRead_ = kWebGpuRunsPerRead;
 
   s->env_ = environmentFor(rt, dev.accel, error);
   if (!s->env_)
@@ -661,7 +679,12 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
       toml += "precision = " + std::to_string((int)cfg.gpuPrecision) + "\n";
     if (cfg.gpuInt8Kernels)
       toml += "allow_src_quantized_fc_conv_ops = true\n";
-    if (cfg.gpuShareConstants)
+    // Never to the WebGPU accelerator: it segfaults compiling any model with
+    // sharing on, a one-node fp32 graph included -- its own copy of TFLite
+    // reads the runtime's tflite::Subgraph with another layout (LiteRT 2.2.0
+    // and 2.3.0; NOTES.md).  Its 8-bit kernels run without it: int8_weight's
+    // answer moves from 1212 ppm to 3926 when they are allowed.
+    if (cfg.gpuShareConstants && !webGpu)
       toml += "enable_constant_tensors_sharing = true\n";
     if (cfg.gpuIrModel)
       toml += "use_ir_model = true\n";
@@ -943,16 +966,22 @@ double LitertSession::timeRuns(unsigned n, std::string &error, bool syncEach)
 {
   if (n == 0)
     return 0.0;
+  // A read after every run, after every runsPerRead_ (0: no such limit), and
+  // after the batch's last.
+  const unsigned every = syncEach ? 1 : runsPerRead_;
+  unsigned pending = 0;
   const auto t0 = Clock::now();
   for (unsigned i = 0; i < n; i++)
   {
     if (!run(error))
       return -1.0;
-    if (syncEach && !sync(error))
-      return -1.0;
+    if (++pending == every || i + 1 == n)
+    {
+      if (!sync(error))
+        return -1.0;
+      pending = 0;
+    }
   }
-  if (!syncEach && !sync(error))
-    return -1.0;
   return elapsedUs(t0) / n;
 }
 

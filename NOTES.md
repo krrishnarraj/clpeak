@@ -212,6 +212,59 @@ clpeak stops running those.
 - **To lift**: delete `decodeFence` and run `clpeak --litert
   --transformer-block` on the GPU device.
 
+### Constant tensor sharing is never sent to the WebGPU accelerator
+
+- **Gate**: `LitertSession::create()` in `src/litert/litert_session.cpp`,
+  where the GPU options are written: `enable_constant_tensors_sharing` is
+  left out when the device's GPU backend is WebGPU.
+- **Withheld**: the option, not a row.  `int8_weight`'s form with the
+  GPU's 8-bit kernels (`litert_gemm`, `litert_numeric_error`,
+  `litert_block_*`) is sent with it to the other accelerators and without
+  it to this one, where the kernels run anyway: the accuracy matmul reads
+  3926 ppm with them allowed, against 1212 without.
+- **Fault**: `LiteRtCreateCompiledModel` segfaults inside
+  `libLiteRtWebGpuAccelerator.so` for any model compiled with sharing on:
+  the `int8_weight` matmul, and a one-node fp32 graph alike.  Nothing after
+  it runs.  The accelerator carries its own copy of TFLite and reads the
+  runtime's `tflite::Subgraph` (`TfLiteContext::impl_`) through it, and the
+  two copies disagree on that class's layout: where the accelerator looks
+  for a hash table, at offset 0x2f8, the runtime's object holds
+  `{0x100000000, a heap pointer}`, and the lookup reads through the first.
+  The composite's crash below is the same disagreement.
+- **Seen**: the ai-edge-litert 2.3.0 and 2.2.0 Linux x86_64 wheels, RTX
+  5060 (NVIDIA 610.57.04, Dawn on Vulkan), 2026-10-17.  The Metal (M1 Pro)
+  and OpenCL (Mali-G710) accelerators take the option.
+- **To lift**: delete the `!webGpu` and run `clpeak --litert
+  --numeric-error --verbose` on the WebGPU device.  `int8_weight` with
+  the 8-bit kernels is the first model compiled with sharing; a reading or
+  a refusal is a fixed accelerator, a run that ends there is not.
+
+### The composite block variant is not sent to the WebGPU accelerator
+
+- **Gate**: `variantFence()` in `src/litert/block.cpp`, asked at the top of
+  `validateVariant`.
+- **Withheld**: on the WebGPU device, every `fp16_composite` row of
+  `litert_block_prefill`, `litert_block_decode` and `litert_block_latency`.
+  On the other GPU accelerators only the decode rows are withheld (the
+  composite entry above); their prefill rows run.
+- **Fault**: `LiteRtCreateCompiledModel` segfaults inside
+  `libLiteRtWebGpuAccelerator.so` on any graph holding the
+  `odml.scaled_dot_product_attention` `STABLEHLO_COMPOSITE`, prefill's
+  included.  The accelerator marks the composite's decomposition subgraph
+  as one to skip with its own copy of TFLite's
+  `Subgraph::MarkSubgraphAsDelegationSkippable`, which reads the runtime's
+  list of subgraphs at offset 0x230 of its `tflite::Subgraph`; the
+  runtime keeps it at 0x248 (the one whose first entry is the subgraph
+  itself), and 0x230 holds a null, which it dereferences.
+- **Seen**: the ai-edge-litert 2.3.0 Linux x86_64 wheel, RTX 5060 (NVIDIA
+  610.57.04, Dawn on Vulkan), 2026-10-17; 2.2.0's dies on the same graph.
+  The Metal accelerator (M1 Pro) runs the prefill rows.
+- **To lift**: delete the `variantFence` call and run `clpeak --litert
+  --transformer-block` on the WebGPU device: the composite's 64-token
+  prefill is the first graph after the fp16 rows.  Prefill rows that run,
+  or a refusal, are a fixed accelerator; the decode rows still answer to
+  the composite entry above.
+
 ### A pre-2.3.0 GPU device is withheld when no OpenCL library can be loaded
 
 - **Gate**: `litertUsableDevices()` in `src/litert/litert_peak.cpp`: when the

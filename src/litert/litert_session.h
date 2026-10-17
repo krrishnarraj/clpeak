@@ -29,6 +29,7 @@ struct LitertSessionConfig
   bool gpuInt8Kernels = false;
   // GPU: enable_constant_tensors_sharing, which the option above is
   // documented to need (LitertPlan::gpuShareConstants says for which graphs).
+  // Never sent to the WebGPU accelerator, which crashes on it (create()).
   bool gpuShareConstants = false;
   // GPU: build the GPU graph through the IrModel pipeline (use_ir_model,
   // ABI 1.1.0).  LitertForm::gpuIrModel.
@@ -91,8 +92,10 @@ public:
   // Mean microseconds per inference over `n` of them, the batch ended with
   // a sync() so the time covers the accelerator's completion and not just
   // its submissions; with `syncEach` every run is waited for on its own,
-  // which is what a caller that reads each result pays.  Negative with
-  // `error` set on failure.
+  // which is what a caller that reads each result pays.  On the WebGPU
+  // accelerator a batch also waits every kWebGpuRunsPerRead runs: every run
+  // left in flight holds a fence, and on NVIDIA a file descriptor.
+  // Negative with `error` set on failure.
   double timeRuns(unsigned n, std::string &error, bool syncEach = false);
 
   // Bytes of output `i` after the last run().
@@ -128,6 +131,7 @@ private:
   bool profile_ = false;
   bool holdsEnv_ = false;
   bool ran_ = false;
+  unsigned runsPerRead_ = 0;   // timeRuns: most runs in flight before a sync; 0 = no limit
   LitertAccel accel_ = LitertAccel::Cpu;
   std::string accelName_;
 };
