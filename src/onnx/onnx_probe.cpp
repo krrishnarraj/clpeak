@@ -786,6 +786,129 @@ bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   return s.keys.count(key) > 0;
 }
 
+namespace
+{
+// The race graph's side: big enough that a slow reduction stands clear of the
+// submission it rides on -- OpenVINO's GPU on an Arc A380 spent 0.68 ms of
+// reduction on a [2048, 2048] fp16 product against a ~0.5 ms submission, and
+// 0.10 ms in the TwoStep order -- and 16 MB at fp32, nothing to hold.
+constexpr int64_t kReduceRaceDim = 2048;
+
+// TwoStep has to take at most this share of the column maxima's time before
+// onnx-gemm leaves the view every earlier reading was taken in.  Where the
+// reduction costs a provider nothing the two graphs time alike, and a margin
+// keeps noise from moving a row between views run to run.
+constexpr double kTwoStepWinShare = 0.9;
+} // namespace
+
+OnnxReduceView onnxGemmReduceView(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                                  int dtype)
+{
+  if (onnxPrefersRank4Reduce(rt, ep))
+    return OnnxReduceView::Rank4;
+
+  static std::unordered_map<std::string, OnnxReduceView> memo;
+  static std::mutex mtx;
+  const std::string memoKey = probeKey(rt, ep) + '\x1f' + std::to_string(dtype);
+  {
+    std::lock_guard<std::mutex> lk(mtx);
+    auto it = memo.find(memoKey);
+    if (it != memo.end())
+      return it->second;
+  }
+
+  const int64_t n = kReduceRaceDim;
+  std::string xRaw;
+  fillTensor(xRaw, dtype, n * n, 0x9e3779b9u);
+  const std::string sVal = onnxFloatScalar(1.0f, dtype);
+
+  // Mean microseconds a run of the race graph in `view` takes: the best of two
+  // batches after a warm-up, as the shape probe times its graphs; -1 when it
+  // could not be built or run.
+  auto timeView = [&](OnnxReduceView view) -> double {
+    std::string model = onnxResidentActivationModel(n, n, dtype,
+                                                    OnnxActivation::None, xRaw,
+                                                    view);
+    auto ses = onnxCreateSession(rt, ep, model, /*keepConstantsUnfolded=*/true);
+    std::string().swap(model);
+    if (!ses.session)
+    {
+      CLPEAK_VLOG("onnx-reduce[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
+                  view == OnnxReduceView::TwoStep ? "two-step" : "rows",
+                  ses.error.c_str());
+      return -1.0;
+    }
+    const int64_t outCount = onnxReducedDims(view, n)[0];
+    std::vector<uint8_t> outBuf((size_t)outCount * dtypeSize(dtype), 0);
+    OrtMemoryInfo *mi = nullptr;
+    OrtValue *inVal = nullptr, *outVal = nullptr;
+    OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
+                                                OrtMemTypeDefault, &mi);
+    const int64_t outShape[1] = {outCount};
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, const_cast<char *>(sVal.data()), sVal.size(), nullptr, 0,
+          (ONNXTensorElementDataType)dtype, &inVal);
+    if (!st)
+      st = rt.api->CreateTensorWithDataAsOrtValue(
+          mi, outBuf.data(), outBuf.size(), outShape, 1,
+          (ONNXTensorElementDataType)dtype, &outVal);
+    if (mi)
+      rt.api->ReleaseMemoryInfo(mi);
+    auto run = [&](unsigned int reps) -> double {
+      static const char *ins[] = {"S"};
+      static const char *outs[] = {"Y"};
+      auto t0 = std::chrono::steady_clock::now();
+      for (unsigned int i = 0; i < reps; i++)
+      {
+        OrtStatus *rs = rt.api->Run(ses.session, nullptr, ins,
+                                    (const OrtValue *const *)&inVal, 1, outs, 1,
+                                    &outVal);
+        if (rs)
+        {
+          rt.api->ReleaseStatus(rs);
+          return -1.0;
+        }
+      }
+      return elapsedUs(t0) / reps;
+    };
+    double us = -1.0;
+    if (st)
+      rt.api->ReleaseStatus(st);
+    else if (run(3) > 0.0)
+    {
+      const double a = run(10), b = run(10);
+      us = (a > 0.0 && b > 0.0) ? std::min(a, b) : -1.0;
+    }
+    if (inVal)
+      rt.api->ReleaseValue(inVal);
+    if (outVal)
+      rt.api->ReleaseValue(outVal);
+    rt.api->ReleaseSession(ses.session);
+    return us;
+  };
+
+  OnnxReduceView pick = OnnxReduceView::Rows;
+  if (!clpeak::cancelRequested())
+  {
+    const double rowsUs = timeView(OnnxReduceView::Rows);
+    const double twoUs = (rowsUs > 0.0 && !clpeak::cancelRequested())
+                             ? timeView(OnnxReduceView::TwoStep)
+                             : -1.0;
+    if (twoUs > 0.0 && twoUs < rowsUs * kTwoStepWinShare)
+      pick = OnnxReduceView::TwoStep;
+    CLPEAK_VLOG("onnx-reduce[%s/%s]: %lld^2 down the columns %.0f us, along the "
+                "rows then down %.0f us -> %s\n",
+                ep.providerKey.c_str(), onnxProfileTypeName(dtype), (long long)n,
+                rowsUs, twoUs,
+                pick == OnnxReduceView::TwoStep ? "two-step" : "columns");
+  }
+
+  std::lock_guard<std::mutex> lk(mtx);
+  memo.emplace(memoKey, pick);
+  return pick;
+}
+
 // ---------------------------------------------------------------------------
 // Folding record
 // ---------------------------------------------------------------------------

@@ -78,11 +78,12 @@ struct OnnxAttr
   }
 };
 
-// How a graph's [rows, cols] result is reduced to the one row that leaves the
-// device (OnnxGraph::reduceRows): the resident GEMMs' product, the transformer
-// block's output, the activation graphs' result.  Both views are the same
-// ReduceMax over the same values -- the maximum down each column -- and
-// differ only in the shape the reduction is handed.
+// How a graph's [rows, cols] result is reduced to what leaves the device
+// (OnnxGraph::reduceRows): the resident GEMMs' product, the transformer
+// block's output, the activation graphs' result.  Rows and Rank4 are the
+// same ReduceMax over the same values -- the maximum down each column -- and
+// differ only in the shape the reduction is handed; TwoStep reduces the same
+// values in the other order, to the one maximum they share.
 enum class OnnxReduceView
 {
   // ReduceMax over axis 0 of the 2-D tensor.  What every provider has taken
@@ -100,7 +101,28 @@ enum class OnnxReduceView
   // not always free: the Adreno backend copies the tensor for the reshape,
   // 7% of an fp32 4096-cube matmul there.
   Rank4,
+
+  // ReduceMax along each row (axis 1), then down the column of row maxima
+  // that leaves: one value, [1].  It needs every element just as the column
+  // maxima do, and it is the order a provider may run far faster: OpenVINO's
+  // GPU runs the column maxima on its reference reduction, which hands each
+  // of `cols` outputs a strided walk down the whole tensor -- 10.7 ms of a
+  // 52 ms request on a [32768, 1024] fp16 product on an Arc A380, 0.68 ms at
+  // [2048, 2048] -- and the row maxima, one contiguous row per output, in
+  // 0.74 and 0.10.  Only onnx-gemm reduces this way, only where the probe
+  // timed it faster (onnxGemmReduceView), and only on a live shape: a
+  // product of constants reduced to one value is a constant a compiler can
+  // afford to evaluate, and TensorRT did (gemm.cpp).  Everywhere else the
+  // column maxima stay, so established readings do not move.
+  TwoStep,
 };
+
+// The shape reduceRows() hands back in `view`: the [cols] row of column
+// maxima, or TwoStep's one value.
+inline OnnxDims onnxReducedDims(OnnxReduceView view, int64_t cols)
+{
+  return view == OnnxReduceView::TwoStep ? OnnxDims{1} : OnnxDims{cols};
+}
 
 // Builds one GraphProto and wraps it in a ModelProto.  Nodes must be added
 // in topological order (ONNX requires it, and no sort is done here).
@@ -140,11 +162,11 @@ public:
   // raises its opset for a datatype would otherwise break on a node that has
   // nothing to do with that datatype.  Every reduction here goes through this.
   void reduceMax(const std::string &in, const std::string &out,
-                 const OnnxDims &axes);
+                 const OnnxDims &axes, bool keepDims = false);
 
   // The column maxima of a [rows, cols] tensor, as a [cols] row, in the given
-  // view (OnnxReduceView).  Every graph that hands one row back goes through
-  // this.
+  // view (OnnxReduceView) -- or TwoStep's one maximum, [1]; onnxReducedDims()
+  // says which.  Every graph that hands one row back goes through this.
   void reduceRows(const std::string &in, const std::string &out,
                   int64_t rows, int64_t cols, OnnxReduceView view);
 

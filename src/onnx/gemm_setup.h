@@ -81,13 +81,16 @@ std::vector<OnnxLiveShape> liveShapesFor(const Variant &v);
 // ladder checks against the memory budget and the protobuf ceiling.  A chain
 // of `layers` embeds one more weight matrix per layer after the first, and on
 // a live shape a seed and its widening weights in place of the activations.
+// `rows` (0: D) is how many rows of activations each layer multiplies, which
+// the tall rungs set above D (makeSetup).
 uint64_t operandBytes(const Variant &v, int64_t D, OnnxLiveShape shape,
-                      int layers = 1);
+                      int layers = 1, int64_t rows = 0);
 
-// One D-by-D product as the graph holds it between layers: codes for the QDQ
-// rows that fuse, fp32 for the ones that cannot and for NVFP4's single
-// product, fp16 for the weight-only rows, the row's own type otherwise.
-uint64_t layerOutputBytes(const Variant &v, int64_t D);
+// One rows-by-D product (rows 0: D) as the graph holds it between layers:
+// codes for the QDQ rows that fuse, fp32 for the ones that cannot and for
+// NVFP4's single product, fp16 for the weight-only rows, the row's own type
+// otherwise.
+uint64_t layerOutputBytes(const Variant &v, int64_t D, int64_t rows = 0);
 
 // Whether a (shape, layers) build enters through a seed (OnnxLiveSeed): chains
 // on the live shapes do; a single multiply and a result-scaled chain hold the
@@ -122,6 +125,7 @@ struct GemmSetup
   OrtValue *outVal = nullptr; // reduced row
   std::vector<uint8_t> inBuf, zaBuf, outBuf;
   int outDtype = 0;           // outBuf's element type: fp32, fp16 or bf16
+  int64_t outCount = 0;       // its elements: the row's D, or 1 (TwoStep)
   std::string error;
 
   // Not copyable, and the compiler has to enforce it: inVal and outVal are
@@ -142,14 +146,17 @@ void destroySetup(const OrtRuntime &rt, GemmSetup &g);
 // `actDtype`/`wgtDtype` apply to the QDQ form; `reduceInFloat` to the plain
 // one.  On failure `error` is set and `session` is null.  `verifyPlacement`
 // is onnxCreateSession's: off for the 32-cube probes, on for every rung a
-// ladder times.  `view` is how the product is reduced to the row that leaves
+// ladder times.  `view` is how the product is reduced to what leaves
 // (OnnxReduceView); `layers` chains that many D x D multiplies in one graph
-// (every row but NVFP4, which ignores it).
+// (every row but NVFP4, which ignores it).  `rows` (0: D) gives every layer
+// that many rows of activations against its D x D weights -- the ladder's
+// tall rungs (gemm.cpp); NVFP4's single cube ignores it.
 GemmSetup makeSetup(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                     const Variant &v, int64_t D, bool profile,
                     int actDtype, bool reduceInFloat, int wgtDtype,
                     OnnxLiveShape shape, bool verifyPlacement = true,
-                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1);
+                    OnnxReduceView view = OnnxReduceView::Rows, int layers = 1,
+                    int64_t rows = 0);
 
 // Mean microseconds per Run() over n runs; negative on failure.
 double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);

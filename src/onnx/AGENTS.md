@@ -38,10 +38,10 @@ backend.
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
-| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly, and `reduceRows()`, the one-row reduction every resident graph ends in, in either `OnnxReduceView` (2-D, or a rank-4 view for a provider that refuses the 2-D form); `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes (either spelled as a 1x1 convolution) and `onnxWeightOnlyMatMulModel()`, and the resident-GEMM ones, which take an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or it moves all four bytes — neither streaming 1.5x fp16's rate per credited byte nor taking fp16's own time at its shape — so a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
+| `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly, and `reduceRows()`, the one-row reduction every resident graph ends in, in any `OnnxReduceView` (2-D, a rank-4 view for a provider that refuses the 2-D form, or `TwoStep` — each row's maximum, then theirs, one value, which only `onnx-gemm` takes, only where the probe timed it faster and only on a live shape, since TensorRT evaluates a constant product reduced to one value at build time; `onnxReducedDims()` is the output's shape); `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes (either spelled as a 1x1 convolution) and `onnxWeightOnlyMatMulModel()`, and the resident-GEMM ones, which take an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
+| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; `onnxGemmReduceView()` — the view `onnx-gemm` reduces in, raced once per provider and product dtype on the activation test's reference graph (OpenVINO's GPU runs the column maxima on a reference kernel, 10.7 ms of a 52 ms request on an Arc A380, and the row maxima in 0.74); the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or it moves all four bytes — neither streaming 1.5x fp16's rate per credited byte nor taking fp16's own time at its shape — so a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
-| `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit, twice: as MatMul layers and as 1x1 convolutions (`int8_qdq_conv1x1` — an NPU compiler's convolution path can be the faster int8 one; `kIntVariants` has the numbers).  A size refused with the 2-D reduction is rebuilt with the rank-4 one |
+| `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply), then — only where the square ladder fell more than 10% short of its best at a wider rung (`kTallCliffShare`) — tall rungs: half-width layers fed four times the rows, doubling while they gain. One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit, twice: as MatMul layers and as 1x1 convolutions (`int8_qdq_conv1x1` — an NPU compiler's convolution path can be the faster int8 one; `kIntVariants` has the numbers).  A size refused with the 2-D reduction is rebuilt with the rank-4 one |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU, softmax and LayerNorm throughput in GB/s at `onnx-tensor-bw`'s three working-set sizes, each net of a reference graph that scales, reads and reduces the same tensor with no operation applied; the reference is measured once per size and shared by all three.  Element width from `onnxStreamDtype()` |
 | `conv.cpp` | `runConv` (`--convolution`) — convolution peak, fp32/fp16 (bf16 is unexpressible: Conv-11 admits only fp16/fp32/fp64, and that schema check fails before any provider sees the graph) × the 3×3-at-stride-2/1×1/depthwise3×3 shape trio (`dtype_label_shape_label` rows; `kShapes` says why the 3×3's stride is 2), each swept over feature-map size |
@@ -1364,7 +1364,8 @@ under an NPU heading.
 ## Throughput graphs keep both operands resident
 
 `onnx-gemm` makes **A and B both initializers** and reduces the result to one
-row, so nothing large crosses the host boundary per run. The obvious shape —
+row (one value, in the `TwoStep` view), so nothing large crosses the host
+boundary per run. The obvious shape —
 A as a graph input, C returned to the host — measures a discrete GPU through
 its PCIe bus. On an RTX 5060 it reported 15 TFLOPS for fp16 while
 `onnx-block`, whose weights are resident, reached 28 on the same device: a
@@ -1456,10 +1457,11 @@ A timing says nothing about what was computed, and a provider that
 miscompiles a graph times it like a correct one: TensorRT's blocked-int8 fold
 timed all-NaN chains at 47-75 TFLOPS. So once a rung's timed phase is over,
 `gemm.cpp`, `conv.cpp` and `block.cpp` hand the reduced row the last run
-returned to `onnxNonFiniteReason()` (`onnx_session.cpp`), and a NaN or an
-infinity in it withholds the timing as `Error`. In gemm and conv that is the
-whole row, not the rungs above it, and the ladder does not drop to another
-live shape; in the block it is the one point, which is its own row.
+returned (gemm's single value, in the `TwoStep` view) to
+`onnxNonFiniteReason()` (`onnx_session.cpp`), and a NaN or an infinity in it
+withholds the timing as `Error`. In gemm and conv that is the whole row, not
+the rungs above it -- a tall rung's included -- and the ladder does not drop to
+another live shape; in the block it is the one point, which is its own row.
 
 The check rests on a property every graph here keeps: **nothing in it can
 overflow.** The chains keep each layer's magnitude: on ONNX Runtime's CPU
@@ -1729,6 +1731,17 @@ rung for its working set, which does not expire either:
   is exactly the hardware that should try it. A slow provider plateaus after
   two or three rungs; the M1 Pro's fp16 curve peaks at 2048 and collapses to
   0.3 TFLOPS by 8192, which the strikes rule catches.
+
+  A square rung grows its weights with its activations, so a ladder can fall
+  off a cache rather than a compute limit, and then the asymptote is not on
+  the square axis at all: an Arc A380's OpenVINO fp16 read 21 TFLOPS at
+  2048-wide layers and 15 at 4096, and 26 with 1024-wide layers fed 32768
+  rows. So a chain whose ladder fell more than 10% below its best at a wider
+  rung then tries half its best width fed four times the rows -- the same
+  multiply-adds as the best rung, so the same run time -- keeps it past
+  `kOnnxPlateauGain`, and doubles the rows the way a square ladder climbs.
+  A ladder that never fell off skips the phase: there it would cost a rung
+  for nothing, and on a CPU provider its best rung is its slowest.
 - **`onnx-tensor-bw`** measures three fixed rungs, then climbs while the rate
   is still falling, which is where the working set has left the last level of
   cache. A fixed top rung would have needed raising already: 128 MB fits

@@ -134,6 +134,17 @@ bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
+// The view onnx-gemm reduces a product of `dtype` in on this provider: Rank4
+// where it refused the 2-D form (above), TwoStep where a race timed that
+// faster than the column maxima, Rows otherwise.  The race is the activation
+// test's reference graph -- one [2048, 2048] constant scaled by a runtime
+// scalar and reduced, nothing else -- built once in each view, so it costs
+// two small sessions per provider and product dtype whatever the ladder then
+// builds, and the difference between the two is the reduction's.  Memoized
+// like the probes; a race graph that cannot be built or run leaves Rows.
+OnnxReduceView onnxGemmReduceView(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                                  int dtype);
+
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only
 // and nvfp4 rows have no accuracy counterpart by design).  When gemm's ladder

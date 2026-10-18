@@ -224,8 +224,9 @@ void OnnxGraph::setOpset(int opset)
 }
 
 void OnnxGraph::reduceMax(const std::string &in, const std::string &out,
-                          const OnnxDims &axes)
+                          const OnnxDims &axes, bool keepDims)
 {
+  const int64_t keep = keepDims ? 1 : 0;
   // Opset 18 moved `axes` from an attribute to an optional input.  Both
   // spellings mean the same thing; which one is legal depends only on the
   // opset the model declares, so the choice belongs here rather than in every
@@ -234,7 +235,7 @@ void OnnxGraph::reduceMax(const std::string &in, const std::string &out,
   if (m_opset < 18)
   {
     node("ReduceMax", {in}, {out},
-         {OnnxAttr::list("axes", axes), OnnxAttr::num("keepdims", 0)});
+         {OnnxAttr::list("axes", axes), OnnxAttr::num("keepdims", keep)});
     return;
   }
 
@@ -242,7 +243,7 @@ void OnnxGraph::reduceMax(const std::string &in, const std::string &out,
   // coexist in one graph.
   const std::string axesName = out + "_axes";
   shapeInitializer(axesName, axes);
-  node("ReduceMax", {in, axesName}, {out}, {OnnxAttr::num("keepdims", 0)});
+  node("ReduceMax", {in, axesName}, {out}, {OnnxAttr::num("keepdims", keep)});
 }
 
 void OnnxGraph::reduceRows(const std::string &in, const std::string &out,
@@ -254,6 +255,15 @@ void OnnxGraph::reduceRows(const std::string &in, const std::string &out,
     shapeInitializer(r4 + "_shape", {1, rows, 1, cols});
     node("Reshape", {in, r4 + "_shape"}, {r4});
     reduceMax(r4, out, {0, 1, 2});
+    return;
+  }
+  if (view == OnnxReduceView::TwoStep)
+  {
+    // The maximum of each row, then of those: a [1] that keeps its axis, so
+    // every output here is a tensor of rank one and binds the same way.
+    const std::string rowMax = out + "_rowmax";
+    reduceMax(in, rowMax, {1});
+    reduceMax(rowMax, out, {0}, /*keepDims=*/true);
     return;
   }
   reduceMax(in, out, {0});
@@ -359,7 +369,9 @@ struct LayerForm
     else
       g.node("MatMul", {x, w}, {y});
   }
-  // The maximum of each output column, as the [cols] row every form returns.
+  // The maximum of each output column, as the [cols] row every form returns
+  // -- or, for a MatMul in the TwoStep view, their one maximum.  A
+  // convolution reduces its 4-D product directly, in no view.
   void reduce(OnnxGraph &g, const std::string &in, const std::string &out,
               int64_t cols, OnnxReduceView view) const
   {
@@ -367,6 +379,10 @@ struct LayerForm
       g.reduceMax(in, out, {0, 2, 3});
     else
       g.reduceRows(in, out, M, cols, view);
+  }
+  OnnxDims reduced(int64_t cols, OnnxReduceView view) const
+  {
+    return conv ? OnnxDims{cols} : onnxReducedDims(view, cols);
   }
 };
 } // namespace
@@ -557,7 +573,7 @@ std::string onnxResidentNvfp4MatMulModel(int64_t M, int64_t K, int64_t N,
   }
   g.reduceRows("C", "R", M, N, view);
   g.node("Mul", {"R", "S"}, {"Y"});
-  g.output("Y", ONNX_DT_FLOAT, {N});
+  g.output("Y", ONNX_DT_FLOAT, onnxReducedDims(view, N));
   return g.build();
 }
 
@@ -631,7 +647,7 @@ std::string onnxResidentWeightOnlyMatMulModel(
   g.reduceRows(product, live ? "Y" : "R", M, N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
-  g.output("Y", ONNX_DT_FLOAT16, {N});
+  g.output("Y", ONNX_DT_FLOAT16, onnxReducedDims(view, N));
   return g.build();
 }
 std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
@@ -711,7 +727,7 @@ std::string onnxResidentMatMulModel(int64_t M, int64_t K, int64_t N, int dtype,
   g.reduceRows(reduceIn, live ? "Y" : "R", M, N, view);
   if (!live)
     g.node("Mul", {"R", "S"}, {"Y"});
-  g.output("Y", tailDtype, {N});
+  g.output("Y", tailDtype, onnxReducedDims(view, N));
   return g.build();
 }
 std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
@@ -888,7 +904,7 @@ std::string onnxResidentQdqMatMulModel(int64_t M, int64_t K, int64_t N,
   form.reduce(g, "C_d", resultScaled ? "R" : "Y", N, view);
   if (resultScaled)
     g.node("Mul", {"R", "S"}, {"Y"});
-  g.output("Y", ONNX_DT_FLOAT, {N});
+  g.output("Y", ONNX_DT_FLOAT, form.reduced(N, view));
   return g.build();
 }
 
@@ -972,7 +988,7 @@ std::string onnxResidentActivationModel(int64_t rows, int64_t cols, int dtype,
   }
 
   g.reduceRows(out, "Y", rows, cols, view);
-  g.output("Y", dtype, {cols});
+  g.output("Y", dtype, onnxReducedDims(view, cols));
   return g.build();
 }
 
@@ -1436,7 +1452,7 @@ std::string onnxBlockModel(const OnnxBlockShape &sh)
   // multiplying the summed rows, a rewrite that would let an optimiser shrink
   // the work.  See onnxResidentMatMulModel.
   g.reduceRows("Y", "Yr", S, d, sh.reduceView);
-  g.output("Yr", act, {d});
+  g.output("Yr", act, onnxReducedDims(sh.reduceView, d));
   if (decode)
   {
     // Keeps the K/V projections live, and mirrors the cache write a real
