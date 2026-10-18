@@ -3,6 +3,7 @@
 #include <cpu/cpu_peak.h>
 #include <common/common.h>
 #include <common/options.h>
+#include <common/screen_hold.h>
 
 #include <algorithm>
 #include <atomic>
@@ -302,6 +303,18 @@ int CpuPeak::runAll()
   if (!isDeviceSelected(0))
     return 0;
 
+  auto backendScope = log->beginBackend("CPU");
+
+  // The cores this process may use are read once, here, and the pool, the
+  // header and every row are built on them, so they wait for an app off
+  // screen as a reading does: Android moves an app that leaves the screen to
+  // a background cpuset.  A Galaxy Z Fold8's CPU backend, started 0.2 s
+  // before the app was back, read four of its eight cores there and ran every
+  // row on them -- the logger's first hold comes at the first test, after the
+  // pool exists.  Android starts moving the app back to its foreground cpuset
+  // as it resumes the activity, before the app has its window's focus, which
+  // is when Flutter reports `resumed` and the app says it is on screen.
+  clpeak::screenGate();
   detectCpuInfo(info);
   if (!pool)
   {
@@ -329,7 +342,9 @@ int CpuPeak::runAll()
         CLPEAK_VLOG("[cpu] %s; the cache rows that need it skip\n", cacheSizeGap(info, lvl));
   }
 
-  auto backendScope = log->beginBackend("CPU");
+  // An Android app's cpuset, taskset or a container: the all-core rows run
+  // on what this process may use, not on the whole chip.
+  const bool fewerUsable = !info.cores.empty() && (int)info.cores.size() < info.logicalCores;
 
   std::vector<logger::Prop> props;
   props.push_back({"Vendor", info.vendor.empty() ? "Unknown" : info.vendor});
@@ -345,9 +360,7 @@ int CpuPeak::runAll()
     if (info.perfCores > 0 && info.effCores > 0)
       cores += " (" + std::to_string(info.perfCores) + "P+" +
                std::to_string(info.effCores) + "E)";
-    // An Android app's cpuset, taskset or a container: the all-core rows run
-    // on what this process may use, not on the whole chip.
-    if (!info.cores.empty() && (int)info.cores.size() < info.logicalCores)
+    if (fewerUsable)
       cores += ", " + std::to_string(info.cores.size()) + " usable";
     props.push_back({"Cores", cores});
   }
@@ -372,6 +385,21 @@ int CpuPeak::runAll()
   auto deviceScope = backendScope.beginDevice({
     info.name, "", "", props, -1, 0, DeviceType::Cpu});
   currentDeviceScope = &deviceScope;
+
+  // The header counts the usable CPUs; the run log names them.
+  if (fewerUsable)
+  {
+    std::vector<int> ids;
+    for (const cpu_core_t &c : info.cores)
+      ids.push_back(c.id);
+    std::sort(ids.begin(), ids.end());
+    std::string list;
+    for (int id : ids)
+      list += " cpu" + std::to_string(id);
+    CLPEAK_LOG(Info, "[cpu] this process may run on %d of the %d logical CPUs:%s; "
+               "every multi-thread row measures those alone",
+               (int)info.cores.size(), info.logicalCores, list.c_str());
+  }
 
   benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Cpu);
   cfg.targetTimeUs = targetTimeUs;

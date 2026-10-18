@@ -11,9 +11,10 @@
 // ran on four of the eight cores.  A reading taken off screen measures the
 // background; one a freeze lands inside measures the freeze.  So at every
 // boundary between readings -- the thermal gate's: a test starting, a row
-// recorded -- a run whose app is off screen waits until it is back or the
-// run is cancelled.  With no limit: what the phone does to the app meanwhile
-// is the phone's, and a run that waited at a boundary resumes cleanly.
+// recorded -- and before the CPU backend reads which cores it may use, a run
+// whose app is off screen waits until it is back or the run is cancelled.
+// With no limit: what the phone does to the app meanwhile is the phone's, and
+// a run that waited at a boundary resumes cleanly.
 //
 // Only an app says where it is (clpeak_set_on_screen, src/ffi/clpeak_ffi.h).
 // The CLI and the desktop engine process never do, so their runs never wait.
