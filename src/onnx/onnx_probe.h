@@ -81,20 +81,20 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
 // The floating-point width this provider streams a resident tensor through
 // fastest: ONNX_DT_FLOAT16 or ONNX_DT_FLOAT.  One [1, K] x [K, N] matrix-
-// vector product over eight megabytes of weights, timed in each, and the
-// faster kept (fp16 on a tie).  The bandwidth-shaped tests take their
-// element type from this rather than assuming fp16: a provider without a
-// native fp16 kernel for the operation -- ONNX Runtime's CPU EP converts
-// every fp16 tensor on the way in -- would otherwise report its conversion
-// rate under a bandwidth heading (2 GB/s on a Threadripper whose fp32 rows
-// stream 38).  fp32 is not a candidate on a provider that narrows it
-// (onnxFp32Narrowed): there it wins every time by moving half the bytes it is
-// credited with.  Memoized per runtime and target.
+// vector product over 64 MB of weights (eight on a device too small to hold
+// that), timed in each, and the faster kept (fp16 on a tie).  The bandwidth-
+// shaped tests take their element type from this rather than assuming fp16:
+// a provider without a native fp16 kernel for the operation -- ONNX Runtime's
+// CPU EP converts every fp16 tensor on the way in -- would otherwise report
+// its conversion rate under a bandwidth heading (2 GB/s on a Threadripper
+// whose fp32 rows stream 38).  fp32 is not a candidate on a provider that
+// narrows it (onnxFp32Narrowed): there it wins every time by moving half the
+// bytes it is credited with.  Memoized per runtime and target.
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // The bandwidth that probe measured in the width it chose, in bytes/second,
-// or 0 when neither width could be timed.  It is a read of eight megabytes of
-// resident weights through the operation every provider tunes hardest, *net
+// or 0 when neither width could be timed.  It is a read of 64 MB of resident
+// weights through the operation every provider tunes hardest, *net
 // of the cost of submitting it* -- the same floor subtraction onnx-tensor-bw
 // makes, and for the same reason: DirectML charges 156 us per submission, so
 // the raw figure came out at 48 GB/s where that provider streams 717.
@@ -112,13 +112,15 @@ double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // weights that way -- QNN's HTP (enable_htp_fp16_precision), OpenVINO's GPU and
 // NPU, the XDNA NPUs in bf16 -- so an fp32 reading credited four bytes an
 // element moved two, and read twice the rate the device has.  The same
-// streaming probe answers it, from two things it measures anyway, and it takes
-// both: the fp32 matrix-vector product came back with half-precision error
-// against a host reference (a narrowed *computation*), and streamed half again
-// or more of fp16's bytes per second (narrowed *storage* -- the same bytes in
-// half the time).  Error alone would condemn NVIDIA's TF32, which rounds the
-// arithmetic and still reads all four bytes; speed alone would condemn a CPU
-// whose fp16 path converts.  False when either width could not be timed.
+// streaming probe answers it, and it takes both of two findings: the fp32
+// matrix-vector product came back with half-precision error against a host
+// reference (a narrowed *computation*), and it moved half its credited bytes
+// (narrowed *storage*) -- seen either as half again or more of fp16's bytes
+// per second, or as fp16's own time at the fp32 product's shape, where the
+// two are one 16-bit kernel; the second holds where time does not scale with
+// work.  Error alone would condemn NVIDIA's TF32, which rounds the arithmetic
+// and still reads all four bytes; speed alone would condemn a CPU whose fp16
+// path converts.  False when either width could not be timed.
 bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // Did this provider refuse a row reduction at some size and take the rank-4

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -376,6 +377,27 @@ constexpr double kFp32ExactRelErr = 2.0e-5;
 // reading comes out near twice fp16's; full-width fp32 comes out near equal.
 constexpr double kNarrowedRateRatio = 1.5;
 
+// The same question, asked so that the answer does not rest on time scaling
+// with work.  The ratio above sets fp16's product beside an fp32 one of half
+// its columns, so where fp32 is held at 16 bits it compares two shapes doing
+// different amounts of work -- and on an OpenVINO GPU (Arc A380) the two did
+// not scale together: fp32 read 1.28x fp16's rate while moving half its
+// credited bytes, because per byte it actually moved the narrower product
+// streamed 56 GB/s against fp16's 87, where onnx-tensor-bw's second-long
+// rungs read 102 to 127 on the same card.  So fp16 is also timed at the fp32
+// product's own shape.  Held at half width, the two are one 16-bit kernel over
+// the same bytes and take the same time whatever dispatch, clocks or shape
+// do; at full width fp32 moves twice the bytes.  The same time is within this
+// factor either way -- the block's decode rows read 0.99x and 1.01x on that
+// card.  On a full-width provider this fires only where fp32 streams 1.6x
+// (2 / 1.25) fp16's bytes per second, which the ratio above already calls
+// narrowed.
+constexpr double kSameShapeTimeRatio = 1.25;
+
+// The same-shape pair runs in alternating batches and each keeps its best, so
+// a clock that drifts while they run lands on both rather than on one.
+constexpr int kSameShapeRounds = 3;
+
 static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
   static std::unordered_map<std::string, StreamProbe> memo;
@@ -402,14 +424,17 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   // difference of two nearly equal numbers: CUDA read 2511 GB/s from a 3 us
   // net, and TensorRT's two widths came out 561 and 965 on noise alone.
   // Sixty-four megabytes is four times the dispatch on the fastest provider
-  // here and still one session per width -- but it is also 64 MB of weights
-  // three times over at peak, so a small device falls back to eight and
-  // reports whatever it can.
+  // here and still one session per width, plus fp16 at fp32's shape where
+  // fp32 comes back rounded (kSameShapeTimeRatio) -- but the fp32 product is
+  // held while that one builds, 96 MB of weights counted as every gate counts
+  // them (onnxHeldBytes), so a small device falls back to eight and reports
+  // whatever it can.
   constexpr int64_t kK = 2048;
   constexpr int64_t kFloorDim = 256; // 128 KB either way: cannot matter
-  const uint64_t kBytes = (clpeak::memoryBudget(1ull << 30) > (192ull << 20))
-                              ? (64ull << 20)
-                              : (8ull << 20);
+  const uint64_t kBytes =
+      (clpeak::memoryBudget(1ull << 30) > onnxHeldBytes(ep, 96ull << 20, 0))
+          ? (64ull << 20)
+          : (8ull << 20);
   // Below this share the reading is dispatch, not bandwidth.  Reporting it
   // would put a meaningless ceiling under the activation rows -- too low
   // refuses every one of them, too high checks nothing -- so the probe says
@@ -418,28 +443,39 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   const int candidates[2] = {ONNX_DT_FLOAT16, ONNX_DT_FLOAT};
   StreamProbe best;
 
-  // Time one [1,k]x[k,n] product of `dtype`; negative when it could not run.
-  // With `relErr`, an fp32 product is also scored against a double-precision
-  // reference: the relative RMS error of the row it returned, or -1.
-  auto timeGemv = [&](int dtype, int64_t k, int64_t n,
-                      double *relErr = nullptr) -> double {
+  // One [1,k]x[k,n] product of `dtype`, built, its input and output bound.
+  // Every input element is 0.5, so an fp32 product's exact answer is half of
+  // each column's sum -- of the fp32 values the model actually holds -- and
+  // `ref` keeps it when the product is to be scored.
+  struct Gemv
+  {
+    OrtSession *session = nullptr;
+    OrtValue *xv = nullptr, *yv = nullptr;
+    std::vector<uint8_t> x, y;
+    std::vector<double> ref;
+  };
+  auto release = [&](Gemv &g) {
+    if (g.xv)
+      rt.api->ReleaseValue(g.xv);
+    if (g.yv)
+      rt.api->ReleaseValue(g.yv);
+    if (g.session)
+      rt.api->ReleaseSession(g.session);
+    g = Gemv();
+  };
+  // Build one in `g`; false when it could not be.
+  auto build = [&](Gemv &g, int dtype, int64_t k, int64_t n,
+                   bool score) -> bool {
     const size_t es = dtypeSize(dtype);
     std::string w;
     fillTensor(w, dtype, k * n, 0x243f6a88u);
-    // Every input element is 0.5, so the exact answer is half of each
-    // column's sum -- of the fp32 values the model actually holds.
-    std::vector<double> ref;
-    if (relErr)
+    if (score && dtype == ONNX_DT_FLOAT)
     {
-      *relErr = -1.0;
-      if (dtype == ONNX_DT_FLOAT)
-      {
-        ref.assign((size_t)n, 0.0);
-        const float *wf = reinterpret_cast<const float *>(w.data());
-        for (int64_t i = 0; i < k; i++)
-          for (int64_t j = 0; j < n; j++)
-            ref[(size_t)j] += 0.5 * (double)wf[(size_t)(i * n + j)];
-      }
+      g.ref.assign((size_t)n, 0.0);
+      const float *wf = reinterpret_cast<const float *>(w.data());
+      for (int64_t i = 0; i < k; i++)
+        for (int64_t j = 0; j < n; j++)
+          g.ref[(size_t)j] += 0.5 * (double)wf[(size_t)(i * n + j)];
     }
     std::string model = onnxMatMulModel(1, k, n, dtype, w);
     std::string().swap(w);
@@ -449,87 +485,97 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     {
       CLPEAK_VLOG("onnx-stream[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
                   dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", ses.error.c_str());
-      return -1.0;
+      release(g);
+      return false;
     }
+    g.session = ses.session;
 
-    std::vector<uint8_t> x((size_t)k * es, 0), y((size_t)n * es, 0);
+    g.x.assign((size_t)k * es, 0);
+    g.y.assign((size_t)n * es, 0);
     {
       std::string one = onnxFloatScalar(0.5f, dtype);
       for (int64_t i = 0; i < k; i++)
-        std::memcpy(&x[(size_t)i * es], one.data(), es);
+        std::memcpy(&g.x[(size_t)i * es], one.data(), es);
     }
     OrtMemoryInfo *mi = nullptr;
-    OrtValue *xv = nullptr, *yv = nullptr;
     OrtStatus *st = rt.api->CreateCpuMemoryInfo(OrtDeviceAllocator,
                                                 OrtMemTypeDefault, &mi);
     const int64_t xs[2] = {1, k}, ys[2] = {1, n};
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, x.data(), x.size(), xs, 2, (ONNXTensorElementDataType)dtype, &xv);
+          mi, g.x.data(), g.x.size(), xs, 2, (ONNXTensorElementDataType)dtype,
+          &g.xv);
     if (!st)
       st = rt.api->CreateTensorWithDataAsOrtValue(
-          mi, y.data(), y.size(), ys, 2, (ONNXTensorElementDataType)dtype, &yv);
+          mi, g.y.data(), g.y.size(), ys, 2, (ONNXTensorElementDataType)dtype,
+          &g.yv);
     if (mi)
       rt.api->ReleaseMemoryInfo(mi);
-
-    double us = -1.0;
-    if (!st)
+    if (st)
     {
-      static const char *ins[] = {"A"};
-      static const char *outs[] = {"C"};
-      auto run = [&](unsigned int reps) -> double {
-        auto t0 = std::chrono::steady_clock::now();
-        for (unsigned int i = 0; i < reps; i++)
-        {
-          OrtStatus *rs = rt.api->Run(ses.session, nullptr, ins,
-                                      (const OrtValue *const *)&xv, 1,
-                                      outs, 1, &yv);
-          if (rs)
-          {
-            rt.api->ReleaseStatus(rs);
-            return -1.0;
-          }
-        }
-        return elapsedUs(t0) / reps;
-      };
-      // Warm, then a short batch: this decides a width, not a rate.
-      if (run(3) > 0.0)
-      {
-        double probe = run(1);
-        if (probe > 0.0)
-        {
-          unsigned int reps = pickIters(probe, 200000u, 0, 50u);
-          us = (reps > 1) ? run(reps) : probe;
-        }
-      }
-    }
-    else
       rt.api->ReleaseStatus(st);
-
-    if (us > 0.0 && !ref.empty())
-    {
-      const float *yf = reinterpret_cast<const float *>(y.data());
-      double num = 0.0, den = 0.0;
-      for (int64_t j = 0; j < n; j++)
-      {
-        const double d = (double)yf[j] - ref[(size_t)j];
-        num += d * d;
-        den += ref[(size_t)j] * ref[(size_t)j];
-      }
-      if (den > 0.0)
-        *relErr = std::sqrt(num / den);
+      release(g);
+      return false;
     }
-
-    if (xv)
-      rt.api->ReleaseValue(xv);
-    if (yv)
-      rt.api->ReleaseValue(yv);
-    rt.api->ReleaseSession(ses.session);
+    return true;
+  };
+  // Run a built product `reps` times: the mean per run in microseconds, or
+  // -1 when a run failed.
+  auto run = [&](Gemv &g, unsigned int reps) -> double {
+    static const char *ins[] = {"A"};
+    static const char *outs[] = {"C"};
+    auto t0 = std::chrono::steady_clock::now();
+    for (unsigned int i = 0; i < reps; i++)
+    {
+      OrtStatus *rs = rt.api->Run(g.session, nullptr, ins,
+                                  (const OrtValue *const *)&g.xv, 1, outs, 1,
+                                  &g.yv);
+      if (rs)
+      {
+        rt.api->ReleaseStatus(rs);
+        return -1.0;
+      }
+    }
+    return elapsedUs(t0) / reps;
+  };
+  // Warm, then a short batch: this decides a width, not a rate.
+  auto timeBuilt = [&](Gemv &g) -> double {
+    if (run(g, 3) <= 0.0)
+      return -1.0;
+    const double probe = run(g, 1);
+    if (probe <= 0.0)
+      return -1.0;
+    const unsigned int reps = pickIters(probe, 200000u, 0, 50u);
+    return (reps > 1) ? run(g, reps) : probe;
+  };
+  // Build, time and release one product; negative when it could not run.
+  auto timeGemv = [&](int dtype, int64_t k, int64_t n) -> double {
+    Gemv g;
+    const double us = build(g, dtype, k, n, false) ? timeBuilt(g) : -1.0;
+    release(g);
     return us;
   };
+  // The relative RMS error of the row a scored product last returned, or -1.
+  auto relErrOf = [&](const Gemv &g) -> double {
+    if (g.ref.empty())
+      return -1.0;
+    const float *yf = reinterpret_cast<const float *>(g.y.data());
+    double num = 0.0, den = 0.0;
+    for (size_t j = 0; j < g.ref.size(); j++)
+    {
+      const double d = (double)yf[j] - g.ref[j];
+      num += d * d;
+      den += g.ref[j] * g.ref[j];
+    }
+    return (den > 0.0) ? std::sqrt(num / den) : -1.0;
+  };
 
-  double bpsOf[2] = {0.0, 0.0}; // indexed like `candidates`
+  double bpsOf[2] = {0.0, 0.0};   // indexed like `candidates`
+  double floorOf[2] = {0.0, 0.0}; // what each width's reading is net of
   double fp32RelErr = -1.0;
+  // The fp32 product outlives its own reading: where it comes back rounded,
+  // it is timed again against fp16 at its shape (kSameShapeTimeRatio).
+  Gemv g32;
   for (size_t ci = 0; ci < 2; ci++)
   {
     const int dtype = candidates[ci];
@@ -541,11 +587,20 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     // measured -- and subtracting a quarter of the transfer reported Core ML
     // at 150 GB/s where onnx-tensor-bw, which subtracts a real floor, says 83.
     const double floorUs = timeGemv(dtype, kFloorDim, kFloorDim);
-    const double us = timeGemv(dtype, kK, (int64_t)(kBytes / (kK * es)),
-                               dtype == ONNX_DT_FLOAT ? &fp32RelErr : nullptr);
+    const int64_t n = (int64_t)(kBytes / (kK * es));
+    double us = -1.0;
+    if (dtype != ONNX_DT_FLOAT)
+      us = timeGemv(dtype, kK, n);
+    else if (build(g32, dtype, kK, n, /*score=*/true))
+    {
+      us = timeBuilt(g32);
+      if (us > 0.0)
+        fp32RelErr = relErrOf(g32);
+    }
     if (us <= 0.0)
       continue;
-    const double netUs = us - ((floorUs > 0.0) ? floorUs : 0.0);
+    floorOf[ci] = (floorUs > 0.0) ? floorUs : 0.0;
+    const double netUs = us - floorOf[ci];
     if (netUs < kMinNetShare * us)
     {
       CLPEAK_VLOG("onnx-stream[%s]: %s %.0f us against a %.0f us floor -- "
@@ -561,21 +616,92 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
                 us, floorUs);
     bpsOf[ci] = bps;
   }
-
-  // fp32 streamed faster per credited byte *and* came back rounded like a
-  // 16-bit type: the provider holds it at half width, and its reading counts
-  // bytes that never moved (see onnxFp32Narrowed).
-  const double bps16 = bpsOf[0], bps32 = bpsOf[1];
   if (fp32RelErr >= 0.0)
     CLPEAK_VLOG("onnx-stream[%s]: fp32 result within %.1f ppm of a double-"
                 "precision reference\n",
                 ep.providerKey.c_str(), fp32RelErr * 1.0e6);
-  best.fp32Narrowed = fp32RelErr > kFp32ExactRelErr && bps16 > 0.0 &&
-                      bps32 > kNarrowedRateRatio * bps16;
+
+  // fp32 came back rounded like a 16-bit type, which is storage held at half
+  // width or arithmetic rounded the way TF32 rounds it.  fp16 at the fp32
+  // product's shape tells the two apart (kSameShapeTimeRatio), raced against
+  // it after a fresh warm-up: the fp32 one sat idle while fp16 was built.
+  const bool fp32Rounded = fp32RelErr > kFp32ExactRelErr;
+  double sameShapeRatio = 0.0; // fp32's net time over fp16's at that shape
+  if (fp32Rounded && bpsOf[0] > 0.0 && bpsOf[1] > 0.0 &&
+      !clpeak::cancelRequested())
+  {
+    Gemv g16;
+    double us32 = -1.0, us16 = -1.0;
+    if (build(g16, ONNX_DT_FLOAT16, kK,
+              (int64_t)(kBytes / (kK * dtypeSize(ONNX_DT_FLOAT))), false) &&
+        run(g16, 3) > 0.0 && run(g32, 3) > 0.0)
+    {
+      const double p32 = run(g32, 1), p16 = run(g16, 1);
+      if (p32 > 0.0 && p16 > 0.0)
+      {
+        const unsigned int r32 = pickIters(p32, 100000u, 0, 25u);
+        const unsigned int r16 = pickIters(p16, 100000u, 0, 25u);
+        for (int i = 0; i < kSameShapeRounds; i++)
+        {
+          const double a = run(g32, r32), b = run(g16, r16);
+          if (a <= 0.0 || b <= 0.0)
+          {
+            us32 = us16 = -1.0;
+            break;
+          }
+          us32 = (us32 > 0.0) ? std::min(us32, a) : a;
+          us16 = (us16 > 0.0) ? std::min(us16, b) : b;
+        }
+      }
+    }
+    release(g16);
+    const double net32 = us32 - floorOf[1], net16 = us16 - floorOf[0];
+    if (us32 > 0.0 && us16 > 0.0 && net32 >= kMinNetShare * us32 &&
+        net16 >= kMinNetShare * us16)
+    {
+      sameShapeRatio = net32 / net16;
+      CLPEAK_VLOG("onnx-stream[%s]: at fp32's shape, fp32 %.0f us and fp16 "
+                  "%.0f us less %.0f / %.0f us floors: %.2fx the time for "
+                  "twice the bytes\n",
+                  ep.providerKey.c_str(), us32, us16, floorOf[1], floorOf[0],
+                  sameShapeRatio);
+    }
+    else if (us32 > 0.0 && us16 > 0.0)
+      CLPEAK_VLOG("onnx-stream[%s]: at fp32's shape, fp32 %.0f us and fp16 "
+                  "%.0f us against %.0f / %.0f us floors -- dispatch, not "
+                  "bandwidth; no reading\n",
+                  ep.providerKey.c_str(), us32, us16, floorOf[1], floorOf[0]);
+  }
+  release(g32);
+
+  // fp32 came back rounded *and* moved half its credited bytes -- streaming
+  // faster per credited byte, or taking fp16's own time at its shape: the
+  // provider holds it at half width, and its reading counts bytes that never
+  // moved (see onnxFp32Narrowed).
+  const double bps16 = bpsOf[0], bps32 = bpsOf[1];
+  const bool fasterPerByte = bps32 > kNarrowedRateRatio * bps16;
+  const bool sameTime = sameShapeRatio >= 1.0 / kSameShapeTimeRatio &&
+                        sameShapeRatio <= kSameShapeTimeRatio;
+  best.fp32Narrowed = fp32Rounded && bps16 > 0.0 && (fasterPerByte || sameTime);
   if (best.fp32Narrowed)
+  {
+    char same[64] = "";
+    if (sameShapeRatio > 0.0)
+      std::snprintf(same, sizeof(same), ", %.2fx its time at the same shape",
+                    sameShapeRatio);
     CLPEAK_VLOG("onnx-stream[%s]: fp32 is held at half width here (%.0f ppm, "
-                "%.2fx fp16's rate per credited byte); streaming fp16\n",
-                ep.providerKey.c_str(), fp32RelErr * 1.0e6, bps32 / bps16);
+                "%.2fx fp16's rate per credited byte%s); streaming fp16\n",
+                ep.providerKey.c_str(), fp32RelErr * 1.0e6, bps32 / bps16,
+                same);
+  }
+  else if (sameShapeRatio > kSameShapeTimeRatio)
+    CLPEAK_VLOG("onnx-stream[%s]: fp32 is rounded in the arithmetic, not the "
+                "storage: it moves its full width\n",
+                ep.providerKey.c_str());
+  else if (sameShapeRatio > 0.0)
+    CLPEAK_VLOG("onnx-stream[%s]: fp16 is the slower of the two at fp32's "
+                "shape, which says nothing about how fp32 is held\n",
+                ep.providerKey.c_str());
 
   // fp16 on a tie, and fp32 only where it is what it says it is.
   if (bps16 > 0.0)

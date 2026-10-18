@@ -39,7 +39,7 @@ backend.
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
 | `onnx_model.cpp` | `OnnxGraph` — emits ONNX protobuf wire format directly, and `reduceRows()`, the one-row reduction every resident graph ends in, in either `OnnxReduceView` (2-D, or a rank-4 view for a provider that refuses the 2-D form); `onnxMatMulModel()` / `onnxQdqMatMulModel()` recipes (either spelled as a 1x1 convolution) and `onnxWeightOnlyMatMulModel()`, and the resident-GEMM ones, which take an optional chain of further layers; fp16/bf16 scalar conversions; `onnxOpsetForDtype()` / `onnxMinOrtApiForOpset()` |
-| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or streams no faster per credited byte than fp16 — a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
+| `onnx_probe.{h,cpp}` | `onnxProbeGemmCache()` — the 32³ probe every matmul-shaped test consults: per variant, which quantization scheme fuses and which live shapes build; `onnxPrefersRank4Reduce()` — the providers that refused a 2-D row reduction and took the rank-4 view, learned by whichever test met it first; the streaming-width probe, `onnxStreamDtype()` / `onnxStreamBps()` / `onnxFp32Narrowed()` (fp32 is a candidate width only where its GEMV result is fp32-accurate or it moves all four bytes — neither streaming 1.5x fp16's rate per credited byte nor taking fp16's own time at its shape — so a provider holding fp32 at half width gets fp16, and the block's fp32 decode row is credited the two bytes an element it moves); the fold record; `onnxEpViable()` |
 | `gemm_setup.{h,cpp}` | The variant table, operand generator and resident-session builder shared by `gemm.cpp` and `onnx_probe.cpp`, plus `liveShapesFor()` — which `OnnxLiveShape`s a row may be built in, most preferred first |
 | `gemm.cpp` | `runGemm` (`--gemm`) — MatMul peak, measured as sixteen distinct square layers chained in one dispatch and swept over layer width (NVFP4 alone is a single multiply). One test, `onnx_gemm`: fp32 + fp16 + bf16 + fp8 e4m3/e5m2 + fp4 e2m1 + fp4/int4/int8 weight-only in flops (the int8 row is the Core ML and LiteRT ladders' `int8_weight`, so the three line up), int8 QDQ carrying its own `ops` unit, twice: as MatMul layers and as 1x1 convolutions (`int8_qdq_conv1x1` — an NPU compiler's convolution path can be the faster int8 one; `kIntVariants` has the numbers).  A size refused with the 2-D reduction is rebuilt with the rank-4 one |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — host→device bandwidth, swept, plus the full offload round trip |
@@ -1534,6 +1534,12 @@ matters as much as its upper: ONNX Runtime's CPU EP runs fp32 decode in a
 quarter of fp16's time because its fp16 path has no kernel at all, and that
 is a different fault which this row must not claim.
 
+Where the stream probe has proved fp32 held at half width
+(`onnxFp32Narrowed()`), the fp32 row is credited the two bytes an element it
+moves and this comparison has nothing left to flag.  It stays for what the
+probe cannot prove -- fp16 converted up, as on the CPU EP -- and for any
+provider the probe misses.
+
 ## Nothing about a device may be hardcoded by its name
 
 The provider tables that map a registration name to its options
@@ -2117,7 +2123,7 @@ tunes hardest.  **The width is measured, not assumed.**  It used to be fp16
 outright, which on a provider with no fp16 kernel measured the conversion
 ORT inserts on the way in and nothing else: the CPU EP read a flat 6.2 GB/s
 at every size on a machine whose fp32 rows stream 236 / 100 / 92, a real
-DRAM curve.  `onnxStreamDtype()` times eight megabytes through this same
+DRAM curve.  `onnxStreamDtype()` times 64 MB through this same
 GEMV in fp16 and in fp32 and the ladder, the activation rows and the
 dispatch matmul all take the faster; the rungs are named for their byte
 size, so an fp32 matrix simply has half the columns and every reading still
