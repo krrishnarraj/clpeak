@@ -3,6 +3,7 @@
 #include "onnx_probe.h"
 #include "gemm_setup.h"
 #include "onnx_model.h"
+#include "onnx_plugin.h"
 #include "onnx_session.h"
 
 #include <onnx/onnx_peak.h>
@@ -24,6 +25,34 @@ using namespace onnxgemm;
 
 namespace
 {
+
+// Which provider a memo here answers for.  Its name is not enough, twice
+// over.  OpenVINO serves its NPU, GPU and CPU targets under one name, and
+// they compile and fuse independently.  And a plugin (--onnx-ep) serves its
+// devices under the name of the provider it is a build of, which can be one
+// the runtime has built in, on the same device: on an Arc A380 the built-in
+// OpenVINO GPU reused every probe the OpenVINO plugin's GPU, listed first,
+// had made.  So the target is part of it, and for a plugin so is the library
+// -- its registration name and the file registered under it, which is what
+// onnx_plugin.cpp counts as one library.  A built-in provider is its name and
+// target alone.
+std::string epIdentity(const onnx_ep_info_t &ep)
+{
+  std::string id = ep.providerKey + '\x1f' + ep.epDevice;
+  if (!ep.library.empty())
+    id += '\x1f' + ep.library + '\x1f' + onnxEpLibraryPath(ep.library);
+  return id;
+}
+
+// The probe memos' key: the provider and the runtime, since what a provider
+// fuses or which widths it casts is that runtime's answer, not the provider
+// name's.  Handles are never unmapped, so the base pointer is a stable
+// identity.
+std::string probeKey(const OrtRuntime &rt, const onnx_ep_info_t &ep)
+{
+  return std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
+         epIdentity(ep);
+}
 
 double elapsedUs(std::chrono::steady_clock::time_point t0)
 {
@@ -334,17 +363,7 @@ const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt, const onnx_ep_inf
 {
   static std::unordered_map<std::string, OnnxProbeCache> memo;
   static std::mutex mtx;
-  // OpenVINO shares one providerKey across its NPU/GPU/CPU targets, which
-  // compile and fuse independently -- key by target too, or the GPU row
-  // would reuse the NPU probe.  And by runtime, like the other memos here:
-  // the GUI can point the backend at a different ONNX Runtime between runs,
-  // and what a provider fuses or which widths it casts is that runtime's
-  // answer, not the provider name's.  Handles are never unmapped, so the
-  // base pointer is a stable identity, and the same path picked again
-  // reuses its handle and so its probe.
-  const std::string memoKey =
-      std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
-      ep.providerKey + '\x1f' + ep.epDevice;
+  const std::string memoKey = probeKey(rt, ep);
   std::lock_guard<std::mutex> lk(mtx);
   auto it = memo.find(memoKey);
   if (it != memo.end())
@@ -402,9 +421,7 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
 {
   static std::unordered_map<std::string, StreamProbe> memo;
   static std::mutex mtx;
-  const std::string memoKey =
-      std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
-      ep.providerKey + '\x1f' + ep.epDevice;
+  const std::string memoKey = probeKey(rt, ep);
   {
     std::lock_guard<std::mutex> lk(mtx);
     auto it = memo.find(memoKey);
@@ -751,25 +768,22 @@ Rank4Store &rank4Store()
   static Rank4Store s;
   return s;
 }
-std::string rank4Key(const OrtRuntime &rt, const onnx_ep_info_t &ep)
-{
-  return std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
-         ep.providerKey + '\x1f' + ep.epDevice;
-}
 } // namespace
 
 void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
+  const std::string key = probeKey(rt, ep);
   Rank4Store &s = rank4Store();
   std::lock_guard<std::mutex> lk(s.mtx);
-  s.keys.insert(rank4Key(rt, ep));
+  s.keys.insert(key);
 }
 
 bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 {
+  const std::string key = probeKey(rt, ep);
   Rank4Store &s = rank4Store();
   std::lock_guard<std::mutex> lk(s.mtx);
-  return s.keys.count(rank4Key(rt, ep)) > 0;
+  return s.keys.count(key) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -778,10 +792,6 @@ bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep)
 
 namespace
 {
-std::string foldKey(const onnx_ep_info_t &ep)
-{
-  return ep.providerKey + '\x1f' + ep.epDevice;
-}
 struct FoldStore
 {
   std::mutex mtx;
@@ -796,16 +806,18 @@ FoldStore &foldStore()
 
 void onnxNoteGemmFolded(const onnx_ep_info_t &ep, const std::string &label)
 {
+  const std::string key = epIdentity(ep);
   FoldStore &s = foldStore();
   std::lock_guard<std::mutex> lk(s.mtx);
-  s.map[foldKey(ep)].insert(label);
+  s.map[key].insert(label);
 }
 
 bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label)
 {
+  const std::string key = epIdentity(ep);
   FoldStore &s = foldStore();
   std::lock_guard<std::mutex> lk(s.mtx);
-  auto it = s.map.find(foldKey(ep));
+  auto it = s.map.find(key);
   if (it == s.map.end())
     return false;
   return it->second.count(label) > 0;
@@ -813,9 +825,10 @@ bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label)
 
 void onnxClearGemmFolded(const onnx_ep_info_t &ep)
 {
+  const std::string key = epIdentity(ep);
   FoldStore &s = foldStore();
   std::lock_guard<std::mutex> lk(s.mtx);
-  s.map.erase(foldKey(ep));
+  s.map.erase(key);
 }
 
 // ---------------------------------------------------------------------------
@@ -830,9 +843,7 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // leaked on purpose, so the base pointer is a stable identity).
   static std::unordered_map<std::string, std::pair<bool, std::string>> memo;
   static std::mutex mtx;
-  const std::string memoKey =
-      std::to_string((uintptr_t)(const void *)rt.base) + '\x1f' +
-      ep.providerKey + '\x1f' + ep.epDevice;
+  const std::string memoKey = probeKey(rt, ep);
   {
     std::lock_guard<std::mutex> lk(mtx);
     auto it = memo.find(memoKey);

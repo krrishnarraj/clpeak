@@ -203,7 +203,10 @@ place:
   Each becomes one `onnx_ep_info_t` with `epDevicePtr` set, the hardware
   type from `HardwareDevice_Type` (NPU → Accelerator, GPU, CPU), the vendor
   and metadata the runtime reports, and `epDevice` a label ("NPU", "GPU#2")
-  that keys the probe memos exactly as OpenVINO's target does.  The
+  that keys the probe memos as OpenVINO's target does -- together with the
+  library (its name and path), because a plugin can serve the very device
+  a built-in provider of the same name does, and they are different builds
+  (`epIdentity()` in `onnx_probe.cpp`).  The
   display name is `kEpTable`'s when the provider is known *and* the device
   is the one the table means -- QNN's HTP row is "Hexagon NPU", its GPU
   backend is not -- else built from what the runtime said ("QNN (Qualcomm

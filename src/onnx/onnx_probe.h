@@ -55,9 +55,12 @@ using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
 
 // Probe every gemm variant once at 32^3 (tiny) and cache result.
 // The cache is keyed by variant label (e.g. "fp16", "int8_qdq").
-// Returned reference is cached per EP (providerKey plus OpenVINO target)
-// for the lifetime of the process - subsequent calls for same EP return
-// the same map without rebuilding.
+// Returned reference is cached per runtime and provider -- its name, its
+// target (OpenVINO's device_type, a plugin's device label) and, for a
+// plugin, the library it was registered from, since a plugin can serve the
+// device a built-in provider of the same name does -- for the lifetime of
+// the process; subsequent calls for the same provider return the same map
+// without rebuilding.
 const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt,
                                          const onnx_ep_info_t &ep);
 
@@ -74,7 +77,7 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt,
 // NPU, or NNAPI on a phone whose accelerator declines every graph -- so
 // listing and runAll() filter through this first instead of printing a
 // device that only ever reports Unsupported.  Creation only, no runs;
-// memoized per runtime and target.  `reason` carries the refusal when it
+// memoized per runtime and provider.  `reason` carries the refusal when it
 // answers false.
 bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   std::string &reason);
@@ -89,7 +92,7 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 // its conversion rate under a bandwidth heading (2 GB/s on a Threadripper
 // whose fp32 rows stream 38).  fp32 is not a candidate on a provider that
 // narrows it (onnxFp32Narrowed): there it wins every time by moving half the
-// bytes it is credited with.  Memoized per runtime and target.
+// bytes it is credited with.  Memoized per runtime and provider.
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // The bandwidth that probe measured in the width it chose, in bytes/second,
@@ -127,7 +130,7 @@ bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // view of it (OnnxReduceView)?  Learned by whichever test meets the refusal
 // first and kept for the provider, so the others build the view that works
 // instead of paying a refused compile to learn it again.  Memoized like the
-// probes: per runtime and target, for the life of the process.
+// probes: per runtime and provider, for the life of the process.
 void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
@@ -140,9 +143,9 @@ bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // cannot fold (its activations are a runtime input), so without this its
 // number would stand alone beside a rate that was refused as meaningless.
 // runGemm records each folded label here; runNumericError consults it.
-// Keyed by EP exactly like the probe cache above.  Cleared per EP in runAll
-// (and again at runGemm entry for direct callers) so a stale run cannot
-// suppress a later one.
+// Keyed by provider like the probe cache above, though not by runtime: it
+// only lives for a run.  Cleared per EP in runAll (and again at runGemm entry
+// for direct callers) so a stale run cannot suppress a later one.
 void onnxNoteGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
 bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
 void onnxClearGemmFolded(const onnx_ep_info_t &ep);
