@@ -28,8 +28,8 @@ typedef ClpeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
 typedef ClpeakRequestCancel = void Function();
-typedef _NoteNative = Void Function(Int32 level, Pointer<Utf8> message);
-typedef _Note = void Function(int level, Pointer<Utf8> message);
+typedef _SetOnScreenNative = Void Function(Int32 onScreen);
+typedef _SetOnScreen = void Function(int onScreen);
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _SetOnnxEpLibsNative = Void Function(Pointer<Utf8> spec);
@@ -57,7 +57,8 @@ class ClpeakBindings {
         requestCancel =
             lib.lookupFunction<_RequestCancelNative, ClpeakRequestCancel>(
                 'clpeak_request_cancel'),
-        _note = lib.lookupFunction<_NoteNative, _Note>('clpeak_note'),
+        _setOnScreen = lib.lookupFunction<_SetOnScreenNative, _SetOnScreen>(
+            'clpeak_set_on_screen'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
         _setOnnxEpLibraries =
@@ -84,7 +85,7 @@ class ClpeakBindings {
   final _FreeString _freeString;
   final ClpeakLaunch launch;
   final ClpeakRequestCancel requestCancel;
-  final _Note _note;
+  final _SetOnScreen _setOnScreen;
   final _SetOnnxLib _setOnnxLibrary;
   final _SetOnnxEpLibs _setOnnxEpLibraries;
   final _SetOnnxWinml _setOnnxWinml;
@@ -93,18 +94,10 @@ class ClpeakBindings {
   final _SetLitertStage _setLitertNpuStageDir;
   final _LitertStatusNative _litertStatus;
 
-  /// A line of the app's own on the in-flight run's log (clpeak_note):
-  /// the document's `log` and the sidecar, source "app".  A no-op outside
-  /// a run.  [level] is the native clpeak::LogLevel, which [LogLevel]'s
-  /// order mirrors.
-  void note(int level, String message) {
-    final ptr = message.toNativeUtf8();
-    try {
-      _note(level, ptr);
-    } finally {
-      malloc.free(ptr);
-    }
-  }
+  /// Whether the app is on screen (clpeak_set_on_screen): while it is not,
+  /// a run in this process waits at its next boundary between readings,
+  /// and each change during a run is recorded on its log.  Any time.
+  void setOnScreen(bool onScreen) => _setOnScreen(onScreen ? 1 : 0);
 
   /// clpeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();

@@ -385,31 +385,20 @@ class BenchmarkService extends ChangeNotifier {
     return AppExitResponse.exit;
   }
 
-  bool _offScreen = false;
-
-  /// App-lifecycle hook: a run's log says when the app left the screen and
-  /// when it came back.  On a phone the run is this process, and one that
-  /// is off screen is paused by Android and iOS and the first ended when
-  /// memory is wanted: a Galaxy S24's run stopped mid-test and its record
-  /// read "LOW_MEMORY (cached, rss 211 MB)" thirteen minutes later, which
-  /// looked like a crash.  These lines say what happened.  Desktop runs live
-  /// in the engine process, which nothing pauses.
+  /// App-lifecycle hook: the engine is told whether the app is on screen,
+  /// and a run in this process waits at its next boundary between readings
+  /// while it is not.  On a phone an app off screen runs on background cores
+  /// at background clocks until it is frozen: a Galaxy Z Fold8 froze clpeak
+  /// about 45 and 70 s after it left, once inside a test, and its CPU
+  /// backend, which started as the app came back, ran on four of eight
+  /// cores.  The run's log records each change.  Desktop runs live in the
+  /// engine process, which nothing pauses.
   void onLifecycleState(AppLifecycleState state) {
     if (!Platform.isAndroid && !Platform.isIOS) return;
-    final run = _run;
-    if (state == AppLifecycleState.hidden && !_offScreen) {
-      _offScreen = true;
-      if (isRunning && run != null) {
-        run.note(
-            LogLevel.warning,
-            'the app left the screen: the phone may pause it, and end it to '
-            'free memory, and the run with it');
-      }
-    } else if (state == AppLifecycleState.resumed && _offScreen) {
-      _offScreen = false;
-      if (isRunning && run != null) {
-        run.note(LogLevel.info, 'the app is back on screen');
-      }
+    if (state == AppLifecycleState.hidden) {
+      _engine.setOnScreen(false);
+    } else if (state == AppLifecycleState.resumed) {
+      _engine.setOnScreen(true);
     }
   }
 

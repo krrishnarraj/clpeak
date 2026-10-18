@@ -12,6 +12,7 @@ add_library(peak_common STATIC
     keep_awake.cpp
     run_document.cpp
     run_log.cpp
+    screen_hold.cpp
     thermal.cpp
     units.cpp
 )

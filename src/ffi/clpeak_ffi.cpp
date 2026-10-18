@@ -10,6 +10,7 @@
 #include <common/peak.h>
 #include <common/host_info.h>
 #include <common/keep_awake.h>
+#include <common/screen_hold.h>
 #include <common/thermal.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
@@ -248,10 +249,9 @@ void clpeak_request_cancel(void)
     clpeak::requestCancel();
 }
 
-void clpeak_note(int level, const char *message)
+void clpeak_set_on_screen(int on_screen)
 {
-    if (!message || level < 0 || level > (int)clpeak::LogLevel::Debug) return;
-    RunLog::hostNote((clpeak::LogLevel)level, "app", message);
+    clpeak::setHostOnScreen(on_screen != 0);
 }
 
 int clpeak_launch(int argc, const char **argv,

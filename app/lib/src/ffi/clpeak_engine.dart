@@ -61,6 +61,11 @@ abstract interface class ClpeakEngine {
 
   /// Start a run with CLI-grammar arguments, without a program name.
   EngineRun start(List<String> args);
+
+  /// Whether the app is on screen.  A run in this process waits while it is
+  /// not (include/common/screen_hold.h): a phone moves an app off screen to
+  /// background cores and clocks and then freezes it.
+  void setOnScreen(bool onScreen);
 }
 
 /// Everything in this process, over the clpeak_ffi C ABI.
@@ -108,6 +113,9 @@ class InProcessEngine implements ClpeakEngine {
 
   @override
   EngineRun start(List<String> args) => ClpeakRunner(_bindings).start(args);
+
+  @override
+  void setOnScreen(bool onScreen) => _bindings.setOnScreen(onScreen);
 }
 
 /// Everything in `clpeak-engine` processes.  The runtime setup is kept here
@@ -203,6 +211,11 @@ class ChildProcessEngine implements ClpeakEngine {
   @override
   EngineRun start(List<String> args) =>
       ChildRun(host, _arguments('launch', args));
+
+  /// Nothing to say: a desktop neither pauses nor ends an engine process
+  /// whose app's window is out of sight.
+  @override
+  void setOnScreen(bool onScreen) {}
 }
 
 /// A run in an engine process: its events arrive one JSON document per line
@@ -245,11 +258,6 @@ class ChildRun implements EngineRun {
     _cancelRequested = true;
     _send('cancel'); // before the process is up, it is sent once it is
   }
-
-  /// Dropped: the engine process is not the one a desktop pauses or ends
-  /// with the app's window, and its stdin carries only a cancel.
-  @override
-  void note(LogLevel level, String message) {}
 
   void _send(String line) {
     final process = _process;

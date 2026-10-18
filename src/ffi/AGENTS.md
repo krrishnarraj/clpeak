@@ -7,8 +7,8 @@ shared library / Apple framework.
 ## Quick Lookups
 
 - The C ABI? → `clpeak_ffi.h` (catalog JSON, blocking `clpeak_launch` with a
-  streaming event callback, `clpeak_request_cancel`, `clpeak_note` (the app's
-  own lines on the run's log), the runtime setters:
+  streaming event callback, `clpeak_request_cancel`, `clpeak_set_on_screen`
+  (a run waits while the app is off screen), the runtime setters:
   `clpeak_set_onnx_library` / `_ep_libraries` / `_winml`, `clpeak_set_litert_*`,
   each with a `clpeak_copy_*_status_json`). There is no saved-result
   loader: result files are JSON in the shape the GUI renders, so it reads them

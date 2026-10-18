@@ -1,6 +1,7 @@
 #include <common/logger.h>
 #include <common/run_log.h>
 #include <common/thermal.h>
+#include <common/screen_hold.h>
 #include <cassert>
 #include <iomanip>
 #include <sstream>
@@ -447,8 +448,10 @@ logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
                   "' was still open; closed it first (call end() on the "
                   "previous TestScope before starting a sibling test)");
     }
-    // A boundary between readings: a device too hot to measure cools first.
+    // A boundary between readings: a device too hot to measure cools first,
+    // and an app off screen waits to be back.
     clpeak::thermalGate();
+    clpeak::screenGate();
     return TestScope(log, spec);
 }
 
@@ -547,6 +550,7 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     e.metric   = log->record(std::move(m));
     log->dispatchEvent(e);
     clpeak::thermalGate();   // and so is a reading recorded
+    clpeak::screenGate();
 }
 
 void logger::TestScope::emit(std::string metric, float value,

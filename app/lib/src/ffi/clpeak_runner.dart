@@ -24,9 +24,6 @@ abstract interface class EngineRun {
 
   /// Request cooperative cancellation; the current test finishes first.
   void cancel();
-
-  /// Record a line of the app's own on the run's log (clpeak_note).
-  void note(LogLevel level, String message);
 }
 
 /// A single in-flight benchmark run in this process.
@@ -72,10 +69,6 @@ class ClpeakRun implements EngineRun {
 
   @override
   void cancel() => _bindings.requestCancel();
-
-  @override
-  void note(LogLevel level, String message) =>
-      _bindings.note(level.index, message);
 
   void _onNative(Pointer<Void> userData, Pointer<Utf8> eventJson) {
     final json = _bindings.takeString(eventJson);
