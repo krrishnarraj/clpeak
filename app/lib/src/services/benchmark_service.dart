@@ -530,12 +530,10 @@ class BenchmarkService extends ChangeNotifier {
       final logs = await _history.listCrashLogs(inFlightId: inFlightRunId);
       final newest = logs.isEmpty ? null : logs.first;
       if (newest != null && !(newest.resumeState?.dismissed ?? false)) {
-        DateTime? newer;
-        for (final r in await _history.list()) {
-          if (r.startedAt.isAfter(newest.startedAt)) newer = r.startedAt;
-        }
         final decided = decideResume(newest,
-            now: DateTime.now(), newerRunStarted: newer);
+            now: DateTime.now(),
+            newerRunStarted:
+                ResumeOffer.newerRunThan(newest, await _history.list()));
         if (decided.canContinue) offer = decided;
       }
     } catch (_) {

@@ -167,7 +167,9 @@ class RunHistoryStore {
       final stat = await f.stat();
       DateTime startedAt;
       if (doc.meta?.generatedAt.isNotEmpty ?? false) {
-        startedAt = DateTime.tryParse(doc.meta!.generatedAt) ?? stat.modified;
+        // Local, as the index's own are: the file says UTC.
+        startedAt = DateTime.tryParse(doc.meta!.generatedAt)?.toLocal() ??
+            stat.modified;
       } else {
         startedAt = stat.modified;
       }
@@ -719,7 +721,9 @@ class CrashLog {
     return CrashLog(
       id: id,
       fileName: p.basename(file.path),
-      startedAt: DateTime.tryParse(h['generated_at'] as String? ?? '') ??
+      // Local, as History's saved runs are: the header says UTC.
+      startedAt: DateTime.tryParse(h['generated_at'] as String? ?? '')
+              ?.toLocal() ??
           stat.modified,
       clpeakVersion: h['clpeak_version'] as String? ?? '',
       verbose: (h['invocation'] as Map<String, dynamic>?)?['verbose']

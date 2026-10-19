@@ -104,6 +104,19 @@ class ResumeOffer {
     return offer;
   }
 
+  /// The latest start of another run after [log]'s, for [decide]'s
+  /// `newerRunStarted`.  A cancelled run that was continued and died has a
+  /// result of its own in [runs], indexed a moment after its log's start,
+  /// and is not newer than itself.
+  static DateTime? newerRunThan(CrashLog log, Iterable<RunSummary> runs) {
+    DateTime? newer;
+    for (final r in runs) {
+      if (r.id == log.id || !r.startedAt.isAfter(log.startedAt)) continue;
+      if (newer == null || r.startedAt.isAfter(newer)) newer = r.startedAt;
+    }
+    return newer;
+  }
+
   /// A run that was cancelled: its result holds what it measured, and the
   /// checkpoint it kept, what it finished.
   static ResumeOffer decideCancelled(

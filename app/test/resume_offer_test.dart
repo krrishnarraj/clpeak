@@ -338,7 +338,22 @@ void main() {
       // The continuation's sidecar, beside the result its first part saved.
       final sidecar = File('${dir.path}/$_id.clpeak.log');
       await sidecar.writeAsString('${[_header(), ..._run()].join('\n')}\n');
-      expect((await store.listCrashLogs()).single.checkpoint?.tests, 1);
+      final log = (await store.listCrashLogs()).single;
+      expect(log.checkpoint?.tests, 1);
+      // Its own result, indexed a moment after the log's start, is not a
+      // newer run on the dashboard; another run's is.
+      RunSummary at(String id, Duration after) => RunSummary(
+          id: id,
+          startedAt: log.startedAt.add(after),
+          durationMs: 0,
+          devices: const [],
+          backends: const [],
+          cancelled: true,
+          fileName: '$id.clpeak.json');
+      final own = at(_id, const Duration(milliseconds: 560));
+      expect(ResumeOffer.newerRunThan(log, [own]), isNull);
+      final other = at('20261017_211306', const Duration(hours: 1));
+      expect(ResumeOffer.newerRunThan(log, [own, other]), other.startedAt);
       // Without the checkpoint, a saved run's sidecar is stale.
       await File('${dir.path}/$_id.clpeak.partial.json').delete();
       expect(await store.listCrashLogs(), isEmpty);
