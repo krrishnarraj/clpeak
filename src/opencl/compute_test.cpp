@@ -18,7 +18,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!isAllowed(which))
+  auto run = admit(which);
+  if (!run)
     return 0;
 
   // Vector width suffixes and display labels

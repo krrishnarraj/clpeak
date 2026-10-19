@@ -24,6 +24,10 @@ abstract interface class EngineRun {
 
   /// Request cooperative cancellation; the current test finishes first.
   void cancel();
+
+  /// Pause the run at its next boundary between readings, or let it go on
+  /// (clpeak_set_paused).
+  void setPaused(bool paused);
 }
 
 /// A single in-flight benchmark run in this process.
@@ -69,6 +73,9 @@ class ClpeakRun implements EngineRun {
 
   @override
   void cancel() => _bindings.requestCancel();
+
+  @override
+  void setPaused(bool paused) => _bindings.setPaused(paused);
 
   void _onNative(Pointer<Void> userData, Pointer<Utf8> eventJson) {
     final json = _bindings.takeString(eventJson);

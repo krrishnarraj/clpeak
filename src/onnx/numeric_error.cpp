@@ -756,7 +756,9 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // meaningless.  This test's non-resident graph cannot fold and would
     // still produce a number -- but a rate without its accuracy is half a
     // number, and so is an accuracy without its rate.  Suppress rather than
-    // publish one half of the pair alone.
+    // publish one half of the pair alone.  The record is this process's: a
+    // run resumed after gemm finished in the part before has none, and
+    // publishes the accuracy alone.
     if (onnxGemmFolded(ep, v.label))
     {
       CLPEAK_VLOG("onnx-numeric-error[%s/%s]: suppressed (gemm folded)\n",

@@ -102,11 +102,12 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 | `format_version` | `3`. A reader rejects any other value outright rather than half-parsing it |
 | `clpeak_version` | the git-describe of the build that produced the file |
 | `generated_at` | ISO-8601 UTC |
-| `duration_s` | wall-clock seconds for the whole run |
+| `duration_s` | seconds the run spent running, the time it was held or paused at a reading included; for a resumed run, its parts summed — the time between them is not the run's |
 | `cancelled` | present and `true` only for a run stopped part-way. **A cancelled run is a partial one** — without this flag every test it never reached would read as hardware that lacks the feature |
 | `build` | what the binary is made of: `backends` lists every backend compiled into it, in run order. The first question on a "backend X is missing" report is whether it was ever there. `config` is the CMake configuration it was built in (`Release`, `Debug`, ...) when the build stamped it: a debug build's host-side work runs unoptimised, and a slow run from one is not the device's fault |
 | `host` | the machine, not its owner: no hostname, username, serial or MAC |
 | `invocation` | how clpeak was asked to run. Every number is sensitive to it — a shorter `--max-time-gpu` measures a different thing, and a selective run is not a full one even though the file is the same shape |
+| `resumed` | present only for a run continued after its process ended part-way: one entry per part after the first (see *Resumed runs*) |
 | `devices` | one entry per benchmarked device |
 | `inventory` | `--verbose` only: what `--list-devices` would have shown (see *Inventory*) |
 | `log` | the diagnostic stream, in order (see *Log*). The warnings in it are usually the only record of *why* something is absent |
@@ -247,9 +248,9 @@ reproduces what the CLI printed.
 
 | key | meaning |
 |---|---|
-| `elapsed_s` | seconds since the run started (`generated_at`). Where the run stalled is visible from the gaps |
+| `elapsed_s` | seconds since the run started (`generated_at`) — across the gap of a resumed run too. Where the run stalled is visible from the gaps |
 | `level` | `error` \| `warning` \| `info` \| `debug` |
-| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `android` (how the OS says the process ended; sidecar only, see below). **Absent for clpeak's own messages** |
+| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for clpeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
 | `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
 
@@ -295,7 +296,8 @@ the case `--verbose` exists for — means it never is, and the sidecar is then
 the only record of the run; its last line is usually where. It is removed once
 the document has been saved, so one that outlives its run is the record of a
 run the process died in. The GUI adopts one it finds on its next launch and
-offers it for export.
+offers it for export, and beside its checkpoint (below) to continue the run.
+A resumed run goes on writing the same sidecar.
 
 Being that record, the sidecar is not the document's `log` line for line. It
 carries every reading as an `info` line with or without `--verbose`, since a
@@ -311,6 +313,60 @@ reasons, with the signal, whether the app was in the foreground and its
 memory at the time — followed, for a native crash, by the tombstone's
 signal, abort message, crashing thread's backtrace and the process's last
 log lines. Its `elapsed_s` is when the process ended.
+
+### The checkpoint
+
+With `-o`, a run also keeps what it has finished beside the output: the path
+with `.json` swapped for `.partial.json` (`run.clpeak.json` →
+`run.clpeak.partial.json`). It is this document as far as the run has got —
+the meta, and the devices with every Benchmark finished so far (one
+`--<test>` flag's worth of tests on a device) — without `log` or
+`inventory`, which the sidecar holds; on one line, with `"schema":
+"clpeak/run-partial"` and a `progress` object:
+
+```jsonc
+{"schema": "clpeak/run-partial", "format_version": 3, …, "progress": {
+  "backends_done": ["Vulkan", "OpenCL"],
+  "devices": [{"backend": "CPU", "device_index": 0, "benchmarks_done": ["single-precision-compute", …]}]},
+ "devices": [ … ]}
+```
+
+`backends_done` names the backends finished whole, and `devices` the devices
+of the one in flight: each `done`, or with the Benchmarks finished on it by
+their flag names. It is rewritten whole, through a rename, as each Benchmark,
+device and backend finishes, and removed with the sidecar once the document is
+saved, so one left behind is a run that did not finish — or one that was
+cancelled, which keeps it beside the document it saved. It is not a result —
+`--compare` refuses it — and `--resume` continues the run from it.
+
+## Resumed runs
+
+A run whose process ended part-way — a phone closed the app off screen, the
+user swiped it away, a driver crashed it — or that was cancelled can be
+continued: `clpeak --resume run.clpeak.json` (or `run.clpeak.partial.json`)
+runs, with the options the run started with, only what its checkpoint does
+not hold. The Benchmark the run was in when it stopped runs again
+from its start, or with `--skip-crashed`, for a crash that would repeat, is
+recorded in its place as an `error` reading `crashed` instead. Only the build
+that started a run continues it, on the OS release it started on.
+
+The parts end in one document under the same name. `generated_at` is the first
+part's start, `log[].elapsed_s` goes on counting from it across the gap, and
+`duration_s` is the time spent running, the parts summed. The `log` holds the
+parts in order, each later one starting with an `info` line `resumed the run
+started at …`. And `resumed` holds one entry per part after the first:
+
+| key | meaning |
+|---|---|
+| `at` | ISO-8601 UTC: when the part started |
+| `elapsed_s` | the same moment on the log's clock |
+| `after` | why the part before ended, when that is known: Android's record of the process's end, or `cancelled` |
+| `from` | the first test the part measured: `backend`, `device`, `device_index`, and `test`, the test's key |
+| `skipped` | `--skip-crashed` only: where the part before died, recorded and not run again |
+
+Tests are in run order, so everything from `from` on was measured in that
+part — at another time, and maybe at another temperature, than the tests
+before it.
 
 ## Inventory
 

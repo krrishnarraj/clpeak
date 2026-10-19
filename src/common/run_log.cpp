@@ -64,6 +64,11 @@ RunLog *RunLog::current()
 
 double RunLog::elapsedS() const
 {
+    return partElapsedS() + clockOffset.load(std::memory_order_relaxed);
+}
+
+double RunLog::partElapsedS() const
+{
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
         .count();
 }
@@ -79,22 +84,23 @@ std::string RunLog::sidecarPathFor(const std::string &outputFile)
     return outputFile + ".log";
 }
 
-void RunLog::openSidecar(const std::string &outputFile)
+void RunLog::openSidecar(const std::string &outputFile, bool append)
 {
     std::string failed;
     {
         std::lock_guard<std::mutex> lock(mutex);
         if (sidecar) return;
         sidecarPath = sidecarPathFor(outputFile);
+        const char *mode = append ? "ab" : "wb";
         errno = 0;
 #ifdef _WIN32
         // Not fopen_s: it opens the file unshared, so nothing can read the
         // sidecar while this run writes it -- which is when a hung run's
         // sidecar is read.  Readers in, other writers out.
         SetLastError(0);
-        sidecar = _fsopen(sidecarPath.c_str(), "wb", _SH_DENYWR);
+        sidecar = _fsopen(sidecarPath.c_str(), mode, _SH_DENYWR);
 #else
-        sidecar = std::fopen(sidecarPath.c_str(), "wb");
+        sidecar = std::fopen(sidecarPath.c_str(), mode);
 #endif
         if (!sidecar)
         {
@@ -117,9 +123,13 @@ void RunLog::openSidecar(const std::string &outputFile)
         }
         else
         {
-            sidecarWriteLocked(runLogHeaderJson(doc.meta));
-            for (const LogEntry &e : doc.log)
+            // Continued: the header and the part before are on disk already.
+            const std::size_t from = append ? priorEntries : 0;
+            if (!append)
+                sidecarWriteLocked(runLogHeaderJson(doc.meta));
+            for (std::size_t i = from; i < doc.log.size(); i++)
             {
+                const LogEntry &e = doc.log[i];
                 if (e.level == clpeak::LogLevel::Debug)
                     sidecarDebugBytes += e.message.size();
                 sidecarWriteLocked(logEntryToJson(e));
@@ -256,6 +266,25 @@ void RunLog::detach(logger *l)
 void RunLog::setFallbackRenderer(std::function<void(const LogEntry &)> render)
 {
     fallback = std::move(render);
+}
+
+void RunLog::seedPrior(std::vector<LogEntry> prior, double clockOffsetS)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    for (LogEntry &e : doc.log)
+        e.elapsedS += clockOffsetS;
+    clockOffset.store(clockOffsetS, std::memory_order_relaxed);
+    // The part before's Debug counts against both caps: the document keeps
+    // it, and the sidecar holds it already.
+    for (const LogEntry &e : prior)
+        if (e.level == clpeak::LogLevel::Debug)
+        {
+            documentDebugBytes += e.message.size();
+            sidecarDebugBytes  += e.message.size();
+        }
+    priorEntries = prior.size();
+    doc.log.insert(doc.log.begin(), std::make_move_iterator(prior.begin()),
+                   std::make_move_iterator(prior.end()));
 }
 
 void RunLog::finish()

@@ -13,7 +13,9 @@ import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
 import 'process_exit.dart';
+import 'resume_offer.dart';
 import 'run_history_store.dart';
+import 'run_notice.dart';
 import 'screen_wake.dart';
 
 enum BenchmarkState { idle, running, cancelling, finished }
@@ -92,6 +94,15 @@ class BenchmarkService extends ChangeNotifier {
   /// side's "thermal status ..." lines is the pause's warning, not the info
   /// line that ends it (src/common/thermal.cpp).
   bool coolingDown = false;
+
+  /// The run is paused (Pause in the live view): it holds at its next
+  /// boundary between readings until it is resumed (include/common/
+  /// screen_hold.h), wherever the app is meanwhile.
+  bool paused = false;
+
+  /// The paused run has reached that boundary and waits there; until then
+  /// the reading in flight finishes.
+  bool held = false;
   int completedTests = 0;
   int exitCode = 0;
   bool cancelled = false;
@@ -106,6 +117,27 @@ class BenchmarkService extends ChangeNotifier {
 
   DateTime? _startedAt;
   DateTime? get startedAt => _startedAt;
+
+  /// The in-flight (or just-finished) run continues one the app died in:
+  /// its meta as the checkpoint held it, or null for a run of its own.
+  RunMeta? _resumedFrom;
+  bool get wasResumed => _resumedFrom != null;
+
+  /// Devices the run's command line selects, for the paused notification's
+  /// "device 3 of 9"; 0 when unknown.
+  int _plannedDevices = 0;
+
+  /// The run's time as the native side saved it ([DoneEvent.durationS]).
+  double? _doneDurationS;
+
+  /// The app is hidden (Android and iOS): set from [onLifecycleState].
+  bool _offScreen = false;
+
+  /// The newest run the app died in, when it can be continued and the user
+  /// has not dismissed it: what the dashboard offers.  Refreshed after each
+  /// catalog load and each run.
+  ResumeOffer? _resumeOffer;
+  ResumeOffer? get resumeOffer => _resumeOffer;
 
   EngineRun? _run;
   String? _runId;
@@ -302,6 +334,9 @@ class BenchmarkService extends ChangeNotifier {
       _markReady();
       notifyListeners();
     }
+    // Whether a run the app died in can be continued depends on the
+    // devices it finds now.
+    unawaited(refreshResumeOffer());
   }
 
   void applyPreset(RunPreset preset) {
@@ -323,18 +358,82 @@ class BenchmarkService extends ChangeNotifier {
     if (preset != null) _config = RunConfig.preset(preset, _catalog);
     if (!_config.hasSelection || _config.categories.isEmpty) return;
 
-    _document = RunDocument();
+    // The first run is when to ask to post the paused notification: the
+    // one moment the request makes sense, with the app on screen.
+    await RunNotice.askOnce();
+    if (isRunning) return;
+
+    final id = _makeRunId(DateTime.now());
+    // What a continuation must find unchanged to be the same run, noted
+    // before anything can end the process.
+    await _history.writeResumeState(id,
+        catalog: ResumeOffer.fingerprint(_catalog),
+        os: Platform.operatingSystemVersion);
+    _resumedFrom = null;
+    await _launch(
+      id: id,
+      document: RunDocument(),
+      verbose: verbose,
+      plannedDevices: _config.selectedDevices.values
+          .fold(0, (n, devices) => n + devices.length),
+      args: (resultPath) => [
+        ..._config.toArgs(_catalog),
+        if (verbose) '--verbose',
+        '-o',
+        resultPath,
+      ],
+    );
+  }
+
+  /// Continue a run the app died in (`--resume`): what its checkpoint holds
+  /// shows at once, and the native side runs only the rest, with the run's
+  /// own options, into the same document.  Verbosity is the run's own too.
+  Future<void> resume(ResumeOffer offer) async {
+    if (isRunning || !catalogReady || !offer.canContinue) return;
+    final saved = await _history.loadCheckpoint(offer.id);
+    if (saved == null || isRunning) return;
+    final meta = saved.meta;
+    _resumedFrom = meta;
+    // A live run has no meta until it is over, a continued one included.
+    saved.meta = null;
+    await _launch(
+      id: offer.id,
+      document: saved,
+      verbose: meta?.verbose ?? false,
+      plannedDevices:
+          ResumeOffer.plannedDevices(meta?.argv ?? const [], _catalog),
+      args: (resultPath) => [
+        '--resume',
+        resultPath,
+        if (offer.skipCrashed) '--skip-crashed',
+      ],
+    );
+  }
+
+  Future<void> _launch({
+    required String id,
+    required RunDocument document,
+    required bool verbose,
+    required int plannedDevices,
+    required List<String> Function(String resultPath) args,
+  }) async {
+    _document = document;
     currentBackend = '';
     currentTest = '';
     runVerbose = verbose;
     coolingDown = false;
-    completedTests = 0;
+    paused = false;
+    held = false;
+    completedTests = document.testCount;
     exitCode = 0;
     cancelled = false;
     runFailure = null;
     runFailureLogKept = false;
+    _plannedDevices = plannedDevices;
+    _doneDurationS = null;
+    _resumeOffer = null;
     _startedAt = DateTime.now();
-    _runId = _makeRunId(_startedAt!);
+    _runId = id;
     _state = BenchmarkState.running;
     notifyListeners();
     _startLiveTicker();
@@ -343,23 +442,26 @@ class BenchmarkService extends ChangeNotifier {
     ScreenWake.acquire();
     // So that Android's record of this process's death names the run, if
     // the run is what it dies in (ProcessExit).
-    ProcessExit.markRun(_runId);
+    ProcessExit.markRun(id);
 
-    final resultPath = await _history.filePathFor(_runId!);
+    final resultPath = await _history.filePathFor(id);
     _resultPath = resultPath;
-    final args = [
-      ..._config.toArgs(_catalog),
-      if (verbose) '--verbose',
-      '-o',
-      resultPath,
-    ];
 
-    final run = _engine.start(args);
+    final run = _engine.start(args(resultPath));
     _run = run;
     run.events.listen(_onEvent, onDone: () async {
       exitCode = await run.result.catchError((_) => 1);
       cancelled = exitCode == clpeakRunCancelled;
       runFailure = run.failure;
+      if (runFailure == null && exitCode == clpeakRunBadArgs) {
+        // Refused before anything ran -- a continuation the native side
+        // will not resume says why on the log.
+        final why = _document.log.lastWhere(
+            (e) => e.level == LogLevel.error,
+            orElse: () => const LogEntry(
+                level: LogLevel.error, message: 'the run could not start'));
+        runFailure = why.message.replaceFirst(RegExp(r'^clpeak: '), '');
+      }
       if (runFailure != null) {
         // The sidecar the native side derives from -o (.json -> .log).
         final log = '${resultPath.substring(0, resultPath.length - 5)}.log';
@@ -372,8 +474,86 @@ class BenchmarkService extends ChangeNotifier {
   void cancel() {
     if (_state != BenchmarkState.running) return;
     _state = BenchmarkState.cancelling;
+    paused = false;
+    held = false;
     _run?.cancel();
+    RunNotice.clear();
     notifyListeners();
+  }
+
+  /// Pause the run, or let a paused one go on.  The reading in flight
+  /// finishes first: one cut in two would measure the pause.
+  void setPaused(bool pause) {
+    if (_state != BenchmarkState.running || paused == pause) return;
+    paused = pause;
+    held = false;
+    _run?.setPaused(pause);
+    notifyListeners();
+  }
+
+  /// Whether a run the app died in can be continued, as things are now;
+  /// History asks it for every such run, the dashboard -- with [now] and
+  /// [newerRunStarted], its narrower terms -- for the newest.
+  ResumeOffer decideResume(CrashLog log,
+          {DateTime? now, DateTime? newerRunStarted}) =>
+      ResumeOffer.decide(
+        log,
+        appVersion: version,
+        osVersion: Platform.operatingSystemVersion,
+        catalog: _catalogFingerprint,
+        now: now,
+        newerRunStarted: newerRunStarted,
+      );
+
+  /// Whether a cancelled run can be continued, as things are now.
+  ResumeOffer decideCancelled(RunSummary run,
+          {required RunCheckpointInfo? checkpoint,
+          required RunResumeState? state}) =>
+      ResumeOffer.decideCancelled(
+        run,
+        checkpoint: checkpoint,
+        state: state,
+        appVersion: version,
+        osVersion: Platform.operatingSystemVersion,
+        catalog: _catalogFingerprint,
+      );
+
+  String? get _catalogFingerprint => catalogReady && _catalogError == null
+      ? ResumeOffer.fingerprint(_catalog)
+      : null;
+
+  /// Find the newest run the app died in and whether to offer it.
+  Future<void> refreshResumeOffer() async {
+    if (isRunning) return;
+    ResumeOffer? offer;
+    try {
+      final logs = await _history.listCrashLogs(inFlightId: inFlightRunId);
+      final newest = logs.isEmpty ? null : logs.first;
+      if (newest != null && !(newest.resumeState?.dismissed ?? false)) {
+        DateTime? newer;
+        for (final r in await _history.list()) {
+          if (r.startedAt.isAfter(newest.startedAt)) newer = r.startedAt;
+        }
+        final decided = decideResume(newest,
+            now: DateTime.now(), newerRunStarted: newer);
+        if (decided.canContinue) offer = decided;
+      }
+    } catch (_) {
+      // An offer, never a reason for the dashboard to fail.
+    }
+    if (isRunning) return;
+    _resumeOffer = offer;
+    notifyListeners();
+  }
+
+  /// The dashboard's offer turned down: History keeps the run, with its
+  /// Continue while the run still allows one.
+  Future<void> dismissResumeOffer() async {
+    final offer = _resumeOffer;
+    if (offer == null) return;
+    _resumeOffer = null;
+    notifyListeners();
+    await _history.dismissResume(offer.id);
   }
 
   /// App-exit hook: cancel an in-flight run and wait for the native side to
@@ -397,9 +577,32 @@ class BenchmarkService extends ChangeNotifier {
     if (!Platform.isAndroid && !Platform.isIOS) return;
     if (state == AppLifecycleState.hidden) {
       _engine.setOnScreen(false);
+      _offScreen = true;
+      // Posted now, while the process still runs: the phone freezes it
+      // soon after (RunNotice).
+      if (_state == BenchmarkState.running) {
+        RunNotice.show(title: 'Run paused', body: _pausedText());
+      }
     } else if (state == AppLifecycleState.resumed) {
       _engine.setOnScreen(true);
+      _offScreen = false;
+      RunNotice.clear();
     }
+  }
+
+  /// "CPU · device 3 of 9 · 41 tests done. Tap to continue."  No test total:
+  /// a run decides which tests a device runs as it goes.  A run the person
+  /// paused stays paused once the app is back.
+  String _pausedText() {
+    final devices = _document.runs.length;
+    final parts = [
+      if (currentBackend.isNotEmpty) currentBackend,
+      if (devices > 0 && _plannedDevices >= devices)
+        'device $devices of $_plannedDevices',
+      '$completedTests ${completedTests == 1 ? 'test' : 'tests'} done',
+    ];
+    final tap = paused ? 'Tap to go back to it.' : 'Tap to continue.';
+    return '${parts.join(' · ')}. $tap';
   }
 
   /// Back to the dashboard after viewing a finished run.
@@ -455,8 +658,15 @@ class BenchmarkService extends ChangeNotifier {
             entry.message.startsWith('thermal status ')) {
           coolingDown = entry.level == LogLevel.warning;
         }
-      case DoneEvent():
-        break; // handled via onDone/result
+        // The paused run's own line once it waits (src/common/
+        // screen_hold.cpp).
+        if (paused &&
+            entry.source.isEmpty &&
+            entry.message == 'held until the run is resumed') {
+          held = true;
+        }
+      case DoneEvent(:final durationS):
+        _doneDurationS = durationS; // the rest via onDone/result
       case DeviceEndEvent():
       case BackendEndEvent():
         break;
@@ -467,18 +677,42 @@ class BenchmarkService extends ChangeNotifier {
   Future<void> _finalize() async {
     _stopLiveTicker(); // back to immediate notifications
     ScreenWake.release();
+    paused = false;
+    held = false;
     ProcessExit.markRun(null);
     final startedAt = _startedAt ?? DateTime.now();
     // Indexed only once written: a run whose engine died has no document,
     // just the sidecar History lists on its own.
     final saved = _resultPath != null && await File(_resultPath!).exists();
+    // A run whose last test was in flight as the app left ends off screen:
+    // where its paused notice was, say so.
+    if (_offScreen && saved) {
+      RunNotice.show(
+          title: 'Run finished',
+          body: '$completedTests tests. Tap to see the results.');
+    } else {
+      RunNotice.clear();
+    }
     if (!_document.isEmpty && saved) {
+      // A continued run is the run it continues: listed from when that
+      // started, for the time all its parts ran.
+      final prior = _resumedFrom;
+      final firstStart = prior == null
+          ? startedAt
+          : (DateTime.tryParse(prior.generatedAt)?.toLocal() ?? startedAt);
+      final priorMs =
+          prior == null ? 0 : (prior.durationSeconds * 1000).round();
+      final done = _doneDurationS;
       final summary = RunSummary.fromDocument(
         id: _runId!,
         fileName: RunHistoryStore.fileNameFor(_runId!),
         doc: _document,
-        startedAt: startedAt,
-        durationMs: DateTime.now().difference(startedAt).inMilliseconds,
+        startedAt: firstStart,
+        // What the document says; the checkpoint's own time stops at its
+        // last write, short of where the part before ended.
+        durationMs: done != null
+            ? (done * 1000).round()
+            : priorMs + DateTime.now().difference(startedAt).inMilliseconds,
         cancelled: cancelled,
       );
       // Index first: listeners (History) re-read the store as soon as
@@ -486,9 +720,14 @@ class BenchmarkService extends ChangeNotifier {
       await _history.add(summary);
       _lastSummary = summary;
     }
+    // A cancelled run keeps its note with its checkpoint, to be continued.
+    if (saved && !cancelled && _runId != null) {
+      await _history.clearResumeState(_runId!);
+    }
     _run = null;
     _state = BenchmarkState.finished;
     notifyListeners();
+    unawaited(refreshResumeOffer());
   }
 
   static String _makeRunId(DateTime t) {

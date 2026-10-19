@@ -257,9 +257,52 @@ struct Invocation {
     bool verbose = false;
 };
 
+// Where in a run something happened: a test on a device, named as the log
+// names it.
+struct RunPlace {
+    std::string backend;
+    std::string device;
+    int         deviceIndex = -1;
+    std::string test;               // the test's key, id@variant
+
+    bool empty() const { return backend.empty(); }
+};
+
+// One part of a run after its first.  The process a run was in ended
+// part-way -- a phone closed the app, the process crashed -- and the run was
+// continued from its checkpoint (--resume, include/common/run_resume.h) into
+// the same document, so its devices were measured in more than one sitting.
+struct ResumeRecord {
+    std::string at;                 // ISO-8601 UTC: when this part started
+    double      elapsedS = 0.0;     // the same moment on the log's clock
+    std::string after;              // why the part before ended, when known
+    RunPlace    from;               // the first test this part measured
+    RunPlace    skipped;            // --skip-crashed: where the part before died, not run again
+};
+
+// What a run has finished, kept in its checkpoint so that another process can
+// continue it: the backends finished whole, and per device either the whole
+// device or the Benchmarks finished on it, by their flag names.
+struct RunProgress {
+    struct Device {
+        std::string backend;        // as the document names it: "CPU"
+        int         deviceIndex = -1;
+        bool        done = false;   // every Benchmark that was going to run on it did
+        std::vector<std::string> benchmarks;   // "single-precision-compute", ...
+    };
+    std::vector<std::string> backendsDone;
+    std::vector<Device>      devices;
+
+    Device &device(const std::string &backend, int deviceIndex);
+    bool    backendDone(const std::string &backend) const;
+};
+
 struct RunMeta {
     std::string clpeakVersion;
     std::string generatedAt;        // ISO-8601 UTC, "2026-08-29T14:03:11Z"
+
+    // Seconds spent running.  For a resumed run, the parts summed: the time
+    // between them is not the run's.
     double      durationS = 0.0;
 
     // A cancelled run is a partial one.  Without this flag a file written
@@ -270,6 +313,9 @@ struct RunMeta {
     BuildInfo  build;
     HostInfo   host;
     Invocation invocation;
+
+    // Each part after the first, in order; empty for a run done in one go.
+    std::vector<ResumeRecord> resumed;
 };
 
 struct RunDocument {
@@ -320,6 +366,9 @@ BaselineMap buildBaselineMap(const RunDocument &doc);
 // fills rather than being written twice.
 std::string isoTimestampUtc();
 
+// The same form back to seconds since the epoch; false when it is not one.
+bool parseIsoTimestampUtc(const std::string &iso, long long &secondsSinceEpoch);
+
 // ---- Serialization --------------------------------------------------------
 
 // One log entry as a single-line JSON object -- the form the document's
@@ -332,6 +381,10 @@ std::string logEntryToJson(const LogEntry &entry);
 // belonged to without the document that was never written.
 std::string runLogHeaderJson(const RunMeta &meta);
 
+// One line of the sidecar back as an entry; false for a line that is not one
+// (the header, a line a crash cut short).
+bool logEntryFromJson(const std::string &line, LogEntry &out);
+
 // Write the document as JSON.  Returns false (after a stderr message) when
 // the file cannot be opened or the stream fails while writing.
 bool saveRunJson(const RunDocument &doc, const std::string &filename);
@@ -340,7 +393,18 @@ bool saveRunJson(const RunDocument &doc, const std::string &filename);
 std::string runDocumentToJson(const RunDocument &doc);
 
 // Read a document back.  Returns false (after a stderr message) for a missing
-// file, malformed JSON, or a format_version this build does not write.
+// file, malformed JSON, a format_version this build does not write, or a
+// run's checkpoint, which is not a result.
 bool loadRunJson(const std::string &filename, RunDocument &out);
+
+// A run's checkpoint (include/common/run_checkpoint.h): the document so far
+// -- meta and devices, no log or inventory -- with schema
+// "clpeak/run-partial" and its `progress`, on one line.
+std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress);
+
+// Read one back.  false with `error` set for a missing file, malformed JSON,
+// or a schema or format_version this build does not write.
+bool loadPartialJson(const std::string &filename, RunDocument &out,
+                     RunProgress &progress, std::string &error);
 
 #endif  // CLPEAK_RUN_DOCUMENT_H

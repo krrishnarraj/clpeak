@@ -24,6 +24,10 @@
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
         tools:node="remove" />
+    <!-- The "run paused" notification a run posts when the app leaves the
+         screen mid-run (lib/src/services/run_notice.dart): a runtime
+         permission from Android 13, asked once, at the first run. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="clpeak"
         android:name="${applicationName}"

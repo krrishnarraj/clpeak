@@ -314,7 +314,7 @@ int CpuPeak::runAll()
   // pool exists.  Android starts moving the app back to its foreground cpuset
   // as it resumes the activity, before the app has its window's focus, which
   // is when Flutter reports `resumed` and the app says it is on screen.
-  clpeak::screenGate();
+  clpeak::holdGate();
   detectCpuInfo(info);
   if (!pool)
   {
@@ -407,44 +407,44 @@ int CpuPeak::runAll()
     cfg.kernelLatencyIters = specifiedIters;
 
   // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ----
-  if (isAllowed(Benchmark::ComputeSP))   runComputeSP(cfg);
-  if (isAllowed(Benchmark::ComputeHP))   runComputeHP(cfg);
-  if (isAllowed(Benchmark::ComputeDP))   runComputeDP(cfg);
-  if (isAllowed(Benchmark::ComputeMP))   runComputeMP(cfg);
-  if (isAllowed(Benchmark::ComputeBF16)) runComputeBF16(cfg);
-  if (isAllowed(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
-  if (isAllowed(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
-  if (isAllowed(Benchmark::ComputeInt))     runComputeInt32(cfg);
-  if (isAllowed(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
-  if (isAllowed(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
-  if (isAllowed(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
-  if (isAllowed(Benchmark::MatrixCompute)) runCpuMatrix(cfg);
+  if (auto run = admit(Benchmark::ComputeSP))   runComputeSP(cfg);
+  if (auto run = admit(Benchmark::ComputeHP))   runComputeHP(cfg);
+  if (auto run = admit(Benchmark::ComputeDP))   runComputeDP(cfg);
+  if (auto run = admit(Benchmark::ComputeMP))   runComputeMP(cfg);
+  if (auto run = admit(Benchmark::ComputeBF16)) runComputeBF16(cfg);
+  if (auto run = admit(Benchmark::ComputeFP8DP)) runComputeFP8DP(cfg);
+  if (auto run = admit(Benchmark::ComputeDivSqrt)) runComputeDivSqrt(cfg);
+  if (auto run = admit(Benchmark::ComputeInt))     runComputeInt32(cfg);
+  if (auto run = admit(Benchmark::ComputeInt8DP))  runComputeInt8DP(cfg);
+  if (auto run = admit(Benchmark::ComputeInt16DP)) runComputeInt16DP(cfg);
+  if (auto run = admit(Benchmark::ComputeIntDiv))  runComputeIntDiv(cfg);
+  if (auto run = admit(Benchmark::MatrixCompute)) runCpuMatrix(cfg);
 #ifdef __APPLE__
-  if (isAllowed(Benchmark::Gemm))          runAppleBlas(cfg);
+  if (auto run = admit(Benchmark::Gemm))          runAppleBlas(cfg);
 #endif
-  if (isAllowed(Benchmark::SmtScaling)) runSmtScaling(cfg);
+  if (auto run = admit(Benchmark::SmtScaling)) runSmtScaling(cfg);
 
   // ---- Crypto (dedicated AES/SHA/CRC silicon; GB/s) ----
-  if (isAllowed(Benchmark::CryptoAes))    runCryptoAes(cfg);
-  if (isAllowed(Benchmark::CryptoSha256)) runCryptoSha256(cfg);
-  if (isAllowed(Benchmark::CryptoSha512)) runCryptoSha512(cfg);
-  if (isAllowed(Benchmark::CryptoCrc32c)) runCryptoCrc32c(cfg);
+  if (auto run = admit(Benchmark::CryptoAes))    runCryptoAes(cfg);
+  if (auto run = admit(Benchmark::CryptoSha256)) runCryptoSha256(cfg);
+  if (auto run = admit(Benchmark::CryptoSha512)) runCryptoSha512(cfg);
+  if (auto run = admit(Benchmark::CryptoCrc32c)) runCryptoCrc32c(cfg);
 
   // ---- String (SIMD text processing; GB/s over L1-resident buffers) ----
-  if (isAllowed(Benchmark::StringScan))   runStringScan(cfg);
-  if (isAllowed(Benchmark::Utf8Validate)) runUtf8Validate(cfg);
+  if (auto run = admit(Benchmark::StringScan))   runStringScan(cfg);
+  if (auto run = admit(Benchmark::Utf8Validate)) runUtf8Validate(cfg);
 
   // ---- Bandwidth ----
   // No TransferBW: on a CPU there is no host<->device bus, so a libc memcpy
   // measures the same DRAM path as the STREAM copy above (redundant).
-  if (isAllowed(Benchmark::GlobalBW))       runDramBandwidth(cfg);
-  if (isAllowed(Benchmark::CacheBandwidth)) runCacheBandwidth(cfg);
+  if (auto run = admit(Benchmark::GlobalBW))       runDramBandwidth(cfg);
+  if (auto run = admit(Benchmark::CacheBandwidth)) runCacheBandwidth(cfg);
 
   // ---- Latency ----
-  if (isAllowed(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
-  if (isAllowed(Benchmark::Atomics))       runAtomics(cfg);
-  if (isAllowed(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
-  if (isAllowed(Benchmark::StoreForward))  runStoreForward(cfg);
+  if (auto run = admit(Benchmark::MemoryLatency)) runMemoryLatency(cfg);
+  if (auto run = admit(Benchmark::Atomics))       runAtomics(cfg);
+  if (auto run = admit(Benchmark::BranchPenalty)) runBranchPenalty(cfg);
+  if (auto run = admit(Benchmark::StoreForward))  runStoreForward(cfg);
 
   currentDeviceScope = nullptr;
   return 0;

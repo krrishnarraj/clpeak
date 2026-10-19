@@ -1,11 +1,13 @@
 #ifndef CLPEAK_RUN_LOG_H
 #define CLPEAK_RUN_LOG_H
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <functional>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <common/common.h>
 #include <common/run_document.h>
@@ -72,16 +74,23 @@ public:
     static void hostNote(clpeak::LogLevel level, const std::string &source,
                          const std::string &message);
 
-    // Seconds since this RunLog was created -- the run's t=0, which is also
-    // what `generated_at` names.
+    // Seconds on the run's clock: since `generated_at`, which is this
+    // RunLog's creation -- or for a resumed run the first part's start, so
+    // the clock goes on across the gap (seedPrior).
     double elapsedS() const;
+
+    // Seconds since this RunLog was created: the part of the run this
+    // process is running.
+    double partElapsedS() const;
 
     // ---- Sidecar ---------------------------------------------------------
 
     // Start mirroring entries to the sidecar of `outputFile`.  Entries
     // already recorded are written first, so nothing recorded before the
-    // output path was known is missing from it.
-    void openSidecar(const std::string &outputFile);
+    // output path was known is missing from it.  With `append` -- a resumed
+    // run whose sidecar holds the part before -- the file is continued
+    // instead: no header, and only the entries recorded since seedPrior().
+    void openSidecar(const std::string &outputFile, bool append = false);
 
     // Stop mirroring; remove the file when the document it stood in for has
     // been saved.
@@ -120,6 +129,14 @@ public:
     // the document is saved.
     void finish();
 
+    // ---- A resumed run (run_resume.h) --------------------------------------
+
+    // Put the part before's entries ahead of everything recorded so far, and
+    // set the clock to `clockOffsetS` past `generated_at`, entries already
+    // recorded included.  `prior` is what the document keeps; its sidecar
+    // already holds the whole of that part.
+    void seedPrior(std::vector<LogEntry> prior, double clockOffsetS);
+
     // Debug message text each keeps before it starts dropping Debug.
     static constexpr std::size_t kMaxDocumentDebugBytes = 64u << 20;
     static constexpr std::size_t kMaxSidecarDebugBytes  = 128u << 20;
@@ -130,6 +147,8 @@ private:
 
     RunDocument &doc;
     std::chrono::steady_clock::time_point start;
+    // Read from vendor threads by elapsedS(), set once by seedPrior().
+    std::atomic<double> clockOffset{0.0};
     std::mutex   mutex;
     logger      *active = nullptr;
     std::function<void(const LogEntry &)> fallback;
@@ -142,6 +161,7 @@ private:
     std::size_t  sidecarDebugBytes  = 0;
     std::size_t  sidecarDropped     = 0;
     bool         finished           = false;   // finish() has run (hostNote)
+    std::size_t  priorEntries       = 0;       // doc.log's first, on disk already
 };
 
 #endif  // CLPEAK_RUN_LOG_H

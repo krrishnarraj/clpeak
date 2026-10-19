@@ -624,11 +624,14 @@ int LitertPeak::runAll()
       auto phase = [&](Benchmark b, int (LitertPeak::*fn)(const LitertRuntime &,
                                                           const litert_device_info_t &,
                                                           benchmark_config_t &)) {
-        if (deviceLost || clpeak::cancelRequested() || !isAllowed(b))
+        if (deviceLost || clpeak::cancelRequested())
           return;
-        (this->*fn)(*rt, dev, cfg);
-        if (devMute.sawWatched())
-          deviceLost = true;
+        if (auto run = admit(b))
+        {
+          (this->*fn)(*rt, dev, cfg);
+          if (devMute.sawWatched())
+            deviceLost = true;
+        }
       };
 
       // ---- Compute (FLOPS + OPS) -------------------------------------------

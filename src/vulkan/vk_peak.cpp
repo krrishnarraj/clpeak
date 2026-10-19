@@ -561,37 +561,37 @@ int vkPeak::runAll()
     currentDeviceScope = &deviceScope;
 
     // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
-    if (isAllowed(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeSP))       runComputeSP(dev, cfg);
 #ifdef VK_HAS_COMPUTE_HP_V1
-    if (isAllowed(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeHP))       runComputeHP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V1
-    if (isAllowed(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeDP))       runComputeDP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V1
-    if (isAllowed(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeMP))       runComputeMP(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V1
-    if (isAllowed(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeBF16))     runComputeBF16(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_INT32_V1
-    if (isAllowed(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeInt))        runComputeInt32(dev, cfg);
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V1
-    if (isAllowed(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
+    if (auto run = admit(Benchmark::ComputeInt8DP))     runComputeInt8DP(dev, cfg);
 #endif
 #ifdef VK_HAS_ANY_COOPMAT
-    if (isAllowed(Benchmark::MatrixCompute))
+    if (auto run = admit(Benchmark::MatrixCompute))
         runCoopMatrix(dev, cfg);
 #endif
     // ---- Phase 3: bandwidth (GBPS) ---------------------------------
-    if (isAllowed(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
+    if (auto run = admit(Benchmark::GlobalBW))        runGlobalBandwidth(dev, cfg);
+    if (auto run = admit(Benchmark::LocalBW))         runLocalBandwidth(dev, cfg);
+    if (auto run = admit(Benchmark::ImageBW))         runImageBandwidth(dev, cfg);
+    if (auto run = admit(Benchmark::TransferBW))      runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
+    if (auto run = admit(Benchmark::KernelLatency))   runKernelLatency(dev, cfg);
 
     currentDeviceScope = nullptr;
     // deviceScope auto-closes here

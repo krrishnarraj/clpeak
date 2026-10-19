@@ -206,6 +206,36 @@ static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 static_assert(numTestFlags == static_cast<int>(Benchmark::COUNT),
               "every Benchmark needs exactly one flag");
 
+const char *benchmarkFlag(Benchmark b)
+{
+  for (int t = 0; t < numTestFlags; t++)
+    if (testFlags[t].test == b)
+      return testFlags[t].name;
+  return "";
+}
+
+bool benchmarkFromFlag(const std::string &flag, Benchmark &out)
+{
+  for (int t = 0; t < numTestFlags; t++)
+    if (flag == testFlags[t].name)
+    {
+      out = testFlags[t].test;
+      return true;
+    }
+  return false;
+}
+
+bool backendFromName(const std::string &name, Backend &out)
+{
+  for (int i = 0; i < numBackends; i++)
+    if (name == backendTable[i].info.name)
+    {
+      out = backendTable[i].info.id;
+      return true;
+    }
+  return false;
+}
+
 // ---- Help ---------------------------------------------------------------------
 
 // One help entry: the flag, padded to the description column, then the
@@ -263,6 +293,13 @@ static std::string helpText()
   helpLine(s, "--describe", "explain what each test and each reading measures");
   helpLine(s, "--list-devices", "list available devices for every backend and exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
+  helpLine(s, "--resume file", "continue a run that was saved to this file and ended\n"
+                               "part-way or was cancelled: only what it had not\n"
+                               "finished runs, with the options it started with, into\n"
+                               "the same file.  Its checkpoint, the name with\n"
+                               ".partial.json for .json, names the run too");
+  helpLine(s, "--skip-crashed", "with --resume, for a run that crashed: record the test\n"
+                                "it died in instead of running it again");
   helpLine(s, "--compare file", "compare results against a saved run");
   helpLine(s, "--onnx-lib path", "the ONNX Runtime library to load; decides which\n"
                                  "providers exist before anything below adds more\n"
@@ -486,6 +523,9 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   bool forcedBackends = false;
   bool forcedTests = false;
   bool forcedCategories = false;
+  // Options other than --resume and --skip-crashed, which --resume refuses:
+  // a continued run is the run it continues, and its options are that run's.
+  const char *otherOption = nullptr;
 
   for (int i = 1; i < argc; i++)
   {
@@ -496,6 +536,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       return ParseResult::Help;
     if (!strcmp(a, "-v") || !strcmp(a, "--version"))
       return ParseResult::Version;
+    if (!strcmp(a, "--resume"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.resumeFile = v;
+      continue;
+    }
+    if (!strcmp(a, "--skip-crashed"))
+    {
+      out.skipCrashed = true;
+      continue;
+    }
+    if (!otherOption)
+      otherOption = a;
     if (!strcmp(a, "--verbose"))
     {
       out.verbose = true;
@@ -686,6 +741,19 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     }
 
     err = std::string("clpeak: unknown option '") + a + "'\n";
+    return ParseResult::Error;
+  }
+
+  if (!out.resumeFile.empty() && otherOption)
+  {
+    err = std::string("clpeak: --resume continues a run with the options it started with, "
+                      "so it takes none but --skip-crashed; got '") +
+          otherOption + "'\n";
+    return ParseResult::Error;
+  }
+  if (out.skipCrashed && out.resumeFile.empty())
+  {
+    err = "clpeak: --skip-crashed goes with --resume\n";
     return ParseResult::Error;
   }
 

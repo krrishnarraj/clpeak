@@ -434,7 +434,7 @@ point's row instead of settling the variant.
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `CMakeLists.txt`, a call in
-  `runAll()` gated on a `Benchmark` value, and a row in Key Files.  Reuse an
+  `runAll()` gated by `admit()` on a `Benchmark` value, and a row in Key Files.  Reuse an
   existing value when the measurement already has a name on another backend
   (`include/common/benchmark_enums.h`); a new one needs a flag row in
   `src/common/options.cpp` -- named for what it measures, never for Core ML.

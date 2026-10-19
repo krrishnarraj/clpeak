@@ -5,6 +5,7 @@
 #include <common/backend_registry.h>
 #include <common/common.h>
 #include <common/inventory.h>
+#include <common/json_writer.h>
 #include <common/coreml_cache.h>
 #include <common/options.h>
 #include <common/peak.h>
@@ -12,8 +13,10 @@
 #include <common/keep_awake.h>
 #include <common/screen_hold.h>
 #include <common/thermal.h>
+#include <common/run_checkpoint.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
+#include <common/run_resume.h>
 #include <common/console_mute.h>
 #include <version.h>
 
@@ -57,11 +60,15 @@ void emitLogEntry(ClpeakEventCallback cb, void *userData, const LogEntry &entry)
     ffiEmitJson(cb, userData, ffiEventToJson(e));
 }
 
-void emitDone(ClpeakEventCallback cb, void *userData, int status, bool cancelled)
+// `durationS` is the saved document's `duration_s`, negative when there is
+// none: for a resumed run only the native side knows the parts' time.
+void emitDone(ClpeakEventCallback cb, void *userData, int status, bool cancelled,
+              double durationS = -1.0)
 {
     std::string json = "{\"t\":\"done\",\"status\":" + std::to_string(status) +
-                       ",\"cancelled\":" + (cancelled ? "true" : "false") + "}";
-    ffiEmitJson(cb, userData, json);
+                       ",\"cancelled\":" + (cancelled ? "true" : "false");
+    if (durationS >= 0.0) json += ",\"duration_s\":" + JsonWriter::fmtNum(durationS);
+    ffiEmitJson(cb, userData, json + "}");
 }
 
 // One launch at a time — the run loop and the cancel flag are process-global.
@@ -254,21 +261,29 @@ void clpeak_set_on_screen(int on_screen)
     clpeak::setHostOnScreen(on_screen != 0);
 }
 
+void clpeak_set_paused(int paused)
+{
+    clpeak::setRunPaused(paused != 0);
+}
+
 int clpeak_launch(int argc, const char **argv,
                   ClpeakEventCallback on_event, void *user_data)
 {
-    return clpeakLaunch(argc, argv, on_event, user_data, /*resetCancel=*/true);
+    return clpeakLaunch(argc, argv, on_event, user_data, /*resetControls=*/true);
 }
 
 int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
-                 void *user_data, bool resetCancel)
+                 void *user_data, bool resetControls)
 {
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true))
         return CLPEAK_RUN_BUSY;  // no done event: the in-flight run owns the stream
 
-    if (resetCancel)
+    if (resetControls)
+    {
         clpeak::resetCancel();
+        clpeak::setRunPaused(false);
+    }
 
     std::vector<char *> mutableArgv;
     mutableArgv.reserve(static_cast<size_t>(argc));
@@ -279,8 +294,9 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     // so a rejected argv is on it too.  Entries a backend's logger records
     // reach the GUI through that logger; the rest through this fallback, as
     // the same `log` event.
-    RunDocument combined;
-    RunLog      runLog(combined);
+    RunDocument   combined;
+    RunLog        runLog(combined);
+    RunCheckpoint checkpoint(combined);
     runLog.setFallbackRenderer([&](const LogEntry &e) {
         emitLogEntry(on_event, user_data, e);
     });
@@ -293,6 +309,25 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         emitDone(on_event, user_data, CLPEAK_RUN_BAD_ARGS, false);
         g_running.store(false);
         return CLPEAK_RUN_BAD_ARGS;
+    }
+
+    // --resume: the interrupted run's own options, from its checkpoint, less
+    // what it finished (include/common/run_resume.h).
+    ResumePlan resume;
+    const bool resuming = !opts.resumeFile.empty();
+    if (resuming)
+    {
+        CliOptions resumed;
+        std::string error;
+        if (!loadResumePlan(opts.resumeFile, resume, error) ||
+            !resumeOptions(resume, opts, resumed, error))
+        {
+            clpeak::logMessage(clpeak::LogLevel::Error, "", error);
+            emitDone(on_event, user_data, CLPEAK_RUN_BAD_ARGS, false);
+            g_running.store(false);
+            return CLPEAK_RUN_BAD_ARGS;
+        }
+        opts = std::move(resumed);
     }
 
     clpeak::setVerbose(opts.verbose);
@@ -318,20 +353,33 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         litertSetNpuDirOverride(opts.litertNpuDir);
 #endif
 
-    combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
-    combined.meta.generatedAt   = isoTimestampUtc();
-    for (const auto &be : backendRegistry())
-        combined.meta.build.backends.push_back(backendInfo(be.id).name);
+    if (resuming)
+    {
+        // The parts before: their meta, devices, log and progress.
+        seedResume(resume, opts, combined, runLog, checkpoint);
+    }
+    else
+    {
+        combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
+        combined.meta.generatedAt   = isoTimestampUtc();
+        for (const auto &be : backendRegistry())
+            combined.meta.build.backends.push_back(backendInfo(be.id).name);
 #ifdef CLPEAK_BUILD_CONFIG
-    combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+        combined.meta.build.config = CLPEAK_BUILD_CONFIG;
 #endif
-    combined.meta.host          = probeHost();
-    combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
+        combined.meta.host          = probeHost();
+        combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
+    }
     // The sidecar: every entry on disk as it happens, for the native crash
     // the document never gets written after.  The app adopts one left behind
-    // on its next launch (app/lib/src/services/run_history_store.dart).
+    // on its next launch (app/lib/src/services/run_history_store.dart).  And
+    // the checkpoint of what finished, which a run left behind continues
+    // from (include/common/run_checkpoint.h).
     if (opts.enableOutput)
-        runLog.openSidecar(opts.outputFile);
+    {
+        runLog.openSidecar(opts.outputFile, /*append=*/resuming && resume.sidecarFound);
+        checkpoint.open(opts.outputFile);
+    }
     int status = 0;
 
     for (Backend b : opts.requestedButNotBuilt())
@@ -364,6 +412,9 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     {
         if (!opts.backendEnabled(be.id) || clpeak::cancelRequested())
             continue;
+        // Finished by the part of the run this one resumes.
+        if (opts.resume.backendsDone.test(static_cast<size_t>(be.id)))
+            continue;
 
         auto peak = be.create();
         // --verbose with -o: the base logger mirrors the metric rows onto the
@@ -384,7 +435,9 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     bool cancelled = clpeak::cancelRequested();
 
     combined.meta.cancelled = cancelled;
-    combined.meta.durationS = runLog.elapsedS();
+    combined.meta.durationS = checkpoint.runningS();
+    if (resuming)
+        combined.meta.resumed.push_back(checkpoint.partRecord(combined));
     runLog.finish();
 
     // Centralized file dump, exactly like the CLI — also runs after a
@@ -397,13 +450,16 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     {
         const bool saved = saveRunJson(combined, opts.outputFile);
         runLog.closeSidecar(/*remove=*/saved);
+        // A cancelled run keeps its checkpoint, so it can still be continued
+        // (--resume): what it saved is its result until then.
+        checkpoint.close(/*remove=*/saved && !cancelled);
         if (!saved)
             status |= 1;
     }
 
     int result = cancelled ? CLPEAK_RUN_CANCELLED : status;
 
-    emitDone(on_event, user_data, result, cancelled);
+    emitDone(on_event, user_data, result, cancelled, combined.meta.durationS);
     g_running.store(false);
     return result;
 }

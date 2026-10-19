@@ -4,11 +4,13 @@ import 'package:provider/provider.dart';
 import '../../model/catalog.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
+import '../../services/resume_offer.dart';
 import '../../services/settings_service.dart';
 import '../../theme/clpeak_theme.dart';
 import '../app.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
+import '../results/results_screen.dart';
 import '../run_config/run_config_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -28,6 +30,10 @@ class DashboardScreen extends StatelessWidget {
           children: [
             _Masthead(version: service.version),
             const SizedBox(height: 26),
+            if (service.resumeOffer case final offer?) ...[
+              _ResumePanel(service: service, offer: offer),
+              const SizedBox(height: 26),
+            ],
             if (!service.catalogReady)
               // Static text, no animation: the frame budget belongs to the
               // benchmarks, and enumeration finishes in seconds anyway.
@@ -147,6 +153,75 @@ class _RunLauncher extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The newest run the app died in, while it can be continued: what
+/// happened, what it saved, and Continue -- which runs only what is left,
+/// into the same result (`--resume`).
+class _ResumePanel extends StatelessWidget {
+  const _ResumePanel({required this.service, required this.offer});
+
+  final BenchmarkService service;
+  final ResumeOffer offer;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final saved = offer.testsSaved;
+    final detail = [
+      saved == 0
+          ? 'Nothing had finished yet; Continue starts it again under the same name.'
+          : '$saved ${saved == 1 ? 'test is' : 'tests are'} saved. Continue runs '
+              'only what is left and keeps both parts as one result.',
+      if (offer.skipCrashed)
+        'The test it stopped in is not run again, since it would most likely '
+            'stop it again.',
+    ].join(' ');
+
+    return CPanel(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: t.text, width: 2)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('RUN DID NOT FINISH', style: t.micro),
+            const SizedBox(height: 6),
+            Text(offer.headline, style: t.body),
+            const SizedBox(height: 6),
+            Text(detail, style: t.monoSmallDim),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                CButton(
+                  label: 'Continue',
+                  icon: Icons.play_arrow,
+                  kind: CButtonKind.primary,
+                  onPressed: () => service.resume(offer),
+                ),
+                if (saved > 0)
+                  CButton(
+                    label: "View what's saved",
+                    icon: Icons.visibility_outlined,
+                    onPressed: () => openCheckpoint(context,
+                        id: offer.id, startedAt: offer.startedAt),
+                  ),
+                CButton(
+                  label: 'Dismiss',
+                  kind: CButtonKind.quiet,
+                  onPressed: service.dismissResumeOffer,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

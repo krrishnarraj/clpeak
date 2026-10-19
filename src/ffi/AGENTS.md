@@ -8,7 +8,8 @@ shared library / Apple framework.
 
 - The C ABI? → `clpeak_ffi.h` (catalog JSON, blocking `clpeak_launch` with a
   streaming event callback, `clpeak_request_cancel`, `clpeak_set_on_screen`
-  (a run waits while the app is off screen), the runtime setters:
+  (a run waits while the app is off screen), `clpeak_set_paused` (and while
+  it is paused), the runtime setters:
   `clpeak_set_onnx_library` / `_ep_libraries` / `_winml`, `clpeak_set_litert_*`,
   each with a `clpeak_copy_*_status_json`). There is no saved-result
   loader: result files are JSON in the shape the GUI renders, so it reads them
@@ -33,7 +34,10 @@ shared library / Apple framework.
   centralized `-o` save — which also stamps `cancelled` so a partial run does
   not read as a complete one). The `RunLog` is created before argv is parsed,
   so a rejected argument is a `log` event like any other diagnostic; with `-o`
-  it streams the `<output>.log` sidecar the app adopts after a native crash
+  it streams the `<output>.log` sidecar the app adopts after a native crash,
+  and keeps the `<output>.partial.json` checkpoint `--resume` continues from
+  (`include/common/run_resume.h`, the same calls as the CLI) -- beside the
+  saved document too when the run was cancelled
 - Diagnostics (`log` events, `--verbose`)? → `clpeak_ffi.h` documents the
   event; the entry is the document's `LogEntry` verbatim. Vendor-relayed
   entries (ONNX Runtime's logger, a Vulkan messenger, a console capture) can
@@ -63,8 +67,8 @@ shared library / Apple framework.
 |------|---------|
 | `clpeak_ffi.h` | `extern "C"` surface + event schema + `CLPEAK_RUN_*` codes |
 | `clpeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory |
-| `launch.h` | `clpeakLaunch()`: `clpeak_launch()` with a choice of whether to clear a pending cancel (the engine does not) |
-| `engine.cpp` | `clpeak_engine_main`: the desktop engine process's catalog / launch modes, events one JSON line per stdout line, cancel on stdin |
+| `launch.h` | `clpeakLaunch()`: `clpeak_launch()` with a choice of whether to clear a pending cancel and pause (the engine does not) |
+| `engine.cpp` | `clpeak_engine_main`: the desktop engine process's catalog / launch modes, events one JSON line per stdout line, cancel, pause and resume on stdin |
 | `engine_host.cpp` | `clpeak-engine` executable: dlopens the library path the app passes and calls `clpeak_engine_main`; beside the runner in every desktop bundle |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |
 | `CMakeLists.txt` | `clpeak_ffi` SHARED target + `clpeak-gui` bundle-assembly target + GUI install/package rules |

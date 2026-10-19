@@ -480,9 +480,10 @@ int OnnxPeak::runAll()
     auto phase = [&](Benchmark b, int (OnnxPeak::*fn)(const OrtRuntime &,
                                                       const onnx_ep_info_t &,
                                                       benchmark_config_t &)) {
-      if (!isAllowed(b) || clpeak::cancelRequested() || deviceLost())
+      if (clpeak::cancelRequested() || deviceLost())
         return;
-      (this->*fn)(*rt, ep, cfg);
+      if (auto run = admit(b))
+        (this->*fn)(*rt, ep, cfg);
     };
 
     // ---- Compute (FLOPS + OPS) ---------------------------

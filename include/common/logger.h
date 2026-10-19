@@ -234,6 +234,24 @@ public:
   /// CLPEAK_LOG / CLPEAK_VLOG, which arrive here through the RunLog.
   void log(clpeak::LogLevel level, std::string message, std::string source = "");
 
+  /// The device open in this logger: its index as its backend numbers it --
+  /// the one --devices and a run's checkpoint name it by -- or -1, and its
+  /// name.
+  int openDeviceIndex() const { return contextDepth >= 2 ? curDeviceIndex : -1; }
+  const std::string &openDeviceName() const { return curDevice; }
+
+  /// A test that is recorded, not measured: one reading with `status` and
+  /// `reason`, on the open device -- where a resumed run's part before died
+  /// (Peak::admit).  A test still open is closed first.  False, recording
+  /// nothing, with no device open.
+  bool recordUnmeasured(const TestSpec &spec, const std::string &metric,
+                        ResultStatus status, const std::string &reason);
+
+  /// Whether a log entry is a reading's transcript line ("      float :
+  /// 3.79 TFLOPS"), which a run without --verbose keeps on its sidecar and
+  /// off its document.
+  static bool isReadingLine(const LogEntry &e);
+
   // ── Baseline compare ────────────────────────────────────────────────────
 
   bool        compareEnabled;

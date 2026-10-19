@@ -31,6 +31,26 @@ struct DeviceSelector {
   int     index   = 0;
 };
 
+// The flag a Benchmark is selected by ("single-precision-compute" for
+// --single-precision-compute), and back: the name a run's checkpoint records
+// a finished Benchmark under.
+const char *benchmarkFlag(Benchmark b);
+bool        benchmarkFromFlag(const std::string &flag, Benchmark &out);
+
+// A backend by the name the document records it under ("OpenCL").
+bool backendFromName(const std::string &name, Backend &out);
+
+// What the part of a run before this one finished, read from the run's
+// checkpoint by --resume (include/common/run_resume.h), so that this part
+// runs only the rest: backends finished whole, devices finished whole, and on
+// the other devices the Benchmarks finished.  Empty on a run of its own.
+struct ResumeSkip {
+  std::bitset<static_cast<size_t>(Backend::COUNT)> backendsDone;
+  std::vector<DeviceSelector> devicesDone;
+  std::vector<std::pair<DeviceSelector, std::bitset<static_cast<size_t>(Benchmark::COUNT)>>>
+      benchmarksDone;
+};
+
 // Shared CLI options populated once by parseCliOptions and consumed by every
 // backend.  Peak::applyOptions copies the relevant fields into the backend
 // so the rest of its code can stay backend-flavored.
@@ -115,6 +135,17 @@ struct CliOptions {
   // (the descriptions authored at the beginTest()/emit() call sites).  Off by
   // default: the plain output is a table for people who already know it.
   bool describe = false;
+
+  // --resume FILE: continue the run whose -o file FILE was, after the
+  // process it ran in ended part-way, with the options it started with --
+  // read back from its checkpoint, so the parser takes no other option
+  // beside it but --skip-crashed (include/common/run_resume.h).
+  std::string resumeFile;
+  // --skip-crashed: that process crashed, so the Benchmark it died in is
+  // recorded as where it died instead of run again.
+  bool skipCrashed = false;
+  // Filled from the checkpoint by --resume, never from the command line.
+  ResumeSkip resume;
 
   CliOptions()
   {

@@ -81,21 +81,21 @@ int MetalPeak::runAll()
         currentDeviceScope = &deviceScope;
 
         // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
-        if (isAllowed(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
-        if (isAllowed(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
-        if (isAllowed(Benchmark::MatrixCompute))     runSimdgroupMatrix(dev, cfg);
-        if (isAllowed(Benchmark::Gemm))              runMpsGemm(dev, cfg);
-        if (isAllowed(Benchmark::Attention))         runMpsAttention(dev, cfg);
+        if (auto run = admit(Benchmark::ComputeSP))         runComputeSP(dev, cfg);
+        if (auto run = admit(Benchmark::ComputeHP))         runComputeHP(dev, cfg);
+        if (auto run = admit(Benchmark::ComputeMP))         runComputeMP(dev, cfg);
+        if (auto run = admit(Benchmark::MatrixCompute))     runSimdgroupMatrix(dev, cfg);
+        if (auto run = admit(Benchmark::Gemm))              runMpsGemm(dev, cfg);
+        if (auto run = admit(Benchmark::Attention))         runMpsAttention(dev, cfg);
 
         // ---- Phase 2: bandwidth (GBPS) -----------------------------------
-        if (isAllowed(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
-        if (isAllowed(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
-        if (isAllowed(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
-        if (isAllowed(Benchmark::TextureSample))     runTextureSampleRate(dev, cfg);
+        if (auto run = admit(Benchmark::GlobalBW))          runGlobalBandwidth(dev, cfg);
+        if (auto run = admit(Benchmark::LocalBW))           runLocalBandwidth(dev, cfg);
+        if (auto run = admit(Benchmark::ImageBW))           runImageBandwidth(dev, cfg);
+        if (auto run = admit(Benchmark::TextureSample))     runTextureSampleRate(dev, cfg);
 
         // ---- Phase 4: latency (us) ---------------------------------------
-        if (isAllowed(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
+        if (auto run = admit(Benchmark::KernelLatency))     runKernelLatency(dev, cfg);
 
         currentDeviceScope = nullptr;
     }

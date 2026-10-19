@@ -16,6 +16,15 @@ import 'process_exit.dart';
 ///                       removed once the document is written.  One that
 ///                       outlives its run is the record of a run the
 ///                       process died in — see [listCrashLogs]
+///   `<id>.clpeak.partial.json`
+///                       the run's checkpoint, rewritten by the native side
+///                       as each benchmark finishes and removed with the
+///                       log: what such a run finished, which `--resume`
+///                       continues (include/common/run_checkpoint.h)
+///   `<id>.clpeak.resume.json`
+///                       the app's own note on a run in flight: the device
+///                       catalog it started on, and whether its Continue
+///                       offer was dismissed ([RunResumeState])
 ///   index.json          {"runs":[RunSummary...]} for a fast history list
 ///
 /// Orphan documents (present on disk but missing from the index, e.g. after
@@ -45,8 +54,17 @@ class RunHistoryStore {
   /// (RunLog::sidecarPathFor in include/common/run_log.h).
   static const logSuffix = '.clpeak.log';
 
+  /// The checkpoint the native side derives from `-o`: `.json` ->
+  /// `.partial.json` (RunCheckpoint::pathFor in
+  /// include/common/run_checkpoint.h).
+  static const partialSuffix = '.clpeak.partial.json';
+
+  static const resumeSuffix = '.clpeak.resume.json';
+
   static String fileNameFor(String id) => '$id$fileSuffix';
   static String logFileNameFor(String id) => '$id$logSuffix';
+  static String partialFileNameFor(String id) => '$id$partialSuffix';
+  static String resumeFileNameFor(String id) => '$id$resumeSuffix';
 
   Future<Directory> runsDirectory() async {
     if (_dir != null) return _dir!;
@@ -192,6 +210,11 @@ class RunHistoryStore {
     final dir = await runsDirectory();
     final file = File(p.join(dir.path, summary.fileName));
     if (await file.exists()) await file.delete();
+    // A cancelled run's checkpoint and note go with it.
+    await _deleteQuietly([
+      File(p.join(dir.path, partialFileNameFor(summary.id))),
+      File(p.join(dir.path, resumeFileNameFor(summary.id))),
+    ]);
     final runs = await _readIndex(dir)
       ..removeWhere((r) => r.id == summary.id);
     await _writeIndex(dir, runs);
@@ -202,7 +225,10 @@ class RunHistoryStore {
   /// Sidecars left behind by runs whose document was never written — the
   /// process was killed or crashed natively mid-run — newest first.  A
   /// sidecar whose document does exist is stale (the run finished, the
-  /// removal did not) and is cleaned up here instead of listed.
+  /// removal did not) and is cleaned up here instead of listed -- unless the
+  /// run's checkpoint is there too: a cancelled run keeps its checkpoint, and
+  /// one continued that died in turn left its sidecar beside the result its
+  /// first part saved.
   ///
   /// [inFlightId] is the run currently executing, whose sidecar is live and
   /// not a crash.
@@ -215,17 +241,36 @@ class RunHistoryStore {
       final name = p.basename(f.path);
       final id = name.substring(0, name.length - logSuffix.length);
       if (id == inFlightId) continue;
-      if (await File(p.join(dir.path, fileNameFor(id))).exists()) {
-        try {
-          await f.delete();
-        } catch (_) {}
+      if (await _finished(dir, id)) {
+        await _deleteQuietly([
+          f,
+          File(p.join(dir.path, resumeFileNameFor(id))),
+        ]);
         continue;
       }
-      final log = await CrashLog.read(f, id: id);
+      final log = await CrashLog.read(
+        f,
+        id: id,
+        checkpoint: File(p.join(dir.path, partialFileNameFor(id))),
+        resumeState: File(p.join(dir.path, resumeFileNameFor(id))),
+      );
       if (log != null) out.add(log);
     }
     out.sort((a, b) => b.startedAt.compareTo(a.startedAt));
     return out;
+  }
+
+  /// The run's result is saved and nothing of it is left to continue.
+  static Future<bool> _finished(Directory dir, String id) async =>
+      await File(p.join(dir.path, fileNameFor(id))).exists() &&
+      !await File(p.join(dir.path, partialFileNameFor(id))).exists();
+
+  static Future<void> _deleteQuietly(List<File> files) async {
+    for (final f in files) {
+      try {
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
   }
 
   /// Android's record of how the process ended (ProcessExit), appended
@@ -243,8 +288,7 @@ class RunHistoryStore {
       if (exit.runId.isEmpty || p.basename(exit.runId) != exit.runId) continue;
       final log = File(p.join(dir.path, logFileNameFor(exit.runId)));
       try {
-        if (!await log.exists() ||
-            await File(p.join(dir.path, fileNameFor(exit.runId))).exists()) {
+        if (!await log.exists() || await _finished(dir, exit.runId)) {
           continue;
         }
         final raf = await log.open(mode: FileMode.append);
@@ -253,9 +297,6 @@ class RunHistoryStore {
           final head = await _readAt(raf, 0, 64 << 10);
           final tail = await _readAt(
               raf, size > _exitTail ? size - _exitTail : 0, _exitTail);
-          // Records stay with Android across launches; one already appended
-          // is in the tail, since nothing writes after it.
-          if (tail.contains(_exitMarker)) continue;
           DateTime? started;
           final nl = head.indexOf('\n');
           if (nl > 0) {
@@ -274,6 +315,11 @@ class RunHistoryStore {
             'source': 'android',
             'message': exit.message,
           });
+          // Records stay with Android across launches, and one run's log
+          // can hold more than one: a run that was resumed and died again.
+          // The same record makes the same line, which is already there
+          // somewhere when it was appended before.
+          if (await _hasLine(log, entry)) continue;
           // A crash can cut the last line short; the entry starts its own.
           final prefix = tail.isEmpty || tail.endsWith('\n') ? '' : '\n';
           await raf.setPosition(size);
@@ -288,14 +334,24 @@ class RunHistoryStore {
     }
   }
 
-  // An appended exit entry is bounded (ProcessExitRecord.message keeps
-  // tens of KB) and is the file's last line, so it is always in this much.
-  static const _exitTail = 256 << 10;
-  static const _exitMarker = '"source":"android"';
+  // Enough of the file's end to see whether its last line is whole.
+  static const _exitTail = 4 << 10;
 
   static Future<String> _readAt(RandomAccessFile raf, int at, int max) async {
     await raf.setPosition(at);
     return utf8.decode(await raf.read(max), allowMalformed: true);
+  }
+
+  // Whether a sidecar holds `line` whole; streamed, since a verbose run's
+  // log can be tens of MB.
+  static Future<bool> _hasLine(File f, String line) async {
+    await for (final l in f
+        .openRead()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .transform(const LineSplitter())) {
+      if (l == line) return true;
+    }
+    return false;
   }
 
   Future<File> crashLogFile(CrashLog log) async {
@@ -303,9 +359,82 @@ class RunHistoryStore {
     return File(p.join(dir.path, log.fileName));
   }
 
+  /// Everything of the run: a cancelled run continued that died in turn
+  /// has its first part's result too.
   Future<void> deleteCrashLog(CrashLog log) async {
-    final file = await crashLogFile(log);
-    if (await file.exists()) await file.delete();
+    final dir = await runsDirectory();
+    await _deleteQuietly([
+      File(p.join(dir.path, log.fileName)),
+      File(p.join(dir.path, partialFileNameFor(log.id))),
+      File(p.join(dir.path, resumeFileNameFor(log.id))),
+      File(p.join(dir.path, fileNameFor(log.id))),
+    ]);
+    final runs = await _readIndex(dir);
+    if (runs.any((r) => r.id == log.id)) {
+      await _writeIndex(dir, runs..removeWhere((r) => r.id == log.id));
+    }
+  }
+
+  /// What a run that did not finish had finished, for viewing and for the
+  /// live view of its continuation: its checkpoint as a document, or null.
+  Future<RunDocument?> loadCheckpoint(String id) async {
+    final dir = await runsDirectory();
+    try {
+      final f = File(p.join(dir.path, partialFileNameFor(id)));
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if (doc['schema'] != 'clpeak/run-partial' ||
+          (doc['format_version'] as num?)?.toInt() != formatVersion) {
+        return null;
+      }
+      return RunDocument.fromJson(doc);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Note the device catalog and OS release a run starts on, beside its
+  /// files ([RunResumeState]).
+  Future<void> writeResumeState(String id,
+      {required String catalog, required String os}) async {
+    final dir = await runsDirectory();
+    try {
+      await File(p.join(dir.path, resumeFileNameFor(id))).writeAsString(
+          jsonEncode(RunResumeState(catalog: catalog, os: os).toJson()));
+    } catch (_) {}
+  }
+
+  /// What a cancelled run kept to be continued: its checkpoint, or null.
+  Future<RunCheckpointInfo?> checkpointInfo(String id) async {
+    final dir = await runsDirectory();
+    return RunCheckpointInfo.read(
+        File(p.join(dir.path, partialFileNameFor(id))));
+  }
+
+  /// The note the app left beside a run when it started it, or null.
+  Future<RunResumeState?> resumeState(String id) async {
+    final dir = await runsDirectory();
+    return RunResumeState.read(File(p.join(dir.path, resumeFileNameFor(id))));
+  }
+
+  /// The user turned down continuing this run: History keeps it, the
+  /// dashboard stops offering it.
+  Future<void> dismissResume(String id) async {
+    final dir = await runsDirectory();
+    final file = File(p.join(dir.path, resumeFileNameFor(id)));
+    final state = await RunResumeState.read(file) ?? const RunResumeState();
+    try {
+      await file.writeAsString(
+          jsonEncode(RunResumeState(
+                  catalog: state.catalog, os: state.os, dismissed: true)
+              .toJson()));
+    } catch (_) {}
+  }
+
+  /// A run's note once its document is written and it has nothing left to
+  /// continue.
+  Future<void> clearResumeState(String id) async {
+    final dir = await runsDirectory();
+    await _deleteQuietly([File(p.join(dir.path, resumeFileNameFor(id)))]);
   }
 
   /// Load a saved run for viewing.
@@ -401,6 +530,10 @@ class RunHistoryStore {
       throw FormatException(
           'Unsupported format version ${json['format_version']} – expected $formatVersion');
     }
+    if (json['schema'] == 'clpeak/run-partial') {
+      throw const FormatException(
+          'This is the checkpoint of a run that did not finish, not a result');
+    }
     final doc = RunDocument.fromJson(json);
     final dir = await runsDirectory();
     var targetName = p.basename(fileName);
@@ -438,9 +571,10 @@ class RunHistoryStore {
 }
 
 /// A run the process died in.  Its document was never written; the run-log
-/// sidecar the native side streamed as it went is the only record, and the
+/// sidecar the native side streamed as it went is the record of it, and the
 /// thing to attach to a bug report.  Read from the sidecar's header line
-/// (the run's identity) and the entries after it.
+/// (the run's identity) and the entries after it, with the run's checkpoint
+/// beside it when there is one -- what it finished, which Continue resumes.
 class CrashLog {
   const CrashLog({
     required this.id,
@@ -452,6 +586,13 @@ class CrashLog {
     required this.backends,
     required this.lastEntry,
     this.processExit,
+    this.hostOs = '',
+    this.hostOsVersion = '',
+    this.lastTestTitle = '',
+    this.lastTestBackend = '',
+    this.diedOffScreen = false,
+    this.checkpoint,
+    this.resumeState,
   });
 
   final String id;
@@ -472,18 +613,43 @@ class CrashLog {
 
   /// How Android says the process ended (`source: "android"`, appended on
   /// a later launch by RunHistoryStore) — what the run's own lines cannot
-  /// say.  Not counted in [entries], and never the [lastEntry].
+  /// say.  Not counted in [entries], and never the [lastEntry].  For a run
+  /// that was resumed, only the latest part's.
   final LogEntry? processExit;
+
+  /// The OS the run started on, from the sidecar's header.
+  final String hostOs;
+  final String hostOsVersion;
+
+  /// The test the run was in when it stopped, as the log titled it when it
+  /// opened ("Memory latency (pointer-chase)"), and its backend.
+  final String lastTestTitle;
+  final String lastTestBackend;
+
+  /// The app had left the screen, and not come back, when the run stopped:
+  /// the phone, or the user, ended it there.  False when it stopped on
+  /// screen -- a crash -- and where no app said (the desktop, the CLI).
+  final bool diedOffScreen;
+
+  /// What it finished, when it left a checkpoint.
+  final RunCheckpointInfo? checkpoint;
+
+  /// What the app noted when it started the run.
+  final RunResumeState? resumeState;
 
   /// Parse a sidecar, or null when it is not one (no header line, or a
   /// header from a format this build does not read).  Streamed: a verbose
   /// run's sidecar can be tens of MB.
-  static Future<CrashLog?> read(File file, {required String id}) async {
+  static Future<CrashLog?> read(File file,
+      {required String id, File? checkpoint, File? resumeState}) async {
     Map<String, dynamic>? header;
     final backends = <String>[];
     LogEntry? last;
     LogEntry? exit;
     var count = 0;
+    var testTitle = '';
+    var testBackend = '';
+    var offScreen = false;
     try {
       await for (final line in file
           .openRead()
@@ -514,6 +680,31 @@ class CrashLog {
           if (entry.backend.isNotEmpty && !backends.contains(entry.backend)) {
             backends.add(entry.backend);
           }
+          if (entry.source == 'app') {
+            // Its other lines -- a pause -- say nothing of where it was.
+            if (entry.message.startsWith('the app left the screen')) {
+              offScreen = true;
+            } else if (entry.message.startsWith('the app is back on screen')) {
+              offScreen = false;
+            }
+          } else if (entry.source.isEmpty) {
+            // A part resumed after the one before died starts on screen,
+            // and what ended the part before is not this part's.
+            if (entry.message.startsWith('resumed the run')) {
+              offScreen = false;
+              exit = null;
+            }
+            // The line a test opens with: "    Title [variant]".
+            final m = entry.message;
+            if (entry.test.isNotEmpty &&
+                entry.level == LogLevel.info &&
+                m.length > 4 &&
+                m.startsWith('    ') &&
+                m[4] != ' ') {
+              testTitle = m.trim();
+              testBackend = entry.backend;
+            }
+          }
         } catch (_) {
           // A line cut short by the crash itself.
         }
@@ -524,6 +715,7 @@ class CrashLog {
     final h = header;
     if (h == null) return null;
     final stat = await file.stat();
+    final host = h['host'] as Map<String, dynamic>? ?? const {};
     return CrashLog(
       id: id,
       fileName: p.basename(file.path),
@@ -537,7 +729,105 @@ class CrashLog {
       backends: backends,
       lastEntry: last,
       processExit: exit,
+      hostOs: host['os'] as String? ?? '',
+      hostOsVersion: host['os_version'] as String? ?? '',
+      lastTestTitle: testTitle,
+      lastTestBackend: testBackend,
+      diedOffScreen: offScreen,
+      checkpoint:
+          checkpoint == null ? null : await RunCheckpointInfo.read(checkpoint),
+      resumeState:
+          resumeState == null ? null : await RunResumeState.read(resumeState),
     );
+  }
+}
+
+/// The checkpoint of a run that did not finish (include/common/
+/// run_checkpoint.h), as far as History needs it: how much it holds, and
+/// what it was run by.
+class RunCheckpointInfo {
+  const RunCheckpointInfo({
+    required this.writtenAt,
+    required this.tests,
+    required this.clpeakVersion,
+    required this.hostOs,
+    required this.hostOsVersion,
+    required this.argv,
+  });
+
+  /// When the run last finished something -- about when it stopped.
+  final DateTime writtenAt;
+
+  /// Tests it holds, over every device.
+  final int tests;
+  final String clpeakVersion;
+  final String hostOs;
+  final String hostOsVersion;
+
+  /// The command line the run started with, which a continuation keeps.
+  final List<String> argv;
+
+  static Future<RunCheckpointInfo?> read(File f) async {
+    try {
+      if (!await f.exists()) return null;
+      final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      if (doc['schema'] != 'clpeak/run-partial' ||
+          (doc['format_version'] as num?)?.toInt() != formatVersion) {
+        return null;
+      }
+      final meta = RunMeta.fromJson(doc);
+      var tests = 0;
+      for (final d in (doc['devices'] as List? ?? const [])) {
+        tests += ((d as Map<String, dynamic>)['tests'] as List? ?? const [])
+            .length;
+      }
+      return RunCheckpointInfo(
+        writtenAt: (await f.stat()).modified,
+        tests: tests,
+        clpeakVersion: meta.clpeakVersion,
+        hostOs: meta.host['os']?.toString() ?? '',
+        hostOsVersion: meta.host['os_version']?.toString() ?? '',
+        argv: meta.argv,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+/// What the app notes beside a run when it starts one: the device catalog
+/// it started on -- devices and runtime versions -- and the OS release, which
+/// a continuation must find unchanged to be the same run, and whether the
+/// user dismissed its Continue offer.
+class RunResumeState {
+  const RunResumeState(
+      {this.catalog = '', this.os = '', this.dismissed = false});
+
+  /// ResumeOffer.fingerprint of the catalog.
+  final String catalog;
+
+  /// Platform.operatingSystemVersion.
+  final String os;
+  final bool dismissed;
+
+  Map<String, dynamic> toJson() => {
+        'catalog': catalog,
+        'os': os,
+        if (dismissed) 'dismissed': true,
+      };
+
+  static Future<RunResumeState?> read(File f) async {
+    try {
+      if (!await f.exists()) return null;
+      final m = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      return RunResumeState(
+        catalog: m['catalog'] as String? ?? '',
+        os: m['os'] as String? ?? '',
+        dismissed: m['dismissed'] as bool? ?? false,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }
 

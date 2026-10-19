@@ -371,7 +371,7 @@ int clPeak::runAll()
         // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
           runKernelLatency(queue, prog(Benchmark::GlobalBW), devInfo, cfg);
-        else if (isAllowed(Benchmark::KernelLatency))
+        else if (auto run = admit(Benchmark::KernelLatency))
         {
           auto test = deviceScope.beginTest(
             {"kernel_launch_latency", "Kernel launch latency", "s",

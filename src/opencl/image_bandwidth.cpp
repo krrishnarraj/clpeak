@@ -6,7 +6,8 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, bps;
   cl::NDRange globalSize, localSize;
 
-  if (!isAllowed(Benchmark::ImageBW))
+  auto run = admit(Benchmark::ImageBW);
+  if (!run)
     return 0;
 
   auto test = currentDeviceScope->beginTest(

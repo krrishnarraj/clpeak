@@ -1,7 +1,14 @@
 package kr.clpeak
 
+import android.Manifest
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
@@ -10,10 +17,32 @@ import io.flutter.plugin.common.MethodChannel
 
 // The platform half of lib/src/services/process_exit.dart: the run in flight
 // is stamped on this process, and Android's record of how an earlier process
-// ended is read back with that stamp on it.
+// ended is read back with that stamp on it.  And of lib/src/services/
+// run_notice.dart: the notification a run posts when the app leaves the
+// screen mid-run.
 class MainActivity : FlutterActivity() {
+    // The Dart call waiting on the permission dialog's answer.
+    private var pendingAsk: MethodChannel.Result? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.clpeak/notify")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "ask" -> askToNotify(result)
+                    "show" -> {
+                        showRunNotice(
+                            call.argument<String>("title").orEmpty(),
+                            call.argument<String>("body").orEmpty())
+                        result.success(null)
+                    }
+                    "clear" -> {
+                        getSystemService(NotificationManager::class.java).cancel(RUN_NOTICE)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.clpeak/process")
             .setMethodCallHandler { call, result ->
                 val am = getSystemService(ActivityManager::class.java)
@@ -41,6 +70,70 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // POST_NOTIFICATIONS is a runtime permission from Android 13, which is
+    // the app's minSdk: without it nothing posts, silently.
+    private fun askToNotify(result: MethodChannel.Result) {
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED) {
+            result.success(true)
+            return
+        }
+        if (pendingAsk != null) {
+            result.success(false)
+            return
+        }
+        pendingAsk = result
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), ASK_TO_NOTIFY)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != ASK_TO_NOTIFY) return
+        pendingAsk?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        pendingAsk = null
+    }
+
+    // Quiet: it is posted as the app leaves, to someone who left on purpose.
+    // A tap opens the task as the launcher would -- the run's, while the
+    // process lives; a fresh launch onto the Continue offer once it is gone,
+    // since Android keeps an app's notifications past its process.
+    private fun showRunNotice(title: String, body: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(RUN_CHANNEL) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(RUN_CHANNEL, "Run status", NotificationManager.IMPORTANCE_LOW)
+                    .apply {
+                        description = "A run waiting for clpeak to be back on screen"
+                        setShowBadge(false)
+                    })
+        }
+        val open = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val tap = PendingIntent.getActivity(
+            this, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notice = Notification.Builder(this, RUN_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_clpeak)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .build()
+        nm.notify(RUN_NOTICE, notice)
+    }
+
+    private companion object {
+        const val RUN_CHANNEL = "run_status"
+        const val RUN_NOTICE = 1
+        const val ASK_TO_NOTIFY = 1
     }
 }
 

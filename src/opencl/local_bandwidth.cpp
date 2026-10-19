@@ -5,7 +5,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, bps;
   cl::NDRange globalSize, localSize;
 
-  if (!isAllowed(Benchmark::LocalBW))
+  auto run = admit(Benchmark::LocalBW);
+  if (!run)
     return 0;
 
   unsigned int forced = forceIters ? specifiedIters : 0;

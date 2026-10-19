@@ -10,8 +10,10 @@ add_library(peak_common STATIC
     host_info.cpp
     json.cpp
     keep_awake.cpp
+    run_checkpoint.cpp
     run_document.cpp
     run_log.cpp
+    run_resume.cpp
     screen_hold.cpp
     thermal.cpp
     units.cpp

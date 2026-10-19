@@ -339,7 +339,7 @@ rows — if it returns, frame it as GHASH GB/s or Gops.
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate file, the `runAll()`
-  dispatch, the `CpuPeak` interface (`include/cpu/cpu_peak.h`), `CMakeLists.txt`,
+  dispatch (an `admit()` gate), the `CpuPeak` interface (`include/cpu/cpu_peak.h`), `CMakeLists.txt`,
   and this file. A measurement no other backend makes also needs a `Benchmark`
   enum value + `categoryOf()` entry in `include/common/benchmark_enums.h` and
   a flag row in `src/common/options.cpp`, named for what it measures (never

@@ -4,8 +4,10 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/backend_registry.h>
+#include <common/run_checkpoint.h>
 #include <common/run_document.h>
 #include <common/run_log.h>
+#include <common/run_resume.h>
 #include <common/logger_text.h>
 #include <common/host_info.h>
 #include <common/keep_awake.h>
@@ -26,6 +28,29 @@ int main(int argc, char **argv)
 {
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
+
+    // --resume: carry on with an interrupted run's own options, from its
+    // checkpoint, less what it finished (include/common/run_resume.h).
+    ResumePlan resume;
+    const bool resuming = !opts.resumeFile.empty();
+    if (resuming)
+    {
+        CliOptions resumed;
+        std::string error;
+        if (!loadResumePlan(opts.resumeFile, resume, error) ||
+            !resumeOptions(resume, opts, resumed, error))
+        {
+            std::cerr << error << "\n";
+            return 1;
+        }
+        opts = std::move(resumed);
+        size_t tests = 0;
+        for (const DeviceResult &d : resume.seed.devices) tests += d.tests.size();
+        std::cout << "Resuming " << opts.outputFile << ": " << tests
+                  << " tests measured before it stopped";
+        if (!resume.after.empty()) std::cout << " (" << resume.after << ")";
+        std::cout << "\n";
+    }
     clpeak::setVerbose(opts.verbose);
 #ifdef ENABLE_ONNX
     // Before any enumeration: --onnx-lib decides which runtime gets loaded,
@@ -75,15 +100,18 @@ int main(int argc, char **argv)
     }
 
     RunDocument combined;
-    combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
-    combined.meta.generatedAt   = isoTimestampUtc();
-    for (const auto &be : backends)
-        combined.meta.build.backends.push_back(backendInfo(be.id).name);
+    if (!resuming)
+    {
+        combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
+        combined.meta.generatedAt   = isoTimestampUtc();
+        for (const auto &be : backends)
+            combined.meta.build.backends.push_back(backendInfo(be.id).name);
 #ifdef CLPEAK_BUILD_CONFIG
-    combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+        combined.meta.build.config = CLPEAK_BUILD_CONFIG;
 #endif
-    combined.meta.host          = probeHost();
-    combined.meta.invocation    = invocationFrom(opts, argc, argv);
+        combined.meta.host          = probeHost();
+        combined.meta.invocation    = invocationFrom(opts, argc, argv);
+    }
 
     // The run's diagnostic stream: every note, CLPEAK_LOG line and relayed
     // library message from here on lands on combined.log -- and, with -o,
@@ -91,6 +119,9 @@ int main(int argc, char **argv)
     // a record.  Between backends no logger is open to print for it, so it
     // prints the way LoggerText would.
     RunLog runLog(combined);
+    // And with -o, what has finished, which a run that dies continues from
+    // (include/common/run_checkpoint.h).
+    RunCheckpoint checkpoint(combined);
     runLog.setFallbackRenderer([&](const LogEntry &e) {
         if (!e.source.empty() || e.level == clpeak::LogLevel::Debug ||
             e.level == clpeak::LogLevel::Info)
@@ -100,8 +131,13 @@ int main(int argc, char **argv)
         }
         std::cout << e.message << "\n";
     });
+    if (resuming)
+        seedResume(resume, opts, combined, runLog, checkpoint);
     if (opts.enableOutput)
-        runLog.openSidecar(opts.outputFile);
+    {
+        runLog.openSidecar(opts.outputFile, /*append=*/resuming && resume.sidecarFound);
+        checkpoint.open(opts.outputFile);
+    }
 
     // A backend asked for by name that this binary does not carry: say so,
     // or the run reads as "no devices".
@@ -139,6 +175,9 @@ int main(int argc, char **argv)
     {
         if (!opts.backendEnabled(be.id))
             continue;
+        // Finished by the part of the run this one resumes.
+        if (opts.resume.backendsDone.test(static_cast<size_t>(be.id)))
+            continue;
 
         auto peak = be.create();
         // --verbose with -o: the base logger mirrors the metric rows onto the
@@ -161,7 +200,9 @@ int main(int argc, char **argv)
             lastError |= status;
     }
 
-    combined.meta.durationS = runLog.elapsedS();
+    combined.meta.durationS = checkpoint.runningS();
+    if (resuming)
+        combined.meta.resumed.push_back(checkpoint.partRecord(combined));
     runLog.finish();
 
     // Centralized file dump.  A failed dump surfaces in the exit code like any
@@ -171,6 +212,7 @@ int main(int argc, char **argv)
     {
         const bool saved = saveRunJson(combined, opts.outputFile);
         runLog.closeSidecar(/*remove=*/saved);
+        checkpoint.close(/*remove=*/saved);
         if (!saved)
             lastError |= 1;
     }

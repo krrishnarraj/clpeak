@@ -12,6 +12,7 @@ import 'src/model/run_config.dart';
 import 'src/services/benchmark_service.dart';
 import 'src/services/export_service.dart';
 import 'src/services/run_history_store.dart';
+import 'src/services/run_notice.dart';
 import 'src/services/settings_service.dart';
 import 'src/ui/app.dart';
 
@@ -41,6 +42,9 @@ Future<void> main() async {
 
   final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history, engine: engine);
+  // A paused notice left by a process that is gone: this launch is what it
+  // asked for, and the dashboard offers to continue that run.
+  unawaited(RunNotice.clear());
 
   // First frame never waits for enumeration: the device catalog (seconds
   // on NPU/GPU boxes while native viability probes compile) loads off the

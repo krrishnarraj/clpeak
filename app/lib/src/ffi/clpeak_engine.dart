@@ -219,7 +219,7 @@ class ChildProcessEngine implements ClpeakEngine {
 }
 
 /// A run in an engine process: its events arrive one JSON document per line
-/// of stdout, a cancel is a line on its stdin.  The same drain barrier as in
+/// of stdout, a cancel or a pause is a line on its stdin.  The same drain barrier as in
 /// process: [events] closes once `done` has been read and the process is
 /// gone.  A process that exits without `done` crashed, and the run ends with
 /// [failure] and a synthesized `done`.
@@ -241,6 +241,7 @@ class ChildRun implements EngineRun {
   final _rc = Completer<int>();
   Process? _process;
   bool _cancelRequested = false;
+  bool _paused = false;
   DoneEvent? _done;
   String? _failure;
 
@@ -257,6 +258,12 @@ class ChildRun implements EngineRun {
   void cancel() {
     _cancelRequested = true;
     _send('cancel'); // before the process is up, it is sent once it is
+  }
+
+  @override
+  void setPaused(bool paused) {
+    _paused = paused;
+    _send(paused ? 'pause' : 'resume'); // as a cancel is
   }
 
   void _send(String line) {
@@ -283,6 +290,7 @@ class ChildRun implements EngineRun {
     _process = process;
     // Writes to an engine that has exited fail; its exit code says why.
     unawaited(process.stdin.done.catchError((Object _) {}));
+    if (_paused) _send('pause');
     if (_cancelRequested) _send('cancel');
     final err = _EngineStderr(process.stderr);
     // Its end is taken now: stdout usually closes before the exit code is

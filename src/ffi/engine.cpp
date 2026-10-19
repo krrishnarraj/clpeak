@@ -143,13 +143,20 @@ void onEvent(void *userData, char *json)
 // Cancellation, from the app: a "cancel" line, or stdin closing.  A closed
 // stdin means the app has gone, and without it the run would go on alone to
 // the end.  Either way the run stops at the next test boundary with -o
-// saving what ran, as a cancel in the app's own process did.
+// saving what ran, as a cancel in the app's own process did.  "pause" and
+// "resume" lines are clpeak_set_paused.
 void watchStdin()
 {
     char line[256];
     while (std::fgets(line, sizeof line, stdin))
+    {
         if (std::strncmp(line, "cancel", 6) == 0)
             clpeak::requestCancel();
+        else if (std::strncmp(line, "pause", 5) == 0)
+            clpeak_set_paused(1);
+        else if (std::strncmp(line, "resume", 6) == 0)
+            clpeak_set_paused(0);
+    }
     clpeak::requestCancel();
 }
 
@@ -249,7 +256,7 @@ int clpeak_engine_main(int argc, const char **argv)
     for (; i < argc; i++)
         run.push_back(argv[i]);
     const int rc = clpeakLaunch(static_cast<int>(run.size()), run.data(),
-                                &onEvent, &sink, /*resetCancel=*/false);
+                                &onEvent, &sink, /*resetControls=*/false);
     // The status itself travels on the `done` event; the exit code only says
     // whether there was one worth reading.
     endProcess(rc == 0 ? 0 : 1);

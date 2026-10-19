@@ -2356,7 +2356,7 @@ behaviour before the operator.
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `src/onnx/CMakeLists.txt`,
-  a call in `runAll()` gated on a `Benchmark` value, and a row in Key Files
+  a `phase()` in `runAll()` on a `Benchmark` value (its `admit()` gate), and a row in Key Files
   above.  Reuse an existing value when the measurement already has a name on
   another backend (`include/common/benchmark_enums.h`); a new one needs a
   flag row in `src/common/options.cpp` -- named for what it measures, never

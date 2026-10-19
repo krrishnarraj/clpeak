@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -10,7 +11,7 @@ import '../common/kit.dart';
 import '../results/results_body.dart';
 
 /// The in-flight run: current-test readout, elapsed / completed counters,
-/// live results ticking in below, and Cancel.
+/// live results ticking in below, Pause and Cancel.
 ///
 /// This screen is deliberately animation-free.  Every frame it presents is
 /// GPU work on the very device being benchmarked (the process shows up as
@@ -26,15 +27,31 @@ class LiveRunScreen extends StatelessWidget {
     final t = CP.of(context);
     final service = context.watch<BenchmarkService>();
     final cancelling = service.state == BenchmarkState.cancelling;
+    final paused = service.paused;
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
             CHeader(
-              title: cancelling ? 'Cancelling' : 'Benchmarking',
+              title: cancelling
+                  ? 'Cancelling'
+                  : paused
+                      ? 'Paused'
+                      : 'Benchmarking',
               subtitle: 'run in progress',
               actions: [
+                if (!cancelling) ...[
+                  // Held at the next boundary between readings, so no
+                  // reading measures the pause (include/common/
+                  // screen_hold.h).
+                  CButton(
+                    label: paused ? 'Resume' : 'Pause',
+                    icon: paused ? Icons.play_arrow : Icons.pause,
+                    onPressed: () => service.setPaused(!paused),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 CButton(
                   label: cancelling ? 'Cancelling…' : 'Cancel',
                   icon: Icons.stop,
@@ -45,7 +62,8 @@ class LiveRunScreen extends StatelessWidget {
             ),
             // A static rule, not an indeterminate LinearProgressIndicator: the
             // latter animates for the whole run and steals GPU time from it.
-            Container(height: 2, color: cancelling ? t.dim : t.text),
+            Container(
+                height: 2, color: cancelling || paused ? t.dim : t.text),
             Expanded(
               child: ResultsBody(
                 document: service.document,
@@ -67,18 +85,28 @@ class _StatusPanel extends StatelessWidget {
   final BenchmarkService service;
   final bool cancelling;
 
+  String _statusText() {
+    if (cancelling) return 'Cancelling — finishing the current test…';
+    if (service.paused) {
+      return service.held
+          ? 'Paused — the run waits before its next reading until you '
+              'resume it.'
+          : 'Pausing — the reading in progress finishes first…';
+    }
+    if (service.coolingDown) {
+      return 'Paused — the device is hot; resuming once it cools…';
+    }
+    if (service.currentTest.isNotEmpty) return service.currentTest;
+    if (service.currentBackend.isNotEmpty) {
+      return 'Preparing ${service.currentBackend}…';
+    }
+    return 'Starting…';
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final statusText = cancelling
-        ? 'Cancelling — finishing the current test…'
-        : service.coolingDown
-            ? 'Paused — the device is hot; resuming once it cools…'
-            : service.currentTest.isNotEmpty
-                ? service.currentTest
-                : service.currentBackend.isNotEmpty
-                    ? 'Preparing ${service.currentBackend}…'
-                    : 'Starting…';
+    final statusText = _statusText();
 
     return CPanel(
       child: Column(
@@ -95,7 +123,7 @@ class _StatusPanel extends StatelessWidget {
                   width: 3,
                   height: 15,
                   margin: const EdgeInsets.only(top: 2),
-                  color: cancelling ? t.dim : t.text,
+                  color: cancelling || service.paused ? t.dim : t.text,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -126,6 +154,17 @@ class _StatusPanel extends StatelessWidget {
               ],
             ),
           ),
+          // A phone holds the run while the app is off screen
+          // (include/common/screen_hold.h), and may end the app meanwhile.
+          if (Platform.isAndroid || Platform.isIOS) ...[
+            Container(height: 1, color: t.line),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+              child: Text(
+                  'Leaving clpeak pauses the run until you come back.',
+                  style: t.monoSmallDim),
+            ),
+          ],
         ],
       ),
     );
