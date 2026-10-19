@@ -163,8 +163,9 @@ namespace
   // where the square ladder fell more than this share short of its best at a
   // width above the best -- that cliff's signature -- it tries layers half
   // as wide fed four times the rows (the best rung's own multiply-adds, so
-  // its run time), keeps it only past kOnnxPlateauGain, and doubles the rows
-  // while they gain the way a wider square rung must.  A ladder that stopped
+  // its run time), stops there if that is slower than the square best, and
+  // otherwise doubles the rows the way the square ladder climbs
+  // (kOnnxPlateauGain, one grace).  A ladder that stopped
   // still rising has no cliff to step around, and its best rung is its
   // slowest: a tall one there costs a compile and a budget for nothing -- on
   // ONNX Runtime's CPU provider, whose best rungs take half a minute a run,
@@ -979,15 +980,21 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         else
         {
-          if (rate > L.best)
+          const bool gained = rate > L.best;
+          if (gained)
           {
             L.best = rate;
             L.bestDim = K;
             L.bestRows = M;
           }
-          // The first tall rung has to gain what a wider square one must
-          // before a second is worth its compile.
-          if (!climbing)
+          // A first tall rung slower than the square best ends the phase.
+          // One that beat it by any margin spends the rows' one grace
+          // instead: its rows are the fewest the phase tries, and on an Arc
+          // A380 they had not yet filled the card -- 8192, 16384 and 32768
+          // rows read 23.1, 24.7 and 25.6 TFLOPS at 1024-wide layers -- so
+          // the built-in OpenVINO's fp32, whose first rung came in 10.0% up
+          // to the third figure, stopped there at 22.7.
+          if (!climbing && !gained)
           {
             CLPEAK_VLOG("onnx-gemm[%s/%s]: %s did not gain on %lld-wide "
                         "layers, stopping\n",
@@ -995,6 +1002,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                         (long long)squareDim);
             break;
           }
+          climbing = true;
           if (++tallStrikes >= kOnnxPlateauStrikes)
           {
             CLPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld x %lld\n",

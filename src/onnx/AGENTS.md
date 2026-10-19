@@ -1738,8 +1738,9 @@ rung for its working set, which does not expire either:
   2048-wide layers and 15 at 4096, and 26 with 1024-wide layers fed 32768
   rows. So a chain whose ladder fell more than 10% below its best at a wider
   rung then tries half its best width fed four times the rows -- the same
-  multiply-adds as the best rung, so the same run time -- keeps it past
-  `kOnnxPlateauGain`, and doubles the rows the way a square ladder climbs.
+  multiply-adds as the best rung, so the same run time -- stops there if that
+  is slower than the square best, and otherwise doubles the rows the way a
+  square ladder climbs (`kOnnxPlateauGain`, one grace).
   A ladder that never fell off skips the phase: there it would cost a rung
   for nothing, and on a CPU provider its best rung is its slowest.
 - **`onnx-tensor-bw`** measures three fixed rungs, then climbs while the rate

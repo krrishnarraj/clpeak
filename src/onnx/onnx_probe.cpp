@@ -644,23 +644,23 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   // it after a fresh warm-up: the fp32 one sat idle while fp16 was built.
   const bool fp32Rounded = fp32RelErr > kFp32ExactRelErr;
   double sameShapeRatio = 0.0; // fp32's net time over fp16's at that shape
-  if (fp32Rounded && bpsOf[0] > 0.0 && bpsOf[1] > 0.0 &&
-      !clpeak::cancelRequested())
-  {
+  // Times fp16 at `p32`'s n columns against `p32` in alternating batches.
+  // True when both gave a reading the floors leave standing, and then
+  // `sameShapeRatio` holds it; `us32`/`us16` are the raw bests either way.
+  auto racePair = [&](Gemv &p32, int64_t n, double &us32, double &us16) {
+    us32 = us16 = -1.0;
     Gemv g16;
-    double us32 = -1.0, us16 = -1.0;
-    if (build(g16, ONNX_DT_FLOAT16, kK,
-              (int64_t)(kBytes / (kK * dtypeSize(ONNX_DT_FLOAT))), false) &&
-        run(g16, 3) > 0.0 && run(g32, 3) > 0.0)
+    if (build(g16, ONNX_DT_FLOAT16, kK, n, false) && run(g16, 3) > 0.0 &&
+        run(p32, 3) > 0.0)
     {
-      const double p32 = run(g32, 1), p16 = run(g16, 1);
-      if (p32 > 0.0 && p16 > 0.0)
+      const double p32us = run(p32, 1), p16us = run(g16, 1);
+      if (p32us > 0.0 && p16us > 0.0)
       {
-        const unsigned int r32 = pickIters(p32, 100000u, 0, 25u);
-        const unsigned int r16 = pickIters(p16, 100000u, 0, 25u);
+        const unsigned int r32 = pickIters(p32us, 100000u, 0, 25u);
+        const unsigned int r16 = pickIters(p16us, 100000u, 0, 25u);
         for (int i = 0; i < kSameShapeRounds; i++)
         {
-          const double a = run(g32, r32), b = run(g16, r16);
+          const double a = run(p32, r32), b = run(g16, r16);
           if (a <= 0.0 || b <= 0.0)
           {
             us32 = us16 = -1.0;
@@ -673,21 +673,54 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     }
     release(g16);
     const double net32 = us32 - floorOf[1], net16 = us16 - floorOf[0];
-    if (us32 > 0.0 && us16 > 0.0 && net32 >= kMinNetShare * us32 &&
-        net16 >= kMinNetShare * us16)
+    const bool read = us32 > 0.0 && us16 > 0.0 &&
+                      net32 >= kMinNetShare * us32 &&
+                      net16 >= kMinNetShare * us16;
+    const unsigned long long mb =
+        (unsigned long long)((uint64_t)kK * (uint64_t)n * 4ull >> 20);
+    if (read)
     {
       sameShapeRatio = net32 / net16;
-      CLPEAK_VLOG("onnx-stream[%s]: at fp32's shape, fp32 %.0f us and fp16 "
-                  "%.0f us less %.0f / %.0f us floors: %.2fx the time for "
+      CLPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
+                  "fp16 %.0f us less %.0f / %.0f us floors: %.2fx the time for "
                   "twice the bytes\n",
-                  ep.providerKey.c_str(), us32, us16, floorOf[1], floorOf[0],
-                  sameShapeRatio);
+                  ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
+                  floorOf[0], sameShapeRatio);
     }
     else if (us32 > 0.0 && us16 > 0.0)
-      CLPEAK_VLOG("onnx-stream[%s]: at fp32's shape, fp32 %.0f us and fp16 "
-                  "%.0f us against %.0f / %.0f us floors -- dispatch, not "
+      CLPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
+                  "fp16 %.0f us against %.0f / %.0f us floors -- dispatch, not "
                   "bandwidth; no reading\n",
-                  ep.providerKey.c_str(), us32, us16, floorOf[1], floorOf[0]);
+                  ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
+                  floorOf[0]);
+    return read;
+  };
+  if (fp32Rounded && bpsOf[0] > 0.0 && bpsOf[1] > 0.0 &&
+      !clpeak::cancelRequested())
+  {
+    const int64_t n = (int64_t)(kBytes / (kK * dtypeSize(ONNX_DT_FLOAT)));
+    double us32 = -1.0, us16 = -1.0;
+    const bool read = racePair(g32, n, us32, us16);
+    release(g32);
+    // Held at half width, the fp32 product moves half the bytes it streamed
+    // for its own reading, and the pair can sink back into the floor its
+    // readings cleared: on an Arc A380 OpenVINO's GPU charged 650-830 us a
+    // submission, and fp16 at the 64 MB fp32 product's shape moved its 32 MB
+    // in about 210 us beyond that -- a fifth of its time, no reading, on both
+    // targets.  So a pair the floors swallow is raced once more at four
+    // times the columns, where 128 MB of 16-bit traffic outweighs the floor,
+    // if both products fit -- 256 and 128 MB of weights, counted as every
+    // gate counts them.
+    const int64_t n4 = 4 * n;
+    const uint64_t pairBytes = (uint64_t)kK * (uint64_t)n4 * 6ull;
+    if (!read && us32 > 0.0 && us16 > 0.0 && !clpeak::cancelRequested() &&
+        clpeak::memoryBudget(2ull << 30) > onnxHeldBytes(ep, pairBytes, 0))
+    {
+      Gemv big;
+      if (build(big, ONNX_DT_FLOAT, kK, n4, false))
+        racePair(big, n4, us32, us16);
+      release(big);
+    }
   }
   release(g32);
 
