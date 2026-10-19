@@ -414,6 +414,7 @@ int OnnxPeak::runAll()
           "GPU_UARCH_VERSION", "MAX_BATCH_SIZE", "OPTIMAL_BATCH_SIZE",
           "OPTIMIZATION_CAPABILITIES", "RANGE_FOR_ASYNC_INFER_REQUESTS",
           "RANGE_FOR_STREAMS", "nv_ep_ort_api_version",
+          "COMPATIBILITY_CHECK", "GPU_CACHELINE_SIZE", "weightless_support",
       };
       if (!ep.vendor.empty())
         details.push_back({"Vendor", ep.vendor});
