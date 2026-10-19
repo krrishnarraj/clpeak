@@ -82,6 +82,12 @@ class BenchmarkService extends ChangeNotifier {
   RunSummary? _lastSummary;
   RunSummary? get lastSummary => _lastSummary;
 
+  /// Runs ended since launch, however they ended: History re-reads its
+  /// files at each, since one that died, or a continuation under the id of
+  /// the run it continues, publishes no new [lastSummary].
+  int _runsEnded = 0;
+  int get runsEnded => _runsEnded;
+
   String currentBackend = '';
   String currentTest = '';
 
@@ -431,6 +437,8 @@ class BenchmarkService extends ChangeNotifier {
     runFailureLogKept = false;
     _plannedDevices = plannedDevices;
     _doneDurationS = null;
+    // The results screen exports this run's file, and none until it has one.
+    _lastSummary = null;
     _resumeOffer = null;
     _startedAt = DateTime.now();
     _runId = id;
@@ -680,8 +688,15 @@ class BenchmarkService extends ChangeNotifier {
     ProcessExit.markRun(null);
     final startedAt = _startedAt ?? DateTime.now();
     // Indexed only once written: a run whose engine died has no document,
-    // just the sidecar History lists on its own.
-    final saved = _resultPath != null && await File(_resultPath!).exists();
+    // just the sidecar History lists on its own.  A cancelled run continued
+    // has its first part's result on disk already, so the file has to be
+    // this launch's (with slack for a filesystem's coarse timestamps).
+    final result = _resultPath == null ? null : File(_resultPath!);
+    final saved = runFailure == null &&
+        result != null &&
+        await result.exists() &&
+        !(await result.lastModified())
+            .isBefore(startedAt.subtract(const Duration(seconds: 2)));
     // A run whose last test was in flight as the app left ends off screen:
     // where its paused notice was, say so.
     if (_offScreen && saved) {
@@ -713,8 +728,8 @@ class BenchmarkService extends ChangeNotifier {
             : priorMs + DateTime.now().difference(startedAt).inMilliseconds,
         cancelled: cancelled,
       );
-      // Index first: listeners (History) re-read the store as soon as
-      // lastSummary changes, so the row must already be on disk.
+      // Index first: History re-reads the store as soon as the run is
+      // over, so the row must already be on disk.
       await _history.add(summary);
       _lastSummary = summary;
     }
@@ -724,6 +739,7 @@ class BenchmarkService extends ChangeNotifier {
     }
     _run = null;
     _state = BenchmarkState.finished;
+    _runsEnded++;
     notifyListeners();
     unawaited(refreshResumeOffer());
   }

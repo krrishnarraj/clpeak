@@ -24,9 +24,10 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   late Future<_HistoryContents> _contents;
 
-  /// Id of the finished run the current list was built for; the tab lives in
-  /// an IndexedStack, so initState alone would leave it stale forever.
-  String? _seenRunId;
+  /// [BenchmarkService.runsEnded] when the current list was built; the tab
+  /// lives in an IndexedStack, so initState alone would leave it stale
+  /// forever.
+  int _seenRunsEnded = 0;
 
   @override
   void initState() {
@@ -149,12 +150,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Re-read the index whenever a run finishes (the summary is written to
-    // disk before lastSummary is published, so the new row is always there).
-    final lastRunId =
-        context.select<BenchmarkService, String?>((s) => s.lastSummary?.id);
-    if (lastRunId != _seenRunId) {
-      _seenRunId = lastRunId;
+    // Re-read the files whenever a run ends (its summary is written to disk
+    // before the count moves, so a new row is always there).
+    final runsEnded =
+        context.select<BenchmarkService, int>((s) => s.runsEnded);
+    if (runsEnded != _seenRunsEnded) {
+      _seenRunsEnded = runsEnded;
       _contents = _load();
     }
     // Whether a run that stopped part-way can be continued turns on the
