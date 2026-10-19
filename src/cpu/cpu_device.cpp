@@ -240,10 +240,15 @@ static const char *armPartName(unsigned imp, unsigned part)
     case 0xd8e: return "Neoverse N3";
     default: return nullptr;
     }
-  if (imp == 0x51)  // Qualcomm custom cores (Kryo parts fall through to generic)
+  // Qualcomm custom cores (Kryo parts fall through to generic).  The kernel's
+  // compatibles count by part ("qcom,oryon-2-2" is part 0x002), Qualcomm by
+  // generation: part 0x002 is the 3rd Gen Oryon of the Snapdragon X2 Elite
+  // and the 8 Elite Gen 5.
+  if (imp == 0x51)
     switch (part)
     {
     case 0x001: return "Oryon";
+    case 0x002: return "Oryon Gen 3";
     default: return nullptr;
     }
   if (imp == 0x4e)  // NVIDIA custom cores (Grace uses Arm Neoverse V2 above)
@@ -270,42 +275,79 @@ static const char *armPartName(unsigned imp, unsigned part)
   return nullptr;
 }
 
-// Compose a name from the distinct MIDR values of all cores (first-seen order).
+// Compose a name from the distinct cores (first-seen order).  A kind of core
+// is its implementer, part AND variant: Qualcomm tells its Oryon core types
+// apart by the variant alone -- an 8 Elite Gen 5 has six part 0x002 variant
+// 2 cores and two variant 3 primes, a Snapdragon X2 Elite variants 2 and 1 --
+// so keyed on the part, the chip read as eight alike.  Kinds that share a
+// name then carry their top clock (`maxMHz`, by CPU number, 0 = unknown)
+// where it tells them apart, else their variant as Arm writes it ("r3").
 static std::string armCpuNameFromMidrs(const std::vector<uint64_t> &midrs,
+                                       const std::vector<int> &maxMHz,
                                        std::string &vendorOut)
 {
-  struct Kind { unsigned imp, part; int count; };
+  struct Kind { unsigned imp, part, variant; int count, mhz; std::string name; };
   std::vector<Kind> kinds;
-  for (uint64_t m : midrs)
+  for (size_t cpu = 0; cpu < midrs.size(); cpu++)
   {
+    const uint64_t m = midrs[cpu];
     if (!m) continue;
-    unsigned imp = (unsigned)((m >> 24) & 0xFF), part = (unsigned)((m >> 4) & 0xFFF);
-    bool found = false;
-    for (auto &k : kinds)
-      if (k.imp == imp && k.part == part) { k.count++; found = true; break; }
-    if (!found) kinds.push_back({imp, part, 1});
+    const unsigned imp = (unsigned)((m >> 24) & 0xFF), variant = (unsigned)((m >> 20) & 0xF),
+                   part = (unsigned)((m >> 4) & 0xFFF);
+    const int mhz = cpu < maxMHz.size() ? maxMHz[cpu] : 0;
+    Kind *k = nullptr;
+    for (auto &x : kinds)
+      if (x.imp == imp && x.part == part && x.variant == variant) { k = &x; break; }
+    if (!k)
+    {
+      kinds.push_back({imp, part, variant, 0, 0, {}});
+      k = &kinds.back();
+    }
+    k->count++;
+    k->mhz = std::max(k->mhz, mhz);
   }
   if (kinds.empty())
     return {};
   if (vendorOut.empty())
     if (const char *v = armImplementerName(kinds[0].imp)) vendorOut = v;
+  for (auto &k : kinds)
+  {
+    if (const char *p = armPartName(k.imp, k.part))
+    {
+      k.name = p;
+      continue;
+    }
+    char buf[48];
+    const char *v = armImplementerName(k.imp);
+    if (v) std::snprintf(buf, sizeof(buf), "%s CPU (part 0x%03x)", v, k.part);
+    else   std::snprintf(buf, sizeof(buf), "ARM CPU (impl 0x%02x, part 0x%03x)", k.imp, k.part);
+    k.name = buf;
+  }
+  std::vector<std::string> suffix(kinds.size());
+  for (size_t i = 0; i < kinds.size(); i++)
+  {
+    std::vector<size_t> same;
+    for (size_t j = 0; j < kinds.size(); j++)
+      if (kinds[j].name == kinds[i].name) same.push_back(j);
+    if (same.size() < 2)
+      continue;
+    bool byClock = true;
+    for (size_t a : same)
+      for (size_t b : same)
+        byClock = byClock && kinds[a].mhz > 0 && (a == b || kinds[a].mhz != kinds[b].mhz);
+    char buf[24];
+    if (byClock) std::snprintf(buf, sizeof(buf), " (%.2f GHz)", kinds[i].mhz / 1000.0);
+    else         std::snprintf(buf, sizeof(buf), " r%u", kinds[i].variant);
+    suffix[i] = buf;
+  }
   std::string name;
-  for (const auto &k : kinds)
+  for (size_t i = 0; i < kinds.size(); i++)
   {
     if (!name.empty()) name += " + ";
     // Only prefix per-kind core counts on heterogeneous chips; the homogeneous
     // count is already in the "Cores" device property.
-    if (kinds.size() > 1) name += std::to_string(k.count) + "x ";
-    if (const char *p = armPartName(k.imp, k.part))
-      name += p;
-    else
-    {
-      char buf[48];
-      const char *v = armImplementerName(k.imp);
-      if (v) std::snprintf(buf, sizeof(buf), "%s CPU (part 0x%03x)", v, k.part);
-      else   std::snprintf(buf, sizeof(buf), "ARM CPU (impl 0x%02x, part 0x%03x)", k.imp, k.part);
-      name += buf;
-    }
+    if (kinds.size() > 1) name += std::to_string(kinds[i].count) + "x ";
+    name += kinds[i].name + suffix[i];
   }
   return name;
 }
@@ -330,8 +372,8 @@ static std::vector<uint64_t> collectMidrs(const std::string &cpuinfo)
   if (!v.empty())
     return v;
   // cpuinfo fallback: each "CPU part" line pairs with the most recent
-  // "CPU implementer" line in its processor block.
-  uint64_t imp = 0;
+  // "CPU implementer" and "CPU variant" lines in its processor block.
+  uint64_t imp = 0, variant = 0;
   size_t pos = 0;
   while (pos < cpuinfo.size())
   {
@@ -342,17 +384,36 @@ static std::vector<uint64_t> collectMidrs(const std::string &cpuinfo)
       size_t c = line.find(':');
       if (c != std::string::npos) imp = std::strtoull(line.c_str() + c + 1, nullptr, 16);
     }
+    else if (line.rfind("CPU variant", 0) == 0)
+    {
+      size_t c = line.find(':');
+      if (c != std::string::npos) variant = std::strtoull(line.c_str() + c + 1, nullptr, 16);
+    }
     else if (line.rfind("CPU part", 0) == 0)
     {
       size_t c = line.find(':');
       if (c != std::string::npos)
       {
         uint64_t part = std::strtoull(line.c_str() + c + 1, nullptr, 16);
-        v.push_back((imp << 24) | ((part & 0xFFF) << 4));
+        v.push_back((imp << 24) | ((variant & 0xF) << 20) | ((part & 0xFFF) << 4));
       }
     }
     if (eol == std::string::npos) break;
     pos = eol + 1;
+  }
+  return v;
+}
+
+// Each CPU's top clock in MHz by CPU number, 0 where cpufreq does not say.
+static std::vector<int> collectMaxMHz(size_t cpus)
+{
+  std::vector<int> v(cpus, 0);
+  for (size_t cpu = 0; cpu < cpus; cpu++)
+  {
+    char path[96];
+    std::snprintf(path, sizeof(path),
+                  "/sys/devices/system/cpu/cpu%zu/cpufreq/cpuinfo_max_freq", cpu);
+    v[cpu] = (int)(std::strtoull(readFile(path).c_str(), nullptr, 10) / 1000);
   }
   return v;
 }
@@ -913,7 +974,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   // elsewhere.
   {
     midrs = collectMidrs(cpuinfo);
-    std::string midrName = armCpuNameFromMidrs(midrs, info.vendor);
+    std::string midrName = armCpuNameFromMidrs(midrs, collectMaxMHz(midrs.size()), info.vendor);
     if (info.name.empty())
       info.name = midrName;
   }
@@ -993,7 +1054,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   // entries carry a name like "Cobalt 100" yet no vendor).
   {
     midrs = collectMidrs();
-    std::string midrName = armCpuNameFromMidrs(midrs, info.vendor);
+    std::string midrName = armCpuNameFromMidrs(midrs, {}, info.vendor);
     if (info.name.empty())
       info.name = midrName;
   }
