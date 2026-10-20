@@ -48,8 +48,11 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   uint32_t numBlocks = (uint32_t)groups;
 
   // Staging buffer populated with xorshift bytes; uploaded via sycl::image
-  // host_ptr on creation.  We use sycl::buffer image semantics (SYCL 2020
-  // sampled_image) via the legacy unsampled_image type for portability.
+  // host_ptr on creation.  The SYCL 1.2.1 image class, deprecated as it is:
+  // DPC++ implements no SYCL 2020 image on any device -- an unsampled_image
+  // device accessor throws feature_not_supported without aspect::image, which
+  // no device reports -- so the legacy class, gated on ext_intel_legacy_image
+  // above, is the only one that runs.
   const size_t numFloats = (size_t)imgW * (size_t)imgH * 4;
   float *staging = new float[numFloats];
   populate(staging, numFloats);
@@ -64,10 +67,13 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 
   try
   {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     sycl::image<2> img(staging,
                        sycl::image_channel_order::rgba,
                        sycl::image_channel_type::fp32,
                        sycl::range<2>(imgW, imgH));
+#pragma clang diagnostic pop
 
     // The walk shapes are raced and the fastest reported -- why, and why
     // none can flatter the result: the image-bandwidth block in
