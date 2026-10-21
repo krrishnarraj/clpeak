@@ -102,13 +102,14 @@ private:
 
 // Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
 // rows: those are independent chains, documented where they are declared.
+// Nor for half2, a packed instruction rather than a vector (compute_float.cpp).
 static inline const char *rocmWidthNote(uint32_t width)
 {
   switch (width)
   {
-  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
-  case 2: return "Two values per thread at a time, packed into one instruction.";
-  case 4: return "Four values per thread at a time, as one 4-wide vector.";
+  case 1: return "Scalar, one value per thread.";
+  case 2: return "2-wide vector per thread.";
+  case 4: return "4-wide vector per thread.";
   default: return "";
   }
 }
@@ -127,7 +128,7 @@ struct rocm_compute_desc_t
   const char *resultTag;
   const char *unit;              // "flops" / "ops"
 
-  // One or two plain-language sentences on what the test measures; travels to
+  // One or two sentences on what the test measures; travels to
   // logger::TestSpec::description (nullptr = undocumented).
   const char *description;
 

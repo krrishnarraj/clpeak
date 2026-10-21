@@ -18,6 +18,7 @@
 #include <ostream>
 
 #if defined(__ANDROID__)
+#include <dlfcn.h>
 #include <sys/system_properties.h>
 #endif
 
@@ -57,7 +58,7 @@ const NpuVendor kNpuVendors[] = {
 // Android app's libraries stay inside the APK ("base.apk!/lib/arm64-v8a",
 // which the linker opens but no directory iterator can) -- each vendor's
 // library is tried by name, the way LiteRT itself will open it.  More than
-// one is normal: tools/fetch_litert_npu.sh stages every vendor's shim, and
+// one is normal: tools/fetch_android_npu.sh stages every vendor's shim, and
 // only the one for the silicon underneath will bring up a device.
 std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
 {
@@ -70,7 +71,17 @@ std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
   {
     std::vector<std::string> names;
     for (; !ec && it != end; it.increment(ec))
-      names.push_back(it->path().filename().string());
+    {
+      // On Windows string() throws for a name the ANSI code page cannot
+      // spell; no shim is named that way, so such a file is passed over.
+      try
+      {
+        names.push_back(it->path().filename().string());
+      }
+      catch (const std::system_error &)
+      {
+      }
+    }
     for (const auto &v : kNpuVendors)
       for (const std::string &name : names)
         if ((name.rfind("libLiteRtDispatch_", 0) == 0 || name.rfind("LiteRtDispatch", 0) == 0) &&
@@ -107,6 +118,40 @@ bool nameCarriesTag(const std::string &name, const std::string &tag)
   };
   return squash(name).find(squash(tag)) != std::string::npos;
 }
+
+#if defined(__ANDROID__)
+// Why one vendor's shims in `dir` would not load, or empty.  LiteRT does
+// say, but as the cause of an error several layers up, beside whatever
+// failed after it; the linker's own sentence is the reason a person needs
+// -- a shim missing a library it is linked against reads `dlopen failed:
+// library "libQnnIr.so" not found` (LiteRT 2.2.0's Qualcomm plugin, packaged
+// without that QNN library) -- so each is opened here first, with the flags LiteRT opens it with on
+// Android (litert_dispatch.cc, compiler_plugin.cc).  The handles stay open:
+// LiteRT opens the same files next and is handed them.  Android only:
+// elsewhere LiteRT opens a compiler plugin RTLD_DEEPBIND, which only the
+// first load of a library decides.
+std::string npuShimLoadFailure(const std::string &dir, const NpuVendor &v)
+{
+  std::error_code ec;
+  std::filesystem::directory_iterator it(dir, ec), end;
+  for (; !ec && it != end; it.increment(ec))
+  {
+    const std::string name = it->path().filename().string();
+    const bool dispatch = name.rfind("libLiteRtDispatch_", 0) == 0;
+    const bool plugin = name.rfind("libLiteRtCompilerPlugin_", 0) == 0;
+    if ((!dispatch && !plugin) || !nameCarriesTag(name, v.fileTag))
+      continue;
+    const int flags = dispatch ? RTLD_NOW | RTLD_LOCAL : RTLD_LAZY | RTLD_LOCAL | RTLD_NODELETE;
+    if (!dlopen(it->path().c_str(), flags))
+    {
+      const char *why = dlerror();
+      return std::string(dispatch ? "the dispatch library " : "the compiler plugin ") + name +
+             " does not load: " + (why ? why : "the linker gave no reason");
+    }
+  }
+  return std::string();
+}
+#endif
 
 // Which vendor's NPU this device carries, from the system's own answer.
 // `ro.soc.manufacturer` (Android 12+, Build.SOC_MANUFACTURER) says "Google",
@@ -222,9 +267,14 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
 
 // The GPU accelerator library that registered, from what LiteRT logged
 // while the environment came up ("Dynamically loaded GPU accelerator
-// (libLiteRtMetalAccelerator.dylib) registered.").
+// (libLiteRtMetalAccelerator.dylib) registered.") -- or, from a model's
+// creation, the API it fell back to: since 2.3.0 the OpenCL accelerator
+// runs on OpenGL ES where there is no OpenCL ("OpenCL not supported on this
+// platform. Using OpenGL instead.", ml_drift_cl_gl_accelerator.cc).
 std::string gpuBackendFrom(const std::string &log)
 {
+  if (log.find("Using OpenGL instead") != std::string::npos)
+    return "OpenGL";
   if (log.find("MetalAccelerator") != std::string::npos)
     return "Metal";
   if (log.find("OpenClAccelerator") != std::string::npos || log.find("ClGlAccelerator") != std::string::npos)
@@ -326,7 +376,14 @@ std::vector<litert_device_info_t> litertUsableDevices(
         dev.vendor = vendors.front()->vendor;
         dev.displayName = vendors.front()->display;
         std::string reason, log;
+#if defined(__ANDROID__)
+        // With one vendor's shims they are the ones LiteRT will open.
+        if (vendors.size() == 1)
+          reason = npuShimLoadFailure(litertNpuDir(), *vendors.front());
+        const bool ok = reason.empty() && probeAccel(rt, dev, reason, log);
+#else
         const bool ok = probeAccel(rt, dev, reason, log);
+#endif
         // Which shim LiteRT actually loaded, from its own log line.
         const std::string envLog = litertEnvironmentLog(LitertAccel::Npu);
         for (const auto &v : kNpuVendors)
@@ -351,12 +408,13 @@ std::vector<litert_device_info_t> litertUsableDevices(
 
     // GPU: the accelerator library beside the runtime, whichever API it is
     // built on.  The environment comes up first, on its own: which library
-    // registered is in its log, and the OpenCL one dereferences a null
-    // (strlen inside libLiteRtClGlAccelerator, LiteRT 2.2.0) when it
-    // compiles a model on a machine with no OpenCL library at all -- an
-    // emulator, a box without a driver -- rather than declining.  So when
-    // that is the accelerator, an OpenCL library has to be loadable before
-    // a model is sent to it.
+    // registered is in its log, and LiteRT 2.2.0's OpenCL one dereferences
+    // a null (strlen inside libLiteRtClGlAccelerator) when it compiles a
+    // model on a machine with no OpenCL library at all -- an emulator, a
+    // box without a driver -- rather than declining.  So when that is the
+    // accelerator of such a runtime, an OpenCL library has to be loadable
+    // before a model is sent to it.  2.3.0's (ABI 1.1.0) runs on OpenGL ES
+    // there instead, and the probe's log names the API that answered.
     {
       litert_device_info_t dev;
       dev.accel = LitertAccel::Gpu;
@@ -368,7 +426,7 @@ std::vector<litert_device_info_t> litertUsableDevices(
       if (ok)
       {
         dev.vendor = gpuBackendFrom(litertEnvironmentLog(dev.accel));
-        if (dev.vendor == "OpenCL")
+        if (dev.vendor == "OpenCL" && !rt.abi11)
         {
           void *cl = clpeak::dynOpen({
 #if defined(__ANDROID__)
@@ -383,16 +441,16 @@ std::vector<litert_device_info_t> litertUsableDevices(
           {
             ok = false;
             reason = "LiteRT's GPU accelerator here is the OpenCL one and no OpenCL library can be "
-                     "loaded; the accelerator crashes rather than declining in that case (LiteRT "
-                     "2.2.0), so no model is sent to it";
+                     "loaded; this LiteRT's accelerator crashes rather than declining in that case "
+                     "(2.3.0 runs on OpenGL ES instead), so no model is sent to it";
           }
           // The handle is kept: the accelerator dlopens the same library.
         }
       }
       if (ok && probeAccel(rt, dev, reason, log))
       {
-        if (dev.vendor.empty())
-          dev.vendor = gpuBackendFrom(log);
+        if (const std::string probed = gpuBackendFrom(log); !probed.empty())
+          dev.vendor = probed;
         if (!dev.vendor.empty())
           dev.displayName += " (" + dev.vendor + ")";
         g_devs.push_back(dev);
@@ -457,6 +515,14 @@ static std::string pendingNote()
 
 LitertPeak::LitertPeak() = default;
 LitertPeak::~LitertPeak() = default;
+
+void LitertPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
 
 int LitertPeak::runAll()
 {
@@ -558,11 +624,14 @@ int LitertPeak::runAll()
       auto phase = [&](Benchmark b, int (LitertPeak::*fn)(const LitertRuntime &,
                                                           const litert_device_info_t &,
                                                           benchmark_config_t &)) {
-        if (deviceLost || clpeak::cancelRequested() || !isAllowed(b))
+        if (deviceLost || clpeak::cancelRequested())
           return;
-        (this->*fn)(*rt, dev, cfg);
-        if (devMute.sawWatched())
-          deviceLost = true;
+        if (auto run = admit(b))
+        {
+          (this->*fn)(*rt, dev, cfg);
+          if (devMute.sawWatched())
+            deviceLost = true;
+        }
       };
 
       // ---- Compute (FLOPS + OPS) -------------------------------------------

@@ -6,7 +6,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   cl::NDRange globalSize, localSize;
   float *arr = nullptr;
 
-  if (!isAllowed(Benchmark::GlobalBW))
+  auto run = admit(Benchmark::GlobalBW);
+  if (!run)
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -20,10 +21,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   auto test = currentDeviceScope->beginTest(
     {"global_memory_bandwidth", "Global memory bandwidth", "bps",
      Category::Unknown,
-     "How many bytes per second the device can stream out of its main memory, "
-     "reading a buffer far too large to cache.  Each reading fetches a "
-     "different number of values per instruction, since wider fetches usually "
-     "pull more through before the memory system saturates.",
+     "Read bandwidth from device memory, over a buffer too large to cache.",
      TestShape::Homogeneous, "vector width"});
 
   // The one number that decides whether this test measured memory or cache:
@@ -37,6 +35,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     arr = new float[numItems];
     populate(arr, numItems);
 

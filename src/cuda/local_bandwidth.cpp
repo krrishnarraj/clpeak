@@ -8,9 +8,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   auto test = currentDeviceScope->beginTest(
     {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
-     "How many bytes per second the GPU moves through shared memory -- the "
-     "small on-chip scratchpad a block of threads passes data through, which "
-     "never goes out to the card's main memory.",
+     "Bandwidth of shared memory, the on-chip scratchpad a block shares.",
      TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;

@@ -5,11 +5,15 @@
 #include <common/common.h>
 #include <common/console_mute.h>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 
 #include "litert/c/litert_profiler_event.h"
@@ -109,15 +113,49 @@ const char *litertAccelName(LitertAccel a)
 namespace
 {
 
-// The last error or warning lines of what the runtime said -- its sink log
-// and whatever it printed to the console -- for a row reason.  LiteRT's own
-// lines look like "ERROR: [file.cc:12] text"; TFLite's kernel errors reach
-// stderr as "ERROR: tflite/kernels/x.cc:302 text"; the accelerator
-// libraries' glog lines ("E0000 ...") carry their severity in the first
-// letter.  Only the sentence survives.
-std::string lastLines(const std::string &log, int keep = 3)
+// LiteRT's location marker, "ERROR: [file.cc:12]", wherever it sits: at the
+// head of a line, and inside a message that quotes an error passed up to it
+// ("Failed to initialize Dispatch API: ERROR: [dispatch_delegate.cc:176]").
+// What went wrong follows on a line of its own (below), when it was said.
+std::string withoutLocations(std::string s)
 {
-  std::vector<std::string> lines;
+  for (const char *sev : {"ERROR: [", "WARNING: [", "INFO: [", "VERBOSE: [", "DEBUG: ["})
+    for (size_t at; (at = s.find(sev)) != std::string::npos;)
+    {
+      const size_t end = s.find(']', at);
+      if (end == std::string::npos)
+        break;
+      s.erase(at, end + 1 - at);
+    }
+  const size_t from = s.find_first_not_of(' ');
+  if (from == std::string::npos)
+    return std::string();
+  return s.substr(from, s.find_last_not_of(' ') + 1 - from);
+}
+
+// The error and warning lines of what the runtime said -- its sink log and
+// whatever it printed to the console -- each down to its sentence, in order.
+// LiteRT's own lines look like "ERROR: [file.cc:12] text"; TFLite's kernel
+// errors reach stderr as "ERROR: tflite/kernels/x.cc:302 text"; the
+// accelerator libraries' glog lines ("E0000 ...") carry their severity in
+// the first letter.
+struct Said
+{
+  std::string text;
+  bool error = false;
+};
+
+std::vector<Said> warningsAndErrors(const std::string &log)
+{
+  // An error LiteRT passes up keeps its cause on the next line, after "└ "
+  // (litert_macros.h); one cause can hold another.  The cause is what says
+  // what went wrong -- `dlopen failed: library "libQnnIr.so" not found`
+  // under "Failed to load plugin at: ... with error:", from LiteRT 2.2.0's
+  // Qualcomm plugin packaged without that library -- and it carries no
+  // severity of its own, so it joins the line it belongs to.
+  static const char kCause[] = "\xE2\x94\x94";   // U+2514
+  std::vector<Said> lines;
+  bool open = false;   // the line before was kept: a cause continues it
   size_t pos = 0;
   while (pos < log.size())
   {
@@ -126,9 +164,21 @@ std::string lastLines(const std::string &log, int keep = 3)
       nl = log.size();
     std::string l = log.substr(pos, nl - pos);
     pos = nl + 1;
-    const bool glogBad = (l.size() > 5 && (l[0] == 'E' || l[0] == 'W') && l[1] == '0');
-    if (levelOf(l) == clpeak::LogLevel::Debug && !glogBad)
+    if (l.rfind(kCause, 0) == 0)
+    {
+      const std::string cause = withoutLocations(l.substr(sizeof(kCause) - 1));
+      if (!open || cause.empty())
+        continue;
+      std::string &line = lines.back().text;
+      line += line.empty() ? cause : (line.back() == ':' ? " " : ": ") + cause;
       continue;
+    }
+    open = false;
+    const bool glogBad = (l.size() > 5 && (l[0] == 'E' || l[0] == 'W') && l[1] == '0');
+    const clpeak::LogLevel level = levelOf(l);
+    if (level == clpeak::LogLevel::Debug && !glogBad)
+      continue;
+    const bool error = glogBad ? l[0] == 'E' : level == clpeak::LogLevel::Error;
     if (glogBad)
     {
       // "E0000 00:00:123.456 7 file.cc:9] text"
@@ -155,18 +205,123 @@ std::string lastLines(const std::string &log, int keep = 3)
           l = l.substr(sp + 1);
       }
     }
-    if (!l.empty() && (lines.empty() || lines.back() != l))
-      lines.push_back(l);
+    lines.push_back({withoutLocations(l), error});   // kept even when empty: its cause may follow
+    open = true;
+  }
+  for (Said &l : lines)
+  {
+    // A location with no cause after it leaves its colon behind.
+    while (!l.text.empty() && (l.text.back() == ':' || l.text.back() == ' '))
+      l.text.pop_back();
+  }
+  return lines;
+}
+
+// A warning with its numbers taken out, for telling one said again with
+// another buffer size or tensor index from a new one.
+std::string warningKey(const std::string &text)
+{
+  std::string key;
+  for (char c : text)
+    if (!std::isdigit((unsigned char)c))
+      key += c;
+    else if (key.empty() || key.back() != '#')
+      key += '#';
+  return key;
+}
+
+// Per accelerator, the warnings its sessions printed on the way to coming
+// up fine: routine, and so no reason for a later one failing.  MediaTek's
+// NPU stack warns on every session that the NeuronAdapter lacks an optional
+// symbol (NeuronExecution_setConfig, NeuroPilot 8) and what buffer sizes its
+// dispatch asked Neuron for; quoted as the reason a graph was refused, they
+// stood in for the refusal itself.
+std::mutex g_routineMutex;
+std::map<int, std::set<std::string>> g_routineWarnings;
+
+void noteRoutine(LitertAccel accel, const std::string &log)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  std::set<std::string> &seen = g_routineWarnings[(int)accel];
+  for (const Said &l : warningsAndErrors(log))
+    if (!l.error && !l.text.empty())
+      seen.insert(warningKey(l.text));
+}
+
+// Per accelerator, the least time a session took to create: the part of a
+// creation that does not grow with its graph (litertCreateFloorUs).
+std::map<int, double> g_createFloorUs;
+
+void noteCreate(LitertAccel accel, double us)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  auto it = g_createFloorUs.find((int)accel);
+  if (it == g_createFloorUs.end() || us < it->second)
+    g_createFloorUs[(int)accel] = us;
+}
+
+// Accelerators where a profiled run that worked named no kernel
+// (litertProfilesNameKernels).
+std::set<int> g_unnamedProfiles;
+
+// The last few lines of what the runtime said while failing, for a row
+// reason, less the warnings its sessions on this accelerator print anyway.
+std::string lastLines(const std::string &log, LitertAccel accel, int keep = 3)
+{
+  std::set<std::string> routine;
+  {
+    std::lock_guard<std::mutex> lock(g_routineMutex);
+    auto it = g_routineWarnings.find((int)accel);
+    if (it != g_routineWarnings.end())
+      routine = it->second;
+  }
+  std::vector<std::string> said;
+  for (const Said &l : warningsAndErrors(log))
+  {
+    if (l.text.empty() || (!l.error && routine.count(warningKey(l.text))))
+      continue;
+    // A line said again counts where it was said last: a compiler refusing
+    // operator after operator alternates two lines.
+    said.erase(std::remove(said.begin(), said.end(), l.text), said.end());
+    said.push_back(l.text);
   }
   std::string out;
-  const size_t from = lines.size() > (size_t)keep ? lines.size() - keep : 0;
-  for (size_t i = from; i < lines.size(); i++)
+  const size_t from = said.size() > (size_t)keep ? said.size() - keep : 0;
+  for (size_t i = from; i < said.size(); i++)
   {
     if (!out.empty())
       out += "; ";
-    out += lines[i];
+    out += said[i];
   }
   return out;
+}
+
+// What a compiler plugin took of the graph, from LiteRT's account of its
+// partitioning ("Partitioned subgraph<0>, selected 2 ops, from a total of 19
+// ops.", compiler_plugin.cc, at INFO): "the NPU compiler took 2 of the
+// graph's 19 operators", or empty when it took them all or none was asked.
+// It is the refusal when a vendor's own lines leave it out -- MediaTek's say
+// nothing when Neuron declines operators its plugin had legalized.
+std::string partitionWords(const std::string &log, const std::string &accelName)
+{
+  static const char kMark[] = "Partitioned subgraph<";
+  long long taken = 0, total = 0;
+  for (size_t at = log.find(kMark); at != std::string::npos; at = log.find(kMark, at + 1))
+  {
+    long long k = 0, m = 0;
+    if (std::sscanf(log.c_str() + at, "Partitioned subgraph<%*d>, selected %lld ops, from a total of %lld ops", &k,
+                    &m) == 2)
+    {
+      taken += k;
+      total += m;
+    }
+  }
+  if (total <= 0 || taken >= total)
+    return std::string();
+  if (total == 1)
+    return "the " + accelName + " compiler did not take the graph's one operator";
+  return "the " + accelName + " compiler took " + (taken == 0 ? std::string("none") : std::to_string(taken)) +
+         " of the graph's " + std::to_string(total) + " operators";
 }
 
 // ---------------------------------------------------------------------------
@@ -206,15 +361,18 @@ struct EnvRecord
 std::mutex g_envMutex;
 std::map<int, EnvRecord> g_envs;   // by accelerator
 
-// The Metal accelerator adds a residency set to its command queue for every
-// compiled model and never removes one, and IOGPUMetalCommandQueue asserts
-// -- an abort -- on the 33rd ("command queue residency set limit of 32
-// exceeded").  Disabling the sets through the GPU options does not stop it,
-// and neither does draining an autorelease pool; only a new command queue
-// does, which means a new environment.  So on Apple the GPU environment is
-// torn down and rebuilt after this many models, between sessions, at the
-// cost of ~300 ms of Metal initialisation each time.  A doubling ladder
-// over nine formats compiles that many models before its second test.
+// The Metal accelerator of LiteRT 2.2.0 adds a residency set to its
+// command queue for every compiled model and never removes one, and
+// IOGPUMetalCommandQueue asserts -- an abort -- on the 33rd ("command queue
+// residency set limit of 32 exceeded").  Disabling the sets through the GPU
+// options does not stop it, and neither does draining an autorelease pool;
+// only a new command queue does, which means a new environment.  So on
+// Apple the GPU environment of such a runtime is torn down and rebuilt
+// after this many models, between sessions, at the cost of ~300 ms of Metal
+// initialisation each time.  A doubling ladder over nine formats compiles
+// that many models before its second test.  2.3.0 (ABI 1.1.0) reworked its
+// residency and compiled 125 models in one environment on an M1 Pro, so its
+// environment is kept (LitertRuntime::abi11).
 #ifdef __APPLE__
 constexpr int kGpuModelsPerEnvironment = 24;
 #else
@@ -257,7 +415,7 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
     g_envs.erase(it);
     it = g_envs.end();
   }
-  if (it != g_envs.end() && it->second.env && accel == LitertAccel::Gpu &&
+  if (it != g_envs.end() && it->second.env && accel == LitertAccel::Gpu && !rt.abi11 &&
       kGpuModelsPerEnvironment > 0 && it->second.models >= kGpuModelsPerEnvironment &&
       it->second.live == 0)
   {
@@ -319,7 +477,7 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
   {
     error = "LiteRT could not create an environment for the " + std::string(litertAccelName(accel)) +
             ": " + litertStatusText(rt, st);
-    const std::string why = lastLines(logged);
+    const std::string why = lastLines(logged, accel);
     if (!why.empty())
       error += " (" + why + ")";
     rec.error = error;
@@ -373,6 +531,21 @@ bool addOpaque(const LitertRuntime &rt, LiteRtOptions options, const char *ident
   return true;
 }
 
+// The most runs a timed batch leaves in flight on the WebGPU accelerator
+// before it reads one back.  Dawn takes a fence for every queue submission
+// and recycles them only when the device is next polled, which LiteRT's
+// WebGPU accelerator does when an output is read; NVIDIA's Linux driver
+// holds a file descriptor (/dev/nvidia0) for every fence.  A batch of 500
+// runs read once at its end took ~950 descriptors on an RTX 5060 (LiteRT
+// 2.3.0, driver 610.57), about two a run, reached the process's limit of
+// 1024 and lost the device in the gemm test's first 1024-wide rung
+// ("Ran out of file descriptors": vkCreateFence failed with
+// VK_ERROR_OUT_OF_HOST_MEMORY).  The pool stays at its high-water mark; with
+// this bound the device's every test ran in under 270 descriptors.  Each
+// read drains the queue: it added ~4 us a run to the 50 us of a batched
+// dispatch there, under half a percent of a millisecond's run.
+constexpr unsigned kWebGpuRunsPerRead = 64;
+
 } // namespace
 
 bool litertPrepareEnvironment(const LitertRuntime &rt, LitertAccel accel, std::string &error)
@@ -394,6 +567,29 @@ void litertResetEnvironment(const LitertRuntime &rt, LitertAccel accel)
     it->second.api.LiteRtDestroyEnvironment(it->second.env);
   g_envs.erase(it);
   litertDrainLog(rt);
+  std::lock_guard<std::mutex> routineLock(g_routineMutex);
+  g_routineWarnings.erase((int)accel);
+  g_createFloorUs.erase((int)accel);
+  g_unnamedProfiles.erase((int)accel);
+}
+
+bool litertProfilesNameKernels(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  return g_unnamedProfiles.count((int)accel) == 0;
+}
+
+void litertNoteUnnamedProfile(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  g_unnamedProfiles.insert((int)accel);
+}
+
+double litertCreateFloorUs(LitertAccel accel)
+{
+  std::lock_guard<std::mutex> lock(g_routineMutex);
+  auto it = g_createFloorUs.find((int)accel);
+  return it == g_createFloorUs.end() ? 0.0 : it->second;
 }
 
 std::string litertEnvironmentLog(LitertAccel accel)
@@ -422,6 +618,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   s->profile_ = cfg.profile;
   s->accel_ = dev.accel;
   s->accelName_ = litertAccelName(dev.accel);
+  const bool webGpu = dev.accel == LitertAccel::Gpu && dev.vendor == "WebGPU";
+  if (webGpu)
+    s->runsPerRead_ = kWebGpuRunsPerRead;
 
   s->env_ = environmentFor(rt, dev.accel, error);
   if (!s->env_)
@@ -431,8 +630,16 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   std::string console;   // what the runtime printed while creating
   auto fail = [&](const std::string &what, LiteRtStatus st) -> std::unique_ptr<LitertSession> {
     s->creationLog = console + litertDrainLog(rt);
+    // Under --verbose the mute has already recorded the console line by
+    // line, but only its first ScopedConsoleMute::kMaxLines, and what
+    // explains a failure is usually last.  A failed session's console goes
+    // on whole; one that came up needs no second copy.
+    if (!console.empty() && clpeak::verboseEnabled())
+      CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
     error = what + ": " + litertStatusText(rt, st);
-    const std::string why = lastLines(s->creationLog);
+    std::string why = lastLines(s->creationLog, dev.accel);
+    if (const std::string took = partitionWords(s->creationLog, s->accelName_); !took.empty())
+      why = why.empty() ? took : took + "; " + why;
     if (!why.empty())
       error += " (" + why + ")";
     return nullptr;
@@ -470,8 +677,17 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     std::string toml;
     if (cfg.gpuPrecision != kLiteRtDelegatePrecisionDefault)
       toml += "precision = " + std::to_string((int)cfg.gpuPrecision) + "\n";
-    if (cfg.gpuAllowQuantized)
+    if (cfg.gpuInt8Kernels)
       toml += "allow_src_quantized_fc_conv_ops = true\n";
+    // Never to the WebGPU accelerator: it segfaults compiling any model with
+    // sharing on, a one-node fp32 graph included -- its own copy of TFLite
+    // reads the runtime's tflite::Subgraph with another layout (LiteRT 2.2.0
+    // and 2.3.0; NOTES.md).  Its 8-bit kernels run without it: int8_weight's
+    // answer moves from 1212 ppm to 3926 when they are allowed.
+    if (cfg.gpuShareConstants && !webGpu)
+      toml += "enable_constant_tensors_sharing = true\n";
+    if (cfg.gpuIrModel)
+      toml += "use_ir_model = true\n";
     if (!toml.empty() && !addOpaque(rt, s->options_, "gpu_options", toml, optErr))
       return fail(optErr, kLiteRtStatusErrorInvalidArgument);
   }
@@ -489,8 +705,15 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     std::string toml;
     if (dev.vendor == "Qualcomm")
     {
+      // QNN's own log at warnings, not LiteRT's default of INFO: at INFO the
+      // HTP narrates every tensor and node it is handed (QnnDsp <I>
+      // QnnTensor_createGraphTensor, QnnBackend_validateOpConfig, ...), some
+      // 25 KB per session, which on a Galaxy S24 was two thirds of the run
+      // log's debug text by the time LiteRT's NPU tests were half done.  ONNX
+      // Runtime's QNN provider never lets that level through either.
       identifier = "qualcomm";
-      toml = "htp_performance_mode = " +
+      toml = "log_level = " + std::to_string((int)kLiteRtQualcommLogLevelWarn) + "\n" +
+             "htp_performance_mode = " +
              std::to_string((int)kLiteRtQualcommHtpPerformanceModeBurst) + "\n" +
              "dsp_performance_mode = " +
              std::to_string((int)kLiteRtQualcommDspPerformanceModeBurst) + "\n";
@@ -534,8 +757,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     return fail(std::string("LiteRT could not compile the model for the ") + s->accelName_, compileSt);
   s->createUs = elapsedUs(t0);
   s->creationLog = console + litertDrainLog(rt);
-  if (!console.empty() && clpeak::verboseEnabled())
-    CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
+  noteRoutine(dev.accel, s->creationLog);
+  noteCreate(dev.accel, s->createUs);
+  s->took_ = partitionWords(s->creationLog, s->accelName_);
   // Where a session's time went, for the run log: the host generating the
   // model against the runtime loading and compiling it.  On a phone both
   // can dwarf the measurement that follows.
@@ -543,11 +767,22 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
               s->bytes_.description.c_str(), (double)s->bytes_.size() / 1048576.0, s->bytes_.buildUs / 1000.0,
               s->accelName_.c_str(), s->createUs / 1000.0);
 
+  // Every operation on the accelerator, by the runtime's own count.  The
+  // older answer counts what any delegate took, the CPU's XNNPACK one
+  // included; ABI 1.1.0's also requires that the CPU took nothing, which is
+  // the claim a GPU or NPU row makes, so it is asked as well where the
+  // runtime has it.
   if (dev.accel != LitertAccel::Cpu)
   {
     bool full = false;
     st = rt.api.LiteRtCompiledModelIsFullyAccelerated(s->compiled_, &full);
     s->fullyAccelerated_ = (st == kLiteRtStatusOk) && full;
+    if (s->fullyAccelerated_ && rt.api.LiteRtCompiledModelIsNonCpuFullyAccelerated)
+    {
+      bool nonCpu = false;
+      st = rt.api.LiteRtCompiledModelIsNonCpuFullyAccelerated(s->compiled_, &nonCpu);
+      s->fullyAccelerated_ = (st == kLiteRtStatusOk) && nonCpu;
+    }
   }
 
   // ---- buffers -------------------------------------------------------------
@@ -629,7 +864,8 @@ std::string LitertSession::offDevice() const
   if (fullyAccelerated_)
     return std::string();
   return "LiteRT handed part of this graph back to the CPU: the " + accelName_ +
-         " accelerator did not take every operation, so this would not be a " + accelName_ + " number";
+         " accelerator did not take every operation" + (took_.empty() ? "" : " (" + took_ + ")") +
+         ", so this would not be a " + accelName_ + " number";
 }
 
 bool LitertSession::writeInput(size_t i, const void *data, size_t bytes, std::string &error)
@@ -686,8 +922,6 @@ bool LitertSession::run(std::string &error)
       sync(ignored);   // the first run's time is to completion, like the rest
     }
     firstRunUs = elapsedUs(t0);
-    if (!console.empty() && clpeak::verboseEnabled())
-      CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     CLPEAK_VLOG("litert: %s: first inference %.0f ms\n", bytes_.description.c_str(), firstRunUs / 1000.0);
   }
   else
@@ -695,9 +929,12 @@ bool LitertSession::run(std::string &error)
                                          outputs_.size(), outputs_.data());
   if (st != kLiteRtStatusOk)
   {
+    // Whole, as for a failed creation.
+    if (!console.empty() && clpeak::verboseEnabled())
+      CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     const std::string logged = console + litertDrainLog(*rt_);
     error = "inference failed: " + litertStatusText(*rt_, st);
-    const std::string why = lastLines(logged);
+    const std::string why = lastLines(logged, accel_);
     if (!why.empty())
       error += " (" + why + ")";
     return false;
@@ -729,16 +966,22 @@ double LitertSession::timeRuns(unsigned n, std::string &error, bool syncEach)
 {
   if (n == 0)
     return 0.0;
+  // A read after every run, after every runsPerRead_ (0: no such limit), and
+  // after the batch's last.
+  const unsigned every = syncEach ? 1 : runsPerRead_;
+  unsigned pending = 0;
   const auto t0 = Clock::now();
   for (unsigned i = 0; i < n; i++)
   {
     if (!run(error))
       return -1.0;
-    if (syncEach && !sync(error))
-      return -1.0;
+    if (++pending == every || i + 1 == n)
+    {
+      if (!sync(error))
+        return -1.0;
+      pending = 0;
+    }
   }
-  if (!syncEach && !sync(error))
-    return -1.0;
   return elapsedUs(t0) / n;
 }
 
@@ -766,9 +1009,35 @@ bool LitertSession::outputBytes(size_t i, std::vector<uint8_t> &out, std::string
   return true;
 }
 
-std::vector<std::string> LitertSession::profileOps(std::string &error)
+bool LitertSession::fillOutput(size_t i, uint8_t byte, std::string &error)
+{
+  if (i >= outputs_.size())
+  {
+    error = "no output " + std::to_string(i);
+    return false;
+  }
+  void *p = nullptr;
+  LiteRtStatus st = rt_->api.LiteRtLockTensorBuffer(outputs_[i], &p, kLiteRtTensorBufferLockModeWrite);
+  if (st != kLiteRtStatusOk || !p)
+  {
+    error = "LiteRT could not map an output buffer: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  std::memset(p, byte, outputBytes_[i]);
+  st = rt_->api.LiteRtUnlockTensorBuffer(outputs_[i]);
+  if (st != kLiteRtStatusOk)
+  {
+    error = "LiteRT could not unmap an output buffer: " + litertStatusText(*rt_, st);
+    return false;
+  }
+  return true;
+}
+
+std::vector<std::string> LitertSession::profileOps(std::string &error, bool *runFailed)
 {
   std::vector<std::string> out;
+  if (runFailed)
+    *runFailed = false;
   if (!profile_ || !rt_->api.LiteRtCompiledModelGetProfiler || !rt_->api.LiteRtStartProfiler ||
       !rt_->api.LiteRtStopProfiler || !rt_->api.LiteRtGetNumProfilerEvents ||
       !rt_->api.LiteRtGetProfilerEvents)
@@ -788,7 +1057,11 @@ std::vector<std::string> LitertSession::profileOps(std::string &error)
   const bool ok = run(error);
   rt_->api.LiteRtStopProfiler(prof);
   if (!ok)
+  {
+    if (runFailed)
+      *runFailed = true;
     return out;
+  }
   int n = 0;
   if (rt_->api.LiteRtGetNumProfilerEvents(prof, &n) != kLiteRtStatusOk || n <= 0)
     return out;

@@ -55,6 +55,12 @@ class _StubBindings implements ClpeakBindings {
   ClpeakRequestCancel get requestCancel => () {};
 
   @override
+  void setOnScreen(bool onScreen) {}
+
+  @override
+  void setPaused(bool paused) {}
+
+  @override
   String version() => 'test';
 
   @override

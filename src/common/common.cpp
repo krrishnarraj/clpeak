@@ -46,6 +46,7 @@ LogSink *logSink()                 { return g_logSink; }
 
 static std::atomic<int> g_realStderrFd{-1};
 void setRealStderrFd(int fd) { g_realStderrFd.store(fd, std::memory_order_relaxed); }
+int  realStderrFd()          { return g_realStderrFd.load(std::memory_order_relaxed); }
 
 void stderrWrite(const std::string &text)
 {

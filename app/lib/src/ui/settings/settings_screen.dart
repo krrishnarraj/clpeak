@@ -801,6 +801,7 @@ class _EpLibrariesPanel extends StatelessWidget {
                   final lib = libraries[i];
                   final st = _statusOf(lib);
                   final registered = st?.registered ?? false;
+                  final replaces = st?.replaces ?? const <String>[];
                   return CRow(
                     rule: i < libraries.length - 1,
                     accent: registered ? tint : null,
@@ -816,6 +817,11 @@ class _EpLibrariesPanel extends StatelessWidget {
                               Text(lib.name, style: t.mono),
                               const SizedBox(height: 3),
                               Text(lib.path, style: t.monoSmallDim),
+                              for (final r in replaces) ...[
+                                const SizedBox(height: 3),
+                                Text('In place of Windows ML\'s $r',
+                                    style: t.monoSmallDim),
+                              ],
                               if (st != null && !registered) ...[
                                 const SizedBox(height: 3),
                                 Text(st.error,

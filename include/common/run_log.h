@@ -1,11 +1,13 @@
 #ifndef CLPEAK_RUN_LOG_H
 #define CLPEAK_RUN_LOG_H
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <functional>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <common/common.h>
 #include <common/run_document.h>
@@ -35,10 +37,14 @@ class logger;
 //   --verbose exists for -- means it never is, and the sidecar is then the
 //   only record.  It is removed once the document has been saved.
 //
-//   The cap.  A runtime that logs per node per session can produce more
-//   text than a phone wants to share.  Past kMaxMessageBytes of message
-//   text, Debug and Info entries are dropped (and counted); warnings and
-//   errors always get through, and finish() records how much was dropped.
+//   The caps.  A runtime that logs per node per session can produce more
+//   text than a phone wants to share.  Only Debug is capped: Info is where
+//   the run is and what it read, and with warnings and errors it always gets
+//   through.  The document keeps kMaxDocumentDebugBytes of Debug text and
+//   finish() counts what it left out; the sidecar, which is on disk, gone
+//   once the document is saved, and read for the run's last minutes, keeps
+//   kMaxSidecarDebugBytes.  Each says so in a warning the moment it starts
+//   dropping, so a run that dies past its cap says it was cut.
 //
 // Callbacks from vendor runtimes fire on their own threads, so record() is
 // serialised.  Scope is read from the open logger without locking it: the
@@ -58,16 +64,33 @@ public:
     // The run's RunLog, or nullptr outside a run.
     static RunLog *current();
 
-    // Seconds since this RunLog was created -- the run's t=0, which is also
-    // what `generated_at` names.
+    // A line from the app hosting the run rather than from the run itself --
+    // the app leaving the screen, say -- recorded on the in-flight run's log
+    // and sidecar with `source`, and rendered nowhere.  A no-op outside a
+    // run.  Safe from any thread at any moment of the run, which onLog() is
+    // not: it neither reads the open logger nor outlives the RunLog, and
+    // once finish() has run the document may be being written, so a later
+    // note reaches the sidecar alone.
+    static void hostNote(clpeak::LogLevel level, const std::string &source,
+                         const std::string &message);
+
+    // Seconds on the run's clock: since `generated_at`, which is this
+    // RunLog's creation -- or for a resumed run the first part's start, so
+    // the clock goes on across the gap (seedPrior).
     double elapsedS() const;
+
+    // Seconds since this RunLog was created: the part of the run this
+    // process is running.
+    double partElapsedS() const;
 
     // ---- Sidecar ---------------------------------------------------------
 
     // Start mirroring entries to the sidecar of `outputFile`.  Entries
     // already recorded are written first, so nothing recorded before the
-    // output path was known is missing from it.
-    void openSidecar(const std::string &outputFile);
+    // output path was known is missing from it.  With `append` -- a resumed
+    // run whose sidecar holds the part before -- the file is continued
+    // instead: no header, and only the entries recorded since seedPrior().
+    void openSidecar(const std::string &outputFile, bool append = false);
 
     // Stop mirroring; remove the file when the document it stood in for has
     // been saved.
@@ -84,6 +107,11 @@ public:
     // too, so the event it goes on to render carries the same time.
     void record(LogEntry &entry);
 
+    // The same, onto the sidecar alone: a reading without --verbose, which
+    // the document holds in its device tree and keeps off its log.  A run
+    // that dies leaves no tree, and the sidecar keeps the numbers it got to.
+    void recordToSidecar(LogEntry &entry);
+
     // LogSink: a message with no logger context of its own.  Scoped by the
     // attached logger when there is one, else recorded as-is.
     void onLog(clpeak::LogLevel level, const std::string &source,
@@ -97,19 +125,30 @@ public:
     // the GUI bridge forwards an event.  Unset: stderr, as with no run.
     void setFallbackRenderer(std::function<void(const LogEntry &)> render);
 
-    // Record the truncation summary, if anything was dropped.  Call before
+    // Record how much Debug the document left out, if any.  Call before
     // the document is saved.
     void finish();
 
-    // Message text the log keeps before it starts dropping Debug and Info.
-    static constexpr std::size_t kMaxMessageBytes = 4u << 20;
+    // ---- A resumed run (run_resume.h) --------------------------------------
+
+    // Put the part before's entries ahead of everything recorded so far, and
+    // set the clock to `clockOffsetS` past `generated_at`, entries already
+    // recorded included.  `prior` is what the document keeps; its sidecar
+    // already holds the whole of that part.
+    void seedPrior(std::vector<LogEntry> prior, double clockOffsetS);
+
+    // Debug message text each keeps before it starts dropping Debug.
+    static constexpr std::size_t kMaxDocumentDebugBytes = 64u << 20;
+    static constexpr std::size_t kMaxSidecarDebugBytes  = 128u << 20;
 
 private:
-    void appendLocked(LogEntry &entry);
+    void appendLocked(LogEntry &entry, bool toDocument);
     void sidecarWriteLocked(const std::string &line);
 
     RunDocument &doc;
     std::chrono::steady_clock::time_point start;
+    // Read from vendor threads by elapsedS(), set once by seedPrior().
+    std::atomic<double> clockOffset{0.0};
     std::mutex   mutex;
     logger      *active = nullptr;
     std::function<void(const LogEntry &)> fallback;
@@ -117,8 +156,12 @@ private:
     FILE        *sidecar = nullptr;
     std::string  sidecarPath;
 
-    std::size_t  messageBytes = 0;
-    std::size_t  dropped      = 0;
+    std::size_t  documentDebugBytes = 0;
+    std::size_t  documentDropped    = 0;
+    std::size_t  sidecarDebugBytes  = 0;
+    std::size_t  sidecarDropped     = 0;
+    bool         finished           = false;   // finish() has run (hostNote)
+    std::size_t  priorEntries       = 0;       // doc.log's first, on disk already
 };
 
 #endif  // CLPEAK_RUN_LOG_H

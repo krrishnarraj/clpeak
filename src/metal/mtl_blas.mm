@@ -219,10 +219,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
     auto test = currentDeviceScope->beginTest(
         {"mps_gemm", "MPS GEMM peak", "flops", Category::Unknown,
-         "Matrix-multiply speed through Apple's own tuned GPU library, on a "
-         "large square problem.  Where the compute rows show what the hardware "
-         "can do in principle, this shows what Apple's shipping code actually "
-         "reaches on the operation most graphics and AI work is built from.",
+         "Peak GEMM rate through Apple's MPS library, on a large square problem.",
          TestShape::Heterogeneous, "data type"});
 
     if (!dev.info.isAppleSilicon)
@@ -240,12 +237,11 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
     // One note per dtype row, threaded through every emit / skip site below.
-    const char *fp32Note = "Full 32-bit precision, the accurate but slowest option.";
-    const char *fp16Note = "16-bit inputs, which the GPU's matrix hardware runs at "
-                           "several times the 32-bit rate.";
-    const char *bf16Note = "bfloat16 inputs -- 16 bits arranged for AI work, trading "
-                           "digits of accuracy for a wider number range.  Needs an M3 "
-                           "or newer GPU.";
+    // A, B and C share one dataType below, so fp16 and bf16 write their result
+    // in that type; MPS does not document the accumulator it uses internally.
+    const char *fp32Note = "fp32 inputs and accumulator.";
+    const char *fp16Note = "fp16 inputs and output.";
+    const char *bf16Note = "bf16 inputs and output (MPSGraph).  Needs M3 or newer.";
 
     // Pre-allocate the largest input set (fp32, 4 bytes) once; smaller dtypes
     // alias the same MTLBuffer with a different MPSMatrixDescriptor stride.
@@ -428,10 +424,8 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest(
         {"mps_attention", "MPS attention SDPA (H16 S4096 D128)", "flops",
          Category::Unknown,
-         "Speed of the attention step -- the operation a language model spends "
-         "most of its time in, deciding which earlier words each word should "
-         "look at.  Apple's library runs it as one fused unit; the shape is "
-         "fixed at a small-LLM size so the number compares across devices.",
+         "Fused fp16 scaled-dot-product attention through MPSGraph, at a fixed "
+         "shape.  FLOPs count only the QK^T and PV matmuls.",
          TestShape::Homogeneous});
 
     if (!dev.info.isAppleSilicon)

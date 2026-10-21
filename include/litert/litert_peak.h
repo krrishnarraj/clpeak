@@ -3,6 +3,7 @@
 
 #ifdef ENABLE_LITERT
 
+#include <common/answer_check.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/logger.h>
@@ -61,6 +62,30 @@ enum class LitertFormat;   // src/litert/litert_model.h
 enum class LitertAccel { Cpu, Gpu, Npu };
 const char *litertAccelName(LitertAccel a);   // "CPU" / "GPU" / "NPU"
 
+// How a raced format's graph is written and run (gemm.cpp, conv.cpp,
+// block.cpp, each with its numbers): the operator its layers are, whether a
+// GPU may use its 8-bit kernels, which of its graph pipelines builds it, and
+// whether an integer graph's inputs and outputs are float.  All but the last
+// are raced on rate; that one is settled by the answer
+// (LitertPeak::resolveIo), since it moves no rate.
+struct LitertForm
+{
+  // The layers as 1x1 CONV_2Ds over a grid of positions, not FULLY_CONNECTED.
+  bool conv1x1 = false;
+  // GPU: allow_src_quantized_fc_conv_ops -- the accelerator's 8-bit FC and
+  // convolution kernels, which it otherwise disallows -- with the
+  // enable_constant_tensors_sharing its documentation requires where the
+  // graph's constants allow it (LitertPlan::gpuShareConstants).
+  bool gpuInt8Kernels = false;
+  // An integer format's graph takes and returns float32, quantized inside it
+  // (QUANTIZE in, DEQUANTIZE out), the converter's default form.
+  bool floatIo = false;
+  // GPU: use_ir_model -- the accelerator builds its GPU graph through the
+  // IrModel pipeline LiteRT 2.3.0 added beside the GraphFloat32 one
+  // (LitertPlan::gpuPipelineChoice).
+  bool gpuIrModel = false;
+};
+
 struct litert_device_info_t
 {
   LitertAccel accel = LitertAccel::Cpu;
@@ -79,6 +104,7 @@ public:
 
   static constexpr Backend kBackend = Backend::Litert;
   Backend backend() const override { return kBackend; }
+  void applyOptions(const CliOptions &opts) override;
   int runAll() override;
 
   static BackendInventory enumerate();
@@ -101,33 +127,39 @@ public:
   // and reason when it could not be measured.  The rate tests ask before
   // publishing a format's rate -- a kernel that returns a wrong answer
   // (Mali's int8 path on a Pixel 7a was 250% off) is not a capability, and
-  // its speed is not a number anyone should divide by.
-  struct AnswerCheck
+  // its speed is not a number anyone should divide by.  The line and the
+  // words are the three ML backends' (include/common/answer_check.h).
+  struct AnswerCheck : clpeak::AnswerCheck
   {
-    double ppm = -1.0;
-    // The answer held NaN or infinity where the reference is finite
-    // everywhere: no figure, and the most wrong answer there is.
-    bool nonFinite = false;
-    ResultStatus status = ResultStatus::Ok;
-    std::string error;
+    // The output is filled with a marker before the run.  The share of its
+    // elements still holding it once the run returned, and -- read only for
+    // a wrong answer -- after a second run, with that run's figure: a marker
+    // that survives both is an answer never written, one the second run
+    // replaces is an answer that lands after the run returns.
+    double unwritten = -1.0, unwrittenRerun = -1.0, rerunPpm = -1.0;
   };
-  // `conv1x1` checks the same product written as a 1x1 CONV_2D, the form
-  // litert_gemm races the int8 one against.
+  // The format's answer in one form (LitertForm): `conv1x1` is the same
+  // product written as a 1x1 CONV_2D, `gpuInt8Kernels` with the GPU's 8-bit
+  // kernels allowed, `floatIo` an integer graph with float inputs and outputs.
   const AnswerCheck &answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                                 bool conv1x1 = false);
-  // Empty when the format's answer is right or could not be checked;
-  // otherwise the reason a rate row is refused with.
+                                 const LitertForm &form = LitertForm());
+  // Empty when the format's answer in that form is right or could not be
+  // checked; otherwise the reason a rate row is refused with.
   std::string wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                          bool conv1x1 = false);
+                          const LitertForm &form = LitertForm());
+  // The inputs and outputs an integer format's graph takes in `form` on this
+  // device: its own int8 or int16 ones while its answer is right with them,
+  // float ones quantized inside the graph when only those answer right --
+  // LiteRT 2.2.0's OpenCL accelerator never converts an integer graph's
+  // inputs and outputs (src/litert/AGENTS.md has the source).  Any other
+  // format's are float already, and `form` comes back as it went in.
+  LitertForm resolveIo(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                       LitertForm form);
 
 private:
-  std::map<std::tuple<int, int, bool>, AnswerCheck> answerChecks_;   // (accelerator, format, conv1x1)
+  // (accelerator, format, conv1x1, gpuInt8Kernels, floatIo, gpuIrModel)
+  std::map<std::tuple<int, int, bool, bool, bool, bool>, AnswerCheck> answerChecks_;
 };
-
-// A relative RMS error past this is a wrong answer, not a loss of precision:
-// int8 with the result itself quantized costs ~1%, nothing legitimate here
-// reaches 10%.
-constexpr double kLitertWrongAnswerPpm = 100000.0;
 
 // The accelerators this machine can actually run, accelerators first and the
 // CPU last: each has compiled and run one tiny model with nothing handed

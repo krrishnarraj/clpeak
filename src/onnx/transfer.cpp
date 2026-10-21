@@ -179,11 +179,9 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   auto test = currentDeviceScope->beginTest(
       {"onnx_transfer_bw", "ONNX host transfer bandwidth", "bps",
        Category::Bandwidth,
-       "How fast data reaches this provider and comes back -- the cable every "
-       "other test here keeps its tensors resident to avoid measuring.  It "
-       "decides whether offloading is worth doing at all, and vendors never "
-       "quote it.  A device sharing memory with the host makes no real "
-       "transfer and says so.",
+       "How fast data reaches this provider and comes back -- the copy every "
+       "other test avoids by keeping tensors resident.  A device that shares "
+       "memory with the host makes no real transfer and says so.",
        TestShape::Heterogeneous, "direction"});
 
   // ---- Trip out ----------------------------------------------------------
@@ -258,12 +256,10 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   }
 
   const std::string h2dNote =
-      "Host to device: the tensor is handed over and one row of it comes "
-      "back, so almost all of the time is the trip out.  Reported at the "
-      "largest size measured" +
+      "Host to device: a tensor in, one row of it back.  Reported at the "
+      "largest size" +
       (lastElems > 0 ? " (" + std::to_string((lastElems * 2) >> 20) + " MB)" : std::string()) +
-      ", since some providers copy only the big tensors and pass small ones "
-      "by pointer.";
+      ", since some providers pass small tensors by pointer.";
   const char *sharedNote =
       "this provider shares memory with the host -- the tensor is handed over "
       "by pointer and no copy takes place";
@@ -290,7 +286,13 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // elementwise pass over 16 MB is exactly the smallest thing its planner
   // sends to the Neural Engine.
   const int64_t rtElems = (firstElems > 0) ? firstElems : kMinElems;
-  const std::string rtSize = " (" + std::to_string((rtElems * 2) >> 20) + " MB)";
+  const std::string rtSize = std::to_string((rtElems * 2) >> 20) + " MB";
+  // Includes the elementwise pass, which dominates on hardware slow at that
+  // (onnx-activation); measured small where h2d is reported large, so the
+  // two rows are not one subtraction apart.
+  const std::string rtNote =
+      "The whole cost of offloading a trivial operation: a tensor out, one "
+      "elementwise pass, the result back, at " + rtSize + ".";
   double roundUs = 0.0;
   if ((uint64_t)rtElems * 2ull <= maxTensorBytes() && !clpeak::cancelRequested())
   {
@@ -303,27 +305,17 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       CLPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
                   ep.providerKey.c_str(),
                   (long long)((rtElems * 2) >> 20), bps);
-      test.emit("roundtrip", (float)bps,
-                ("The full cost of offloading: a tensor out, one trivial "
-                 "operation, the result back -- the bar any offloaded work has "
-                 "to clear.  It includes one elementwise pass on the device, "
-                 "which on hardware slow at that (see the activation rows) is "
-                 "what dominates.  Measured at the smallest size" + rtSize +
-                 ", where the trip out is reported at the largest, so the two "
-                 "rows are not one subtraction apart.").c_str());
+      test.emit("roundtrip", (float)bps, rtNote.c_str());
     }
     else
     {
       test.skip("roundtrip", r.status,
-                r.error.empty() ? "run failed" : r.error,
-                "Both directions, which is what an offloaded operation "
-                "actually pays.");
+                r.error.empty() ? "run failed" : r.error, rtNote);
     }
   }
   else
   {
-    test.skip("roundtrip", ResultStatus::Error, "no usable size",
-              "Both directions, which is what an offloaded operation pays.");
+    test.skip("roundtrip", ResultStatus::Error, "no usable size", rtNote);
   }
 
   // ---- Trip back, by difference ------------------------------------------
@@ -334,10 +326,8 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   // cheap: the ANE applies a pointwise operation at about a seventh of the
   // rate it reads memory (see onnx-activation).
   const std::string d2hNote =
-      "Device to host, worked out as the difference between the round trip "
-      "and an otherwise identical graph that keeps its result on the device.  "
-      "What is left is the return journey alone, at the round trip's size" +
-      rtSize + ".";
+      "Device to host: the round trip less the same graph keeping its result "
+      "on the device, at " + rtSize + ".";
 
   if (!transfers)
   {

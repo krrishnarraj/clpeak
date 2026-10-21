@@ -42,6 +42,10 @@ class ClpeakShell extends StatefulWidget {
 class _ClpeakShellState extends State<ClpeakShell> {
   int _tab = 0;
 
+  /// A run was in flight at the last build: a run that starts while another
+  /// tab is showing -- Continue in History -- is watched where runs are.
+  bool _wasRunning = false;
+
   static const _destinations = [
     (icon: Icons.speed_outlined, selected: Icons.speed, label: 'Benchmark'),
     (icon: Icons.history_outlined, selected: Icons.history, label: 'History'),
@@ -57,6 +61,13 @@ class _ClpeakShellState extends State<ClpeakShell> {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final wide = MediaQuery.sizeOf(context).width >= 900;
+    final running = context.select<BenchmarkService, bool>((s) => s.isRunning);
+    if (running && !_wasRunning && _tab != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _tab = 0);
+      });
+    }
+    _wasRunning = running;
 
     final content = IndexedStack(
       index: _tab,

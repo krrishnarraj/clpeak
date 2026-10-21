@@ -4,7 +4,7 @@ Copied verbatim from the `litert_cc_sdk.zip` asset of one LiteRT release,
 Apache-2.0 licensed (copyright notices retained in each file).
 
 - **Upstream:** https://github.com/google-ai-edge/LiteRT
-- **Tag:** `v2.2.0`  (`LITERT_RUNTIME_ABI_VERSION` 1.0.0)
+- **Tag:** `v2.3.0`  (`LITERT_RUNTIME_ABI_VERSION` 1.1.0)
 - **Path:** `litert_cc_sdk/litert/c/` inside the release's `litert_cc_sdk.zip`
 
 Only the C API is vendored (`litert/c/`, 35 headers): the transitive include

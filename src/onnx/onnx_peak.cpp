@@ -80,6 +80,8 @@ bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
 // off-chance (`named == false`) only under --verbose, where a registered
 // library is also confirmed with its path.  A registered library with no
 // device here, and an uncertified Windows ML provider, are verbose-only.
+// A Windows ML provider left out for a library added by hand is said out
+// loud: the catalog was asked for, and that provider of it is not there.
 static void pluginNotes(const OrtRuntime &rt,
                         std::vector<std::string> &loud,
                         std::vector<std::string> &quiet)
@@ -87,6 +89,9 @@ static void pluginNotes(const OrtRuntime &rt,
   const std::vector<onnx_ep_info_t> devices = onnxPluginDevices(rt);
   for (const auto &st : onnxEpLibraryStatus())
   {
+    for (const auto &p : st.replaces)
+      loud.push_back("Windows ML: the " + p + " execution provider is left out for the " +
+                     st.lib.name + " plugin library added by hand (" + st.lib.path + ")");
     if (!st.registered)
     {
       (st.lib.named ? loud : quiet)
@@ -303,6 +308,14 @@ OnnxRuntimeStatus onnxRuntimeStatus()
 OnnxPeak::OnnxPeak() = default;
 OnnxPeak::~OnnxPeak() = default;
 
+void OnnxPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
+
 int OnnxPeak::runAll()
 {
   const OrtRuntime *rt = ortRuntime();
@@ -401,6 +414,7 @@ int OnnxPeak::runAll()
           "GPU_UARCH_VERSION", "MAX_BATCH_SIZE", "OPTIMAL_BATCH_SIZE",
           "OPTIMIZATION_CAPABILITIES", "RANGE_FOR_ASYNC_INFER_REQUESTS",
           "RANGE_FOR_STREAMS", "nv_ep_ort_api_version",
+          "COMPATIBILITY_CHECK", "GPU_CACHELINE_SIZE", "weightless_support",
       };
       if (!ep.vendor.empty())
         details.push_back({"Vendor", ep.vendor});
@@ -467,9 +481,10 @@ int OnnxPeak::runAll()
     auto phase = [&](Benchmark b, int (OnnxPeak::*fn)(const OrtRuntime &,
                                                       const onnx_ep_info_t &,
                                                       benchmark_config_t &)) {
-      if (!isAllowed(b) || clpeak::cancelRequested() || deviceLost())
+      if (clpeak::cancelRequested() || deviceLost())
         return;
-      (this->*fn)(*rt, ep, cfg);
+      if (auto run = admit(b))
+        (this->*fn)(*rt, ep, cfg);
     };
 
     // ---- Compute (FLOPS + OPS) ---------------------------
@@ -488,12 +503,19 @@ int OnnxPeak::runAll()
 
     // One line that says what happened, in place of the dozens of rows each
     // remaining test would otherwise have filed against a device that cannot
-    // answer.  An error, not a warning: nothing was measured here.
+    // answer.  An error, not a warning: those tests were never measured.
+    //
+    // What was measured before the loss stands.  The S24 whose WebGPU
+    // provider was reset by a 4096-wide fp32 chain published 262 GFLOPS for
+    // that row, from the 1024 and 2048 rungs timed before it.  The ladders
+    // (gemm, conv, the block) also drop a size timed across the loss, whose
+    // cut-short run can still come back a success.
     if (deviceLost())
       CLPEAK_LOG(Error,
                  "ONNX %s: the device was lost during the run (the driver reset "
-                 "it, and the provider cannot recover); no further tests were "
-                 "attempted on it and any rows already filed are not measurements",
+                 "it, and the provider cannot recover), so no further tests "
+                 "were attempted on it; the readings taken before the loss "
+                 "stand",
                  ep.displayName.c_str());
 
     currentDeviceScope = nullptr;

@@ -19,9 +19,7 @@ int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "ops";
-  d.description = "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                  "indexing, addressing and bit manipulation, which shaders do "
-                  "alongside their fractional maths.";
+  d.description = "Peak 32-bit integer arithmetic rate.";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
@@ -36,17 +34,16 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // INT8 DP4a (v_dot4_i32_i8) vector-shader path -- distinct from the matrix
   // INT8 MFMA peak (runMfma). All four variants do 8192 ops/thread, so the
   // numbers are directly comparable; they differ only in ILP (chain count).
+  // Where dp8 stops gaining on dp4, the issue rate is the limit, not latency.
   static const rocm_compute_variant_t variants[] = {
       {"int8_dp", "compute_int8_dp", &rocm_kernels::compute_int8_dp,
-       "One chain of dot products, each waiting on the one before it."},
+       "One dependent chain of dot products."},
       {"int8_dp2", "compute_int8_dp2", &rocm_kernels::compute_int8_dp,
-       "Two independent chains, so the GPU has a second dot product to get on "
-       "with while the first is still finishing."},
+       "2 independent chains."},
       {"int8_dp4", "compute_int8_dp4", &rocm_kernels::compute_int8_dp,
-       "Four independent chains."},
+       "4 independent chains."},
       {"int8_dp8", "compute_int8_dp8", &rocm_kernels::compute_int8_dp,
-       "Eight independent chains.  Where this stops improving on four, the "
-       "hardware itself is the limit, not the waiting."},
+       "8 independent chains."},
   };
   int A = 4;
   rocm_compute_desc_t d = {};
@@ -57,9 +54,8 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // hardware more dot products to have in flight at once.
   d.axis = "chains in flight";
   d.unit = "ops";
-  d.description = "Peak speed of the 8-bit dot-product instruction, which multiplies "
-                  "four pairs of small whole numbers and sums them in one step -- the "
-                  "shader-core path for quantized (compressed) neural networks.";
+  d.description = "Peak rate of the 4-way int8 dot-product instruction, "
+                  "without the matrix engine.";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_INT8_DP_WORK_PER_WI;

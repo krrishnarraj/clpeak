@@ -23,10 +23,10 @@ void main()
 {
     CHAIN_DECL(vec2, vec2(pc.A, pc.A + 1.0), vec2(gl_LocalInvocationID.x))
 
-    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
-    for (int i = 0; i < 64; i++)
+    // 64 MAD_16s * 16 FMAs * 4 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
+    for (int i = 0; i < CHAIN_TRIPS(64); i++)
     {
-        MAD_16
+        CHAIN_TRIP
     }
 
     vec2 r = CHAIN_RESULT;

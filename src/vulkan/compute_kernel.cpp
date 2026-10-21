@@ -2,7 +2,10 @@
 
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
+#include <common/form_race.h>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -65,7 +68,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     // Single-variant tests: one reading, documented by d.metricDescription.
     // Coopmat uses this path once per data type, all into the same test.
     variants.push_back({d.metricLabel, d.spirv, d.spirvSize,
-                        d.metricDescription, nullptr, 0});
+                        d.metricDescription, d.altSpirv, d.altSpirvSize});
   }
 
   auto note = [](const char *text)
@@ -112,6 +115,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     maxWGs = std::min(maxWGs, (uint64_t)dev.info.maxWGCount);
   uint64_t wantWGs = globalWIs / wgSize;
   uint32_t numGroups = (uint32_t)std::min(wantWGs, maxWGs);
+  // Divided after the limits, not before: a dispatch the limits had already
+  // cut short must shrink too, or its longer work-groups make it longer --
+  // llvmpipe's coopmat dispatch is held at 65535 groups.
+  if (d.globalDivisor > 1)
+    numGroups = std::max(1u, numGroups / d.globalDivisor);
   globalWIs = (uint64_t)numGroups * wgSize;
   uint64_t bufferBytes = (uint64_t)numGroups * bytesPerWG;
 
@@ -218,30 +226,37 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   // Time one shader, returning microseconds per dispatch (<= 0 on failure).
   // *built distinguishes "the driver rejected the stage" from "the dispatch
   // failed", which the caller reports differently.
-
-  // Phase markers.  A driver that faults inside its own shader compiler or on
-  // submit takes the process with it, so the last line printed is the only
-  // evidence of where it went -- which of the two below appears last says
-  // whether pipeline creation or the dispatch was fatal.
-  auto timeShape = [&](const uint32_t *spirv, size_t spirvSize,
-                       bool *built) -> float
+  auto timeShape = [&](const char *label, const uint32_t *spirv,
+                       size_t spirvSize, uint32_t width, bool *built) -> float
   {
     VkPipeline pipeline;
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                       pipeline, d.specInfo, subgroup);
+                                       pipeline, d.specInfo, width);
     // A pinned subgroup width is a preference, not a requirement: if the
-    // driver won't compile the stage at that width, run it however it likes
-    // rather than dropping the row.  Worth knowing about, though -- a coopmat
-    // shader that lands on several subgroups per work-group has every one of
-    // them recompute the same tile, so the reading comes out divided by that
-    // factor (see coopmatRequiredSubgroupSize() in vk_peak.h).
-    if (!*built && subgroup)
+    // driver won't build the stage pinned, build it unpinned and let it
+    // choose rather than drop the row.  Worth knowing about, though -- a
+    // coopmat shader that lands on several subgroups per work-group has every
+    // one of them recompute the same tile, so the reading comes out divided
+    // by that factor (see coopmatRequiredSubgroupSize() in vk_peak.h).  The
+    // half-width contender (below) is the exception: unpinned it would only
+    // time another case, so a refusal there just drops it.
+    //
+    // Only where unpinned can differ, though: the pin has to have been
+    // applied (createComputePipeline drops one the device cannot take) and
+    // the device has to have another width to choose.  An Adreno 840 offers
+    // 64 alone, so retrying there built the same pipeline twice.  And a
+    // refusal of a pinned build does not say the width was refused -- only
+    // what the retry does says anything about that.  Nor for a width a caller
+    // is racing (d.pinOnly), which unpinned would only time another case.
+    if (!*built && width == subgroup && !d.pinOnly && dev.canPinSubgroupSize(width) &&
+        dev.info.minSubgroupSize < dev.info.maxSubgroupSize)
     {
-      CLPEAK_VLOG("%s: subgroup size %u refused by the driver, "
-                  "falling back to its own choice\n",
-                  d.resultTag, subgroup);
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
+      CLPEAK_VLOG("%s %s: the driver refused the pipeline pinned to subgroup "
+                  "%u and %s\n",
+                  d.resultTag, label, width,
+                  *built ? "built it unpinned" : "unpinned as well");
     }
     if (!*built)
       return -1.0f;
@@ -261,46 +276,119 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return (float)((double)globalWIs * (double)d.workPerWI * 1e6 / timed);
   };
 
+  // The alt build again at half the pinned width, where the device offers it.
+  // At SIMD32 Alchemist's register banks catch the affine chain's operands
+  // lined up more often than not -- an Arc A380 read it at 3.44-4.83 TFLOPS
+  // there and 4.60-4.88 pinned to 16 -- while this driver keeps fp16's double
+  // rate only at SIMD32, so neither width is right for every family and both
+  // are timed.  A clear loser drops out (FormRace::dropTrailing); a tie does
+  // not settle it, because the allocator lays out every vector width afresh.
+  // See shaders/mad_chain.glsl.
+  uint32_t halfSubgroup = 0;
+  if (d.raceHalfSubgroup && subgroup && dev.info.subgroupSizeControl &&
+      dev.info.minSubgroupSize <= subgroup / 2 &&
+      subgroup / 2 <= dev.info.maxSubgroupSize &&
+      (!dev.info.maxComputeWorkgroupSubgroups ||
+       (uint64_t)wgSize <= (uint64_t)(subgroup / 2) * dev.info.maxComputeWorkgroupSubgroups))
+    halfSubgroup = subgroup / 2;
+  clpeak::FormRace widthRace;
+  if (!halfSubgroup)
+    widthRace.drop(true);
+
   for (const auto &v : variants)
   {
     bool built = false;
-    float timed = timeShape(v.spirv, v.spirvSize, &built);
+    float timed = timeShape(v.label, v.spirv, v.spirvSize, subgroup, &built);
     if (!built)
     {
-      test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
-                emitOpts(v.description));
+      // A caller with another shape to offer -- coopmat's next tile -- takes
+      // the refusal itself; otherwise it is this reading's error.
+      if (d.refused)
+        *d.refused = true;
+      else
+        test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
+                  emitOpts(v.description));
       continue;
     }
     if (timed <= 0.0f)
     {
-      test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                emitOpts(v.description));
+      if (d.reading)
+        *d.reading = 0.0f;
+      else
+        test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
+                  emitOpts(v.description));
       continue;
     }
     float value = toValue(timed);
 
-    // Race the affine build of the same shader and keep the faster.  A shape
-    // that fails to build or run here is not an error -- the first shape
-    // already produced a reading.
+    // Race the alt build of the same shader -- at both widths, where the
+    // family races them -- and keep the fastest.  A shape that fails to build
+    // or run here is not an error: the first shape already produced a reading.
     if (v.altSpirv && v.altSpirvSize)
     {
-      bool altBuilt = false;
-      float altTimed = timeShape(v.altSpirv, v.altSpirvSize, &altBuilt);
-      if (altBuilt && altTimed > 0.0f)
+      const uint32_t altWidth[2] = {subgroup, halfSubgroup};
+      double altValue[2] = {0.0, 0.0};
+      for (int f = 0; f < 2; f++)
       {
-        float altValue = toValue(altTimed);
-        CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %.1f %s\n",
-                    d.resultTag, v.label, value, altValue, d.unit);
-        if (altValue > value * MAX_ALT_CHAIN_RATIO)
+        if (!widthRace.runs(f == 1))
+          continue;
+        bool altBuilt = false;
+        float altTimed = timeShape(v.label, v.altSpirv, v.altSpirvSize,
+                                   altWidth[f], &altBuilt);
+        if (altBuilt && altTimed > 0.0f)
+          altValue[f] = toValue(altTimed);
+        else if (f == 1)
+          widthRace.drop(true);
+      }
+      if (clpeak::verboseEnabled() && (altValue[0] > 0.0 || altValue[1] > 0.0))
+      {
+        std::string alts;
+        for (int f = 0; f < 2; f++)
+        {
+          if (altValue[f] <= 0.0)
+            continue;
+          char reading[64];
+          if (halfSubgroup)
+            snprintf(reading, sizeof(reading), "%s%.1f (subgroup %u)",
+                     alts.empty() ? "" : ", ", altValue[f], altWidth[f]);
+          else
+            snprintf(reading, sizeof(reading), "%.1f", altValue[f]);
+          alts += reading;
+        }
+        CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %s %s\n",
+                    d.resultTag, v.label, value, alts.c_str(), d.unit);
+      }
+      // The fold guard first, so a reading it rejects cannot decide the race.
+      const double first = value;
+      double raced[2] = {altValue[0], altValue[1]};
+      for (int f = 0; f < 2; f++)
+      {
+        if (altValue[f] > first * MAX_ALT_CHAIN_RATIO)
+        {
           CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
                       "compiler fold\n",
-                      d.resultTag, v.label, altValue / value);
-        else if (altValue > value)
-          value = altValue;
+                      d.resultTag, v.label, altValue[f] / first);
+          raced[f] = 0.0;
+        }
+        else if (altValue[f] > value)
+          value = (float)altValue[f];
+      }
+      if (widthRace.runs(false) && widthRace.runs(true))
+      {
+        widthRace.dropTrailing(raced);
+        if (!widthRace.runs(false) || !widthRace.runs(true))
+          CLPEAK_VLOG("%s %s: alt shape at subgroup %u trails by %.1fx -- "
+                      "dropped from here\n", d.resultTag, v.label,
+                      widthRace.runs(true) ? subgroup : halfSubgroup,
+                      widthRace.runs(true) ? altValue[1] / altValue[0]
+                                           : altValue[0] / altValue[1]);
       }
     }
 
-    test.emit(v.label, value, emitOpts(v.description));
+    if (d.reading)
+      *d.reading = value;
+    else
+      test.emit(v.label, value, emitOpts(v.description));
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

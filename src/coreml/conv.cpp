@@ -28,12 +28,18 @@ namespace
 constexpr int64_t kChannels = 256;
 constexpr int64_t kMinSpatial = 32;
 constexpr int64_t kMaxSpatial = 4096;
+// The gemm ladder's climb (gemm.cpp): a size gains by kImproveFactor, two
+// that do not end the climb, and so does one that fell where the next size
+// would cost seconds (ladderDropEnds).
 constexpr double kImproveFactor = 1.03;
 constexpr int kMaxStrikes = 2;
 constexpr double kMaxIterUs = 2.0e6;
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+// Everything a rung holds at once (coremlHeldBytes), capped at a quarter of
+// physical memory and at 3 GB, which still admits the 1024-square fp16 map
+// the GPU's depthwise row is fastest at.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(3ull << 30); }
 
 struct DType
 {
@@ -51,28 +57,17 @@ struct Shape
   const char *note;
 };
 
+// A row's description is its shape's note, then its type's: "Stride-2 3x3,
+// 16-bit weights and arithmetic."
 const DType kDTypes[] = {
-    {CML_FP16, "fp16", "16-bit floats, the native currency of the Neural Engine's convolution engine."},
-    {CML_FP32, "fp32",
-     "FP32 in and out.  The Neural Engine has no fp32 path, so on that device "
-     "this row reads whichever unit Core ML sent it to, or reports so."},
+    {CML_FP16, "fp16", "16-bit weights and arithmetic."},
+    {CML_FP32, "fp32", "full 32-bit precision."},
 };
 
 const Shape kShapes[] = {
-    {3, 2, false, "conv3x3s2",
-     "A 3x3 convolution over 256 channels at stride 2, the layer vision "
-     "networks downsample with.  Winograd kernels, which do a fraction of the "
-     "multiplies a direct count assumes, cannot run a stride of 2, so every "
-     "multiply counted here is one the unit did."},
-    {1, 1, false, "conv1x1",
-     "Arithmetically a matrix multiply at every pixel, so it should land near "
-     "the matmul rows; where it does not, the two shapes reach different "
-     "machinery."},
-    {3, 1, true, "depthwise3x3",
-     "A 3x3 at stride 1 with each channel kept separate, so far less "
-     "arithmetic per value loaded.  Hardware built around dense arrays "
-     "collapses here, which is why mobile networks run slower than their FLOP "
-     "counts."},
+    {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
+    {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
+    {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -86,27 +81,43 @@ double convFlops(const Shape &v, int64_t spatial)
 
 int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one prediction may be predicted to take: on a GPU,
+  // --max-time-ml-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_conv", "Core ML convolution peak", "flops", Category::Compute,
-       "2-D convolution rate through Core ML on this compute unit, three "
-       "shapes at 256 channels, each swept over feature-map size and reported "
-       "at its best.  Against the matmul rows this says whether the unit was "
-       "built for convolution, and the depthwise row says what it does when "
-       "the arithmetic per byte collapses.",
+       "2-D convolution rate on this compute unit at 256 channels -- a stride-2 "
+       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
+       "reported at its best.  Set against the matmul rows, it shows how well "
+       "this compute unit handles convolution.",
        TestShape::Heterogeneous, "data type and shape"});
 
   for (const DType &dt : kDTypes)
   {
+    // A unit whose answer for this precision, written as a 1x1 convolution,
+    // is wrong has no convolution rate worth publishing (wrongAnswer,
+    // numeric_error.cpp): the conv1x1 row's operator, and the nearest there
+    // is to the other shapes'.
+    const std::string wrongConv =
+        clpeak::cancelRequested()
+            ? std::string()
+            : wrongAnswer(dev, dt.dtype == CML_FP32 ? CoremlWeight::Fp32 : CoremlWeight::Fp16, false,
+                          /*conv1x1=*/true);
     for (const Shape &v : kShapes)
     {
       if (clpeak::cancelRequested())
         break;
       const std::string row = std::string(dt.label) + "_" + v.label;
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  " + dt.note;
+      o.description = std::string(v.note) + ", " + dt.note;
+      if (!wrongConv.empty())
+      {
+        CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());
+        test.skip(row, ResultStatus::Error, wrongConv, o);
+        continue;
+      }
 
       const int64_t group = v.depthwise ? kChannels : 1;
       const uint64_t elemBytes = coremlElemBytes(dt.dtype, 1);
@@ -124,18 +135,35 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
       {
         if (clpeak::cancelRequested())
           break;
-        // The feature map, held twice (the constant and the scaled copy).
-        const uint64_t bytes = 2ull * (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
-        if (bytes > maxTensorBytes())
+        // The feature map and the filter are constants (coremlHeldBytes);
+        // the scaled copy of the map and the result, a quarter of it at
+        // stride 2, are activations.
+        const uint64_t map = (uint64_t)kChannels * (uint64_t)sp * (uint64_t)sp * elemBytes;
+        const uint64_t filter = (uint64_t)kChannels * (uint64_t)(kChannels / group) *
+                                (uint64_t)(v.kernel * v.kernel) * elemBytes;
+        const uint64_t bytes = coremlHeldBytes(map + filter, map + map / (uint64_t)(v.stride * v.stride));
+        const uint64_t budget = maxRungBytes();
+        if (bytes > budget)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB, stopping\n", dev.displayName.c_str(),
-                      row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20));
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
+                      (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)
         {
           CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would take too long, stopping\n",
                       dev.displayName.c_str(), row.c_str(), (long long)sp);
+          break;
+        }
+        // On a GPU a prediction is also held to what one run may keep the
+        // device busy (gpuRunCapUs): a driver resets a GPU held too long.
+        if (lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / lastRate > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a prediction, past "
+                      "--max-time-ml-gpu (%.2f s), stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
+                      runCapUs / 1.0e6);
           break;
         }
         if (sp > kMinSpatial && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kCoremlMaxCreateUs)
@@ -175,8 +203,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
             }
           }
           else
-            offDeviceNote = "  Larger feature maps were declined by the " +
-                            std::string(coremlKindName(dev.kind)) + ".";
+            offDeviceNote = "; the " + std::string(coremlKindName(dev.kind)) + " declined larger maps";
           break;
         }
         if (!coremlBindScalar(*s, "s", dt.dtype, err))
@@ -200,6 +227,10 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         s.reset();
         if (m.meanUs <= 0.0)
         {
+          // Logged whatever the row says: above a measured size it publishes
+          // the sizes below, and this failure would leave no trace.
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld run failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                      (long long)sp, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -236,11 +267,26 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
             best = rate;
             bestSp = sp;
           }
+          if (ladderDropEnds(rate, best, 4.0 * m.meanUs))
+          {
+            CLPEAK_VLOG("coreml-conv[%s/%s]: %lld fell to %.0f%% of the best, and the next size would take "
+                        "~%.0f s a prediction, stopping\n",
+                        dev.displayName.c_str(), row.c_str(), (long long)sp, 100.0 * rate / best,
+                        4.0 * m.meanUs / 1.0e6);
+            break;
+          }
           if (++strikes >= kMaxStrikes)
             break;
         }
         if (m.probeUs > kMaxIterUs)
           break;
+        if (runCapUs > 0.0 && m.probeUs > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-ml-gpu (%.2f s), "
+                      "stopping\n",
+                      dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
+          break;
+        }
         if (prevCreateUs > 0.0 && createUs > kCoremlCreateGrowthFloor &&
             createUs > prevCreateUs * kCoremlCreateGrowthFactor)
         {
@@ -257,9 +303,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       if (best > 0.0)
       {
-        o.description = std::string(v.note) + "  " + dt.note + "  Fastest at a " +
-                        std::to_string(bestSp) + " by " + std::to_string(bestSp) + " feature map." +
-                        offDeviceNote + glueNote;
+        o.description += "  Fastest at a " + std::to_string(bestSp) + "x" + std::to_string(bestSp) +
+                         " feature map" + offDeviceNote + glueNote + ".";
         test.emit(row, (float)best, o);
       }
       else

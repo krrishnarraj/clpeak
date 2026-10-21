@@ -206,6 +206,36 @@ static const int numTestFlags = sizeof(testFlags) / sizeof(testFlags[0]);
 static_assert(numTestFlags == static_cast<int>(Benchmark::COUNT),
               "every Benchmark needs exactly one flag");
 
+const char *benchmarkFlag(Benchmark b)
+{
+  for (int t = 0; t < numTestFlags; t++)
+    if (testFlags[t].test == b)
+      return testFlags[t].name;
+  return "";
+}
+
+bool benchmarkFromFlag(const std::string &flag, Benchmark &out)
+{
+  for (int t = 0; t < numTestFlags; t++)
+    if (flag == testFlags[t].name)
+    {
+      out = testFlags[t].test;
+      return true;
+    }
+  return false;
+}
+
+bool backendFromName(const std::string &name, Backend &out)
+{
+  for (int i = 0; i < numBackends; i++)
+    if (name == backendTable[i].info.name)
+    {
+      out = backendTable[i].info.id;
+      return true;
+    }
+  return false;
+}
+
 // ---- Help ---------------------------------------------------------------------
 
 // One help entry: the flag, padded to the description column, then the
@@ -246,11 +276,16 @@ static std::string helpText()
   s += " GLOBAL OPTIONS:\n";
   helpLine(s, "-h, --help", "display help message");
   helpLine(s, "-v, --version", "display version");
-  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time calibration)");
+  helpLine(s, "-i, --iters num", "force a fixed iter count (overrides --max-time-gpu calibration)");
   helpLine(s, "-w, --warmup num", "number of warm-up kernel runs before timing (default: 2)");
-  helpLine(s, "--max-time ms", "per-test time budget for the timed phase, every backend\n"
-                               "except CPU (default: 500 ms).  Iters are picked to fit it,\n"
-                               "so set it lower if you hit a GPU watchdog");
+  helpLine(s, "--max-time-gpu ms", "how long a GPU may be kept busy in one go (default:\n"
+                                   "500 ms): every backend but CPU, ONNX Runtime, LiteRT\n"
+                                   "and Core ML sizes a test's timed phase to it.  Set it\n"
+                                   "lower if you hit a GPU watchdog");
+  helpLine(s, "--max-time-ml-gpu ms", "the longest one run of ONNX Runtime, LiteRT or Core ML\n"
+                                      "may keep a GPU busy (default: 1000 ms): a GPU's size\n"
+                                      "sweep stops before one run would take longer.  Set it\n"
+                                      "lower if you hit a GPU watchdog");
   helpLine(s, "--max-time-cpu ms", "per-test time budget for the CPU backend (default: 2000 ms)");
   helpLine(s, "--verbose", "print backend debug logs (kernel build logs, API errors);\n"
                            "with -o, record them in the file's log, with the device\n"
@@ -258,6 +293,13 @@ static std::string helpText()
   helpLine(s, "--describe", "explain what each test and each reading measures");
   helpLine(s, "--list-devices", "list available devices for every backend and exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
+  helpLine(s, "--resume file", "continue a run that was saved to this file and ended\n"
+                               "part-way or was cancelled: only what it had not\n"
+                               "finished runs, with the options it started with, into\n"
+                               "the same file.  Its checkpoint, the name with\n"
+                               ".partial.json for .json, names the run too");
+  helpLine(s, "--skip-crashed", "with --resume, for a run that crashed: record the test\n"
+                                "it died in instead of running it again");
   helpLine(s, "--compare file", "compare results against a saved run");
   helpLine(s, "--onnx-lib path", "the ONNX Runtime library to load; decides which\n"
                                  "providers exist before anything below adds more\n"
@@ -481,6 +523,9 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   bool forcedBackends = false;
   bool forcedTests = false;
   bool forcedCategories = false;
+  // Options other than --resume and --skip-crashed, which --resume refuses:
+  // a continued run is the run it continues, and its options are that run's.
+  const char *otherOption = nullptr;
 
   for (int i = 1; i < argc; i++)
   {
@@ -491,6 +536,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       return ParseResult::Help;
     if (!strcmp(a, "-v") || !strcmp(a, "--version"))
       return ParseResult::Version;
+    if (!strcmp(a, "--resume"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.resumeFile = v;
+      continue;
+    }
+    if (!strcmp(a, "--skip-crashed"))
+    {
+      out.skipCrashed = true;
+      continue;
+    }
+    if (!otherOption)
+      otherOption = a;
     if (!strcmp(a, "--verbose"))
     {
       out.verbose = true;
@@ -531,7 +591,8 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       out.warmupCount = parsed;
       continue;
     }
-    if (!strcmp(a, "--max-time") || !strcmp(a, "--max-time-cpu"))
+    if (!strcmp(a, "--max-time-gpu") || !strcmp(a, "--max-time-ml-gpu") ||
+        !strcmp(a, "--max-time-cpu"))
     {
       const char *v = nextArg(argc, argv, i);
       if (!v)
@@ -540,8 +601,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!parseUIntArg(v, parsed, /*allowZero=*/false) ||
           parsed > std::numeric_limits<unsigned int>::max() / 1000u)
         return invalidValue(err, a, v);
-      if (!strcmp(a, "--max-time"))
+      if (!strcmp(a, "--max-time-gpu"))
         out.targetTimeUs = parsed * 1000u; // ms -> us
+      else if (!strcmp(a, "--max-time-ml-gpu"))
+        out.targetTimeUsMlGpu = parsed * 1000u;
       else
         out.targetTimeUsCpu = parsed * 1000u;
       continue;
@@ -681,6 +744,19 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
     return ParseResult::Error;
   }
 
+  if (!out.resumeFile.empty() && otherOption)
+  {
+    err = std::string("clpeak: --resume continues a run with the options it started with, "
+                      "so it takes none but --skip-crashed; got '") +
+          otherOption + "'\n";
+    return ParseResult::Error;
+  }
+  if (out.skipCrashed && out.resumeFile.empty())
+  {
+    err = "clpeak: --skip-crashed goes with --resume\n";
+    return ParseResult::Error;
+  }
+
   // `--devices cuda:0 --vulkan` selects nothing: every device named is on a
   // backend the backend flags switched off.  Contradictory, so say so.
   if (!out.devices.empty())
@@ -752,6 +828,7 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
 
   inv.targetTimeUs = opts.targetTimeUs;
   inv.targetTimeUsCpu = opts.targetTimeUsCpu;
+  inv.targetTimeUsMlGpu = opts.targetTimeUsMlGpu;
   inv.warmup = opts.warmupCount;
   // Only when pinned with -i.  Left at 0 the run calibrated each test to a
   // time budget instead, which is the normal mode and the comparable one.

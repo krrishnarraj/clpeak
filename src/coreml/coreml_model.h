@@ -140,6 +140,13 @@ public:
   void lutToDense(const Out &out, int nbits, const std::string &packedIndices,
                   const std::string &lutRaw);
 
+  // Room for `bytes` more of tensor data in the weight blob, so a large one
+  // is allocated once: grown by appending, a 2 GB blob held twice that while
+  // it was built (the buffer it outgrew beside the new one, which macOS kept
+  // resident after the free).  Capacity only -- what the blob holds is still
+  // what is appended.
+  void reserveWeights(uint64_t bytes);
+
   // ---- Serialization -----------------------------------------------------
   std::string buildModel() const;             // Model.proto bytes
   const std::string &weightBytes() const { return m_blob; }
@@ -288,6 +295,14 @@ CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t se
 CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
                                      CoremlWeight w, std::vector<float> *dequantized,
                                      bool transposed = false);
+
+// The same product written as a 1x1 convolution, in `dtype` (fp16 or fp32):
+// x[1, K, H, W] a model input with H * W = M, a constant W[N, K, 1, 1], and
+// y[1, N, H, W] the full result -- channel-major, so x and y hold the
+// matmul's operand and answer transposed.  The convolution rows' accuracy
+// check (numeric_error.cpp).  `weights` receives W's values, [N, K].
+CoremlProgram coremlPlainConv1x1Model(int spec, int64_t M, int64_t K, int64_t N, int dtype,
+                                      std::vector<float> *weights);
 
 // y[1, cols] = x[1, d] * W[d, cols] in fp16: one matrix-vector product
 // against a resident weight, the operation generating a token performs.

@@ -10,7 +10,8 @@ the wordmark as an alpha mask and re-composes it per platform:
   iOS      full-bleed opaque square (+ dark and tinted iOS 18 variants)
   macOS    Big Sur squircle inset in the canvas, with a soft shadow
   Android  adaptive foreground/monochrome inside the 66/108dp safe circle,
-           plus legacy mipmap PNGs and a 512px Play Store icon
+           plus legacy mipmap PNGs, a 512px Play Store icon and the
+           notification's status-bar icon
   Windows  multi-resolution .ico
   Linux    single 256px PNG, loaded as the GTK window icon at runtime
 
@@ -272,6 +273,15 @@ def build_android() -> None:
         write(
             render(legacy, tile=0.92, radius=0.92 * 0.20),
             mipmap / "ic_launcher.png",
+        )
+
+        # Status-bar icon of the run's notification (lib/src/services/
+        # run_notice.dart): Android draws only its alpha, in the bar's own
+        # colour.  24dp, the wordmark across its 22dp live area.
+        status = round(24 * scale)
+        write(
+            render(status, background=None, text_frac=22 / 24),
+            res / f"drawable-{density}" / "ic_stat_clpeak.png",
         )
 
     (res / "mipmap-anydpi-v26").mkdir(parents=True, exist_ok=True)

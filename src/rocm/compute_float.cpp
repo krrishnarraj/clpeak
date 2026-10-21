@@ -19,9 +19,8 @@ int RocmPeak::runComputeSP(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "flops";
-  d.description = "Peak arithmetic speed of the GPU's shader cores on 32-bit "
-                  "fractional numbers -- the ordinary float type.  Nothing touches "
-                  "memory, so only the arithmetic units limit the rate.";
+  d.description = "Peak fp32 arithmetic rate of the GPU's ALUs, with no memory "
+                  "traffic.";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
@@ -35,7 +34,8 @@ int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
 {
   static const rocm_compute_variant_t variants[] = {
       {"half", "compute_hp", &rocm_kernels::compute_hp, rocmWidthNote(1)},
-      {"half2", "compute_hp2", &rocm_kernels::compute_hp, rocmWidthNote(2)},
+      {"half2", "compute_hp2", &rocm_kernels::compute_hp,
+       "Two fp16 values packed in one instruction."},
   };
   float A = 1.3f;
   rocm_compute_desc_t d = {};
@@ -44,10 +44,8 @@ int RocmPeak::runComputeHP(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "flops";
-  d.description = "Peak arithmetic speed on 16-bit fractional numbers -- half the "
-                  "size of a normal float, and what graphics and on-device AI mostly "
-                  "run on.  AMD shader cores reach full speed only on the packed "
-                  "form that does two at a time.";
+  d.description = "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.  "
+                  "Only the packed half2 form reaches full rate.";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_FP_WORK_PER_WI;
@@ -75,10 +73,8 @@ int RocmPeak::runComputeDP(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "flops";
-  d.description = "Peak arithmetic speed on 64-bit fractional numbers, the "
-                  "high-accuracy type scientific computing relies on.  Radeon "
-                  "gaming cards run these far slower than 32-bit; the Instinct "
-                  "compute cards do not.";
+  d.description = "Peak fp64 arithmetic rate.  Consumer GPUs run it at a small "
+                  "fraction of their fp32 rate.";
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_DP_WORK_PER_WI;
@@ -97,9 +93,8 @@ int RocmPeak::runComputeMP(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "flops";
-  d.description = "Peak speed when the GPU multiplies 16-bit numbers but keeps the "
-                  "running total in 32 bits -- the accuracy-preserving pattern AI "
-                  "code uses.  This is the shader cores, not the matrix cores.";
+  d.description = "Peak rate of fp16 multiplies accumulated in fp32, "
+                  "without the matrix engine.";
   d.metricLabel = "mp";
   d.kernelName = "compute_mp";
   d.blob = &rocm_kernels::compute_mp;
@@ -121,10 +116,8 @@ int RocmPeak::runComputeBF16(RocmDevice &dev, benchmark_config_t &cfg)
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "flops";
-  d.description = "Peak speed on bfloat16 -- 16 bits arranged for AI work, trading "
-                  "digits of accuracy for the number range of a full float.  Again "
-                  "the shader cores; the matrix-core figure is in the WMMA or MFMA "
-                  "rows.";
+  d.description = "Peak rate of bf16 multiplies accumulated in fp32, "
+                  "without the matrix engine.";
   d.metricLabel = "bf16";
   d.kernelName = "compute_bf16";
   d.blob = &rocm_kernels::compute_bf16;

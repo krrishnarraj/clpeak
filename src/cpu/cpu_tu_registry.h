@@ -10,13 +10,15 @@
 // This list drives the forward declarations of every table accessor in
 // cpu_dispatch.cpp.  The declarations are emitted unconditionally -- declaring a
 // symbol that is never defined is harmless; only *calling* one requires the TU,
-// and every call site in kernels()/kernelMenu() is guarded by #if CLPEAK_TU_<tag>.
+// and every call site is guarded by #if CLPEAK_TU_<tag> (kernels()) or reached
+// through TU(<tag>), which yields an empty table for an unbuilt TU (kernelMenu()).
 //
 // Adding a new TU is therefore three edits:
 //   1. add CLPEAK_TU(<tag>) below,
 //   2. add a clpeak_add_isa_tu(<tag> <flags>) call in CMakeLists.txt,
-//   3. wire the merge (kernels(), bandwidth) + push (kernelMenu(), one row per
-//      supported ISA) under #if CLPEAK_TU_<tag> in cpu_dispatch.cpp.
+//   3. wire the merge (kernels(), bandwidth; under #if CLPEAK_TU_<tag>) + push
+//      (kernelMenu(), one row per supported ISA; through TU(<tag>), never under
+//      #if, so its predicate runs in every build) in cpu_dispatch.cpp.
 // The order below is baseline -> widest, matching the merge/menu ordering.
 // ===========================================================================
 

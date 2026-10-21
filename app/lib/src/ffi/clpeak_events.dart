@@ -85,6 +85,7 @@ sealed class ClpeakEvent {
         return DoneEvent(
           status: (m['status'] as num?)?.toInt() ?? 0,
           cancelled: m['cancelled'] as bool? ?? false,
+          durationS: (m['duration_s'] as num?)?.toDouble(),
         );
       default:
         return LogEntryEvent(LogEntry(
@@ -221,7 +222,12 @@ class LogEntryEvent extends ClpeakEvent {
 }
 
 class DoneEvent extends ClpeakEvent {
-  const DoneEvent({required this.status, required this.cancelled});
+  const DoneEvent(
+      {required this.status, required this.cancelled, this.durationS});
   final int status;
   final bool cancelled;
+
+  /// The run's `duration_s` as its document records it -- for a resumed
+  /// run, its parts summed -- or null when the launch ran nothing.
+  final double? durationS;
 }

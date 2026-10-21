@@ -37,41 +37,42 @@
 // environment was synced to and syncs it again when they differ.
 uint64_t onnxEpConfigGeneration();
 
-// The libraries the environment should have registered: the configured set
-// plus, when the Windows ML catalog is on, the providers it resolved (which
-// may install them first -- see onnx_winml.h).  The catalog's part is
-// memoized per runtime and fixed for the process with the rest of the
-// runtime setup (onnx_runtime.h), so asking again costs nothing and
-// downloads nothing.
-std::vector<OnnxEpLibrary> onnxEffectiveEpLibraries(const OrtRuntime &rt);
-
-// Bring `env`'s plugin libraries in line with the effective set, and
-// record how each fared (onnxEpLibraryStatus()): a library no longer wanted
-// is unregistered (and unloaded), a new one registered, and one that stays
-// keeps its answer.  The environment is never rebuilt for this -- it lives
-// for the process (onnx_session.cpp).  Also remembers which provider names
-// the environment listed before its first plugin, so that onnxPluginDevices
-// can tell a plugin's devices from the built-in ones.  Between runs only:
-// a library in use by a session cannot be unregistered.
+// Bring `env`'s plugin libraries in line with the configured set plus, when
+// the Windows ML catalog is on, the providers it resolved (which may install
+// them first -- see onnx_winml.h; memoized per runtime and fixed for the
+// process with the rest of the runtime setup, so a later sync downloads
+// nothing).  Records how each fared (onnxEpLibraryStatus()) and the devices
+// registering it added, which is how onnxPluginDevices knows each device's
+// library.  A library no longer wanted is unregistered (and unloaded), a new
+// one registered, and one that stays keeps its answer.  The configured
+// libraries go in first, and a catalog provider one of them stands for --
+// one registered under its name, or one serving a provider of that name --
+// is left out (OnnxEpLibraryStatus::replaces).  The environment is never
+// rebuilt for this -- it lives for the process (onnx_session.cpp).  Between
+// runs only: a library in use by a session cannot be unregistered.
 void onnxSyncEpLibraries(const OrtRuntime &rt, OrtEnv *env);
 
-// What identifies a plugin device's origin: its registration name plus the
-// version it reports, when it reports one.  The listing wraps it as
+// What identifies a plugin device's origin: the provider's own name plus
+// the version it reports, when it reports one.  Not the registration name:
+// that is whatever the person registering the library typed (the GUI
+// suggests the provider's name, the CLI takes any), so one library would
+// read differently in the two.  The listing wraps it as
 // "EP plugin (<here>)" (InventoryDevice::origin); the run reports it as the
 // value of its "EP plugin" prop.  One helper so the two never drift apart.
 inline std::string onnxPluginOrigin(const onnx_ep_info_t &ep)
 {
-  if (ep.library.empty())
+  if (!ep.epDevicePtr)
     return std::string();
   if (ep.pluginVersion.empty())
-    return ep.library;
-  return ep.library + " " + ep.pluginVersion;
+    return ep.providerKey;
+  return ep.providerKey + " " + ep.pluginVersion;
 }
 
-// One entry per (plugin provider, hardware device) the environment
-// enumerates, accelerators first, CPU-class devices last, named from what
-// the runtime reports.  Empty when no plugin registered, or the runtime
-// predates the API.
+// One entry per (plugin provider, hardware device) a registered library
+// added to the environment, with `library` the registration it came from;
+// accelerators first, CPU-class devices last, named from what the runtime
+// reports.  Empty when no plugin registered, or the runtime predates the
+// API.
 std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt);
 
 // Attach the plugin provider behind `ep` to `so` with `kv` as its options.

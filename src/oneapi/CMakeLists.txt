@@ -9,6 +9,7 @@ add_library(peak_oneapi STATIC
     compute_float.cpp
     compute_int.cpp
     joint_matrix.cpp
+    joint_matrix_block.cpp
     onemkl.cpp
     global_bandwidth.cpp
     local_bandwidth.cpp

@@ -1,43 +1,12 @@
 #version 450
 #extension GL_EXT_integer_dot_product : require
+#extension GL_GOOGLE_include_directive : require
 
-// INT8 dot-product compute throughput (packed dp4a).
+// INT8 dot-product compute throughput (packed dp4a), one chain per thread.
 //
-// Uses dotPacked4x8AccSatEXT(int, int, int) -- the uint32-packed form of
-// dotAccSatEXT.  Packed is the hardware-native path on NVIDIA, AMD and
-// Intel (dp4a / V_DOT4 / IDPAS take 32-bit packed operands natively), so
-// the driver doesn't insert any pack/unpack around the op.  An earlier
-// i8vec4 version ran ~6x slower on NVIDIA because of exactly that
-// lowering overhead.
-//
-// Each dotPacked4x8AccSatEXT is 4 signed INT8 multiply-adds into a 32-bit
-// accumulator = 8 INT8 ops.  Nothing else runs in the loop: every
-// instruction issued is one the op budget credits.
-//
-// The chain shape.  Three constraints have to hold at once:
-//
-//  - Both multiplicands may not be loop-invariant.  dp4a with fixed
-//    operands is `a + n*dot(x, y)`, which a driver may and does fold: the
-//    shape read 74939 GOPS on an RTX 5060 whose dp4a peak, measured
-//    through CUDA's own __dp4a on the same card, is 33928.
-//
-//  - Nothing may run between the dots.  The obvious way to keep an operand
-//    moving is to rewrite it from the accumulator (`y ^= a`), but that XOR
-//    is a second dependent integer op per dot and the op budget does not
-//    credit it; on an Arc A380 it cost more than half the rate (8832 GOPS
-//    against 19497 for the same instruction with nothing beside it).
-//
-//  - All three source operands must be distinct registers.  Intel
-//    Alchemist halves a three-source op that reads the same register twice
-//    -- the rule the MAD chains in mad_chain.glsl are built around -- so
-//    `a = dot(x, a, a)` is not the answer either.
-//
-// What satisfies all three: two accumulators feeding each other.  Each dot
-// reads {x, the other accumulator, its own}, three distinct registers, and
-// writes its own.  Every dot depends on the one before it, so this is still
-// a single chain; and because the dot extracts bytes of a value that is
-// itself a 32-bit accumulator, the recurrence is not affine and has no
-// closed form to fold to.  v2/v4 run two and four independent copies.
+// The chain itself -- its two shapes, and the rules every spelling of it has
+// to keep -- lives in dp4a_chain.glsl.  v2/v4 run two and four independent
+// copies of it.
 
 layout(local_size_x = 256) in;
 
@@ -76,34 +45,20 @@ layout(push_constant) uniform PushConstants {
 // which is not reachable from GLSL.  Do not spend another shape on it without
 // a way to read the SASS.
 
-// Two dots, one dependent chain, no third instruction.
-
-
-#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
-                         q = dotPacked4x8AccSatEXT(x, p, q);
-#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
-#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
+#include "dp4a_chain.glsl"
 
 void main()
 {
-    // x holds four int8 lanes packed LSB->MSB: (A, A+1, A+2, A+3).
-    // int (not uint) so glslang picks the signed int32 overload of
-    // dotPacked4x8AccSatEXT and emits OpSDotAccSat + PackedVectorFormat4x8Bit
-    // (the native dp4a path) instead of folding back to i8vec4.
-    int x = (pc.A & 0xff)
-          | (((pc.A + 1) & 0xff) << 8)
-          | (((pc.A + 2) & 0xff) << 16)
-          | (((pc.A + 3) & 0xff) << 24);
+    DP_DECL_X(pc.A)
     int lid = int(gl_LocalInvocationID.x);
-    int a0 = lid;
-    int a1 = lid + 4;
+    DP_CHAIN_DECL(0, lid)
 
     // 16 outer iters * 64 dots = 1024 dots * 8 ops = 8192 ops per WI.
     for (int i = 0; i < 16; i++)
     {
-        STEP2_8(x, a0, a1) STEP2_8(x, a0, a1)
-        STEP2_8(x, a0, a1) STEP2_8(x, a0, a1)
+        DP_CHAIN_16(0) DP_CHAIN_16(0)
+        DP_CHAIN_16(0) DP_CHAIN_16(0)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = a0 + a1;
+    outputBuf.data[gl_GlobalInvocationID.x] = DP_CHAIN_SUM(0);
 }

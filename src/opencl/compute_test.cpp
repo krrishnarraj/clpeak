@@ -1,11 +1,15 @@
 #include <opencl/cl_peak.h>
 #include <common/common.h>
+#include <common/form_race.h>
+#include <cstdio>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // Unified compute benchmark -- replaces compute_sp/hp/dp/integer/intfast/char/short
 // ---------------------------------------------------------------------------
 
 int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
+                           const std::string &buildError,
                            device_info_t &devInfo, benchmark_config_t &cfg,
                            Benchmark which,
                            const std::string &displayName, const std::string &resultTag,
@@ -14,7 +18,8 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
-  if (!isAllowed(which))
+  auto run = admit(which);
+  if (!run)
     return 0;
 
   // Vector width suffixes and display labels
@@ -29,6 +34,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     if (widths[w] > 1)
       labels[w] += std::to_string(widths[w]);
   }
+  // int8_dp's widths are independent chains, not vectors (see its kernels).
+  auto rowNote = [&](int w) {
+    return which == Benchmark::ComputeInt8DP ? clChainNote(widths[w]) : clWidthNote(widths[w]);
+  };
 
   auto test = currentDeviceScope->beginTest(
     {resultTag, displayName, unit, Category::Unknown, description,
@@ -62,6 +71,12 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                  "integer dot product (4x8) not supported");
     return 0;
   }
+  if (!buildError.empty())
+  {
+    test.skipAll({labels[0], labels[1], labels[2], labels[3], labels[4]},
+                 ResultStatus::Error, buildError);
+    return -1;
+  }
 
   try
   {
@@ -73,27 +88,70 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
 
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, globalWIs * elemSize);
 
-    // Create kernels and set arguments.  Each width also looks for an
-    // affine-chain twin (compute_*_alt_v*, see kernels/mad_chain.cl); families
-    // that do not define one simply race nothing.
+    // Create kernels and set arguments.  Each width also looks for its
+    // second-shape twins (see kernels/mad_chain.cl): compute_*_alt_v*, and for
+    // the float families and int8_dp on a device that offers it
+    // compute_*_alt_sg16_v*, the same second shape pinned to sub-group 16.  A
+    // family that defines neither simply races nothing.
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM --
+    // which the catch below reads as the family not having been built.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Kernel kernels[5];
     cl::Kernel altKernels[5];
+    cl::Kernel sg16Kernels[5];
     bool hasAlt[5] = {false, false, false, false, false};
+    bool hasSg16[5] = {false, false, false, false, false};
+    // Looked up by name first: some runtimes (Apple's) print an error for
+    // every clCreateKernel on a name the program lacks, and most families lack
+    // the twins.  But never on a program with no kernels at all: NVIDIA's
+    // driver (610.57) builds one whose every kernel was preprocessed out, says
+    // it has none, and then segfaults inside clGetProgramInfo when asked for
+    // their names.  A family with no kernels is one the device's compiler did
+    // not build, which the catch below reports -- int8_dp on a device that
+    // advertises the dot product but defines none of its macros.
+    size_t programKernelCount = 1;
+    try
+    {
+      programKernelCount = prog.getInfo<CL_PROGRAM_NUM_KERNELS>();
+    }
+    catch (cl::Error &)
+    {
+    }
+    if (programKernelCount == 0)
+      throw cl::Error(CL_INVALID_KERNEL_NAME, "clCreateKernel");
+    std::string programKernels;
+    try
+    {
+      programKernels = ";" + prog.getInfo<CL_PROGRAM_KERNEL_NAMES>() + ";";
+    }
+    catch (cl::Error &)
+    {
+    }
+    auto findTwin = [&](const std::string &name, cl::Kernel &k) -> bool
+    {
+      if (programKernels.size() > 2 &&
+          programKernels.find(";" + name + ";") == std::string::npos)
+        return false;
+      try
+      {
+        k = cl::Kernel(prog, name.c_str());
+        k.setArg(0, outputBuf);
+        return true;
+      }
+      catch (cl::Error &)
+      {
+        return false;
+      }
+    };
     for (int w = 0; w < 5; w++)
     {
       std::string kname = kernelPrefix + suffixes[w];
       kernels[w] = cl::Kernel(prog, kname.c_str());
       kernels[w].setArg(0, outputBuf);
-      try
-      {
-        altKernels[w] = cl::Kernel(prog, (kernelPrefix + "_alt" + suffixes[w]).c_str());
-        altKernels[w].setArg(0, outputBuf);
-        hasAlt[w] = true;
-      }
-      catch (cl::Error &)
-      {
-        hasAlt[w] = false;
-      }
+      hasAlt[w] = findTwin(kernelPrefix + "_alt" + suffixes[w], altKernels[w]);
+      hasSg16[w] = findTwin(kernelPrefix + "_alt_sg16" + suffixes[w], sg16Kernels[w]);
       // Arg 1: scalar constant -- type depends on the test
       auto setScalarArg = [&](cl::Kernel &k) {
         if (which == Benchmark::ComputeDP)
@@ -125,7 +183,32 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       };
       setScalarArg(kernels[w]);
       if (hasAlt[w]) setScalarArg(altKernels[w]);
+      if (hasSg16[w]) setScalarArg(sg16Kernels[w]);
     }
+
+    // Which width the compiler built a kernel at.  On Intel GPUs the preferred
+    // multiple is the SIMD width it chose, and the chain shapes' rates depend
+    // on it (the MAD chain block in include/common/common.h), so the --verbose
+    // race line carries it.
+    cl::Device device = queue.getInfo<CL_QUEUE_DEVICE>();
+    auto simdHint = [&](cl::Kernel &k) -> size_t
+    {
+      try
+      {
+        return k.getWorkGroupInfo<CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE>(device);
+      }
+      catch (cl::Error &)
+      {
+        return 0;
+      }
+    };
+
+    // The affine chain at the compiler's sub-group size and at 16 race as a
+    // FormRace that drops only a clear loser: a tie at one vector width says
+    // nothing about the next, because the register allocator lays every width
+    // out afresh -- that is how Alchemist's mixed-precision chain tied at width
+    // 4 and then read 16-28% low at 8 and 16.  See kernels/mad_chain.cl.
+    clpeak::FormRace widthRace;
 
     // Run each vector width. run_kernel clamps the local size to each kernel's
     // own work-group limit (wide vector widths can be capped by register
@@ -143,36 +226,85 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         float throughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / timed * 1e6f;
 
-        // Race the affine chain and keep the faster reading.  A failure here
-        // is not an error: the squaring chain already produced one.
-        if (hasAlt[w])
+        // Race the second shapes and keep the fastest reading.  A failure
+        // here is not an error: the squaring chain already produced one.
+        auto timeTwin = [&](cl::Kernel &k) -> float
         {
           try
           {
-            float altTimed = run_kernel(queue, altKernels[w], globalSize, localSize,
-                                        cfg.targetTimeUs, forceIters ? specifiedIters : 0);
-            float altThroughput = (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / altTimed * 1e6f;
-            CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
-                        resultTag.c_str(), labels[w].c_str(), throughput,
-                        altThroughput, unit.c_str());
-            if (altThroughput > throughput * MAX_ALT_CHAIN_RATIO)
-              CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                          "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
-                          altThroughput / throughput);
-            else if (altThroughput > throughput)
-              throughput = altThroughput;
+            float twinTimed = run_kernel(queue, k, globalSize, localSize,
+                                         cfg.targetTimeUs, forceIters ? specifiedIters : 0);
+            return (static_cast<float>(ndRangeTotal(globalSize)) * static_cast<float>(workPerWI)) / twinTimed * 1e6f;
           }
           catch (cl::Error &)
           {
+            return 0.0f;
+          }
+        };
+        double twin[2] = {0.0, 0.0};
+        if (hasAlt[w] && widthRace.runs(false))
+          twin[0] = timeTwin(altKernels[w]);
+        if (hasSg16[w] && widthRace.runs(true))
+          twin[1] = timeTwin(sg16Kernels[w]);
+        if (clpeak::verboseEnabled() && (twin[0] > 0.0 || twin[1] > 0.0))
+        {
+          std::string alts;
+          for (int f = 0; f < 2; f++)
+          {
+            if (twin[f] <= 0.0)
+              continue;
+            char reading[64];
+            snprintf(reading, sizeof(reading), "%s%.1f%s", alts.empty() ? "" : ", ",
+                     twin[f], !hasSg16[w] ? "" : f ? " (sub-group 16)" : " (compiler's sub-group)");
+            alts += reading;
+          }
+          std::string multiples = std::to_string(simdHint(kernels[w])) + "/" +
+                                  std::to_string(simdHint(altKernels[w]));
+          if (hasSg16[w])
+            multiples += "/" + std::to_string(simdHint(sg16Kernels[w]));
+          CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %s %s; work-group "
+                      "multiples %s\n",
+                      resultTag.c_str(), labels[w].c_str(), throughput, alts.c_str(),
+                      unit.c_str(), multiples.c_str());
+        }
+        // The fold guard first, so a reading it rejects cannot decide the race.
+        const float squaring = throughput;
+        double raced[2] = {twin[0], twin[1]};
+        for (int f = 0; f < 2; f++)
+        {
+          if (twin[f] > squaring * MAX_ALT_CHAIN_RATIO)
+          {
+            CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                        "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
+                        twin[f] / squaring);
+            raced[f] = 0.0;
+          }
+          else if (twin[f] > throughput)
+            throughput = (float)twin[f];
+        }
+        if (hasSg16[w])
+        {
+          if (widthRace.runs(true) && twin[1] <= 0.0)
+            widthRace.drop(true);
+          if (widthRace.runs(false) && widthRace.runs(true))
+          {
+            widthRace.dropTrailing(raced);
+            if (!widthRace.runs(false) || !widthRace.runs(true))
+              CLPEAK_VLOG("%s %s: alt chain at the %s sub-group trails by %.1fx -- "
+                          "dropped from here\n",
+                          resultTag.c_str(), labels[w].c_str(),
+                          widthRace.runs(true) ? "compiler's" : "16",
+                          widthRace.runs(true) ? twin[1] / twin[0] : twin[0] / twin[1]);
           }
         }
 
-        test.emit(labels[w], throughput, clWidthNote(widths[w]));
+        test.emit(labels[w], throughput, rowNote(w));
+
       }
       catch (cl::Error &error)
       {
         std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-        test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+        test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
       }
     }
   }
@@ -189,18 +321,18 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       for (int w = 0; w < 5; w++)
         test.skip(labels[w], ResultStatus::Unsupported,
                   "device's OpenCL compiler did not build these kernels",
-                  clWidthNote(widths[w]));
+                  rowNote(w));
       return 0;
     }
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
     return -1;
   }
   catch (std::exception &e)
   {
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, e.what(), clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, e.what(), rowNote(w));
     return -1;
   }
 

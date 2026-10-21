@@ -10,10 +10,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest(
         {"image_memory_bandwidth", "Image memory bandwidth", "bps",
          Category::Unknown,
-         "How many bytes per second the GPU reads through its texture units, "
-         "which take a different path to memory than plain buffer reads.  Each "
-         "reading uses a different pixel format, so they differ in how many "
-         "bytes one pixel costs.",
+         "Read bandwidth through the texture units, reading each pixel of an "
+         "image once.",
          TestShape::Heterogeneous, "pixel format"});
 
     const NSUInteger imgW = 4096, imgH = 4096;
@@ -45,15 +43,13 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     };
     const V vs[] = {
         { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16,
-          "Four colour channels at full 32-bit precision: 16 bytes a pixel, the "
-          "heaviest format here." },
+          "Four fp32 channels, 16 bytes per pixel." },
         { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8,
-          "Four channels at half precision: 8 bytes a pixel." },
+          "Four fp16 channels, 8 bytes per pixel." },
         { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4,
-          "Four 8-bit channels: 4 bytes a pixel, the format ordinary images use." },
+          "Four 8-bit unorm channels, 4 bytes per pixel." },
         { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4,
-          "A single 32-bit channel: also 4 bytes a pixel, but one value instead "
-          "of four." },
+          "One fp32 channel, 4 bytes per pixel." },
     };
 
     for (const auto &v : vs)
@@ -177,11 +173,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
     auto test = currentDeviceScope->beginTest(
         {"texture_sample_rate", "Texture sample rate (bilinear)", "texels",
          Category::Bandwidth,
-         "How many filtered texture lookups per second the GPU's sampling "
-         "hardware performs.  Every lookup falls between pixels, so the hardware "
-         "must blend four of them -- the basic operation of drawing any textured "
-         "surface.  The texture is small enough to stay cached, so this measures "
-         "the sampling units rather than memory.",
+         "Bilinear-filtered texture samples per second, from a texture small "
+         "enough to stay cached.",
          TestShape::Heterogeneous, "pixel format"});
 
     const unsigned int SAMPLES_PER_WI = 64;   // must match texture_sample.metal
@@ -212,10 +205,9 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
     };
     const V vs[] = {
         { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4,
-          "Blending four 8-bit-per-channel pixels, the common case in games and UI." },
+          "Four 8-bit unorm channels, 4 bytes per texel." },
         { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8,
-          "Blending four half-precision pixels -- twice the data per lookup, so "
-          "the rate typically drops." },
+          "Four fp16 channels, 8 bytes per texel." },
     };
 
     for (const auto &v : vs)

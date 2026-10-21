@@ -1,6 +1,10 @@
 #include <common/logger.h>
+#include <common/run_checkpoint.h>
 #include <common/run_log.h>
+#include <common/thermal.h>
+#include <common/screen_hold.h>
 #include <cassert>
+#include <exception>
 #include <iomanip>
 #include <sstream>
 
@@ -152,7 +156,29 @@ void logger::log(clpeak::LogLevel level, std::string message, std::string source
     dispatchEvent(e);
 }
 
-void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
+bool logger::recordUnmeasured(const TestSpec &spec, const std::string &metric,
+                              ResultStatus status, const std::string &reason)
+{
+    if (contextDepth < 2 || curDeviceIdx == kNoIndex) return false;
+    if (contextDepth == 3) closeOpenTest();
+    TestScope test(this, spec);
+    test.skip(metric, status, reason);
+    test.end();
+    return true;
+}
+
+// The prefix mirrorEvent() puts on a reading and on a whole-test skip, which
+// nothing else on the log starts with.
+static const char kReadingIndent[] = "      ";
+
+bool logger::isReadingLine(const LogEntry &e)
+{
+    return e.level == clpeak::LogLevel::Info && e.source.empty() && !e.test.empty() &&
+           e.message.compare(0, sizeof(kReadingIndent) - 1, kReadingIndent) == 0;
+}
+
+void logger::recordTranscriptLine(const LogEvent &e, const std::string &message,
+                                  bool toDocument)
 {
     if (message.empty()) return;
     RunLog *run = RunLog::current();
@@ -164,7 +190,10 @@ void logger::recordTranscriptLine(const LogEvent &e, const std::string &message)
     entry.deviceIndex = e.deviceIndex;
     entry.test        = e.testKey();
     entry.message     = message;
-    run->record(entry);
+    if (toDocument)
+        run->record(entry);
+    else
+        run->recordToSidecar(entry);
 }
 
 void logger::dispatchEvent(const LogEvent &e)
@@ -181,8 +210,9 @@ void logger::mirrorEvent(const LogEvent &e)
     // on the log of every run.  It is what a sidecar left behind by a crash
     // is read for, and a run without --verbose used to leave one that ended
     // at the last warning, minutes before the device that took it down.  The
-    // readings join it under --verbose (mirrorToRunLog), so the log then reads
-    // as the terminal did.
+    // readings join it on the sidecar of every run, since a run that dies
+    // leaves no device tree to hold them, and on the document's log under
+    // --verbose (mirrorToRunLog), which then reads as the terminal did.
     const bool transcript = mirrorToRunLog;
     switch (e.kind)
     {
@@ -216,8 +246,6 @@ void logger::mirrorEvent(const LogEvent &e)
 
     case LogEvent::Kind::Metric:
     {
-        if (!transcript)
-            break;
         UnitInfo unit;
         if (e.metric.hasUnit)
         {
@@ -234,7 +262,7 @@ void logger::mirrorEvent(const LogEvent &e)
                                   : e.metric.direction;
 
         std::ostringstream line;
-        line << "      " << e.metric.displayLabel() << " : ";
+        line << kReadingIndent << e.metric.displayLabel() << " : ";
         if (e.metric.status == ResultStatus::Ok)
         {
             const ScaledValue sv = formatScaledValue(e.metric.value, unit);
@@ -276,14 +304,14 @@ void logger::mirrorEvent(const LogEvent &e)
         {
             line << "[" << statusString(e.metric.status) << "] " << e.metric.reason;
         }
-        recordTranscriptLine(e, line.str());
+        recordTranscriptLine(e, line.str(), transcript);
         break;
     }
 
     case LogEvent::Kind::TestSkippedAll:
-        if (transcript)
-            recordTranscriptLine(e, std::string("      [") + statusString(e.status) +
-                                      "] " + e.reason);
+        recordTranscriptLine(e, std::string(kReadingIndent) + "[" + statusString(e.status) +
+                                  "] " + e.reason,
+                             transcript);
         break;
 
     default:
@@ -324,6 +352,11 @@ void logger::BackendScope::end()
     closed = true;
     assert(log->contextDepth == 1);
     log->dispatchEvent(log->makeEvent(LogEvent::Kind::BackendEnd));
+    // Every device it was going to run is behind it: a resumed run does not
+    // construct it again.  Not when a cancel or an exception cut it short.
+    if (RunCheckpoint *checkpoint = RunCheckpoint::current())
+        if (!clpeak::cancelRequested() && std::uncaught_exceptions() == 0)
+            checkpoint->backendFinished(log->curBackend, log->doc);
     log->curBackend.clear();
     log->contextDepth = 0;
 }
@@ -403,6 +436,10 @@ void logger::DeviceScope::end()
     closed = true;
     assert(log->contextDepth == 2);
     log->dispatchEvent(log->makeEvent(LogEvent::Kind::DeviceEnd));
+    // Likewise its device, which a resumed run then does not open.
+    if (RunCheckpoint *checkpoint = RunCheckpoint::current())
+        if (!clpeak::cancelRequested() && std::uncaught_exceptions() == 0)
+            checkpoint->deviceFinished(log->curBackend, log->curDeviceIndex, log->doc);
     log->curDevice.clear();
     log->curDriver.clear();
     log->curPlatform.clear();
@@ -443,6 +480,10 @@ logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
                   "' was still open; closed it first (call end() on the "
                   "previous TestScope before starting a sibling test)");
     }
+    // A boundary between readings: a device too hot to measure cools first,
+    // and a paused run, or one whose app is off screen, waits.
+    clpeak::thermalGate();
+    clpeak::holdGate();
     return TestScope(log, spec);
 }
 
@@ -540,6 +581,8 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
     log->dispatchEvent(e);
+    clpeak::thermalGate();   // and so is a reading recorded
+    clpeak::holdGate();
 }
 
 void logger::TestScope::emit(std::string metric, float value,

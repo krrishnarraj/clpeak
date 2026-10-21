@@ -10,18 +10,12 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 
   auto test = currentDeviceScope->beginTest(
     {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
-     "The overhead of asking the GPU to do anything at all, measured with a "
-     "kernel that does no work.  It is what small, frequent GPU jobs pay "
-     "before any of their own work begins.",
+     "Time to launch an empty kernel, the fixed cost every dispatch pays.",
      TestShape::Heterogeneous});
 
-  const char *dispatchNote = "One way only: from the moment the host submits the "
-                             "work to the moment the GPU starts running it.  CUDA "
-                             "exposes no clock the host and GPU share, so this is "
-                             "reported on the other backends but not here.";
-  const char *roundtripNote = "The full round trip -- submit, run, and hear back "
-                              "that it finished.  This is what the host waits for "
-                              "if it has nothing else to get on with.";
+  const char *dispatchNote = "Host submit to kernel start, one way.  CUDA has no "
+                             "host/GPU shared clock to measure it.";
+  const char *roundtripNote = "Host submit to completion seen by the host.";
 
   CudaKernel k = dev.getKernel(cuda_kernels::kernel_latency, "kernel_latency_noop");
   if (!k)

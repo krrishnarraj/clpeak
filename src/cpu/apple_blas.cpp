@@ -96,7 +96,7 @@ SweepResult sweep(const std::vector<uint64_t> &sizes, size_t elemBytes,
     double g = runSize(n);
     if (g <= 0.0)
       continue;
-    CLPEAK_VLOG("  [accelerate] %s N=%llu: %.1f GFLOPS\n", label,
+    CLPEAK_VLOG("  [accelerate] %s N=%llu: %.1f FLOPS\n", label,
                 (unsigned long long)n, g);
     if (g > res.peakFlops) { res.peakFlops = g; res.peakN = n; }
     res.largestFlops = g;

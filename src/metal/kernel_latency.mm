@@ -12,18 +12,13 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
 
     auto test = currentDeviceScope->beginTest(
         {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
-         "The overhead of asking the GPU to do anything at all, measured with a "
-         "kernel that does no work.  It is what small, frequent GPU jobs pay "
-         "before any of their own work begins.",
+         "Time to launch an empty kernel, the fixed cost every dispatch pays.",
          // Two different waits, not one measured two ways: the one-way cost
          // and the full round trip answer different questions.
          TestShape::Heterogeneous});
 
-    const char *dispatchNote = "One way only: from the moment the CPU submits the "
-                               "work to the moment the GPU starts running it.";
-    const char *roundtripNote = "The full round trip -- submit, run, and hear back "
-                                "that it finished.  This is what the CPU waits for "
-                                "if it has nothing else to get on with.";
+    const char *dispatchNote = "Host submit to kernel start, one way.";
+    const char *roundtripNote = "Host submit to completion seen by the host.";
 
     id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
         mtl_kernels::kernel_latency_src,

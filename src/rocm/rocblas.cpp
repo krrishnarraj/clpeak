@@ -125,26 +125,17 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
 
 
   // One note per dtype row, shared by every emit and skip path below.
-  const char *fp32Note = "Full 32-bit precision, on the ordinary shader cores "
-                         "rather than the matrix cores.";
-  const char *fp64Note = "Full 64-bit precision, for scientific computing.  "
-                         "Gaming cards run this far slower than the compute cards.";
-  const char *fp16Note = "16-bit inputs with 32-bit totals -- the everyday "
-                         "precision of AI inference, and usually the fastest row "
-                         "here.";
-  const char *bf16Note = "bfloat16 inputs with 32-bit totals -- 16 bits arranged "
-                         "for AI work, trading digits of accuracy for the number "
-                         "range of a full float.";
-  const char *int8Note = "8-bit whole numbers with 32-bit totals -- the format "
-                         "quantized neural networks use.";
+  const char *fp32Note = "fp32 inputs and accumulator.";
+  const char *fp64Note = "fp64 inputs and accumulator.  Consumer GPUs run it at a "
+                         "small fraction of their fp32 rate.";
+  const char *fp16Note = "fp16 inputs, fp32 accumulator.";
+  const char *bf16Note = "bf16 inputs, fp32 accumulator.";
+  const char *int8Note = "int8 inputs, int32 accumulator.";
 
   auto test = currentDeviceScope->beginTest(
         {"rocblas_gemm", "rocBLAS GEMM peak", "flops", Category::Unknown,
-         "Matrix-multiply speed through AMD's own tuned library, on a large "
-         "square problem.  Where the matrix-core rows show what the hardware "
-         "can do in principle, this shows what shipping code reaches on the "
-         "operation most AI work is built from.  Each reading is a different "
-         "input format.",
+         "Peak GEMM rate through AMD's rocBLAS library, on a large square "
+         "problem.",
          TestShape::Heterogeneous, "data type"});
 
   auto blasOpts = [&](const char *note) {

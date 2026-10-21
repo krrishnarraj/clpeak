@@ -1,4 +1,4 @@
-// mad_chain.glsl -- the two chain shapes every compute-peak shader races.
+// mad_chain.glsl -- the chain shapes every compute-peak shader races.
 //
 // Each .comp that includes this is compiled twice: once plain, giving the
 // squaring recurrence
@@ -10,10 +10,11 @@
 //
 //     x_k = a*x_k + b                   (a, b per-lane loop invariants)
 //
-// Both spell exactly 16 chain instructions per MAD_16, so the loop trip counts
-// and the per-work-item op budget are identical between the two and the
-// readings are directly comparable.  runComputeKernel times both and reports
-// the faster one.
+// Both spell exactly 16 chain instructions per MAD_16, so the per-work-item op
+// budget is identical between the two and the readings are directly
+// comparable; only how many MAD_16s one loop trip holds differs (CHAIN_TRIP,
+// below).  runComputeKernel times both -- the affine one at two subgroup
+// widths for the float families -- and reports the fastest.
 //
 // Why two shapes.  No single shape reaches peak on every vendor, because the
 // two dominant register files have opposite constraints:
@@ -29,9 +30,18 @@
 //    two-register x = x*x + c runs at full rate; four independent chains
 //    restore the affine form to ~1.0.
 //
-// Racing the pair lands within 3% of the best measured shape on every device
-// tested (Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45, M1 Pro via
-// MoltenVK) where the squaring form alone reports half rate on Alchemist.
+// Why two widths.  Distinct registers still collide on Alchemist when all
+// three sources of a mad sit in one register bank, and at SIMD32 every 32-lane
+// fp32 value straddles both banks the same way, so the driver's allocator
+// lines them up more often than not.  Pinned to subgroup 16 an Arc A380 read
+// the affine chain at 4.87 TFLOPS in fp32 and 4.60-4.80 in mixed precision,
+// against 4.81 and 3.44-3.55 at the SIMD32 its pipelines are pinned to -- while
+// this driver keeps fp16's double rate only at SIMD32 (9.50 against 4.93).
+// The measurements are in the MAD chain block of include/common/common.h.
+//
+// The race is what keeps Alchemist off the squaring form's half rate: across
+// the Arc A380, RTX 5060, RTX 4060, Arc UHD 630, Adreno X1-45 and M1 Pro (via
+// MoltenVK) no one shape is the fastest everywhere.
 //
 // MAD_CHAINS is set by the includer to hold the chain state at ~4 32-bit
 // registers per lane whatever the vector width -- the register-pressure rule
@@ -178,9 +188,25 @@
 
 #endif
 
-// Deep inner loop for the shaders whose accumulator has to round-trip through
-// a narrow type once per outer iteration (mp, bf16): 128 chain instructions,
-// so the conversion amortises instead of sitting in the critical path.
+// 128 chain instructions in one trip, for the shaders whose accumulator
+// round-trips through a narrow type once per trip (mp, bf16): the conversion
+// amortises instead of sitting in the critical path.
 #define MAD_128  MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16 MAD_16
+
+// One loop trip of the fp32/fp16 shaders, and how many of them make n MAD_16s.
+// The squaring build runs 128 chain instructions a trip: the trip counter is
+// an op nobody counts, and Apple's compilers keep the loop as written -- at
+// MAD_16 an M1 Pro lost 16% of its fp32 rate to it, and squaring is the shape
+// Apple runs.  The affine build keeps MAD_16: deeper, it gained nothing on any
+// GPU measured (the compilers that pick it unroll the loop anyway) and cost
+// llvmpipe's emulated fp16 26-43%.  The op budget is the same either way.
+// The measurements are in the MAD chain block of include/common/common.h.
+#ifdef MAD_CHAIN_AFFINE
+  #define CHAIN_TRIP        MAD_16
+  #define CHAIN_TRIPS(n16)  (n16)
+#else
+  #define CHAIN_TRIP        MAD_128
+  #define CHAIN_TRIPS(n16)  ((n16) / 8)
+#endif
 
 #endif // MAD_CHAIN_GLSL

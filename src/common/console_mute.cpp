@@ -54,6 +54,12 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
   savedOut = CLPEAK_DUP(CLPEAK_FILENO(stdout));
   savedErr = CLPEAK_DUP(CLPEAK_FILENO(stderr));
   keepText = (mode == Capture::Always);
+  // Inside another scope, fd 2 is that scope's pipe and savedErr a copy of
+  // it: a line rendered there would be recorded again as library output,
+  // and echoed back into the pipe, up to kMaxLines times.  The terminal is
+  // the enclosing scope's bypass.
+  outerRealErr = realStderrFd();
+  const int realErr = outerRealErr >= 0 ? outerRealErr : savedErr;
 
   // Watching needs the stream in hand line by line, which only the capture
   // path gives; a non-verbose scope that merely wants to know whether a
@@ -73,7 +79,7 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
       (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stderr));
       (void)CLPEAK_CLOSE(fds[1]);
       // Whatever renders a captured line must not write it into the capture.
-      setRealStderrFd(savedErr);
+      setRealStderrFd(realErr);
       try
       {
         reader = std::thread([this] { drain(); });
@@ -82,7 +88,7 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
       {
         // No thread: put the console back and run unmuted, as --verbose
         // always did.
-        setRealStderrFd(-1);
+        setRealStderrFd(outerRealErr);
         if (!stderrOnly)
           (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
         (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
@@ -109,7 +115,7 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
     // bypass the capture path installs, so a warning emitted inside a muted
     // scope is not lost with the noise.
     if (savedErr >= 0)
-      setRealStderrFd(savedErr);
+      setRealStderrFd(realErr);
   }
 }
 
@@ -124,10 +130,11 @@ void ScopedConsoleMute::finish()
   (void)fflush(stderr);
   if (savedOut >= 0 && !stderrOnly) (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
   if (savedErr >= 0) (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
-  // fd 2 is the console again, so the bypass goes before its saved copy is
-  // closed -- a line the reader is still rendering must not land on a
-  // closed (or, worse, reused) descriptor.
-  setRealStderrFd(-1);
+  // fd 2 is what it was before this scope, so the bypass goes back to the
+  // enclosing scope's (or none) before the saved copy is closed -- a line
+  // the reader is still rendering must not land on a closed (or, worse,
+  // reused) descriptor, nor on fd 2 while that is an outer scope's pipe.
+  setRealStderrFd(outerRealErr);
   if (savedOut >= 0) (void)CLPEAK_CLOSE(savedOut);
   if (savedErr >= 0) (void)CLPEAK_CLOSE(savedErr);
   if (readFd < 0)

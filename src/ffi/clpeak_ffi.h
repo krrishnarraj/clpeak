@@ -87,7 +87,7 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // State of the ONNX Runtime, for a settings screen to report back with:
 //   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
 //    "epLibraries":[{"name":str,"path":str,"named":bool,"registered":bool,
-//                    "error":str}],
+//                    "error":str,"replaces":[str]}],
 //    "winml":{"enabled":bool,"path":str,"error":str},
 //    "pendingRuntime"?:{"path":str,"winml":{"enabled":bool,"path":str}}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
@@ -96,7 +96,9 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // statically linked).  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
 // `epLibraries` is what the environment registered, so a library set since
-// the last enumeration is absent until the next one; `winml.path` is
+// the last enumeration is absent until the next one; an entry's `replaces`
+// names the Windows ML providers ("<name> <version>") left out because that
+// library, added by hand, provides the same one.  `winml.path` is
 // the catalog DLL that answered and `winml.error` why it did not.  When
 // enabled but nothing has resolved the catalog yet both are empty --
 // pending until the next enumeration or run, like `epLibraries`.
@@ -185,7 +187,7 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
 // where it is authored (logger::EmitOptions::description).
 //   test_end      {}          device_end {}          backend_end {}
 //   log           {..., test, variant, level, source, elapsed_s, message}
-//   done          {status, cancelled}   // ALWAYS the last event of a launch
+//   done          {status, cancelled, duration_s}   // ALWAYS the last event of a launch
 //
 // `log` is one line of the run's diagnostic stream -- the same entry the
 // saved document holds in its `log` array (docs/format-v3.md): `level` is
@@ -218,9 +220,13 @@ typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 // run exactly like the CLI, so partial results of a cancelled run still get
 // saved -- with `"cancelled": true` in the document to say they are partial.
 // While the run is in flight, `<file>` with `.json` swapped for `.log` holds
-// the diagnostic stream so far, one JSON object per line (run_log.h); it is
-// removed once the document is written, so one left behind means the process
-// died mid-run and the sidecar is that run's only record.
+// the diagnostic stream so far, one JSON object per line (run_log.h), and
+// `<file>` with `.json` swapped for `.partial.json` what has finished
+// (run_checkpoint.h); both are removed once the document is written, so ones
+// left behind mean the process died mid-run -- except that a cancelled run
+// keeps its checkpoint beside the document it saved.  `--resume <file>` then
+// continues that run into the same document, with its own options
+// (run_resume.h).
 // Never calls exit().
 CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
                                     ClpeakEventCallback on_event,
@@ -233,6 +239,28 @@ CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
 // tests and devices are skipped silently.  Safe to call from any thread.
 // The flag auto-resets at the start of the next clpeak_launch().
 CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
+
+// ---- The app on screen -----------------------------------------------------------
+
+// Whether the app hosting runs in this process is on screen (nonzero) or not;
+// on screen until said otherwise.  While it is not, a run waits at its next
+// boundary between readings -- a test starting, a row recorded -- until it
+// is, or is cancelled: off screen a phone moves the app to background cores
+// and clocks and then freezes it (include/common/screen_hold.h).  Each change
+// during a run is recorded on its log -- the document's `log` and the
+// sidecar -- with source "app".  Safe to call from any thread, at any time.
+CLPEAK_FFI_EXPORT void clpeak_set_on_screen(int on_screen);
+
+// ---- Pausing --------------------------------------------------------------------
+
+// Pause the in-flight launch (nonzero) or let it go on (zero).  A paused run
+// finishes the reading in flight and waits at its next boundary between
+// readings, as one whose app is off screen does, until it is resumed or
+// cancelled; it logs `held until the run is resumed` in the scope of the test
+// it stopped in once it waits.  Each change during a run is recorded on its
+// log with source "app".  Every clpeak_launch() starts unpaused.  Safe to
+// call from any thread.
+CLPEAK_FFI_EXPORT void clpeak_set_paused(int paused);
 
 // ---- Engine process (desktop) ----------------------------------------------------
 //
@@ -258,7 +286,8 @@ CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
 //   launch   clpeak_launch() with the argv after `--` (no program name),
 //            each event one line of stdout, ending with `done`.  A "cancel"
 //            line on stdin is clpeak_request_cancel(); stdin closing is too,
-//            since it means the app has gone.
+//            since it means the app has gone.  "pause" and "resume" lines
+//            are clpeak_set_paused(1) and (0).
 // Nothing else reaches stdout: what a library prints there goes to stderr.
 // Returns only on a usage error (64); otherwise the process ends when the
 // mode does, without running static destructors -- every result is saved by

@@ -178,11 +178,6 @@ class TfliteModel
 public:
   TfliteModel();
 
-  // Reserve room up front for the weight bytes the recipe will add, so the
-  // builder never reallocates (and copies) a half-built model of hundreds of
-  // megabytes.  Advisory; the builder grows without it.
-  void reserveBytes(size_t bytes);
-
   // A weight buffer.  Index 0 is the empty buffer every non-constant tensor
   // refers to, so the first call returns 1.  Not copied: `data` must stay
   // valid until build() returns.
@@ -249,7 +244,6 @@ private:
 
   std::vector<Subgraph> subgraphs_;
   std::vector<Buffer> buffers_;
-  size_t reserve_ = 0;
 };
 
 } // namespace clpeak_tflite

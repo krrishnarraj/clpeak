@@ -176,21 +176,17 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 {
   auto test = currentDeviceScope->beginTest(
     {"hipblaslt-fp8", "hipBLASLt FP8 GEMM peak", "flops", Category::Unknown,
-     "Matrix-multiply speed through AMD's hipBLASLt library on the narrowest "
-     "number formats -- 8-bit and 4-bit.  These are the formats large models "
-     "are compressed into to fit and run fast, and the library is how real "
-     "code reaches them.",
+     "Peak fp8 and fp4 GEMM rate through AMD's hipBLASLt library, on a large "
+     "square problem.",
      TestShape::Heterogeneous, "data type"});
 
   // One note per dtype row, shared by every emit and skip path below.
-  const char *e4m3Note = "8-bit inputs, in the variant that spends its bits on "
-                         "accuracy rather than range.";
-  const char *e5m2Note = "8-bit inputs including the variant that spends its bits "
-                         "on range rather than accuracy -- the usual choice for "
-                         "inference.";
-  const char *mxf4Note = "4-bit inputs with a shared scale factor per block, the "
-                         "open MX format.  The scale is what makes 4 bits usable "
-                         "for real models rather than a curiosity.";
+  const char *e4m3Note = "fp8 E4M3 FNUZ inputs (more precision, less range), "
+                         "fp32 accumulator.";
+  // E5M2 x E5M2 is not what runs: B stays E4M3 (see runVariant below).
+  const char *e5m2Note = "fp8 E5M2 x E4M3 inputs (FNUZ), fp32 accumulator.";
+  const char *mxf4Note = "fp4 E2M1 inputs, one shared scale per 32 values (OCP "
+                         "MX), fp32 accumulator.";
 
 #ifndef CLPEAK_ROCM_HAS_HIPBLASLT
   test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt not found at configure time", e4m3Note);

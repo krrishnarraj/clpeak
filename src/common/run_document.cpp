@@ -131,6 +131,21 @@ void RunDocument::append(const RunDocument &other)
     }
 }
 
+RunProgress::Device &RunProgress::device(const std::string &backend, int deviceIndex)
+{
+    for (Device &d : devices)
+        if (d.backend == backend && d.deviceIndex == deviceIndex) return d;
+    devices.push_back(Device{backend, deviceIndex, false, {}});
+    return devices.back();
+}
+
+bool RunProgress::backendDone(const std::string &backend) const
+{
+    for (const std::string &b : backendsDone)
+        if (b == backend) return true;
+    return false;
+}
+
 // ── Baselines ──────────────────────────────────────────────────────────────
 
 std::string deviceKey(const std::string &name, int deviceIndex)
@@ -176,6 +191,25 @@ std::string isoTimestampUtc()
     return std::string(buf);
 }
 
+bool parseIsoTimestampUtc(const std::string &iso, long long &secondsSinceEpoch)
+{
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0;
+    char z = 0;
+    if (std::sscanf(iso.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d%c", &y, &mo, &d, &h, &mi, &s, &z) != 7 ||
+        z != 'Z' || mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || s > 60)
+        return false;
+    // Days since 1970-01-01 in the proleptic Gregorian calendar, without
+    // timegm (not on Windows) or mktime (local time).
+    const int       yy  = y - (mo <= 2 ? 1 : 0);
+    const long long era = (yy >= 0 ? yy : yy - 399) / 400;
+    const long long yoe = yy - era * 400;
+    const long long doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const long long days = era * 146097 + doe - 719468;
+    secondsSinceEpoch = days * 86400 + h * 3600 + mi * 60 + s;
+    return true;
+}
+
 // ── JSON writer ────────────────────────────────────────────────────────────
 
 namespace {
@@ -201,13 +235,14 @@ void writeInvocation(JsonWriter &w, const Invocation &inv)
         for (const std::string &a : inv.argv) w.rawString(a);
         w.endArray();
     }
-    if (inv.targetTimeUs)    w.uint("target_time_us",     inv.targetTimeUs);
-    if (inv.targetTimeUsCpu) w.uint("target_time_us_cpu", inv.targetTimeUsCpu);
-    if (inv.warmup)          w.uint("warmup",             inv.warmup);
+    if (inv.targetTimeUs)      w.uint("target_time_us",        inv.targetTimeUs);
+    if (inv.targetTimeUsCpu)   w.uint("target_time_us_cpu",    inv.targetTimeUsCpu);
+    if (inv.targetTimeUsMlGpu) w.uint("target_time_us_ml_gpu", inv.targetTimeUsMlGpu);
+    if (inv.warmup)            w.uint("warmup",                inv.warmup);
     // Absent means "calibrated per test", which is the normal mode; a number
     // means the run was pinned to it with -i and is not comparable to one that
     // was not.
-    if (inv.iters)           w.uint("iters",              inv.iters);
+    if (inv.iters)             w.uint("iters",                 inv.iters);
     if (!inv.categories.empty())
     {
         w.beginArray("categories");
@@ -326,11 +361,72 @@ void writeDevice(JsonWriter &w, const DeviceResult &d)
     w.endObject();
 }
 
-void writeDocument(const RunDocument &doc, std::ostream &out)
+void writePlace(JsonWriter &w, const char *key, const RunPlace &p)
 {
-    JsonWriter w(out);
+    if (p.empty()) return;
+    w.beginObject(key);
+    w.str("backend", p.backend);
+    w.strIf("device", p.device);
+    if (p.deviceIndex >= 0) w.integer("device_index", p.deviceIndex);
+    w.strIf("test", p.test);
+    w.endObject();
+}
+
+void writeResumed(JsonWriter &w, const std::vector<ResumeRecord> &parts)
+{
+    if (parts.empty()) return;
+    w.beginArray("resumed");
+    for (const ResumeRecord &r : parts)
+    {
+        w.beginObject();
+        w.str("at", r.at);
+        w.num("elapsed_s", r.elapsedS);
+        w.strIf("after", r.after);
+        writePlace(w, "from", r.from);
+        writePlace(w, "skipped", r.skipped);
+        w.endObject();
+    }
+    w.endArray();
+}
+
+void writeProgress(JsonWriter &w, const RunProgress &p)
+{
+    w.beginObject("progress");
+    w.beginArray("backends_done");
+    for (const std::string &b : p.backendsDone) w.rawString(b);
+    w.endArray();
+    w.beginArray("devices");
+    for (const RunProgress::Device &d : p.devices)
+    {
+        w.beginObject();
+        w.str("backend", d.backend);
+        w.integer("device_index", d.deviceIndex);
+        if (d.done)
+        {
+            w.boolean("done", true);
+        }
+        else
+        {
+            w.beginArray("benchmarks_done");
+            for (const std::string &b : d.benchmarks) w.rawString(b);
+            w.endArray();
+        }
+        w.endObject();
+    }
+    w.endArray();
+    w.endObject();
+}
+
+// The result document, or with `progress` a run's checkpoint: the same meta
+// and devices on one line, and no log or inventory -- the sidecar holds the
+// log, and the checkpoint is rewritten whole at every boundary that adds to
+// it, so it carries nothing it does not need to.
+void writeDocument(const RunDocument &doc, std::ostream &out,
+                   const RunProgress *progress = nullptr)
+{
+    JsonWriter w(out, /*compact=*/progress != nullptr);
     w.beginObject();
-    w.str("schema", "clpeak/run");
+    w.str("schema", progress ? "clpeak/run-partial" : "clpeak/run");
     w.integer("format_version", RESULT_FORMAT_VERSION);
     w.str("clpeak_version", doc.meta.clpeakVersion.empty()
                                 ? std::string(CLPEAK_VERSION_STR)
@@ -342,6 +438,8 @@ void writeDocument(const RunDocument &doc, std::ostream &out)
     writeBuild(w, doc.meta.build);
     writeHost(w, doc.meta.host);
     writeInvocation(w, doc.meta.invocation);
+    writeResumed(w, doc.meta.resumed);
+    if (progress) writeProgress(w, *progress);
 
     w.beginArray("devices");
     for (const DeviceResult &d : doc.devices) writeDevice(w, d);
@@ -349,13 +447,13 @@ void writeDocument(const RunDocument &doc, std::ostream &out)
 
     // Results first; the two blocks a reader consults when they look wrong
     // come after, and the log is the one that can run long.
-    if (!doc.inventory.empty())
+    if (!progress && !doc.inventory.empty())
     {
         w.beginArray("inventory");
         writeInventoryBackends(w, doc.inventory);
         w.endArray();
     }
-    if (!doc.log.empty())
+    if (!progress && !doc.log.empty())
     {
         w.beginArray("log");
         for (const LogEntry &e : doc.log) writeLogEntry(w, e);
@@ -413,6 +511,13 @@ std::string runDocumentToJson(const RunDocument &doc)
     return ss.str();
 }
 
+std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress)
+{
+    std::ostringstream ss;
+    writeDocument(doc, ss, &progress);
+    return ss.str();
+}
+
 // ── JSON loader ────────────────────────────────────────────────────────────
 
 namespace {
@@ -433,10 +538,11 @@ void readInvocation(const JsonValue &v, Invocation &inv)
     if (!v.isObject()) return;
     if (const JsonValue *a = v.find("argv"))
         for (const JsonValue &x : a->items()) inv.argv.push_back(x.asString());
-    inv.targetTimeUs    = static_cast<unsigned>(v.num("target_time_us"));
-    inv.targetTimeUsCpu = static_cast<unsigned>(v.num("target_time_us_cpu"));
-    inv.warmup          = static_cast<unsigned>(v.num("warmup"));
-    inv.iters           = static_cast<unsigned>(v.num("iters"));
+    inv.targetTimeUs      = static_cast<unsigned>(v.num("target_time_us"));
+    inv.targetTimeUsCpu   = static_cast<unsigned>(v.num("target_time_us_cpu"));
+    inv.targetTimeUsMlGpu = static_cast<unsigned>(v.num("target_time_us_ml_gpu"));
+    inv.warmup            = static_cast<unsigned>(v.num("warmup"));
+    inv.iters             = static_cast<unsigned>(v.num("iters"));
     if (const JsonValue *c = v.find("categories"))
         for (const JsonValue &x : c->items()) inv.categories.push_back(x.asString());
     if (const JsonValue *t = v.find("tests"))
@@ -524,37 +630,38 @@ DeviceResult readDevice(const JsonValue &v)
     return d;
 }
 
-} // namespace
-
-bool loadRunJson(const std::string &filename, RunDocument &out)
+RunPlace readPlace(const JsonValue *v)
 {
-    std::ifstream f(filename);
-    if (!f.is_open())
-    {
-        std::cerr << "clpeak: cannot open result file: " << filename << "\n";
-        return false;
-    }
-    std::ostringstream ss;
-    ss << f.rdbuf();
+    RunPlace p;
+    if (!v || !v->isObject()) return p;
+    p.backend     = v->str("backend");
+    p.device      = v->str("device");
+    p.deviceIndex = static_cast<int>(v->num("device_index", -1));
+    p.test        = v->str("test");
+    return p;
+}
 
-    std::string error;
-    JsonValue   root = jsonParse(ss.str(), &error);
-    if (!root.isObject())
-    {
-        std::cerr << "clpeak: " << filename << " is not a clpeak result file"
-                  << (error.empty() ? "" : " (" + error + ")") << "\n";
-        return false;
-    }
+void readProgress(const JsonValue &v, RunProgress &p)
+{
+    if (const JsonValue *bs = v.find("backends_done"))
+        for (const JsonValue &b : bs->items()) p.backendsDone.push_back(b.asString());
+    if (const JsonValue *ds = v.find("devices"))
+        for (const JsonValue &d : ds->items())
+        {
+            RunProgress::Device dev;
+            dev.backend     = d.str("backend");
+            dev.deviceIndex = static_cast<int>(d.num("device_index", -1));
+            dev.done        = d.flag("done");
+            if (const JsonValue *bs = d.find("benchmarks_done"))
+                for (const JsonValue &b : bs->items()) dev.benchmarks.push_back(b.asString());
+            p.devices.push_back(std::move(dev));
+        }
+}
 
-    const int version = static_cast<int>(root.num("format_version", 0));
-    if (version != RESULT_FORMAT_VERSION)
-    {
-        std::cerr << "clpeak: " << filename << " is format_version=" << version
-                  << "; this build expects v" << RESULT_FORMAT_VERSION
-                  << ". Regenerate the file with this version of clpeak.\n";
-        return false;
-    }
-
+// Everything but the schema check, shared by the result loader and the
+// checkpoint's.
+void readDocument(const JsonValue &root, RunDocument &out)
+{
     out = RunDocument();
     out.meta.clpeakVersion = root.str("clpeak_version");
     out.meta.generatedAt   = root.str("generated_at");
@@ -568,12 +675,108 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     }
     if (const JsonValue *h = root.find("host"))       readHost(*h, out.meta.host);
     if (const JsonValue *i = root.find("invocation")) readInvocation(*i, out.meta.invocation);
+    if (const JsonValue *rs = root.find("resumed"))
+        for (const JsonValue &r : rs->items())
+        {
+            ResumeRecord rec;
+            rec.at       = r.str("at");
+            rec.elapsedS = r.num("elapsed_s");
+            rec.after    = r.str("after");
+            rec.from     = readPlace(r.find("from"));
+            rec.skipped  = readPlace(r.find("skipped"));
+            out.meta.resumed.push_back(std::move(rec));
+        }
     if (const JsonValue *ds = root.find("devices"))
         for (const JsonValue &d : ds->items()) out.devices.push_back(readDevice(d));
     // `inventory` is not read back: this loader serves --compare, which needs
     // readings, and the GUI reads the file with its own parser.
     if (const JsonValue *l = root.find("log"))
         for (const JsonValue &x : l->items()) out.log.push_back(readLogEntry(x));
+}
 
+bool readFile(const std::string &filename, std::string &text)
+{
+    std::ifstream f(filename, std::ios::binary);
+    if (!f.is_open()) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    text = ss.str();
+    return true;
+}
+
+} // namespace
+
+bool loadRunJson(const std::string &filename, RunDocument &out)
+{
+    std::string text;
+    if (!readFile(filename, text))
+    {
+        std::cerr << "clpeak: cannot open result file: " << filename << "\n";
+        return false;
+    }
+
+    std::string error;
+    JsonValue   root = jsonParse(text, &error);
+    if (!root.isObject())
+    {
+        std::cerr << "clpeak: " << filename << " is not a clpeak result file"
+                  << (error.empty() ? "" : " (" + error + ")") << "\n";
+        return false;
+    }
+    if (root.str("schema") == "clpeak/run-partial")
+    {
+        std::cerr << "clpeak: " << filename << " is the checkpoint of a run that "
+                  << "did not finish, not a result; continue the run with --resume\n";
+        return false;
+    }
+
+    const int version = static_cast<int>(root.num("format_version", 0));
+    if (version != RESULT_FORMAT_VERSION)
+    {
+        std::cerr << "clpeak: " << filename << " is format_version=" << version
+                  << "; this build expects v" << RESULT_FORMAT_VERSION
+                  << ". Regenerate the file with this version of clpeak.\n";
+        return false;
+    }
+
+    readDocument(root, out);
+    return true;
+}
+
+bool logEntryFromJson(const std::string &line, LogEntry &out)
+{
+    JsonValue v = jsonParse(line);
+    if (!v.isObject() || !v.has("message") || !v.has("level")) return false;
+    out = readLogEntry(v);
+    return true;
+}
+
+bool loadPartialJson(const std::string &filename, RunDocument &out,
+                     RunProgress &progress, std::string &error)
+{
+    std::string text;
+    if (!readFile(filename, text))
+    {
+        error = "cannot open " + filename;
+        return false;
+    }
+    std::string why;
+    JsonValue   root = jsonParse(text, &why);
+    if (!root.isObject() || root.str("schema") != "clpeak/run-partial")
+    {
+        error = filename + " is not a clpeak run checkpoint" +
+                (why.empty() ? "" : " (" + why + ")");
+        return false;
+    }
+    const int version = static_cast<int>(root.num("format_version", 0));
+    if (version != RESULT_FORMAT_VERSION)
+    {
+        error = filename + " is format_version=" + std::to_string(version) +
+                "; this build reads v" + std::to_string(RESULT_FORMAT_VERSION);
+        return false;
+    }
+    readDocument(root, out);
+    progress = RunProgress();
+    if (const JsonValue *p = root.find("progress")) readProgress(*p, progress);
     return true;
 }

@@ -28,6 +28,10 @@ typedef ClpeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
 typedef ClpeakRequestCancel = void Function();
+typedef _SetOnScreenNative = Void Function(Int32 onScreen);
+typedef _SetOnScreen = void Function(int onScreen);
+typedef _SetPausedNative = Void Function(Int32 paused);
+typedef _SetPaused = void Function(int paused);
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _SetOnnxEpLibsNative = Void Function(Pointer<Utf8> spec);
@@ -41,7 +45,7 @@ typedef _SetLitertStageNative = Void Function(Pointer<Utf8> dir);
 typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
 typedef _LitertStatusNative = Pointer<Utf8> Function();
 
-/// Thin, manual dart:ffi bindings over the 12 clpeak_* symbols.
+/// Thin, manual dart:ffi bindings over the 14 clpeak_* symbols.
 class ClpeakBindings {
   ClpeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
@@ -55,6 +59,10 @@ class ClpeakBindings {
         requestCancel =
             lib.lookupFunction<_RequestCancelNative, ClpeakRequestCancel>(
                 'clpeak_request_cancel'),
+        _setOnScreen = lib.lookupFunction<_SetOnScreenNative, _SetOnScreen>(
+            'clpeak_set_on_screen'),
+        _setPaused = lib.lookupFunction<_SetPausedNative, _SetPaused>(
+            'clpeak_set_paused'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'clpeak_set_onnx_library'),
         _setOnnxEpLibraries =
@@ -81,6 +89,8 @@ class ClpeakBindings {
   final _FreeString _freeString;
   final ClpeakLaunch launch;
   final ClpeakRequestCancel requestCancel;
+  final _SetOnScreen _setOnScreen;
+  final _SetPaused _setPaused;
   final _SetOnnxLib _setOnnxLibrary;
   final _SetOnnxEpLibs _setOnnxEpLibraries;
   final _SetOnnxWinml _setOnnxWinml;
@@ -88,6 +98,15 @@ class ClpeakBindings {
   final _SetLitertLib _setLitertLibrary;
   final _SetLitertStage _setLitertNpuStageDir;
   final _LitertStatusNative _litertStatus;
+
+  /// Whether the app is on screen (clpeak_set_on_screen): while it is not,
+  /// a run in this process waits at its next boundary between readings,
+  /// and each change during a run is recorded on its log.  Any time.
+  void setOnScreen(bool onScreen) => _setOnScreen(onScreen ? 1 : 0);
+
+  /// Pause the in-flight run at its next boundary between readings, or let
+  /// it go on (clpeak_set_paused).  Each change is recorded on its log.
+  void setPaused(bool paused) => _setPaused(paused ? 1 : 0);
 
   /// clpeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();
@@ -231,6 +250,7 @@ class OnnxEpLibraryStatus {
     required this.named,
     required this.registered,
     required this.error,
+    this.replaces = const [],
   });
 
   final String name;
@@ -239,6 +259,10 @@ class OnnxEpLibraryStatus {
   final bool registered;
   final String error; // when !registered
 
+  /// The Windows ML providers left out for this library, which provides the
+  /// same one: `"<name> <version>"`.
+  final List<String> replaces;
+
   factory OnnxEpLibraryStatus.fromJson(Map<String, dynamic> m) =>
       OnnxEpLibraryStatus(
         name: m['name'] as String? ?? '',
@@ -246,6 +270,10 @@ class OnnxEpLibraryStatus {
         named: m['named'] as bool? ?? true,
         registered: m['registered'] as bool? ?? false,
         error: m['error'] as String? ?? '',
+        replaces: [
+          for (final r in (m['replaces'] as List<dynamic>? ?? const []))
+            r as String,
+        ],
       );
 }
 

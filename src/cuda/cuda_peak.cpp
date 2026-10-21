@@ -156,36 +156,36 @@ int CudaPeak::runAll()
     currentDeviceScope = &deviceScope;
 
     // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
-    if (isAllowed(Benchmark::ComputeSP))
+    if (auto run = admit(Benchmark::ComputeSP))
       runComputeSP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeHP))
+    if (auto run = admit(Benchmark::ComputeHP))
       runComputeHP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeDP))
+    if (auto run = admit(Benchmark::ComputeDP))
       runComputeDP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeMP))
+    if (auto run = admit(Benchmark::ComputeMP))
       runComputeMP(dev, cfg);
-    if (isAllowed(Benchmark::ComputeBF16))
+    if (auto run = admit(Benchmark::ComputeBF16))
       runComputeBF16(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt))
+    if (auto run = admit(Benchmark::ComputeInt))
       runComputeInt32(dev, cfg);
-    if (isAllowed(Benchmark::ComputeInt8DP))
+    if (auto run = admit(Benchmark::ComputeInt8DP))
       runComputeInt8DP(dev, cfg);
-    if (isAllowed(Benchmark::MatrixCompute))
+    if (auto run = admit(Benchmark::MatrixCompute))
       runWmma(dev, cfg);
-    if (isAllowed(Benchmark::Gemm))
+    if (auto run = admit(Benchmark::Gemm))
       runCublas(dev, cfg);
     // ---- Phase 3: bandwidth (GBPS) -------------------------------------
-    if (isAllowed(Benchmark::GlobalBW))
+    if (auto run = admit(Benchmark::GlobalBW))
       runGlobalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::LocalBW))
+    if (auto run = admit(Benchmark::LocalBW))
       runLocalBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::ImageBW))
+    if (auto run = admit(Benchmark::ImageBW))
       runImageBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::TransferBW))
+    if (auto run = admit(Benchmark::TransferBW))
       runTransferBandwidth(dev, cfg);
 
     // ---- Phase 4: latency (us) -----------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))
+    if (auto run = admit(Benchmark::KernelLatency))
       runKernelLatency(dev, cfg);
 
     currentDeviceScope = nullptr;

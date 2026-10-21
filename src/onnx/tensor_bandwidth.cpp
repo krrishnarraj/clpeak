@@ -75,19 +75,11 @@ struct Size
 // now and later, and every rung stays comparable because a rung is named for
 // its working-set size rather than for its position in the list.
 const Size kSizes[] = {
-  {2048, "8mb",
-   "Eight megabytes of weights -- small enough to sit in fast local memory on "
-   "most devices, so this is usually the fastest rung."},
-  {4096, "32mb",
-   "Thirty-two megabytes -- around the size of a large cache or a device's fast local memory."},
-  {8192, "128mb",
-   "128 megabytes -- past the cache of most devices, though not all."},
-  {16384, "512mb",
-   "512 megabytes -- beyond any cache shipping today, so this is main memory "
-   "on anything that still shows a falling rate by this point."},
-  {32768, "2gb",
-   "Two gigabytes.  Only reached by a device whose rate was still dropping at "
-   "512 MB, meaning a cache larger than anything current."},
+  {2048, "8mb", "8 MB of weights, small enough for most devices' fast local memory."},
+  {4096, "32mb", "32 MB of weights, around the size of a large cache."},
+  {8192, "128mb", "128 MB of weights, past most devices' caches."},
+  {16384, "512mb", "512 MB of weights, beyond any current cache: main memory."},
+  {32768, "2gb", "2 GB of weights, reached only if the rate was still falling at 512 MB."},
 };
 
 // A rung beyond the base three is only worth trying if the one before it was
@@ -234,17 +226,14 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
                std::chrono::steady_clock::now() - a).count() / (double)n;
   };
 
-  if (!st && run(1 + warmup) > 0.0)
+  const double probe = st ? -1.0 : warmAndProbe(run, warmup);
+  if (probe > 0.0)
   {
-    double probe = run(1);
-    if (probe > 0.0)
-    {
-      unsigned int iters = pickIters(probe, 1000000u, forceIters ? forced : 0,
-                                     kOnnxMaxIters);
-      // The probe was one whole pass; when the budget affords only one, it
-      // already is the measurement.
-      r.us = (iters > 1) ? run(iters) : probe;
-    }
+    unsigned int iters = pickIters(probe, 1000000u, forceIters ? forced : 0,
+                                   kOnnxMaxIters);
+    // The probe was one whole pass; when the budget affords only one, it
+    // already is the measurement.
+    r.us = (iters > 1) ? run(iters) : probe;
   }
   if (st)
     r.error = onnxStatusText(rt, st);
@@ -267,12 +256,10 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_tensor_bw", "ONNX resident-tensor bandwidth", "bps",
        Category::Bandwidth,
-       "How fast this provider streams weights out of its own memory, on the "
-       "operation generating a token performs: one row of numbers multiplied "
-       "through a weight matrix, in whichever of fp16 and fp32 it streams "
-       "faster.  The size at which the rate drops is where a model stops "
-       "fitting in fast local memory, and the cost of handing work over is "
-       "subtracted, so these are transfer rates rather than round trips.",
+       "How fast this provider streams a resident weight matrix through a "
+       "matrix-vector product -- the shape of generating a token -- at "
+       "growing sizes, net of dispatch cost.  Where the rate drops, the "
+       "weights no longer fit in fast local memory.",
        // The point of the ladder is where the rate drops, so the rungs are
        // not interchangeable and the fastest of them is not the answer.
        TestShape::Heterogeneous, "weight size"});
@@ -311,16 +298,19 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       break;
     }
 
-    // Three times the weight matrix is what exists at peak: the raw values and
-    // the model embedding them overlap while the model is built, and the model
-    // and ORT's copy overlap while the session is created.  The first three
-    // rungs are otherwise unconditional, and on a phone an over-optimistic
-    // estimate is a kill rather than a failed allocation.
-    if ((uint64_t)s.dim * (uint64_t)s.dim * 2ull * 3ull >
-        clpeak::memoryBudget(2ull << 30))
+    // The weight matrix is held as any constant is (onnxHeldBytes); the
+    // vector it multiplies is nothing beside it.  The first three rungs are
+    // otherwise unconditional, and on a phone an over-optimistic estimate is
+    // a kill rather than a failed allocation.
+    const uint64_t held =
+        onnxHeldBytes(ep, (uint64_t)s.dim * (uint64_t)s.dim * 2ull, 0);
+    const uint64_t budget = clpeak::memoryBudget(2ull << 30);
+    if (held > budget)
     {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s exceeds this machine's memory "
-                  "budget, stopping\n", ep.providerKey.c_str(), s.label);
+      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s needs %llu MB of a %llu MB budget, "
+                  "stopping\n", ep.providerKey.c_str(), s.label,
+                  (unsigned long long)(held >> 20),
+                  (unsigned long long)(budget >> 20));
       break;
     }
 

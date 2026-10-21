@@ -10,17 +10,25 @@ description: >
   equivalent, and threading `call setvars.bat &&` through every step would mean
   a cmd-only step list on Windows and a bash one on Linux.
 
+# Bump the two defaults together - windows & linux
 inputs:
+  linux-packages:
+    description: >
+      apt packages to install on Linux.  The versioned names hold the build on
+      one release; the unversioned metapackages would float to whatever Intel
+      published last and silently raise the runtime the zip needs.
+    required: false
+    default: intel-oneapi-compiler-dpcpp-cpp-2026.2 intel-oneapi-mkl-devel-2026.2
   windows-installer-url:
     description: >
       Intel oneAPI offline installer to use on Windows.  There is no
       versionless URL, so bumping the toolkit means bumping this default.
     required: false
-    default: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/4144bec3-82ce-4672-bd71-5c93a79cd5e7/intel-oneapi-toolkit-2026.1.0.191_offline.exe
+    default: https://registrationcenter-download.intel.com/akdlm/IRC_NAS/728c4418-1b40-47a9-ad51-31530fb27c94/intel-oneapi-toolkit-2026.2.0.661_offline.exe
   windows-components:
     description: >
       Colon-separated component IDs to install on Windows -- the counterpart of
-      the Linux apt package list below.  Installing the full toolkit would cost
+      linux-packages.  Installing the full toolkit would cost
       tens of GB for components clpeak never touches.
     required: false
     default: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel
@@ -37,8 +45,7 @@ runs:
         echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
           | sudo tee /etc/apt/sources.list.d/oneAPI.list
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel
+        sudo apt-get install -y --no-install-recommends ${{ inputs.linux-packages }}
 
     # Deliberately not cached, for the same reason as the HIP SDK: the install
     # runs to several GB, and a cache entry that size keeps evicting the Vulkan

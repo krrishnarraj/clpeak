@@ -34,8 +34,9 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` |
 | `kernel_latency.cpp` | `runKernelLatency` |
 | `shaders/` | GLSL compute shaders (`.comp`) compiled to SPIR-V at build time |
-| `shaders/mad_chain.glsl` | The two MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_MAP` / `CHAIN_RESULT`) |
-| `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`) — and why it is shaped that way |
+| `shaders/mad_chain.glsl` | The MAD-chain shapes every compute-peak shader races (`CHAIN_DECL` / `MAD_16` / `MAD_128` / `CHAIN_TRIP` / `CHAIN_MAP` / `CHAIN_RESULT`) |
+| `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`, `CM_STORE_ALL`) on one accumulator or four — and why it is shaped that way |
+| `shaders/dp4a_chain.glsl` | The dot-product chains every `compute_int8_dp_v*` shader runs (`DP_DECL_X`, `DP_CHAIN_DECL`, `DP_CHAIN_16`, `DP_CHAIN_SUM`): an accumulator pair or a four-accumulator cycle — and the rules both keep |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
 
 ## Test documentation
@@ -59,7 +60,17 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   named by its data type alone;
   the driver-advertised tile goes in its NOTE, appended by `bindCoopTile`,
   because a shape in the name would differ between a device that measured the
-  reading and one that skipped it — the same reading under two ids.  The prose
+  reading and one that skipped it — the same reading under two ids.  A data
+  type runs at the first advertised tile the driver will build: `rankTiles`
+  (`vk_peak.cpp`) keeps every tile, best first, and a refusal to build
+  (`vk_compute_desc_t::refused`, set by `runComputeKernel`) moves
+  `runCoopMatrix` on to the next; the note counts any it refused.  A tile the
+  driver advertised without a subgroup width (no
+  `VK_EXT_cooperative_matrix_maintenance1`) is also timed at each narrower
+  width the device can pin (`coopmatSubgroupWidths()` in `vk_peak.h`): the
+  runner hands each reading back through `vk_compute_desc_t::reading` instead
+  of emitting it, and `runCoopMatrix` emits the fastest, naming the width in
+  the note.  The prose
   goes on `metricDescription` — the test's own description covers the family.
   int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
@@ -80,15 +91,25 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   run, and a fully unrolled run is both what a shader compiler chokes on and what
   it can fold into a closed form.  `COOPMAT_MMA_PER_TRIP` in
   `include/common/common.h` must stay equal to `CM_MMA_PER_TRIP` in
-  `shaders/coopmat_chain.glsl`.
-- A shader that `#include`s `shaders/mad_chain.glsl` is compiled **twice**,
-  the second time with `-DMAD_CHAIN_AFFINE`, and embedded as `<name>` and
-  `<name>_alt`.  `CompileShaders.cmake` detects this from the source, so
-  adopting the shared chain is the only step; then declare the `_alt` extern
-  and its `VK_ALT_<name>` block in `vk_peak.h` and pass `VK_ALT_SHADER(<name>)`
-  as the variant's last field.  `runComputeKernel` times both and emits the
-  faster; `--verbose` prints both readings.  Why two shapes: the MAD chain
-  block in `include/common/common.h`.
+  `shaders/coopmat_chain.glsl`.  Every coopmat shader's push block is
+  `{A, trips, spread}`, matching `CoopPush` in `coopmat.cpp`; `spread` stays 0
+  and exists so no compiler can treat a tile as one value (why: the header).
+- A shader that `#include`s one of the shared chain headers is compiled
+  **twice**, the second time with that header's other shape --
+  `-DMAD_CHAIN_AFFINE` for `mad_chain.glsl`, `-DCM_CHAIN_ALT` for
+  `coopmat_chain.glsl`, `-DDP4A_CHAIN_ALT` for `dp4a_chain.glsl` -- and
+  embedded as `<name>` and `<name>_alt`.  `CompileShaders.cmake` detects this
+  from the source, so adopting the shared chain is the only step; then declare
+  the `_alt` extern and its `VK_ALT_<name>` block in `vk_peak.h` and pass
+  `VK_ALT_SHADER(<name>)` as the variant's last field (a single-variant desc --
+  coopmat -- carries it in `altSpirv`; `bindCoopTile` drops it for a tile whose
+  four accumulators would not fit, and sizes the buffer for the four tiles the
+  alt stores).  The float families' and int8_dp's descs also set
+  `raceHalfSubgroup`, and `runComputeKernel` then times the `_alt` module at
+  half the pinned subgroup width too, where the device offers it.  It emits
+  the fastest reading; `--verbose` prints them all.  Why the shapes and the
+  widths: the MAD chain block in `include/common/common.h`, and the two other
+  headers' own comments.
 - `runComputeKernel` pins every pipeline it builds to a subgroup width: the
   desc's `requiredSubgroupSize`, or the width the device reports when that is
   0.  Left to choose, Intel's Windows driver compiles compute shaders at

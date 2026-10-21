@@ -3,11 +3,13 @@
 
 #ifdef ENABLE_ONNX
 
+#include <common/answer_check.h>
 #include <common/common.h>
 #include <common/inventory.h>
 #include <common/logger.h>
 #include <common/peak.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -50,8 +52,10 @@ constexpr unsigned int kOnnxMaxIters = 500;
 // optional: a size that lands badly and the next that recovers is ordinary --
 // QNN's unsigned int8 matmul read 3.98, 3.66, 13.2 TOPS across 2048..8192,
 // and ONNX Runtime's CPU EP 1.01, 1.02, 1.27, 1.49 across 1024..8192 -- and a
-// ladder stopped at the first flat step reports a third of the device.  A
-// slow device plateaus early and pays for fewer compiles.
+// ladder stopped at the first flat step reports a third of the device.  The
+// grace is withheld only from a size that fell where the next one would cost
+// seconds a run (ladderDropEnds, include/common/common.h).  A slow device
+// plateaus early and pays for fewer compiles.
 constexpr double kOnnxPlateauGain = 1.10;
 constexpr int kOnnxPlateauStrikes = 2;
 
@@ -203,6 +207,10 @@ struct OnnxEpLibraryStatus
   OnnxEpLibrary lib;
   bool registered = false;
   std::string error; // when !registered
+  // The Windows ML providers left out because this library, added by hand,
+  // provides the same execution provider or took its registration name:
+  // each "<name> <version>", the version when the catalog gave one.
+  std::vector<std::string> replaces;
 };
 std::vector<OnnxEpLibraryStatus> onnxEpLibraryStatus();
 
@@ -216,6 +224,7 @@ public:
   // the inventory and the device selector all read it from here.
   static constexpr Backend kBackend = Backend::Onnx;
   Backend backend() const override { return kBackend; }
+  void applyOptions(const CliOptions &opts) override;
   int runAll() override;
 
   static BackendInventory enumerate();
@@ -239,6 +248,30 @@ public:
                          benchmark_config_t &cfg);
 
   logger::DeviceScope *currentDeviceScope = nullptr;
+
+  // onnx_numeric_error's measurement of one format on one provider,
+  // memoised: the relative RMS error of the provider's 1024-cubed answer
+  // against the CPU provider's fp32 one, or why there is none
+  // (include/common/answer_check.h).  `label` is a gemm row's, or a
+  // convolution precision's product written as a 1x1 convolution
+  // ("fp16_conv1x1").  The rate tests ask before they publish -- a kernel
+  // that returns a wrong answer is not a capability -- and run before the
+  // accuracy test, so the first to ask measures.  `note` is what the
+  // accuracy row adds to its description.
+  struct AnswerCheck : clpeak::AnswerCheck
+  {
+    std::string note;
+  };
+  const AnswerCheck &answerCheck(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                                 const std::string &label);
+  // Empty when `label`'s answer on this provider is right or could not be
+  // checked; otherwise the reason a rate row is refused with.
+  std::string wrongAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                          const std::string &label);
+
+private:
+  // (provider, device, label)
+  std::map<std::string, AnswerCheck> answerChecks_;
 };
 
 // List the loaded runtime's execution providers in benchmark order

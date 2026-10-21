@@ -8,6 +8,8 @@
 //   1. warmup   1 + warmupCount untimed predictions.  The extra one is not a
 //               spare: the Neural Engine finishes specialising on the first
 //               prediction, so run one is a different event from run two.
+//               A prediction of a second or more is its own warm-up
+//               (warmAndProbe, include/common/common.h).
 //   2. probe    exactly one timed prediction, to size the batch.
 //   3. timed    pickIters(probe, budget, forced, kCoremlMaxIters) predictions;
 //               when the budget affords only one, the probe already is the
@@ -23,6 +25,18 @@
 #include <string>
 #include <vector>
 
+// What one session of a program over resident constants holds at once, for
+// a test's memory gate: two copies of the constants -- the program's weight
+// blob, alive until the session has compiled and loaded it, and the compute
+// unit's own; Core ML maps the compiled weights from disk, and the Neural
+// Engine's compiler runs in a process of its own, so there is no third --
+// and every intermediate tensor, which the runtimes behind the other
+// backends keep rather than reusing two (src/litert/litert_bench.h).
+inline uint64_t coremlHeldBytes(uint64_t constants, uint64_t activations)
+{
+  return 2 * constants + activations;
+}
+
 struct CoremlMeasurement
 {
   double meanUs = -1.0;     // mean per prediction; negative on failure
@@ -37,14 +51,7 @@ inline CoremlMeasurement coremlMeasure(CoremlSession &s, unsigned warmupCount,
                                        unsigned maxIters = kCoremlMaxIters)
 {
   CoremlMeasurement m;
-  if (s.timeRuns(1 + warmupCount, m.error) < 0.0)
-  {
-    m.status = ResultStatus::Error;
-    if (m.error.empty())
-      m.error = "prediction failed";
-    return m;
-  }
-  m.probeUs = s.timeRuns(1, m.error);
+  m.probeUs = warmAndProbe([&](unsigned n) { return s.timeRuns(n, m.error); }, warmupCount);
   if (m.probeUs <= 0.0)
   {
     m.status = ResultStatus::Error;
@@ -93,16 +100,16 @@ inline std::string coremlOffDeviceReason(const coreml_device_info_t &dev, const 
          "on another compute unit, so this would not be a " + unit + " number";
 }
 
-// A sentence for a row's description when a passing session still had
-// negligible glue -- a closing scalar multiply, a reshape -- placed on
-// another unit; empty when everything ran on the device.
+// A clause for a row's description ("; ..."), when a passing session still
+// had glue -- a closing scalar multiply, a reshape, under kCoremlOffDeviceShare
+// of the plan's cost -- placed on another unit; empty when everything ran on
+// the device.
 inline std::string coremlGlueNote(const CoremlSession &s)
 {
   const std::string g = s.glue();
   if (g.empty())
     return std::string();
-  return "  Core ML placed " + g + " on another compute unit, at under 5% of the "
-         "plan's estimated cost.";
+  return "; negligible " + g + " ran elsewhere";
 }
 
 // Session creation cost, for the compile-time gates.

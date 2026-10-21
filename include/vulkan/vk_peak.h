@@ -25,13 +25,12 @@ struct BackendInventory; // forward decl
 #define VK_HAS_ANY_COOPMAT 1
 #endif
 
-// One cooperative-matrix tile (subgroup scope) selected for a given dtype.
-// M/N/K are whatever the driver advertised via
+// One cooperative-matrix tile (subgroup scope) the driver advertised for a
+// given dtype.  M/N/K are whatever it reported via
 // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR -- the shaders take these
 // as specialization constants, so a single SPIR-V module runs any advertised
 // shape (NVIDIA 8-bit types use K=32, fp16/bf16 use K=16, etc.).
 struct coopmat_tile_t {
-  bool     supported = false;
   uint32_t M = 0, N = 0, K = 0;
   // Subgroup width this tile was advertised at, or 0 when the device only has
   // the width-agnostic KHR query and we have no way to know.  The KHR list is
@@ -41,11 +40,33 @@ struct coopmat_tile_t {
   uint32_t subgroupSize = 0;
 };
 
+// Every tile advertised for one input/accumulator combination, best first
+// (rankTiles in vk_peak.cpp).  The first is the one that runs; the rest are
+// what runCoopMatrix falls back to, in order, when the driver refuses to
+// build it.  Empty: none advertised.
+using coopmat_tiles_t = std::vector<coopmat_tile_t>;
+
+// "64x32x32", plus the width when the tile was advertised at one -- how a
+// tile is named in notes and logs.
+static inline std::string coopmatTileName(const coopmat_tile_t &t)
+{
+  std::string name = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" +
+                     std::to_string(t.K);
+  if (t.subgroupSize)
+    name += " at subgroup " + std::to_string(t.subgroupSize);
+  return name;
+}
+
 // Vulkan device info (mirrors OpenCL device_info_t for display)
 struct vk_device_info_t {
   std::string deviceName;
   std::string driverVersion;
   std::string apiVersion;
+  // Which driver this is (VkPhysicalDeviceDriverProperties::driverID), 0 when
+  // it does not say.  Not the vendor ID: one Adreno runs under Qualcomm's
+  // driver or Mesa's Turnip, two different shader compilers, and a crash gate
+  // (NOTES.md) keys on the compiler that crashes.
+  VkDriverId driverID = (VkDriverId)0;
 
   unsigned int numCUs;            // 0 unless a vendor property reports it
   unsigned int maxWGSize;
@@ -94,23 +115,23 @@ struct vk_device_info_t {
   uint32_t maxComputeWorkgroupSubgroups; // 0 = no subgroup-size control
   bool     subgroupSizeControl;   // requiredSubgroupSize usable on compute
 
-  // Canonical cooperative-matrix tile selected per dtype from
-  // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.  We don't assume a
-  // fixed shape: whatever subgroup-scope tile the driver advertises for an
-  // input/accumulator combination is recorded here, and the coopmat shaders
-  // take M/N/K as specialization constants so one SPIR-V module runs it.
-  // This is how fp8/int8 land on NVIDIA's K=32 tiles while fp16/bf16 stay at
-  // K=16 -- no per-K shader variants needed.  .supported == false means no
-  // matching subgroup-scope property was advertised.
-  coopmat_tile_t coopmatFP32;     // fp32 A/B,    fp32 C
-  coopmat_tile_t coopmatFP16;     // fp16 A/B,    fp32 C
-  coopmat_tile_t coopmatFP16F16;  // fp16 A/B,    fp16 C -- a separate property,
+  // The cooperative-matrix tiles advertised per dtype by
+  // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, best first.  We don't
+  // assume a fixed shape: every subgroup-scope tile the driver advertises for
+  // an input/accumulator combination is recorded here, and the coopmat
+  // shaders take M/N/K as specialization constants so one SPIR-V module runs
+  // any of them.  This is how fp8/int8 land on NVIDIA's K=32 tiles while
+  // fp16/bf16 stay at K=16 -- no per-K shader variants needed.  Empty means
+  // no matching subgroup-scope property was advertised.
+  coopmat_tiles_t coopmatFP32;    // fp32 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP16;    // fp16 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP16F16; // fp16 A/B,    fp16 C -- a separate property,
                                   // and on GeForce a separate rate: consumer
                                   // parts run fp32 accumulation at half speed
-  coopmat_tile_t coopmatBF16;     // bf16 A/B,    fp32 C
-  coopmat_tile_t coopmatFP8E4M3;  // fp8 E4M3 A/B, fp32 C
-  coopmat_tile_t coopmatFP8E5M2;  // fp8 E5M2 A/B, fp32 C
-  coopmat_tile_t coopmatINT8;     // int8 A/B,    int32 C
+  coopmat_tiles_t coopmatBF16;    // bf16 A/B,    fp32 C
+  coopmat_tiles_t coopmatFP8E4M3; // fp8 E4M3 A/B, fp32 C
+  coopmat_tiles_t coopmatFP8E5M2; // fp8 E5M2 A/B, fp32 C
+  coopmat_tiles_t coopmatINT8;    // int8 A/B,    int32 C
 };
 
 // Dispatch-sizing helper used by runComputeKernel and several benchmark
@@ -168,16 +189,40 @@ static inline uint32_t coopmatRequiredSubgroupSize(const vk_device_info_t &info,
   return 0;
 }
 
+// Every width a tile is timed at, coopmatSubgroupWidth()'s first.  A tile the
+// driver advertised at a width runs at that width alone.  One from the
+// width-agnostic KHR query leaves the width a guess -- that list is the union
+// over every width the device supports, and nothing says the matrix unit is
+// built around the widest.  Alchemist's DPAS is an 8-lane instruction: an Arc
+// A380 (driver 8993, no maintenance1) read coopmat int8 at 22.0 TOPS pinned to
+// 32, where joint_matrix, compiled to 8-wide sub-groups, read 31.0.  So each
+// narrower width the device can pin is timed too, while it still divides the
+// MxN tile spread across the lanes, and runCoopMatrix reports the fastest.
+// Not wider ones: the guess already starts at 32.
+static inline std::vector<uint32_t> coopmatSubgroupWidths(const vk_device_info_t &info,
+                                                          const coopmat_tile_t &t)
+{
+  const uint32_t first = coopmatSubgroupWidth(info, t.subgroupSize);
+  std::vector<uint32_t> widths(1, first);
+  if (t.subgroupSize || !coopmatRequiredSubgroupSize(info, t.subgroupSize) ||
+      info.minSubgroupSize == 0)
+    return widths;
+  for (uint32_t w = first / 2; w >= info.minSubgroupSize; w /= 2)
+    if (((uint64_t)t.M * t.N) % w == 0)
+      widths.push_back(w);
+  return widths;
+}
+
 // Shared note for one reading of a vector-width sweep.  NOT for the int8-dot
 // rows: those variants are independent chains -- see compute_int.cpp.
 static inline const char *vkWidthNote(uint32_t width)
 {
   switch (width)
   {
-  case 1: return "One value per thread at a time -- the plain, unvectorised case.";
-  case 2: return "Two values per thread at a time, as one 2-wide vector.";
-  case 4: return "Four values per thread at a time, as one 4-wide vector.";
-  case 8: return "Eight values per thread at a time, as one 8-wide vector.";
+  case 1: return "Scalar, one value per thread.";
+  case 2: return "2-wide vector per thread.";
+  case 4: return "4-wide vector per thread.";
+  case 8: return "8-wide vector per thread.";
   default: return "";
   }
 }
@@ -214,6 +259,15 @@ public:
                              VkPipeline &pipeline,
                              const VkSpecializationInfo *specInfo = nullptr,
                              uint32_t requiredSubgroupSize = 0);
+
+  // Whether createComputePipeline will pin a stage to this subgroup width
+  // rather than drop the request: size control on compute, and the width
+  // inside the device's range.
+  bool canPinSubgroupSize(uint32_t width) const
+  {
+    return width && info.subgroupSizeControl &&
+           width >= info.minSubgroupSize && width <= info.maxSubgroupSize;
+  }
 
   // Submit a command buffer and wait.  Returns the worst VkResult seen
   // across vkQueueSubmit / vkQueueWaitIdle so callers can detect and skip
@@ -283,9 +337,13 @@ struct vk_compute_desc_t
   const char *metricDescription;
   const char *metricUnit;
 
-  // Single-variant shader (used when variants == nullptr)
+  // Single-variant shader (used when variants == nullptr), and the second
+  // build raced against it the way a variant's alt is -- coopmat's four-
+  // accumulator run.  nullptr: nothing to race.
   const uint32_t *spirv;
   size_t spirvSize;
+  const uint32_t *altSpirv;
+  size_t altSpirvSize;
 
   // Multi-variant shader list (takes precedence over single-variant fields)
   const vk_compute_variant_t *variants;
@@ -303,6 +361,11 @@ struct vk_compute_desc_t
                              // writes per work-group.  0 => defaults to wgSize
                              // (one element per WI).  Coopmat shaders write an
                              // M*N tile (the selected tile's M*N) per WG.
+  uint32_t globalDivisor;    // dispatch this many times fewer work-groups than
+                             // the device would otherwise get (0 = 1), for a
+                             // desc whose work-groups each do that many times
+                             // the work -- coopmat's (kCoopGroupScale in
+                             // coopmat.cpp).
 
   // Push-constant payload.  nullptr => no push constants bound.
   const void *pushData;
@@ -312,6 +375,14 @@ struct vk_compute_desc_t
   // Used by the coopmat shaders to bind the selected M/N/K tile + loop count.
   // nullptr => none.
   const VkSpecializationInfo *specInfo;
+
+  // Also time the variants' alt build pinned to half the subgroup width the
+  // pipelines are pinned to, where the device offers it, and keep the faster
+  // (see runComputeKernel).  The floating-point families set it -- Alchemist
+  // runs their affine chain up to a third faster at SIMD16 than at the SIMD32
+  // its driver needs for fp16's double rate -- and so does int8_dp, whose dot
+  // chain an A380 ran ~23% faster at the SIMD16 its driver picks unpinned.
+  bool raceHalfSubgroup;
 
 
   // Test to write into.  nullptr means "open one from the fields above" --
@@ -325,6 +396,23 @@ struct vk_compute_desc_t
   bool skip;
   const char *skipMsg;
 
+  // Single-variant path only.  When set, a pipeline the driver refuses to
+  // build is reported here and no row is emitted, because the caller has
+  // another shape to offer -- runCoopMatrix walks the tiles the driver
+  // advertised.  nullptr: a refusal is the row's error.
+  bool *refused;
+
+  // Single-variant path only.  When set, the reading is stored here instead of
+  // emitted, and a dispatch that fails leaves 0 instead of the row's error:
+  // the caller races several builds of one reading and emits the fastest
+  // itself -- runCoopMatrix timing a tile at each subgroup width it could run
+  // at.  A refusal to build still goes to `refused`.
+  float *reading;
+
+  // Never retry a refused pinned build unpinned.  Set for a width raced beside
+  // the one the stage would otherwise run at: unpinned, the driver would
+  // choose a width of its own, which is another case and not this one.
+  bool pinOnly;
 };
 
 // Top-level Vulkan benchmark runner
@@ -438,9 +526,10 @@ namespace vk_shaders {
   extern const size_t   compute_sp_v4_alt_size;
 #endif
 
-// -- affine-build selection -------------------------------------------------
-// A shader that includes shaders/mad_chain.glsl is compiled a second time with
-// the affine chain shape; CompileShaders.cmake then defines
+// -- second-build selection -------------------------------------------------
+// A shader that includes one of the shared chain headers (shaders/
+// mad_chain.glsl, coopmat_chain.glsl, dp4a_chain.glsl) is compiled a second
+// time with that header's other shape; CompileShaders.cmake then defines
 // VK_HAS_<NAME>_ALT.  VK_ALT_SHADER(name) expands to that build's
 // (pointer, size) pair, or to (nullptr, 0) when the second build was skipped,
 // so a variant table entry reads the same either way.  The #ifdefs cannot live
@@ -536,6 +625,56 @@ namespace vk_shaders {
   #define VK_ALT_compute_bf16_v4 vk_shaders::compute_bf16_v4_alt, vk_shaders::compute_bf16_v4_alt_size
 #else
   #define VK_ALT_compute_bf16_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
+  #define VK_ALT_compute_int8_dp_v1 vk_shaders::compute_int8_dp_v1_alt, vk_shaders::compute_int8_dp_v1_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v1 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
+  #define VK_ALT_compute_int8_dp_v2 vk_shaders::compute_int8_dp_v2_alt, vk_shaders::compute_int8_dp_v2_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v2 nullptr, 0
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
+  #define VK_ALT_compute_int8_dp_v4 vk_shaders::compute_int8_dp_v4_alt, vk_shaders::compute_int8_dp_v4_alt_size
+#else
+  #define VK_ALT_compute_int8_dp_v4 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP32_ALT
+  #define VK_ALT_coopmat_fp32 vk_shaders::coopmat_fp32_alt, vk_shaders::coopmat_fp32_alt_size
+#else
+  #define VK_ALT_coopmat_fp32 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_ALT
+  #define VK_ALT_coopmat_fp16 vk_shaders::coopmat_fp16_alt, vk_shaders::coopmat_fp16_alt_size
+#else
+  #define VK_ALT_coopmat_fp16 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC_ALT
+  #define VK_ALT_coopmat_fp16_f16acc vk_shaders::coopmat_fp16_f16acc_alt, vk_shaders::coopmat_fp16_f16acc_alt_size
+#else
+  #define VK_ALT_coopmat_fp16_f16acc nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_BF16_ALT
+  #define VK_ALT_coopmat_bf16 vk_shaders::coopmat_bf16_alt, vk_shaders::coopmat_bf16_alt_size
+#else
+  #define VK_ALT_coopmat_bf16 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP8_E4M3_ALT
+  #define VK_ALT_coopmat_fp8_e4m3 vk_shaders::coopmat_fp8_e4m3_alt, vk_shaders::coopmat_fp8_e4m3_alt_size
+#else
+  #define VK_ALT_coopmat_fp8_e4m3 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_FP8_E5M2_ALT
+  #define VK_ALT_coopmat_fp8_e5m2 vk_shaders::coopmat_fp8_e5m2_alt, vk_shaders::coopmat_fp8_e5m2_alt_size
+#else
+  #define VK_ALT_coopmat_fp8_e5m2 nullptr, 0
+#endif
+#ifdef VK_HAS_COOPMAT_INT8_ALT
+  #define VK_ALT_coopmat_int8 vk_shaders::coopmat_int8_alt, vk_shaders::coopmat_int8_alt_size
+#else
+  #define VK_ALT_coopmat_int8 nullptr, 0
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V1
   extern const uint32_t compute_hp_v1[];
@@ -633,13 +772,25 @@ namespace vk_shaders {
   extern const uint32_t compute_int8_dp_v1[];
   extern const size_t   compute_int8_dp_v1_size;
 #endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V1_ALT
+  extern const uint32_t compute_int8_dp_v1_alt[];
+  extern const size_t   compute_int8_dp_v1_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
   extern const uint32_t compute_int8_dp_v2[];
   extern const size_t   compute_int8_dp_v2_size;
 #endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V2_ALT
+  extern const uint32_t compute_int8_dp_v2_alt[];
+  extern const size_t   compute_int8_dp_v2_alt_size;
+#endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
   extern const uint32_t compute_int8_dp_v4[];
   extern const size_t   compute_int8_dp_v4_size;
+#endif
+#ifdef VK_HAS_COMPUTE_INT8_DP_V4_ALT
+  extern const uint32_t compute_int8_dp_v4_alt[];
+  extern const size_t   compute_int8_dp_v4_alt_size;
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V1
   extern const uint32_t compute_mp_v1[];
@@ -693,29 +844,57 @@ namespace vk_shaders {
   extern const uint32_t coopmat_fp16[];
   extern const size_t   coopmat_fp16_size;
 #endif
-#ifdef VK_HAS_COOPMAT_BF16
+#ifdef VK_HAS_COOPMAT_FP16_ALT
+  extern const uint32_t coopmat_fp16_alt[];
+  extern const size_t   coopmat_fp16_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP16_F16ACC
   extern const uint32_t coopmat_fp16_f16acc[];
   extern const size_t   coopmat_fp16_f16acc_size;
 #endif
+#ifdef VK_HAS_COOPMAT_FP16_F16ACC_ALT
+  extern const uint32_t coopmat_fp16_f16acc_alt[];
+  extern const size_t   coopmat_fp16_f16acc_alt_size;
+#endif
+#ifdef VK_HAS_COOPMAT_BF16
   extern const uint32_t coopmat_bf16[];
   extern const size_t   coopmat_bf16_size;
+#endif
+#ifdef VK_HAS_COOPMAT_BF16_ALT
+  extern const uint32_t coopmat_bf16_alt[];
+  extern const size_t   coopmat_bf16_alt_size;
 #endif
 #ifdef VK_HAS_COOPMAT_INT8
   extern const uint32_t coopmat_int8[];       // M/N/K bound via spec constants
   extern const size_t   coopmat_int8_size;
 #endif
+#ifdef VK_HAS_COOPMAT_INT8_ALT
+  extern const uint32_t coopmat_int8_alt[];
+  extern const size_t   coopmat_int8_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP8_E4M3
   extern const uint32_t coopmat_fp8_e4m3[];
   extern const size_t   coopmat_fp8_e4m3_size;
+#endif
+#ifdef VK_HAS_COOPMAT_FP8_E4M3_ALT
+  extern const uint32_t coopmat_fp8_e4m3_alt[];
+  extern const size_t   coopmat_fp8_e4m3_alt_size;
 #endif
 #ifdef VK_HAS_COOPMAT_FP8_E5M2
   extern const uint32_t coopmat_fp8_e5m2[];
   extern const size_t   coopmat_fp8_e5m2_size;
 #endif
+#ifdef VK_HAS_COOPMAT_FP8_E5M2_ALT
+  extern const uint32_t coopmat_fp8_e5m2_alt[];
+  extern const size_t   coopmat_fp8_e5m2_alt_size;
+#endif
 #ifdef VK_HAS_COOPMAT_FP32
   extern const uint32_t coopmat_fp32[];
   extern const size_t   coopmat_fp32_size;
+#endif
+#ifdef VK_HAS_COOPMAT_FP32_ALT
+  extern const uint32_t coopmat_fp32_alt[];
+  extern const size_t   coopmat_fp32_alt_size;
 #endif
 }
 

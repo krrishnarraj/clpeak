@@ -6,22 +6,19 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, bps;
   cl::NDRange globalSize, localSize;
 
-  if (!isAllowed(Benchmark::ImageBW))
+  auto run = admit(Benchmark::ImageBW);
+  if (!run)
     return 0;
 
   auto test = currentDeviceScope->beginTest(
     {"image_memory_bandwidth", "Image memory bandwidth", "bps",
      Category::Unknown,
-     "How many bytes per second the device reads through its texture units, "
-     "which take a different path to memory than plain buffer reads.  Each "
-     "pixel of the image is read exactly once, so caching cannot flatter the "
-     "number.",
+     "Image read bandwidth, reading each pixel once.",
      TestShape::Homogeneous});
 
   // The image is RGBA float, so one fetch returns a whole pixel: four 32-bit
   // values, hence the metric name.
-  const char *fetchNote = "Each fetch returns one whole pixel -- four 32-bit "
-                          "colour values, 16 bytes.";
+  const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
 
   if (!devInfo.imageSupported)
   {
@@ -32,17 +29,27 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  // Choose image dimensions: up to 4096x4096, bounded by device limits and maxAllocSize
-  uint64_t imgW = std::min((uint64_t)4096, devInfo.image2dMaxWidth);
-  uint64_t imgH = std::min((uint64_t)4096, devInfo.image2dMaxHeight);
+  // Choose image dimensions: up to 4096x4096, bounded by device limits and
+  // maxAllocSize, and each a power of two -- the kernel walks the image with
+  // shifts and masks (see kernels/image_bandwidth_kernels.cl).
+  auto floorPow2 = [](uint64_t v) {
+    uint64_t p = 1;
+    while (p * 2 <= v)
+      p *= 2;
+    return p;
+  };
+  auto log2Of = [](uint64_t pow2) {
+    cl_int l = 0;
+    while ((1ull << l) < pow2)
+      l++;
+    return l;
+  };
+  uint64_t imgW = floorPow2(std::min((uint64_t)4096, devInfo.image2dMaxWidth));
+  uint64_t imgH = floorPow2(std::min((uint64_t)4096, devInfo.image2dMaxHeight));
   uint64_t bytesPerPixel = 4 * sizeof(cl_float); // RGBA float
   uint64_t imgBytes = imgW * imgH * bytesPerPixel;
   if (imgBytes > devInfo.maxAllocSize / 2)
-  {
-    imgH = (devInfo.maxAllocSize / 2) / (imgW * bytesPerPixel);
-    if (imgH == 0)
-      imgH = 1;
-  }
+    imgH = floorPow2(std::max<uint64_t>(1, (devInfo.maxAllocSize / 2) / (imgW * bytesPerPixel)));
 
   // Size the dispatch so each pixel is read exactly once per launch,
   // eliminating cache reuse that inflates apparent bandwidth.
@@ -52,6 +59,10 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
 
     cl::ImageFormat imgFmt(CL_RGBA, CL_FLOAT);
@@ -80,25 +91,36 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       kernel_v1.setArg(0, img);
       kernel_v1.setArg(1, outputBuf);
 
-      // Two walk orders are raced and the faster reported -- why, and why
-      // neither can flatter the result: the image-bandwidth block in
-      // include/common/common.h.
-      auto timeWalk = [&](cl_int walk) -> float {
-        kernel_v1.setArg(2, walk);
-        return run_kernel(queue, kernel_v1, globalSize, localSize,
-                          cfg.targetTimeUs, forced);
+      // The Vulkan backend's walk shapes, raced and the fastest reported --
+      // why, and why none can flatter the result: the image-bandwidth block
+      // in include/common/common.h.  A block larger than the image is skipped.
+      struct Shape { const char *label; cl_int walk; uint64_t tileW, tileH; };
+      const Shape shapes[] = {
+        { "row",       0, imgW, 1 },
+        { "col",       1, imgW, 1 },
+        { "tile2x2",   2,    2, 2 },
+        { "tile16x16", 2,   16, 16 },
       };
-      float rowUs = timeWalk(0);
-      float colUs = timeWalk(1);
+      const cl_int logW = log2Of(imgW), logH = log2Of(imgH);
 
       // Each WI reads IMAGE_FETCH_PER_WI float4 pixels = IMAGE_FETCH_PER_WI * 4 * sizeof(float) bytes
       uint64_t bytesPerCall = (uint64_t)IMAGE_FETCH_PER_WI * 4 * sizeof(cl_float) * ndRangeTotal(globalSize);
-      float rowBps = rowUs > 0.0f ? (float)bytesPerCall / rowUs * 1e6f : 0.0f;
-      float colBps = colUs > 0.0f ? (float)bytesPerCall / colUs * 1e6f : 0.0f;
-      CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
-                  rowBps, colBps);
-      bps = std::max(rowBps, colBps);
-      (void)timed;
+      bps = 0.0f;
+      for (const Shape &s : shapes)
+      {
+        if (s.tileW > imgW || s.tileH > imgH)
+          continue;
+        kernel_v1.setArg(2, s.walk);
+        kernel_v1.setArg(3, logW);
+        kernel_v1.setArg(4, logH);
+        kernel_v1.setArg(5, log2Of(s.tileW));
+        kernel_v1.setArg(6, log2Of(s.tileH));
+        timed = run_kernel(queue, kernel_v1, globalSize, localSize,
+                           cfg.targetTimeUs, forced);
+        float shapeBps = timed > 0.0f ? (float)bytesPerCall / timed * 1e6f : 0.0f;
+        CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, shapeBps);
+        bps = std::max(bps, shapeBps);
+      }
 
       test.emit("float4", bps, fetchNote);
     }

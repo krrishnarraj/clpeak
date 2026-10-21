@@ -132,7 +132,7 @@ static double runBf16Chain(uint64_t outer)
 // ---- Mixed precision (fp16 mul -> fp32 acc, widening FMLA) ------------------
 #if (defined(__ARM_FEATURE_FP16FML) || defined(__ARM_FEATURE_FP16_FML)) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 #define CPU_HAS_MP_KERNEL 1
-static constexpr int MP_NACC = 16, MP_OPS_PER_INSTR = 16;  // 2 FMLAL = 8 mul + 8 add
+static constexpr int MP_NACC = 24, MP_OPS_PER_STEP = 16;  // 2 FMLAL x 4 lanes x (mul + add)
 static double runMpChain(uint64_t outer)
 {
   float32x4_t acc[MP_NACC];
@@ -144,27 +144,46 @@ static double runMpChain(uint64_t outer)
   // and even an asm("+w") barrier all FAILED on the aarch64 server clang -- the
   // work stays *linear*, so it's always close-form-able.  The robust fix is the
   // fp16 chain's trick: feed the accumulator back as a MULTIPLICAND so the
-  // recurrence is genuinely NONLINEAR (no closed form exists).  FMLAL multiplies
-  // fp16, so narrow acc -> fp16 each step:
-  //   acc <- acc + narrow(acc)*(-decay) + 1*refill   ->  fixed point refill/decay.
-  // The vcvt is what makes it nonlinear (and uncollapsible); the constant refill
-  // keeps acc off zero so the feedback term stays meaningful.
-  const float16x8_t decay  = vdupq_n_f16((float16_t)-0.000977f);  // <0: contracts
-  const float16x8_t refill = vdupq_n_f16((float16_t) 0.001953f);
-  const float16x8_t one    = vdupq_n_f16((float16_t) 1.0f);
-  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(1.0f + 0.01f * j);
+  // recurrence is genuinely NONLINEAR (no closed form exists).
+  //
+  // It feeds back with no conversion.  The high 16 bits of an fp32 are its
+  // bfloat16, and read as an fp16 they are an ordinary number (2.0f's read 2.0,
+  // 1e-3f's ~0.8; Inf or NaN only from 2^121 up), so each FMLAL multiplies by
+  // element 1 or 3 of its own accumulator's register -- the high halves of fp32
+  // lanes 0 and 1 -- and the loop is FMLALs and nothing else.  Narrowing instead
+  // (vcvt_f16_f32, which clang fills a vector with as FCVTN + FCVTN2) put two
+  // uncounted conversions in every step, and a Cortex-X4 issues FCVTN once a
+  // cycle on two of its four pipes: mp read 23 GFLOPS there against 101 fp32,
+  // where FMLAL runs at the fp32 rate.
+  //
+  // Each source lane pulls itself back toward zero (negative self coefficient,
+  // small positive cross term), so the values settle into a small orbit around
+  // zero: normal, finite, and never frozen.
+  //
+  // 24 chains: an element operand gets no fast forwarding on the X4, and an fp32
+  // result read as fp16 is a precision change besides, so a self-fed step costs
+  // ~5 cycles and 16 chains would leave the four pipes a fifth idle.  The element
+  // register must be v0-v15, so chains 16-23 read the lanes of chains 0-7 rather
+  // than their own -- still values with no closed form.
+  // Low half pairs with element 1 (lane 0's high bits), high half with element 3.
+  static const float16_t kCoef[8] = {
+      (float16_t)-0.0009765625f, (float16_t)0.0001220703125f, (float16_t)-0.00048828125f,
+      (float16_t)0.000244140625f, (float16_t)0.0001220703125f, (float16_t)-0.0009765625f,
+      (float16_t)0.00048828125f, (float16_t)-0.000244140625f};
+  const float16x8_t c = vld1q_f16(kCoef);
+  volatile float vseed = 0.75f;
+  const float seed = vseed;
+  for (int j = 0; j < MP_NACC; j++) acc[j] = vdupq_n_f32(seed + 0.01f * j);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
       for (int j = 0; j < MP_NACC; j++)
-      {
-        float16x4_t h  = vcvt_f16_f32(acc[j]);          // narrow: nonlinear feedback
-        float16x8_t hh = vcombine_f16(h, h);
-        acc[j] = vfmlalq_low_f16(acc[j], hh, decay);    // acc += narrow(acc)*(-decay)
-        acc[j] = vfmlalq_high_f16(acc[j], one, refill); // acc += 1*refill (off-zero)
-      }
+        acc[j] = vfmlalq_laneq_low_f16(acc[j], c, vreinterpretq_f16_f32(acc[j % 16]), 1);
+      CPU_UNROLL_FULL
+      for (int j = 0; j < MP_NACC; j++)
+        acc[j] = vfmlalq_laneq_high_f16(acc[j], c, vreinterpretq_f16_f32(acc[j % 16]), 3);
     }
   float32x4_t s = acc[0];
   for (int j = 1; j < MP_NACC; j++) s = vaddq_f32(s, acc[j]);
@@ -247,24 +266,63 @@ static double runInt8DpChain(uint64_t outer)
 }
 #elif defined(__ARM_FEATURE_DOTPROD)
 #define CPU_HAS_INT8DP_KERNEL 1
+#define CPU_HAS_INT8DP_FORMS 1
 static constexpr int I8_NACC = 16, I8_OPS_PER_INSTR = 32;
-static double runInt8DpChain(uint64_t outer)
+// SDOT runs in four spellings, raced per reading (ChainVariant::alts).  A
+// Cortex-X4 read 200 GOPS one-thread with the first against 802 for SMMLA,
+// which does twice SDOT's work per instruction -- half the rate its
+// optimization guide gives (both four a cycle, accumulate latency one), from a
+// loop of nothing but SDOTs.  Nothing in the guide says which change of shape
+// recovers it, so each runs:
+//   - 16 accumulators, every dot multiplying the same two registers;
+//   - 28 of them, should the latency be longer than listed;
+//   - four a x four b registers, so no two dots of a step share both operands
+//     and no four consecutive dots read one register;
+//   - each dot multiplying its accumulator's own bytes (a bit-cast): operands
+//     that change every step, like real data.
+enum class I8Form { OnePair, Pairs16, Carried };
+template <int NACC, I8Form F>
+static double runInt8DpForm(uint64_t outer)
 {
-  int32x4_t acc[I8_NACC];
-  const int8x16_t a = vdupq_n_s8(3);
-  const int8x16_t b = vdupq_n_s8(5);
-  for (int j = 0; j < I8_NACC; j++) acc[j] = vdupq_n_s32(0);
+  int32x4_t acc[NACC];
+  volatile int vseed = 3;
+  const int seed = vseed;
+  int8x16_t a[4], b[4];
+  for (int i = 0; i < 4; i++)
+  {
+    a[i] = vdupq_n_s8((int8_t)(seed + i));
+    b[i] = vdupq_n_s8((int8_t)(seed + 2 + i));
+  }
+  for (int j = 0; j < NACC; j++) acc[j] = vdupq_n_s32(F == I8Form::Carried ? seed + j : 0);
   for (uint64_t o = 0; o < outer; o++)
     CPU_UNROLL_K
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
-      for (int j = 0; j < I8_NACC; j++) acc[j] = vdotq_s32(acc[j], a, b);
+      for (int j = 0; j < NACC; j++)
+      {
+        if (F == I8Form::OnePair)
+          acc[j] = vdotq_s32(acc[j], a[0], b[0]);
+        else if (F == I8Form::Pairs16)  // a Latin square over the 4 x 4 pairs
+          acc[j] = vdotq_s32(acc[j], a[j & 3], b[((j & 3) + (j >> 2)) & 3]);
+        else
+          acc[j] = vdotq_s32(acc[j], vreinterpretq_s8_s32(acc[j]), b[0]);
+      }
     }
   int32x4_t s = acc[0];
-  for (int j = 1; j < I8_NACC; j++) s = vaddq_s32(s, acc[j]);
+  for (int j = 1; j < NACC; j++) s = vaddq_s32(s, acc[j]);
   return (double)vaddvq_s32(s);
 }
+static double runInt8DpChain(uint64_t outer) { return runInt8DpForm<I8_NACC, I8Form::OnePair>(outer); }
+static const char *const kInt8DpForm = "16 accumulators, one operand pair";
+static const ChainVariant kInt8DpAlts[] = {
+    {runInt8DpForm<28, I8Form::OnePair>, (double)INNER * 28 * I8_OPS_PER_INSTR,
+     "28 accumulators, one operand pair"},
+    {runInt8DpForm<I8_NACC, I8Form::Pairs16>, (double)INNER * I8_NACC * I8_OPS_PER_INSTR,
+     "16 accumulators, 16 operand pairs"},
+    {runInt8DpForm<24, I8Form::Carried>, (double)INNER * 24 * I8_OPS_PER_INSTR,
+     "24 accumulators, operands from the accumulators"},
+};
 #endif
 
 // ---- INT16 dot product (x86) ------------------------------------------------
@@ -359,11 +417,15 @@ static double runInt16DpChain(uint64_t outer)
 
 // ---- FP8 dot product (ARM FEAT_FP8DOT4) --------------------------------------
 // Native fp8 4-way dot -> fp32 (FDOT), first shipped by NVIDIA Vera.  The fpm_t
-// operand programs the FPMR format register; the compiler hoists the msr out of
-// the loop (verified), so the hot loop is back-to-back fdot.  Inputs are a
-// nonzero constant (0x38 = 0.5 in e4m3); throughput is format-independent, and
-// like the int8/bf16 dot chains the intrinsic is opaque enough that the
-// accumulate loop isn't scalar-evolved -- re-verify with objdump on new clangs.
+// operand programs the FPMR format register.  Clang 21 writes it once per pass
+// of the unrolled inner loop, then issues FP8_NACC x CPU_UNROLL_K back-to-back
+// fdot (verified; the msr is not hoisted out of the loop).  The clangs without
+// the ACLE macro below set it before every fdot, so the CMake probe demands the
+// macro (see src/cpu/CMakeLists.txt).  Inputs are the nonzero constant 0x38
+// (0.5 in e5m2, the format __arm_fpm_init() selects); throughput is
+// format-independent, and like the int8/bf16 dot chains the intrinsic is opaque
+// enough that the accumulate loop isn't scalar-evolved -- re-verify with
+// objdump on new clangs.
 #if defined(__ARM_FEATURE_FP8DOT4)
 #define CPU_HAS_FP8DP_KERNEL 1
 static constexpr int FP8_NACC = 16, FP8_OPS_PER_INSTR = 32;  // 4 lanes x (4 mul + 4 add)

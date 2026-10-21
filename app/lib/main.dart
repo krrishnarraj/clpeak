@@ -12,6 +12,7 @@ import 'src/model/run_config.dart';
 import 'src/services/benchmark_service.dart';
 import 'src/services/export_service.dart';
 import 'src/services/run_history_store.dart';
+import 'src/services/run_notice.dart';
 import 'src/services/settings_service.dart';
 import 'src/ui/app.dart';
 
@@ -41,6 +42,9 @@ Future<void> main() async {
 
   final history = RunHistoryStore();
   final service = BenchmarkService(bindings, history, engine: engine);
+  // A paused notice left by a process that is gone: this launch is what it
+  // asked for, and the dashboard offers to continue that run.
+  unawaited(RunNotice.clear());
 
   // First frame never waits for enumeration: the device catalog (seconds
   // on NPU/GPU boxes while native viability probes compile) loads off the
@@ -51,7 +55,11 @@ Future<void> main() async {
 
   // On quit during a run: cancel and let the engine save partial results
   // before this process exits.
-  AppLifecycleListener(onExitRequested: service.onExitRequested);
+  // On a phone, whether the app is on screen decides whether a run goes
+  // on: the run's log records it leaving and coming back.
+  AppLifecycleListener(
+      onExitRequested: service.onExitRequested,
+      onStateChange: service.onLifecycleState);
 
   // Dev hook: CLPEAK_AUTORUN=1 starts a run at launch (used by automated UI
   // verification; harmless otherwise).  Waits for the catalog: device

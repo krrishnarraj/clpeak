@@ -87,8 +87,12 @@
 // LiteRtGetStatusString is optional because the Linux x86_64 wheel of
 // ai-edge-litert 2.2.0 does not export it (the macOS and Android libraries
 // do); litertStatusText() falls back to the numeric code.
+// LiteRtCompiledModelIsNonCpuFullyAccelerated is ABI 1.1.0's (LiteRT
+// 2.3.0), and its presence is how the runtime's ABI is told
+// (LitertRuntime::abi11).
 #define CLPEAK_LITERT_OPTIONAL(X)                                     \
   X(LiteRtGetStatusString)                                            \
+  X(LiteRtCompiledModelIsNonCpuFullyAccelerated)                      \
   X(LiteRtCreateSinkLogger)                                           \
   X(LiteRtDestroyLogger)                                              \
   X(LiteRtSetDefaultLogger)                                           \
@@ -124,7 +128,14 @@ struct LitertRuntime
   LitertApi api;
   std::string path;        // the file that loaded (resolved when known)
   std::string libraryDir;  // its directory; where accelerator libraries live
-  std::string abiVersion;  // LITERT_RUNTIME_ABI_VERSION this build was compiled against
+  // The loaded library's ABI, which may be older than the headers'
+  // (LITERT_RUNTIME_ABI_VERSION): `--litert-lib` takes any wheel.  LiteRT has
+  // no call that reports its own version, so it is read from what the
+  // library exports -- 1.1.0 (LiteRT 2.3.0) added
+  // LiteRtCompiledModelIsNonCpuFullyAccelerated, and a library without it is
+  // 1.0.0 or older.  The GPU faults 2.3.0 fixed stay fenced on the rest.
+  std::string abiVersion;
+  bool abi11 = false;
 };
 
 // Point the loader at a specific library, ahead of the platform's conventional

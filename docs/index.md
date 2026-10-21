@@ -143,7 +143,8 @@ export as JSON.
 
 Each release has a zip per platform with the CLI and the app. The `cuda`,
 `rocm` and `oneapi` variants add the backends that need a vendor SDK at build
-time. On macOS the `.dmg` holds the app.
+time. On macOS the `.dmg` holds the app. Windows binaries are not signed yet, so
+SmartScreen may warn on first run.
 
 <div id="release-list">
   <p class="rel-note">
@@ -265,7 +266,8 @@ clpeak --onnx --transformer-block # the decoder block on every ONNX provider
 clpeak --describe                 # what each test and each reading measures
 clpeak -o run.clpeak.json         # save the run as JSON
 clpeak --compare run.clpeak.json  # run again and compare with a saved run
-clpeak --max-time 200             # a shorter time budget per test
+clpeak --max-time-gpu 250         # keep a GPU busy at most 250 ms at a time
+clpeak --max-time-ml-gpu 500      # the same for one ONNX / LiteRT / Core ML run
 ```
 
 `clpeak --help` lists every flag. Every flag parses in every build, so a

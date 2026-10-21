@@ -16,12 +16,18 @@ class ResultsBody extends StatefulWidget {
     super.key,
     required this.document,
     this.header,
+    this.showDiagnostics = true,
   });
 
   final RunDocument document;
 
   /// Optional slivers-above widget (e.g. the live-run banner).
   final Widget? header;
+
+  /// Whether to show the DIAGNOSTICS panel when the log is non-empty.
+  /// The live run passes false unless the run was started with verbose
+  /// diagnostics enabled; saved runs leave the default true.
+  final bool showDiagnostics;
 
   @override
   State<ResultsBody> createState() => _ResultsBodyState();
@@ -171,7 +177,7 @@ class _ResultsBodyState extends State<ResultsBody> {
         ],
       if (selected.unavailable.isNotEmpty)
         _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
-      if (widget.document.log.isNotEmpty)
+      if (widget.showDiagnostics && widget.document.log.isNotEmpty)
         _WidgetRow(_DiagnosticsSection(log: widget.document.log), padTop: 22),
     ];
 
@@ -662,7 +668,8 @@ class _TestLineState extends State<_TestLine> {
           const SizedBox(width: 12),
           if (collapsible) ...[
             Builder(builder: (context) {
-              final peak = formatValue(test.peakValue, test.units);
+              final peak =
+                  formatValue(test.peakValue, test.unitsOf(test.peakMetric));
               return CValue(
                   value: peak.value, unit: peak.unit, color: widget.color);
             }),

@@ -30,13 +30,13 @@
 //
 // Each width is timed with the weights stored both ways, [in, out] and
 // [out, in], until the readings settle which one this unit runs faster
-// (CoremlLayoutRace), and the row takes the faster, names it and says what
-// the other read.  On an M1 Pro every row's race settles at the first width
-// or the second but the GPU's int4_weight, whose layouts stay 7-18% apart
-// all the way up, so the race costs about one more model per row; and on
-// the Neural Engine, which runs the two at one rate, the climb goes on in
-// the [out, in] layout its compiler takes as it is: 2048-wide layers
-// compile in about a second there instead of fifteen.
+// (CoremlLayoutRace), and the row takes the faster and names it.  On an M1
+// Pro every row's race settles at the first width or the second but the
+// GPU's int4_weight, whose layouts stay 7-18% apart all the way up, so the
+// race costs about one more model per row; and on the Neural Engine, which
+// runs the two at one rate, the climb goes on in the [out, in] layout its
+// compiler takes as it is: 2048-wide layers compile in about a second there
+// instead of fifteen.
 //
 // One test, `coreml_gemm`: the same chain in every format Core ML can store a
 // weight in.  Core ML's arithmetic is fp16 or fp32 and nothing else, so most
@@ -52,7 +52,6 @@
 // operations that moved, rather than a CPU number under an accelerator's
 // name.
 
-#include <common/units.h>
 #include <coreml/coreml_peak.h>
 #include "coreml_bench.h"
 #include "coreml_model.h"
@@ -75,7 +74,9 @@ constexpr int kChainLayers = 16;
 constexpr int64_t kSeedWidth = 64;
 
 // A size counts as an improvement only if it beats the best so far by this
-// much; two failures in a row end the search.
+// much; two failures in a row end the search, and so does one that fell
+// where the next size would cost seconds (ladderDropEnds,
+// include/common/common.h).
 constexpr double kImproveFactor = 1.03;
 constexpr int kMaxStrikes = 2;
 
@@ -86,13 +87,22 @@ constexpr int kMaxStrikes = 2;
 // ladder found on a CPU provider.
 constexpr double kMaxIterUs = 2.0e6;
 
+// On a GPU one prediction is bounded too, at --max-time-ml-gpu (gpuRunCapUs).
+// Each layout's first rung, which has no rate to be predicted from, is
+// predicted from a chain this wide timed once beforehand (mlLadderScouts) --
+// the ONNX ladder's rule, for its reason (src/onnx/gemm.cpp).  The scout is
+// no rung: the row neither publishes it nor counts it toward the plateau.  A
+// layout it says is too slow for kMinDim climbs from kScoutDim instead.
+constexpr int64_t kScoutDim = 512;
+
 // Per-size budget for the timed phase.
 constexpr unsigned int kSizeBudgetUs = 2000000;
 
-// Everything the chain holds, capped at a quarter of physical memory: a
-// fixed ceiling would be a crash on a phone and a needless limit on a Mac
-// Studio.
-uint64_t maxOperandBytes() { return clpeak::memoryBudget(3ull << 30); }
+// Everything a rung holds at once (rungBytes), capped at a quarter of
+// physical memory -- a fixed ceiling would be a crash on a phone and a
+// needless limit on a Mac Studio -- and at 8 GB, which still admits an
+// 8192-wide fp16 chain, for a GPU that runs one inside --max-time-ml-gpu.
+uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
 
 struct Variant
 {
@@ -101,105 +111,60 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {CoremlWeight::Fp16,
-     "16-bit inputs, the Neural Engine's native width and the currency of "
-     "every shipping Core ML model."},
-    {CoremlWeight::Fp32,
-     "Full 32-bit precision.  The Neural Engine has no fp32 path, so on that "
-     "row Core ML sends the multiply elsewhere and the plan says where."},
-    {CoremlWeight::Bf16,
-     "bfloat16: in Core ML's type list but accepted by none of its "
-     "operations, so this row records what the compiler says to it."},
+    {CoremlWeight::Fp16, "16-bit weights and arithmetic."},
+    {CoremlWeight::Fp32, "Full 32-bit precision."},
+    {CoremlWeight::Bf16, "bfloat16 weights and arithmetic."},
     {CoremlWeight::Int8Channel,
-     "8-bit integer weights with one scale per output column, unpacked into a "
-     "16-bit multiply -- Core ML's affine weight quantization.  The "
-     "arithmetic is unchanged, so what the narrow weights buy is traffic."},
-    {CoremlWeight::Int4Block,
-     "4-bit integer weights, one scale per block of 32 along the reduction "
-     "axis, unpacked into a 16-bit multiply.  The blocked form needs macOS 15 "
-     "/ iOS 18, and a Neural Engine older than the A17 Pro / M4 generation "
-     "may decline it with live activations, which every layer of the chain "
-     "has -- as the transformer-block rows do."},
-    {CoremlWeight::Int4Lut,
-     "4-bit palettized weights: every value is an index into a 16-entry "
-     "table, the compression Apple's Neural Engine was built to decode.  "
-     "The same 16-level grid as the blocked row, so the two differ only in "
-     "how the levels are found."},
+     "8-bit weights, one scale per output column, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Block, "4-bit weights in blocks of 32, widened to 16 bits for the multiply."},
+    {CoremlWeight::Int4Lut, "4-bit indices into a 16-entry table, widened to 16 bits for the multiply."},
     {CoremlWeight::Fp8Block,
-     "8-bit float (E4M3) weights with block scales.  The type exists in Core "
-     "ML's format since macOS 26; whether any compute unit takes it is what "
-     "this row asks."},
+     "8-bit float (E4M3) weights in blocks of 32, widened to 16 bits for the multiply."},
     {CoremlWeight::Int8Qdq,
-     "8-bit weights and 8-bit activations: the activations are quantized on "
-     "device and every product quantized back, the pattern Core ML fuses into "
-     "an integer multiply on Neural Engines that have one (A17 Pro, M4 and "
-     "later).  Measured in ops; a reading no faster than the fp16 row is a "
-     "Neural Engine doing this in 16-bit."},
+     "Full-integer int8: 8-bit activations and weights; only A17 Pro / M4 and later Neural Engines "
+     "multiply them as integers."},
 };
 
 // A row's word on the layout of its weights (CoremlLayoutRace): the order
-// the peak was measured in and, from the last width both were timed at,
-// what the other order read there -- or that it never ran.
-std::string layoutNote(bool transposed, int64_t raceDim, const double raceRate[2],
-                       const double raceCreateUs[2], int otherRungs, const char *unit)
+// the peak was measured in, and why there was no race when there was none.
+std::string layoutNote(bool transposed, int otherRungs, bool otherWrong)
 {
-  std::string s = ", its weights stored " + std::string(coremlLayoutName(transposed));
-  if (raceDim > 0)
-  {
-    char buf[96];
-    s += "; at " + std::to_string(raceDim) + "-wide layers they ran at " +
-         formatReading(raceRate[transposed], unit) + " that way and " +
-         formatReading(raceRate[!transposed], unit) + " stored " + coremlLayoutName(!transposed);
-    // A tie the compile times settled, which would otherwise read as the
-    // slower layout kept by mistake.
-    if (CoremlLayoutRace::tieOnBuild(raceRate, raceCreateUs) &&
-        raceCreateUs[!transposed] > raceCreateUs[transposed])
-    {
-      std::snprintf(buf, sizeof buf, ", which took %.1f s to compile against %.1f",
-                    raceCreateUs[!transposed] / 1.0e6, raceCreateUs[transposed] / 1.0e6);
-      s += buf;
-    }
-  }
+  std::string s = ", weights stored " + std::string(coremlLayoutName(transposed));
+  if (otherWrong)
+    s += "; " + std::string(coremlLayoutName(!transposed)) + " answered wrong";
   else if (otherRungs == 0)
-    s += "; stored " + std::string(coremlLayoutName(!transposed)) + " they did not run here";
-  return s + ".";
+    s += ", the only order that ran";
+  return s;
 }
 
-// What the chain holds: the seed and the weights that widen it, then every
-// layer's weights.
-uint64_t operandBytes(CoremlWeight w, int64_t D)
+// The chain's constants -- the seed and the weights that widen it, then
+// every layer's weights -- held as coremlHeldBytes says, and every layer's
+// output.
+uint64_t rungBytes(CoremlWeight w, int64_t D)
 {
   const int64_t sw = std::min(kSeedWidth, D);
-  return coremlElemBytes(coremlActDtype(w), D * sw) + coremlWeightBytes(w, sw, D) +
-         (uint64_t)kChainLayers * coremlWeightBytes(w, D, D);
+  const int act = coremlActDtype(w);
+  const uint64_t constants = coremlElemBytes(act, D * sw) + coremlWeightBytes(w, sw, D) +
+                             (uint64_t)kChainLayers * coremlWeightBytes(w, D, D);
+  return coremlHeldBytes(constants, (uint64_t)(kChainLayers + 1) * coremlElemBytes(act, D * D));
 }
 
 } // namespace
 
 int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one prediction may be predicted to take: on a GPU,
+  // --max-time-ml-gpu (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
   auto test = currentDeviceScope->beginTest(
       {"coreml_gemm", "Core ML matmul peak", "flops", Category::Unknown,
-       "Matrix-multiply rate through Core ML on this compute unit, one weight "
-       "format per row: sixteen distinct square multiplies chained in one "
-       "prediction, each layer's product feeding the next, swept over layer "
-       "widths and reported at its best, with the weights stored in whichever "
-       "of their two orders, [in, out] or [out, in], this unit runs faster.  "
-       "The same chain runs on the Neural Engine, the GPU and the CPU, and the "
-       "compute plan proves which one actually did the multiplies: a row Core "
-       "ML would have moved to another unit reports unsupported instead.",
+       "Matrix-multiply rate on this compute unit, one weight format per row: "
+       "sixteen chained square matmuls in one prediction, swept over layer width "
+       "and reported at its best in the faster of the two weight layouts.  A row "
+       "Core ML would move to another unit reports unsupported.",
        TestShape::Heterogeneous, "weight format"});
-
-  const std::string sweep = "Peak over a doubling sweep of layer widths, sixteen layers chained "
-                            "per prediction";
-  const std::string seedNote =
-      "  The chain starts from a " + std::to_string(kSeedWidth) +
-      "-wide seed that takes a runtime value, and one more multiply, not counted, "
-      "widens it into the first layer's activations -- so no compiler can fold the "
-      "multiplies away, and the seed's pass and that multiply are inside the figure.";
 
   for (const Variant &v : kVariants)
   {
@@ -211,7 +176,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     const int ioDtype = (act == CML_BF16) ? CML_FP16 : act;
 
     logger::EmitOptions o;
-    o.description = sweep + ".  " + v.note;
+    o.description = v.note;
     if (isInt)
       o.unit = "ops";
 
@@ -222,6 +187,20 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                     " (model specification " + std::to_string(coremlSpecForWeight(v.w)) +
                     "); this OS accepts " + std::to_string(spec),
                 o);
+      continue;
+    }
+
+    // A layout whose answer is wrong leaves the race (wrongAnswer,
+    // numeric_error.cpp), and a format with no layout that answers right has
+    // no rate worth publishing.
+    std::string wrongWhy[2];
+    for (int t = 0; t < 2; t++)
+      wrongWhy[t] = wrongAnswer(dev, v.w, t);
+    if (!wrongWhy[0].empty() && !wrongWhy[1].empty())
+    {
+      const int read = answerCheck(dev, v.w).read;
+      CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[read == 1].c_str());
+      test.skip(label, ResultStatus::Error, wrongWhy[read == 1], o);
       continue;
     }
 
@@ -238,27 +217,66 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     // runs, each with its own caps and its own compile history, and the
     // width's rate is the faster one's.
     CoremlLayoutRace race;
+    for (int t = 0; t < 2; t++)
+      if (!wrongWhy[t].empty())
+      {
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[t].c_str());
+        race.drop(t);
+      }
     struct Lane
     {
+      int64_t startDim = kMinDim;   // kScoutDim when the scout says kMinDim is too slow
       int rungs = 0;
       double lastRate = 0.0, prevCreateUs = 0.0, prevPrevCreateUs = 0.0;
       std::string offDeviceNote, glueNote;
     } lanes[2];
-    // The last width both layouts were timed at, for the row's note.
-    int64_t raceDim = 0;
-    double raceRate[2] = {0.0, 0.0}, raceCreateUs[2] = {0.0, 0.0};
 
-    for (int64_t D = kMinDim; D <= kMaxDim && !race.done(); D *= 2)
+    // Each layout's first rung is predicted from a kScoutDim chain
+    // (mlLadderScouts); a scout that cannot be built, is sent to another
+    // unit or cannot run leaves it unpredicted.
+    for (int t = 0; t < 2 && mlLadderScouts(dev.deviceType); t++)
+    {
+      if (!race.runs(t) || clpeak::cancelRequested())
+        continue;
+      std::string err;
+      auto s = CoremlSession::create(
+          dev, coremlMatMulChainModel(spec, kScoutDim, kChainLayers, kSeedWidth, v.w, t), err);
+      double us = -1.0;
+      if (s && !s->onDevice())
+        err = coremlOffDeviceReason(dev, *s);
+      else if (s && coremlBindScalar(*s, "s", ioDtype, err) && s->timeRuns(1, err) > 0.0)   // compile + warmup
+        us = s->timeRuns(1, err);
+      s.reset();
+      if (us > 0.0)
+      {
+        lanes[t].lastRate = 2.0 * (double)kScoutDim * (double)kScoutDim * (double)kScoutDim * kChainLayers / us;
+        const double firstUs = 2.0 * (double)kMinDim * (double)kMinDim * (double)kMinDim * kChainLayers /
+                               lanes[t].lastRate;
+        if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / kChainLayers > kMaxIterUs)
+          lanes[t].startDim = kScoutDim;
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
+                    (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3,
+                    lanes[t].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
+                                                   : "");
+      }
+      else
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
+                    dev.displayName.c_str(), label, (long long)kScoutDim, coremlLayoutName(t),
+                    err.empty() ? "no reason given" : err.c_str());
+    }
+
+    const int64_t firstDim = std::min(lanes[0].startDim, lanes[1].startDim);
+    for (int64_t D = firstDim; D <= kMaxDim && !race.done(); D *= 2)
     {
       if (clpeak::cancelRequested())
         break;
 
-      const uint64_t bytes = operandBytes(v.w, D);
-      if (bytes > maxOperandBytes())
+      const uint64_t bytes = rungBytes(v.w, D), budget = maxRungBytes();
+      if (bytes > budget)
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of operands, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D,
-                    (unsigned long long)(bytes >> 20));
+        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
+                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
+                    (unsigned long long)(budget >> 20));
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;
@@ -266,22 +284,47 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       for (int t = 0; t < 2 && !wrong; t++)
       {
-        if (!race.runs(t))
+        if (!race.runs(t) || D < lanes[t].startDim)
           continue;
         Lane &ln = lanes[t];
         const char *layout = coremlLayoutName(t);
-        if (ln.lastRate > 0.0 && layerOps / ln.lastRate > kMaxIterUs)
+        const double runUs = ln.lastRate > 0.0 ? layerOps * kChainLayers / ln.lastRate : 0.0;
+        const bool runTooLong = runCapUs > 0.0 && runUs > runCapUs;
+        if (runTooLong || runUs / kChainLayers > kMaxIterUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
-                      "stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, layout,
-                      layerOps / ln.lastRate / 1.0e6);
+          if (runTooLong)
+            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would keep the GPU busy ~%.2f s a "
+                        "prediction, past --max-time-ml-gpu (%.2f s), stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, layout, runUs / 1.0e6,
+                        runCapUs / 1.0e6);
+          else
+            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
+                        "stopping\n",
+                        dev.displayName.c_str(), label, (long long)D, layout,
+                        runUs / kChainLayers / 1.0e6);
+          // Before any rung the prediction is the scout's, and it is all the
+          // row has to say.
+          if (ln.rungs == 0 && firstErr.empty())
+          {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.1f", runUs / 1.0e6);
+            firstErr = (D == kScoutDim ? "a " + std::to_string(kScoutDim) + "-wide chain took about " + buf +
+                                             " s a prediction, "
+                                       : "at the rate a " + std::to_string(kScoutDim) + "-wide chain ran, a " +
+                                             std::to_string(D) + "-wide one would take about " + buf +
+                                             " s a prediction, ") +
+                       (runTooLong ? "longer than --max-time-ml-gpu lets one run hold a GPU -- a driver "
+                                     "may reset a GPU held longer -- "
+                                   : "longer than one multiply may take, ") +
+                       "so no size was measured";
+            errStatus = ResultStatus::Error;
+          }
           race.drop(t);
           continue;
         }
         // The compile cap, checked before paying for the build; the first
         // size always builds, since its time seeds the prediction.
-        if (D > kMinDim && ln.prevCreateUs > 0.0)
+        if (D > ln.startDim && ln.prevCreateUs > 0.0)
         {
           const double predictedUs =
               coremlPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, strikes > 0);
@@ -337,8 +380,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
             }
           }
           else
-            ln.offDeviceNote = "  Wider layers were declined by the " +
-                               std::string(coremlKindName(dev.kind)) + ".";
+            ln.offDeviceNote = "; the " + std::string(coremlKindName(dev.kind)) + " declined wider layers";
           race.drop(t);
           continue;
         }
@@ -365,6 +407,10 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         s.reset();   // the temp files go before the next model is written
         if (m.meanUs <= 0.0)
         {
+          // Logged whatever the row says: above a measured width it
+          // publishes the widths below, and this failure would leave no trace.
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
+                      (long long)D, layout, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -403,10 +449,21 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                       m.probeUs / kChainLayers / 1.0e6);
           race.drop(t);
         }
+        // The same for a GPU's prediction (gpuRunCapUs): this one held the
+        // device longer than --max-time-ml-gpu and survived it, and the next
+        // would hold it eight times as long.
+        else if (runCapUs > 0.0 && m.probeUs > runCapUs)
+        {
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.2f s a prediction, past "
+                      "--max-time-ml-gpu (%.2f s), stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, layout, m.probeUs / 1.0e6,
+                      runCapUs / 1.0e6);
+          race.drop(t);
+        }
         // A size that compiled past the cap anyway is kept, and ends this
         // layout's climb.  The first may exceed it once: its time seeds the
         // prediction.
-        else if (D != kMinDim && cu > kCoremlMaxChainCreateUs)
+        else if (D != ln.startDim && cu > kCoremlMaxChainCreateUs)
         {
           CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s create %.1f s > %.1f s, stopping\n",
                       dev.displayName.c_str(), label, (long long)D, layout, cu / 1.0e6,
@@ -424,9 +481,6 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       if (rate[0] > 0.0 && rate[1] > 0.0)
       {
-        raceDim = D;
-        std::copy(rate, rate + 2, raceRate);
-        std::copy(createUs, createUs + 2, raceCreateUs);
         race.settle(rate, createUs);
         if (!race.runs(0) || !race.runs(1))
           CLPEAK_VLOG("coreml-gemm[%s/%s]: layouts settled at %lld-wide layers: %s goes on\n",
@@ -452,6 +506,14 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           bestDim = D;
           bestTransposed = t;
         }
+        const double nextUs = 8.0 * layerOps * kChainLayers * 1.0e6 / rate[t];
+        if (ladderDropEnds(rate[t], best, nextUs))
+        {
+          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers fell to %.0f%% of the best, and the next size "
+                      "would take ~%.0f s a prediction, stopping\n",
+                      dev.displayName.c_str(), label, (long long)D, 100.0 * rate[t] / best, nextUs / 1.0e6);
+          break;
+        }
         if (++strikes >= kMaxStrikes)
         {
           CLPEAK_VLOG("coreml-gemm[%s/%s]: no further gain past %lld-wide layers\n",
@@ -464,10 +526,10 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     if (best > 0.0)
     {
       const Lane &ln = lanes[bestTransposed];
-      o.description = sweep + "; fastest at " + std::to_string(bestDim) + "-wide layers" +
-                      layoutNote(bestTransposed, raceDim, raceRate, raceCreateUs,
-                                 lanes[!bestTransposed].rungs, isInt ? "ops" : "flops") +
-                      "  " + v.note + seedNote + ln.offDeviceNote + ln.glueNote;
+      o.description = std::string(v.note) + "  Fastest at " + std::to_string(bestDim) + "-wide layers" +
+                      layoutNote(bestTransposed, lanes[!bestTransposed].rungs,
+                                 !wrongWhy[!bestTransposed].empty()) +
+                      ln.offDeviceNote + ln.glueNote + ".";
       test.emit(label, (float)best, o);
     }
     else

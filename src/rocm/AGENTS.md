@@ -70,7 +70,8 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
   vs CDNA), not different formats on one unit.  `en.isInt` drives the `ops`
   unit override that lets the integer entry share the test.
 - `rocmWidthNote()` (`rocm_peak.h`) covers `float`/`float2`/`float4`,
-  `half`/`half2` and `int`/`int2`/`int4`.
+  `half` and `int`/`int2`/`int4`.  `half2` is one packed instruction, not a
+  vector, and carries its own note.
 - **`int8_dp`/`dp2`/`dp4`/`dp8` are NOT widths** — one, two, four and eight
   *independent chains*.  They carry their own notes.
 - `rocblas_gemm` and `rocwmma` are each one test, with the integer reading carrying its own unit.

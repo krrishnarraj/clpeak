@@ -31,6 +31,26 @@ struct DeviceSelector {
   int     index   = 0;
 };
 
+// The flag a Benchmark is selected by ("single-precision-compute" for
+// --single-precision-compute), and back: the name a run's checkpoint records
+// a finished Benchmark under.
+const char *benchmarkFlag(Benchmark b);
+bool        benchmarkFromFlag(const std::string &flag, Benchmark &out);
+
+// A backend by the name the document records it under ("OpenCL").
+bool backendFromName(const std::string &name, Backend &out);
+
+// What the part of a run before this one finished, read from the run's
+// checkpoint by --resume (include/common/run_resume.h), so that this part
+// runs only the rest: backends finished whole, devices finished whole, and on
+// the other devices the Benchmarks finished.  Empty on a run of its own.
+struct ResumeSkip {
+  std::bitset<static_cast<size_t>(Backend::COUNT)> backendsDone;
+  std::vector<DeviceSelector> devicesDone;
+  std::vector<std::pair<DeviceSelector, std::bitset<static_cast<size_t>(Benchmark::COUNT)>>>
+      benchmarksDone;
+};
+
 // Shared CLI options populated once by parseCliOptions and consumed by every
 // backend.  Peak::applyOptions copies the relevant fields into the backend
 // so the rest of its code can stay backend-flavored.
@@ -82,9 +102,12 @@ struct CliOptions {
   bool         forceIters    = false;
   unsigned int iters         = 0;
   unsigned int warmupCount   = 2;
-  unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time, in us
-  // CPU backend uses its own (longer) budget; --max-time does not affect it.
+  unsigned int targetTimeUs  = DEFAULT_TARGET_TIME_US; // --max-time-gpu, in us
+  // CPU backend uses its own (longer) budget; --max-time-gpu does not affect it.
   unsigned int targetTimeUsCpu = DEFAULT_CPU_TARGET_TIME_US; // --max-time-cpu, in us
+  // The ML backends (ONNX Runtime, LiteRT, Core ML) bound one GPU run with
+  // their own budget (gpuRunCapUs); neither of the above affects them.
+  unsigned int targetTimeUsMlGpu = DEFAULT_ML_GPU_TARGET_TIME_US; // --max-time-ml-gpu, in us
 
   // Test selection.  Default: every category and every test enabled.  The
   // first positive --<test> flag flips enabledTests to allow-list mode
@@ -112,6 +135,17 @@ struct CliOptions {
   // (the descriptions authored at the beginTest()/emit() call sites).  Off by
   // default: the plain output is a table for people who already know it.
   bool describe = false;
+
+  // --resume FILE: continue the run whose -o file FILE was, after the
+  // process it ran in ended part-way, with the options it started with --
+  // read back from its checkpoint, so the parser takes no other option
+  // beside it but --skip-crashed (include/common/run_resume.h).
+  std::string resumeFile;
+  // --skip-crashed: that process crashed, so the Benchmark it died in is
+  // recorded as where it died instead of run again.
+  bool skipCrashed = false;
+  // Filled from the checkpoint by --resume, never from the command line.
+  ResumeSkip resume;
 
   CliOptions()
   {
@@ -143,7 +177,7 @@ struct CliOptions {
 };
 
 // Describe how clpeak was asked to run, for the result document's `invocation`
-// block.  Every number in a run is sensitive to this -- a shorter --max-time
+// block.  Every number in a run is sensitive to this -- a shorter --max-time-gpu
 // measures a different thing, and a selective run is not a full one even though
 // the file looks the same shape -- so it is recorded rather than inferred.
 // Lives here because the category and test flag-name tables do.

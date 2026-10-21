@@ -3,9 +3,11 @@
 #include <common/options.h>
 #include <common/common.h>
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <thread>
 
-// Kernel strings live in cl_kernels.cpp — see clGetMainKernels(), etc.
+// Kernel strings live in cl_kernels.cpp — see clGetTestKernels().
 // Benchmark methods live in separate files:
 //   cl_kernels.cpp        compute_test.cpp
 //   global_bandwidth.cpp  local_bandwidth.cpp  image_bandwidth.cpp
@@ -28,6 +30,33 @@ void CL_CALLBACK contextNotify(const char *errinfo, const void *, size_t, void *
 {
   if (errinfo)
     clpeak::logMessage(clpeak::LogLevel::Error, "opencl", errinfo);
+}
+
+// Whether the device takes intel_reqd_sub_group_size(16): the extension, and
+// 16 among CL_DEVICE_SUB_GROUP_SIZES_INTEL.  The query is the extension's own,
+// so it goes through the C API.
+bool offersSubGroup16(const cl::Device &device)
+{
+  try
+  {
+    if (device.getInfo<CL_DEVICE_EXTENSIONS>().find("cl_intel_required_subgroup_size") ==
+        std::string::npos)
+      return false;
+  }
+  catch (cl::Error &)
+  {
+    return false;
+  }
+  const cl_device_info kSubGroupSizesIntel = 0x4108;
+  size_t bytes = 0;
+  if (clGetDeviceInfo(device(), kSubGroupSizesIntel, 0, nullptr, &bytes) != CL_SUCCESS ||
+      bytes == 0)
+    return false;
+  std::vector<size_t> sizes(bytes / sizeof(size_t));
+  if (clGetDeviceInfo(device(), kSubGroupSizesIntel, bytes, sizes.data(), nullptr) !=
+      CL_SUCCESS)
+    return false;
+  return std::find(sizes.begin(), sizes.end(), (size_t)16) != sizes.end();
 }
 
 } // namespace
@@ -99,64 +128,156 @@ int clPeak::runAll()
         });
         currentDeviceScope = &deviceScope;
 
-        cl::Program::Sources source(1, clGetMainKernels());
-        cl::Program prog = cl::Program(ctx, source);
-        try
+        // Every program the selected tests run, one per test (clGetTestKernels)
+        // and built side by side.  On a cold driver cache the compile is most
+        // of a device's setup -- an Arc A380 spent ~45 s on the compute
+        // families as one program -- and a compiler works through one program
+        // at a time, so separate programs on separate threads put the CPU's
+        // cores on it.  Separate programs are also what NVIDIA's OpenCL needs:
+        // the local-bandwidth kernels' __local arguments and the image kernels'
+        // image2d_t reserve module-level resources that compress the register
+        // budget of every other kernel in the same program, triggering
+        // CL_OUT_OF_RESOURCES on the v16 kernels.
+        struct ProgramBuild
         {
-          std::vector<cl::Device> dev = {devices[d]};
-          prog.build(dev, BUILD_OPTIONS);
-        }
-        catch (cl::Error &error)
-        {
-          // The device produces nothing after this, and only the compiler
-          // says why -- so the build log is an error on the run log, not a
-          // --verbose extra, and a file from a machine nobody can reach
-          // still explains the missing device.
-          CLPEAK_LOG(Error, "OpenCL: program build failed on %s (%s %d):\n%s",
-                     devInfo.deviceName.c_str(), error.what(), error.err(),
-                     prog.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]).c_str());
-          currentDeviceScope = nullptr;
-          continue;
-        }
-
-        // Helper: build an auxiliary program, silently skip on failure.
-        auto buildAuxProg = [&](const std::string &src, const std::string &label,
-                                const std::string &options = BUILD_OPTIONS) -> cl::Program
-        {
-          cl::Program p;
-          try
-          {
-            cl::Program::Sources s(1, src);
-            p = cl::Program(ctx, s);
-            std::vector<cl::Device> dev = {devices[d]};
-            p.build(dev, options.c_str());
-          }
-          catch (cl::Error &)
-          {
-            CLPEAK_VLOG("  %s kernel build failed, test skipped\n", label.c_str());
-            p = cl::Program(); // return empty/invalid program
-          }
-          return p;
+          Benchmark which;
+          const char *label;
+          std::string options;
+          bool quiet;          // a failure is the test's "did not build", not an error
+          cl::Program program;
+          std::string error;   // what failed, and the compiler's log; empty: built
         };
-
-        // Local-BW kernels use __local pointer arguments.
-        // Image kernels use image2d_t / sampler_t.
-        // All three cause NVIDIA CUDA-OpenCL to reserve module-level resources
-        // that compress the register budget for every other kernel in the same
-        // program, triggering CL_OUT_OF_RESOURCES on the v16 kernels.
-        // Each gets its own isolated program object.
-        cl::Program localProg = buildAuxProg(clGetLocalKernels(), "Local bandwidth");
-        cl::Program imgProg;
-        if (devInfo.imageSupported)
-          imgProg = buildAuxProg(clGetImageKernels(), "Image bandwidth");
-
-        cl::Program int8DpProg;
-        if (devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported)
+        std::vector<ProgramBuild> builds;
+        auto want = [&](Benchmark which, const char *label, bool wanted,
+                        const std::string &options, bool quiet = false)
         {
-          std::string int8BuildOptions = std::string(BUILD_OPTIONS) +
-              (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "");
-          int8DpProg = buildAuxProg(clGetInt8DpKernels(), "INT8 dot-product compute", int8BuildOptions);
+          if (wanted)
+            builds.push_back({which, label, options, quiet, cl::Program(), std::string()});
+        };
+        // On a device that offers sub-group 16, the float families' affine
+        // chain a second time pinned to it (kernels/mad_chain.cl).
+        const std::string floatOptions =
+            std::string(BUILD_OPTIONS) +
+            (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
+        // The int8 dot builtins hang off OpenCL C 3.0 feature macros, which a
+        // compiler left at its default 1.2 never defines.  Its four-accumulator
+        // cycle races pinned to sub-group 16 too, like the float families'
+        // affine chain (kernels/compute_int8_dp_kernels.cl).
+        const std::string int8Options =
+            std::string(BUILD_OPTIONS) +
+            (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "") +
+            (devInfo.openclC30 ? " -cl-std=CL3.0 " : "") +
+            (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
+        want(Benchmark::ComputeSP, "Single-precision compute",
+             isAllowed(Benchmark::ComputeSP), floatOptions);
+        want(Benchmark::ComputeHP, "Half-precision compute",
+             devInfo.halfSupported && isAllowed(Benchmark::ComputeHP), floatOptions);
+        want(Benchmark::ComputeDP, "Double-precision compute",
+             devInfo.doubleSupported && isAllowed(Benchmark::ComputeDP), floatOptions);
+        want(Benchmark::ComputeMP, "Mixed-precision compute",
+             devInfo.halfSupported && isAllowed(Benchmark::ComputeMP), floatOptions);
+        want(Benchmark::ComputeInt, "Integer compute",
+             isAllowed(Benchmark::ComputeInt), BUILD_OPTIONS);
+        want(Benchmark::ComputeIntFast, "Integer compute Fast 24bit",
+             isAllowed(Benchmark::ComputeIntFast), BUILD_OPTIONS);
+        want(Benchmark::ComputeChar, "Integer char (8bit) compute",
+             isAllowed(Benchmark::ComputeChar), BUILD_OPTIONS);
+        want(Benchmark::ComputeShort, "Integer short (16bit) compute",
+             isAllowed(Benchmark::ComputeShort), BUILD_OPTIONS);
+        want(Benchmark::ComputeInt8DP, "INT8 dot-product compute",
+             (devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported) &&
+                 isAllowed(Benchmark::ComputeInt8DP),
+             int8Options, true);
+        // The latency test borrows a global-bandwidth kernel.
+        want(Benchmark::GlobalBW, "Global memory bandwidth",
+             isAllowed(Benchmark::GlobalBW) || isAllowed(Benchmark::KernelLatency),
+             BUILD_OPTIONS);
+        want(Benchmark::LocalBW, "Local memory bandwidth",
+             isAllowed(Benchmark::LocalBW), BUILD_OPTIONS, true);
+        want(Benchmark::ImageBW, "Image memory bandwidth",
+             devInfo.imageSupported && isAllowed(Benchmark::ImageBW), BUILD_OPTIONS, true);
+
+        {
+          std::atomic<size_t> next(0);
+          auto work = [&]()
+          {
+            for (size_t i = next++; i < builds.size(); i = next++)
+            {
+              ProgramBuild &b = builds[i];
+              try
+              {
+                cl::Program::Sources source(1, clGetTestKernels(b.which));
+                b.program = cl::Program(ctx, source);
+                std::vector<cl::Device> dev = {devices[d]};
+                b.program.build(dev, b.options.c_str());
+              }
+              catch (cl::Error &error)
+              {
+                b.error = std::string(error.what()) + " " + std::to_string(error.err());
+                try
+                {
+                  b.error += ":\n" + b.program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[d]);
+                }
+                catch (cl::Error &)
+                {
+                }
+                b.program = cl::Program();
+              }
+              catch (std::exception &e)
+              {
+                b.error = e.what();
+                b.program = cl::Program();
+              }
+            }
+          };
+          // Up to eight compiles at once: past that the gain is small and a
+          // compiler's working set is not.
+          size_t threads = std::min<size_t>(builds.size(), 8);
+          threads = std::min<size_t>(threads, std::max(1u, std::thread::hardware_concurrency()));
+          std::vector<std::thread> pool;
+          for (size_t t = 1; t < threads; t++)
+            pool.emplace_back(work);
+          work();
+          for (std::thread &t : pool)
+            t.join();
         }
+
+        auto programFor = [&](Benchmark which) -> ProgramBuild *
+        {
+          for (ProgramBuild &b : builds)
+            if (b.which == which)
+              return &b;
+          return nullptr;
+        };
+        for (const ProgramBuild &b : builds)
+        {
+          if (b.error.empty())
+            continue;
+          // A compute family or the bandwidth kernels failing is the compiler
+          // refusing what the device claims to run, and only its log says why
+          // -- so that is an error on the run log, not a --verbose extra, and
+          // a file from a machine nobody can reach still explains the rows.
+          if (b.quiet)
+            CLPEAK_VLOG("  %s kernel build failed, test skipped: %s\n", b.label,
+                        b.error.c_str());
+          else
+            CLPEAK_LOG(Error, "OpenCL: %s program build failed on %s (%s)", b.label,
+                       devInfo.deviceName.c_str(), b.error.c_str());
+        }
+        cl::Program none;
+        auto prog = [&](Benchmark which) -> cl::Program &
+        {
+          ProgramBuild *b = programFor(which);
+          return b ? b->program : none;
+        };
+        auto buildError = [&](Benchmark which) -> std::string
+        {
+          ProgramBuild *b = programFor(which);
+          return b && !b->quiet && !b->error.empty()
+                     ? "the OpenCL compiler did not build this test's program -- "
+                       "its log is on the run log"
+                     : std::string();
+        };
 
         cl_command_queue_properties supportedQueueProps = devices[d].getInfo<CL_DEVICE_QUEUE_PROPERTIES>();
         bool supportsProfilingQueue = (supportedQueueProps & CL_QUEUE_PROFILING_ENABLE) != 0;
@@ -165,97 +286,97 @@ int clPeak::runAll()
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
 
         // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeSP,
+        runComputeTest(queue, prog(Benchmark::ComputeSP),
+                       buildError(Benchmark::ComputeSP),
+                       devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "flops",
-                       "Peak arithmetic speed of the device's compute units on 32-bit "
-                       "fractional numbers -- the ordinary float type.  Nothing "
-                       "touches memory, so only the arithmetic units limit the rate.",
+                       "Peak fp32 arithmetic rate of the device's ALUs, with no memory "
+                       "traffic.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeHP,
+        runComputeTest(queue, prog(Benchmark::ComputeHP),
+                       buildError(Benchmark::ComputeHP),
+                       devInfo, cfg, Benchmark::ComputeHP,
                        "Half-precision compute", "half_precision_compute",
                        "compute_hp", "half", "flops",
-                       "Peak arithmetic speed on 16-bit fractional numbers -- half "
-                       "the size of a normal float, and what graphics and on-device "
-                       "AI mostly run on.",
+                       "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeDP,
+        runComputeTest(queue, prog(Benchmark::ComputeDP),
+                       buildError(Benchmark::ComputeDP),
+                       devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute", "double_precision_compute",
                        "compute_dp", "double", "flops",
-                       "Peak arithmetic speed on 64-bit fractional numbers, the "
-                       "high-accuracy type scientific computing relies on.  Consumer "
-                       "graphics parts deliberately run these many times slower than "
-                       "32-bit.",
+                       "Peak fp64 arithmetic rate.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeMP,
+        runComputeTest(queue, prog(Benchmark::ComputeMP),
+                       buildError(Benchmark::ComputeMP),
+                       devInfo, cfg, Benchmark::ComputeMP,
                        "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "flops",
-                       "Peak speed when the device multiplies 16-bit numbers but keeps "
-                       "the running total in 32 bits -- the accuracy-preserving "
-                       "pattern AI code uses.",
+                       "Peak rate of fp16 multiplies accumulated in fp32, "
+                       "without the matrix engine.",
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeInt,
+        runComputeTest(queue, prog(Benchmark::ComputeInt),
+                       buildError(Benchmark::ComputeInt),
+                       devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute", "integer_compute",
                        "compute_integer", "int", "ops",
-                       "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                       "indexing, addressing and bit manipulation, which kernels do "
-                       "alongside their fractional maths.",
+                       "Peak 32-bit integer arithmetic rate.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeIntFast,
+        runComputeTest(queue, prog(Benchmark::ComputeIntFast),
+                       buildError(Benchmark::ComputeIntFast),
+                       devInfo, cfg, Benchmark::ComputeIntFast,
                        "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "ops",
-                       "The same integer maths restricted to 24-bit values, which "
-                       "some devices multiply on their faster floating-point hardware "
-                       "instead.  Where this beats the plain integer row, the full "
-                       "32-bit multiply is the slower path.",
+                       "Peak rate of mad24, the integer multiply-add on 24-bit "
+                       "operands.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeChar,
+        runComputeTest(queue, prog(Benchmark::ComputeChar),
+                       buildError(Benchmark::ComputeChar),
+                       devInfo, cfg, Benchmark::ComputeChar,
                        "Integer char (8bit) compute", "integer_compute_char",
                        "compute_char", "char", "ops",
-                       "Peak speed on 8-bit whole numbers, the smallest integer type "
-                       "-- worth knowing because image and quantized-AI work is full "
-                       "of them.",
+                       "Peak 8-bit integer arithmetic rate.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
-        runComputeTest(queue, prog, devInfo, cfg, Benchmark::ComputeShort,
+        runComputeTest(queue, prog(Benchmark::ComputeShort),
+                       buildError(Benchmark::ComputeShort),
+                       devInfo, cfg, Benchmark::ComputeShort,
                        "Integer short (16bit) compute", "integer_compute_short",
                        "compute_short", "short", "ops",
-                       "Peak speed on 16-bit whole numbers -- the middle size, "
-                       "between the 8-bit and 32-bit rows.",
+                       "Peak 16-bit integer arithmetic rate.",
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
-        runComputeTest(queue, int8DpProg, devInfo, cfg, Benchmark::ComputeInt8DP,
+        runComputeTest(queue, prog(Benchmark::ComputeInt8DP),
+                       buildError(Benchmark::ComputeInt8DP),
+                       devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "ops",
-                       "Peak speed of the 8-bit dot-product instruction, which "
-                       "multiplies four pairs of small whole numbers and sums them in "
-                       "one step -- the workhorse of quantized (compressed) neural "
-                       "networks.",
+                       "Peak rate of the 4-way int8 dot-product instruction, "
+                       "without the matrix engine.",
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         // ---- Phase 3: bandwidth ----------------------------------------
-        runGlobalBandwidthTest(queue, prog, devInfo, cfg);
-        runLocalBandwidthTest(queue, localProg, devInfo, cfg);
-        runImageBandwidthTest(queue, imgProg, devInfo, cfg);
-        runTransferBandwidthTest(queue, prog, devInfo, cfg);
+        runGlobalBandwidthTest(queue, prog(Benchmark::GlobalBW), devInfo, cfg);
+        runLocalBandwidthTest(queue, prog(Benchmark::LocalBW), devInfo, cfg);
+        runImageBandwidthTest(queue, prog(Benchmark::ImageBW), devInfo, cfg);
+        runTransferBandwidthTest(queue, none, devInfo, cfg);
 
         // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
-          runKernelLatency(queue, prog, devInfo, cfg);
-        else if (isAllowed(Benchmark::KernelLatency))
+          runKernelLatency(queue, prog(Benchmark::GlobalBW), devInfo, cfg);
+        else if (auto run = admit(Benchmark::KernelLatency))
         {
           auto test = deviceScope.beginTest(
             {"kernel_launch_latency", "Kernel launch latency", "s",
              Category::Unknown,
-             "The overhead of asking the device to do anything at all, measured "
-             "with a kernel that does no work.  It is what small, frequent jobs "
-             "pay before any of their own work begins."});
+             "Time to launch a small kernel, the fixed cost every dispatch pays."});
           test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
                        "No profiling queue support");
         }

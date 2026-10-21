@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for the Windows release zips.
+
+  SignPath keeps artifact configurations on its side, not in the repo: this is
+  the reviewed copy, pasted into the dashboard (Project, Artifact
+  configurations) under the slug the `sign-windows` job in
+  .github/workflows/build.yml passes.  Change both together.
+
+  Input: the one GitHub artifact the job uploads, holding every
+  clpeak-<version>-windows-<arch>[-<backend>].zip that CPack produced.  A
+  GitHub artifact is always a zip, hence the outer <zip-file>.
+
+  Only clpeak's own binaries are signed: built from this repo's source by
+  this workflow.  The Flutter engine (flutter_windows.dll) and the plugin DLLs
+  ship as they are: SignPath Foundation signs a project's own code, not its
+  dependencies.  Each <include> must match exactly once per zip (the default),
+  so a renamed or missing binary fails the request instead of shipping
+  unsigned.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <zip-file-set>
+      <include path="clpeak-*-windows-*.zip" max-matches="unbounded" />
+      <for-each>
+        <pe-file-set>
+          <include path="*/bin/clpeak.exe" />
+          <include path="*/gui/clpeak-gui.exe" />
+          <include path="*/gui/clpeak-engine.exe" />
+          <include path="*/gui/clpeak_ffi.dll" />
+          <for-each>
+            <authenticode-sign />
+          </for-each>
+        </pe-file-set>
+      </for-each>
+    </zip-file-set>
+  </zip-file>
+</artifact-configuration>

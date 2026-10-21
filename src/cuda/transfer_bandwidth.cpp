@@ -11,15 +11,12 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   auto test = currentDeviceScope->beginTest(
     {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
-     "How fast data crosses between the computer's own memory and the card's, "
-     "over the PCIe link.  That link is far narrower than either side's own "
-     "memory, which is what makes moving data to the GPU worth avoiding.  Both "
-     "readings use pinned host memory, the fast path.",
+     "Copy bandwidth between host and GPU memory, over PCIe on a discrete "
+     "card.  Both rows use pinned host memory.",
      TestShape::Heterogeneous, "direction"});
 
-  const char *h2dNote = "Host to device: sending data up to the card.";
-  const char *d2hNote = "Device to host: reading results back down.  Often a "
-                        "little slower than the other direction.";
+  const char *h2dNote = "Host to GPU.";
+  const char *d2hNote = "GPU to host.";
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)

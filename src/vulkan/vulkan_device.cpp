@@ -1,6 +1,7 @@
 #ifdef ENABLE_VULKAN
 
 #include <vulkan/vk_peak.h>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <vector>
@@ -20,6 +21,34 @@ VulkanDevice::~VulkanDevice()
   cleanup();
 }
 
+// The driver's version as its vendor writes it.  VK_VERSION_* reads only the
+// drivers that pack it the standard way, which Mesa's do: NVIDIA's packs
+// 10.8.8.6 bits, so 616.92 read back as "616.368.0", and Intel's Windows
+// driver 18.14, so 101.8993 read back as "0.406.801".  Without a driverID (a
+// pre-1.2 driver with no VK_KHR_driver_properties) NVIDIA is told by its PCI
+// vendor ID: Mesa's NVK reports a driverID, so a driver without one there is
+// NVIDIA's own.
+static std::string driverVersionString(uint32_t v, uint32_t vendorID, VkDriverId driverID)
+{
+  char buf[32];
+  const bool nvidia = driverID ? driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY
+                               : vendorID == 0x10DE;
+  if (nvidia)
+  {
+    const unsigned secondary = (v >> 6) & 0xff;
+    if (secondary)
+      snprintf(buf, sizeof(buf), "%u.%02u.%02u", v >> 22, (v >> 14) & 0xff, secondary);
+    else
+      snprintf(buf, sizeof(buf), "%u.%02u", v >> 22, (v >> 14) & 0xff);
+  }
+  else if (driverID == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
+    snprintf(buf, sizeof(buf), "%u.%u", v >> 14, v & 0x3fff);
+  else
+    snprintf(buf, sizeof(buf), "%u.%u.%u", VK_VERSION_MAJOR(v), VK_VERSION_MINOR(v),
+             VK_VERSION_PATCH(v));
+  return buf;
+}
+
 // ---------------------------------------------------------------------------
 // Step 1: basic device properties, memory heaps, queue family discovery
 // ---------------------------------------------------------------------------
@@ -32,9 +61,9 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
   self->info.apiVersion = std::to_string(VK_VERSION_MAJOR(props.apiVersion)) + "." +
                           std::to_string(VK_VERSION_MINOR(props.apiVersion)) + "." +
                           std::to_string(VK_VERSION_PATCH(props.apiVersion));
-  self->info.driverVersion = std::to_string(VK_VERSION_MAJOR(props.driverVersion)) + "." +
-                             std::to_string(VK_VERSION_MINOR(props.driverVersion)) + "." +
-                             std::to_string(VK_VERSION_PATCH(props.driverVersion));
+  // Read again once the driverID is known (queryDriverInfo).
+  self->info.driverVersion = driverVersionString(props.driverVersion, props.vendorID,
+                                                 (VkDriverId)0);
   self->info.maxWGSize = std::min(props.limits.maxComputeWorkGroupSize[0], (uint32_t)MAX_WG_SIZE);
   self->info.maxWGCount = props.limits.maxComputeWorkGroupCount[0];
   self->info.maxAllocSize = props.limits.maxStorageBufferRange;
@@ -83,6 +112,37 @@ static bool queryBasicInfo(VulkanDevice *self, VkPhysicalDevice physDev)
     return false;
 
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Step 1, continued: which driver.  Core from Vulkan 1.2 and an extension
+// before it, so asked of a device that reports 1.2 or lists
+// VK_KHR_driver_properties: a 1.2 driver need not list an extension it has
+// promoted.  Needs the extension list, which step 1 runs before.
+// ---------------------------------------------------------------------------
+static void queryDriverInfo(VulkanDevice *self, VkPhysicalDevice physDev,
+                            const std::function<bool(const char*)> &hasExt)
+{
+  self->info.driverID = (VkDriverId)0;
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(physDev, &props);
+  if (props.apiVersion < VK_API_VERSION_1_2 &&
+      !hasExt(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
+    return;
+
+  VkPhysicalDeviceDriverProperties drv = {};
+  drv.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+  VkPhysicalDeviceProperties2 p2 = {};
+  p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  p2.pNext = &drv;
+  vkGetPhysicalDeviceProperties2(physDev, &p2);
+  self->info.driverID = drv.driverID;
+  self->info.driverVersion = driverVersionString(props.driverVersion, props.vendorID,
+                                                 drv.driverID);
+  // driverInfo is where a driver names its build -- Qualcomm's carries its
+  // shader compiler's version -- which a crash in that compiler is filed by.
+  CLPEAK_VLOG("Vulkan: %s: %s (%s)\n", self->info.deviceName.c_str(),
+              drv.driverName, drv.driverInfo);
 }
 
 // ---------------------------------------------------------------------------
@@ -618,6 +678,8 @@ bool VulkanDevice::init(VkInstance inst, VkPhysicalDevice physDev)
     return false;
   };
 
+  queryDriverInfo(this, physDev, hasExt);
+
   // Step 2: probe CU/SM count from vendor extensions
   probeComputeUnitCount(this, physDev, hasExt);
 
@@ -711,9 +773,7 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   // subgroup" silently runs several subgroups per group instead.
   VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT sgSizeCI = {};
   sgSizeCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
-  if (requiredSubgroupSize && info.subgroupSizeControl &&
-      requiredSubgroupSize >= info.minSubgroupSize &&
-      requiredSubgroupSize <= info.maxSubgroupSize)
+  if (canPinSubgroupSize(requiredSubgroupSize))
   {
     sgSizeCI.requiredSubgroupSize = requiredSubgroupSize;
     stageCI.pNext = &sgSizeCI;

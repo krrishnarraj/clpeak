@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../model/run_summary.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/export_service.dart';
+import '../../services/resume_offer.dart';
 import '../../services/run_history_store.dart';
 import '../../theme/clpeak_theme.dart';
 import '../common/format.dart';
@@ -23,9 +24,10 @@ class HistoryScreen extends StatefulWidget {
 class _HistoryScreenState extends State<HistoryScreen> {
   late Future<_HistoryContents> _contents;
 
-  /// Id of the finished run the current list was built for; the tab lives in
-  /// an IndexedStack, so initState alone would leave it stale forever.
-  String? _seenRunId;
+  /// [BenchmarkService.runsEnded] when the current list was built; the tab
+  /// lives in an IndexedStack, so initState alone would leave it stale
+  /// forever.
+  int _seenRunsEnded = 0;
 
   @override
   void initState() {
@@ -36,10 +38,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<_HistoryContents> _load() async {
     final history = context.read<RunHistoryStore>();
     final service = context.read<BenchmarkService>();
+    final runs = await history.list();
+    // A cancelled run keeps its checkpoint, to be continued.
+    final kept = <String, (RunCheckpointInfo, RunResumeState?)>{};
+    for (final run in runs) {
+      if (!run.cancelled || run.id == service.inFlightRunId) continue;
+      final checkpoint = await history.checkpointInfo(run.id);
+      if (checkpoint != null) {
+        kept[run.id] = (checkpoint, await history.resumeState(run.id));
+      }
+    }
     return _HistoryContents(
-      runs: await history.list(),
+      runs: runs,
       crashLogs:
           await history.listCrashLogs(inFlightId: service.inFlightRunId),
+      kept: kept,
     );
   }
 
@@ -137,14 +150,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Re-read the index whenever a run finishes (the summary is written to
-    // disk before lastSummary is published, so the new row is always there).
-    final lastRunId =
-        context.select<BenchmarkService, String?>((s) => s.lastSummary?.id);
-    if (lastRunId != _seenRunId) {
-      _seenRunId = lastRunId;
+    // Re-read the files whenever a run ends (its summary is written to disk
+    // before the count moves, so a new row is always there).
+    final runsEnded =
+        context.select<BenchmarkService, int>((s) => s.runsEnded);
+    if (runsEnded != _seenRunsEnded) {
+      _seenRunsEnded = runsEnded;
       _contents = _load();
     }
+    // Whether a run that stopped part-way can be continued turns on the
+    // device catalog, and never while another run is in flight; nothing
+    // else of the service's state reaches this screen, which a run's
+    // events must not rebuild.
+    context.select<BenchmarkService, bool>(
+        (s) => s.catalogReady && !s.isRunning);
+    final service = context.read<BenchmarkService>();
 
     return Scaffold(
       body: SafeArea(
@@ -194,28 +214,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       ),
                     );
                   }
-                  // Crashed runs first: a run the app died in is the one the
-                  // user came here about, and its log is what a maintainer
-                  // needs.
-                  final tiles = <Widget>[
-                    if (crashLogs.isNotEmpty) ...[
-                      const CSection(label: 'Runs that did not finish'),
-                      const SizedBox(height: 10),
-                      for (final log in crashLogs)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _CrashLogTile(log: log, onChanged: _refresh),
+                  // One list, newest first: a run that did not finish sits
+                  // where it started, among the runs that did.  A cancelled
+                  // run that was continued and died in turn is the one run
+                  // that did not finish, its first part's result included.
+                  final unfinished = {for (final log in crashLogs) log.id};
+                  final items = <(DateTime, Widget)>[
+                    for (final log in crashLogs)
+                      (
+                        log.startedAt,
+                        _CrashLogTile(
+                          log: log,
+                          offer: service.isRunning
+                              ? null
+                              : service.decideResume(log),
+                          onChanged: _refresh,
                         ),
-                      if (runs.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        const CSection(label: 'Saved runs'),
-                        const SizedBox(height: 10),
-                      ],
-                    ],
+                      ),
                     for (final run in runs)
+                      if (!unfinished.contains(run.id))
+                        (
+                          run.startedAt,
+                          _RunTile(
+                            summary: run,
+                            offer: _offerFor(service, contents, run),
+                            onChanged: _refresh,
+                          ),
+                        ),
+                  ]..sort((a, b) => b.$1.compareTo(a.$1));
+                  final tiles = [
+                    for (final (_, tile) in items)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 10),
-                        child: _RunTile(summary: run, onChanged: _refresh),
+                        child: tile,
                       ),
                   ];
                   return RefreshIndicator(
@@ -234,23 +265,41 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ),
     );
   }
+
+  /// Whether a cancelled run can be continued; null for any other run, and
+  /// while another is in flight.
+  static ResumeOffer? _offerFor(
+      BenchmarkService service, _HistoryContents contents, RunSummary run) {
+    final kept = contents.kept[run.id];
+    if (kept == null || service.isRunning) return null;
+    return service.decideCancelled(run, checkpoint: kept.$1, state: kept.$2);
+  }
 }
 
 enum _ImportConflictChoice { overwrite, rename, cancel }
 
 class _HistoryContents {
-  const _HistoryContents({required this.runs, required this.crashLogs});
+  const _HistoryContents(
+      {required this.runs, required this.crashLogs, required this.kept});
   final List<RunSummary> runs;
   final List<CrashLog> crashLogs;
+
+  /// By id, what each cancelled run kept to be continued.
+  final Map<String, (RunCheckpointInfo, RunResumeState?)> kept;
 }
 
-/// A run the process died in: no results, only the run log the native side
-/// streamed while it ran.  Exportable, so it can go on a bug report, and
-/// deletable; nothing to open.
+/// A run the process died in: the run log the native side streamed while it
+/// ran, and what it finished when it left a checkpoint.  The log exports, so
+/// it can go on a bug report; what was saved opens as results; and while
+/// the run can be continued, Continue runs the rest into the same result.
 class _CrashLogTile extends StatelessWidget {
-  const _CrashLogTile({required this.log, required this.onChanged});
+  const _CrashLogTile(
+      {required this.log, required this.offer, required this.onChanged});
 
   final CrashLog log;
+
+  /// Whether it can be continued; null while another run is in flight.
+  final ResumeOffer? offer;
   final VoidCallback onChanged;
 
   Future<void> _export(BuildContext context) async {
@@ -283,8 +332,11 @@ class _CrashLogTile extends StatelessWidget {
               onPressed: () => Navigator.pop(context, true)),
         ],
         child: Text(
-          'This permanently removes the only record of the run from '
-          '${formatDate(log.startedAt)}.',
+          log.checkpoint == null
+              ? 'This permanently removes the only record of the run from '
+                  '${formatDate(log.startedAt)}.'
+              : 'This permanently removes the run from '
+                  '${formatDate(log.startedAt)}: its log and what it saved.',
           style: t.body,
         ),
       ),
@@ -299,6 +351,10 @@ class _CrashLogTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final last = log.lastEntry;
+    final exit = log.processExit;
+    final checkpoint = log.checkpoint;
+    final saved = checkpoint?.tests ?? 0;
+    final offer = this.offer;
     return CPanel(
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
@@ -347,11 +403,32 @@ class _CrashLogTile extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             Text(
-              'The app stopped before this run finished. Its results were '
-              'never written; the run log recorded up to that point is '
-              'what to attach to a bug report.',
+              checkpoint == null
+                  ? 'The app stopped before this run finished. Its results '
+                      'were never written; the run log recorded up to that '
+                      'point is what to attach to a bug report.'
+                  : 'The app stopped before this run finished. '
+                      '$saved ${saved == 1 ? 'test was' : 'tests were'} saved; '
+                      'the run log is what to attach to a bug report.',
               style: t.monoSmallDim,
             ),
+            if (offer != null &&
+                checkpoint != null &&
+                !offer.canContinue &&
+                offer.whyNot.isNotEmpty) ...[
+              const SizedBox(height: 7),
+              Text("Can't be continued: ${offer.whyNot}.",
+                  style: t.monoSmallDim),
+            ],
+            if (exit != null) ...[
+              const SizedBox(height: 7),
+              Text(
+                exit.message.split('\n').first,
+                style: t.monoSmall.copyWith(color: t.danger),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
             if (last != null) ...[
               const SizedBox(height: 7),
               Text(
@@ -359,6 +436,30 @@ class _CrashLogTile extends StatelessWidget {
                 style: t.monoSmall,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            if ((offer?.canContinue ?? false) || saved > 0) ...[
+              const SizedBox(height: 11),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  if (offer != null && offer.canContinue)
+                    CButton(
+                      label: 'Continue',
+                      icon: Icons.play_arrow,
+                      kind: CButtonKind.primary,
+                      onPressed: () =>
+                          context.read<BenchmarkService>().resume(offer),
+                    ),
+                  if (saved > 0)
+                    CButton(
+                      label: "View what's saved",
+                      icon: Icons.visibility_outlined,
+                      onPressed: () => openCheckpoint(context,
+                          id: log.id, startedAt: log.startedAt),
+                    ),
+                ],
               ),
             ],
             const SizedBox(height: 9),
@@ -399,9 +500,13 @@ class _CrashLogTile extends StatelessWidget {
 }
 
 class _RunTile extends StatelessWidget {
-  const _RunTile({required this.summary, required this.onChanged});
+  const _RunTile(
+      {required this.summary, required this.offer, required this.onChanged});
 
   final RunSummary summary;
+
+  /// For a cancelled run, whether it can be continued; null otherwise.
+  final ResumeOffer? offer;
   final VoidCallback onChanged;
 
   Future<void> _open(BuildContext context) async {
@@ -524,6 +629,7 @@ class _RunTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final offer = this.offer;
     return CPanel(
       child: CTap(
         onTap: () => _open(context),
@@ -568,6 +674,17 @@ class _RunTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (offer != null && offer.canContinue) ...[
+                const SizedBox(height: 11),
+                // Into this result: only what the run had not finished.
+                CButton(
+                  label: 'Continue',
+                  icon: Icons.play_arrow,
+                  kind: CButtonKind.primary,
+                  onPressed: () =>
+                      context.read<BenchmarkService>().resume(offer),
+                ),
+              ],
               if (summary.clpeakVersion.isNotEmpty ||
                   summary.hostOs.isNotEmpty ||
                   summary.hostArch.isNotEmpty) ...[

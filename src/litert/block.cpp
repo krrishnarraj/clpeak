@@ -22,12 +22,15 @@
 // attention, the softmax and the SwiGLU, and whether an accelerator keeps
 // its matmul rate through all of that is what a model would meet.
 
+#include <common/form_race.h>
 #include <litert/litert_peak.h>
 #include "litert_bench.h"
 #include "litert_model.h"
 #include "litert_session.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <string>
@@ -59,51 +62,45 @@ struct Variant
   const char *label;
   LitertFormat f;
   bool sweep;         // walk the whole prompt and context ladders
-  const char *unit;   // nullptr: the scope's own unit
+  const char *unit;   // "ops" for full-integer, the scope it runs in; litertRateUnit has the row's
   const char *note;
   bool int8Kv;        // the cache stored as int8
   bool decodeOnly;    // a cache format has no prefill row
   bool composite;     // attention as the odml.scaled_dot_product_attention composite
 };
 
+// Rows differ in more than the seven projections: the rest of the block runs
+// in the plan's activation type (litertBlockModel), which on the CPU is fp32
+// for every quantized format against the fp16 row's fp16.
 const Variant kVariants[] = {
     {"fp16", LitertFormat::Fp16, true, nullptr,
-     "16-bit weights and arithmetic, the form an unquantized model is served "
-     "in and the reference for the other rows.",
+     "16-bit weights and arithmetic, the reference row.",
      false, false, false},
     {"fp16_composite", LitertFormat::Fp16, false, nullptr,
-     "fp16 with attention spelt as the odml.scaled_dot_product_attention "
-     "composite that AI Edge Torch and LiteRT-LM ship; an accelerator either "
-     "fuses it into one kernel or hands it back, and the guard says which.",
+     "16-bit weights and arithmetic, with attention as the "
+     "odml.scaled_dot_product_attention composite.",
      false, false, true},
     {"int4_weight", LitertFormat::Int4Weight, true, nullptr,
-     "4-bit blockwise weights against float activations, what a quantized "
-     "language model ships as; XNNPACK runs the projections as int8 "
-     "arithmetic, an NPU compiler does what it can with the blocked form.",
+     "4-bit weights in blocks of 32 against float activations.",
      false, false, false},
     {"int8_weight", LitertFormat::Int8Weight, false, nullptr,
-     "8-bit per-row weights against float activations -- dynamic-range "
-     "quantization, the post-training-quantized format.",
+     "8-bit weights, one scale per output column, against float activations.",
      false, false, false},
     {"int8_qdq", LitertFormat::Int8Qdq, false, "ops",
-     "8-bit arithmetic through the seven projections, quantized in and out, "
-     "with attention and the softmax in float as in any real deployment.",
+     "Full-integer int8 projections; attention and softmax stay in float.",
      false, false, false},
     {"fp32", LitertFormat::Fp32, false, nullptr,
-     "Full precision as a control: an accelerator whose fp16 row fails to beat "
-     "it is not running half-precision hardware.",
+     "Full 32-bit precision.",
      false, false, false},
     {"bf16", LitertFormat::Bf16, false, nullptr,
-     "bfloat16 throughout, which needs a bf16 kernel for every operation in "
-     "the layer; the row records LiteRT's answer.",
+     "bfloat16 weights and arithmetic throughout.",
      false, false, false},
     {"fp8_weight", LitertFormat::Fp8Weight, false, nullptr,
-     "8-bit float weights with a scale per row, if any kernel takes them.",
+     "8-bit float (E4M3) weights, one scale per output column, against float activations.",
      false, false, false},
     {"int8_kv", LitertFormat::Fp16, true, nullptr,
-     "16-bit throughout with only the cached context stored as int8 and "
-     "decompressed into attention -- the axis that decides how long a "
-     "conversation a device can hold.",
+     "16-bit throughout except the cached context, stored as int8 and widened "
+     "inside attention.",
      true, true, false},
 };
 
@@ -158,6 +155,19 @@ struct Point
   double us = -1.0;
   std::string error;
   ResultStatus status = ResultStatus::Ok;
+  double createUs = 0.0;
+  // Where the variant races forms (VariantResult::forms): the one this
+  // point's time is.
+  size_t form = 0;
+  // The slowest form's time: every form runs at every point, so this, not
+  // `us`, is what the variant's next point holds a GPU for.
+  double slowestUs = -1.0;
+  bool nonFinite = false;   // the timed graph returned NaN or infinity
+  // The kernel the projections ran as in that form, for a format whose
+  // weights are integer (litertRateUnit, litertKernelNote): empty until
+  // profiled, and where a profile names none.
+  bool profiled = false;
+  std::string kernel;
 };
 
 struct VariantResult
@@ -166,18 +176,44 @@ struct VariantResult
   std::string skipReason;
   ResultStatus skipStatus = ResultStatus::Unsupported;
   std::map<int64_t, Point> prefill, decode;
+  // The forms the variant runs in (LitertForm): on a GPU with 8-bit kernels
+  // for the format, with them disallowed and allowed, and on one with two
+  // graph pipelines each through both, each regime racing them as gemm.cpp
+  // does; one form everywhere else.
+  std::vector<LitertForm> forms;
+  clpeak::MultiFormRace prefillRace{1}, decodeRace{1};
+  // The failure that took a regime's last racing form out: what a longer
+  // prompt or context, which then has no form left to run it, reports.
+  Point prefillLeft, decodeLeft;
 };
 
 // Why a variant's decode form cannot be sent to this accelerator, or empty.
 // The GPU accelerator's graph reader CHECK-fails -- an abort, not a refusal
-// (object_reader.cc, "CanReadValue(node_input_index)", LiteRT 2.2.0) -- on a
-// composite whose input is a constant, and decode's cache is one; prefill,
-// whose K and V are computed, is fine.
+// (object_reader.cc, "CanReadValue(node_input_index)", LiteRT 2.2.0 and
+// 2.3.0) -- on a composite whose input is a constant, and decode's cache is
+// one; prefill, whose K and V are computed, is fine.  2.3.0's IrModel
+// pipeline does not abort, but answers NaN.
 std::string decodeFence(const Variant &v, LitertAccel accel)
 {
   if (v.composite && accel == LitertAccel::Gpu)
     return "the GPU accelerator aborts the process on a composite with a constant input "
-           "(LiteRT 2.2.0), and decode's cache is a constant, so only prefill is sent to it";
+           "(LiteRT 2.2.0 and 2.3.0), and decode's cache is a constant, so only prefill is sent to it";
+  return std::string();
+}
+
+// Why a variant cannot be sent to this device at all, or empty.  The WebGPU
+// accelerator segfaults compiling any graph with the composite in it,
+// prefill's too: marking the decomposition subgraph as one to skip
+// (Subgraph::MarkSubgraphAsDelegationSkippable, in the accelerator's own
+// copy of TFLite), it reads the runtime's subgraph list 24 bytes before
+// where libLiteRt keeps it (offset 0x230 against 0x248 in the ai-edge-litert
+// 2.3.0 Linux wheel; 2.2.0's dies on the same graph) and dereferences the
+// null it finds there.
+std::string variantFence(const Variant &v, const litert_device_info_t &dev)
+{
+  if (v.composite && dev.accel == LitertAccel::Gpu && dev.vendor == "WebGPU")
+    return "the WebGPU accelerator crashes the process compiling a composite (LiteRT 2.2.0 and 2.3.0), "
+           "so this variant is not sent to it";
   return std::string();
 }
 
@@ -196,22 +232,13 @@ LitertBlockShape shapeFor(const Variant &v, bool decode, int64_t kvLen, int64_t 
   return sh;
 }
 
-// What a prompt row says about its way in, when it has a seed (kSeedWidth).
-std::string seedNote(int64_t seq)
-{
-  if (seq <= kSeedWidth)
-    return std::string();
-  return "  The prompt starts from a " + std::to_string(kSeedWidth) +
-         "-wide seed that takes a runtime value, and one more multiply, not "
-         "counted, widens it into the layer's input -- inside the figure, "
-         "a quarter of a percent of its arithmetic.";
-}
-
 } // namespace
 
 int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &dev, benchmark_config_t &cfg)
 {
-  (void)cfg;
+  // The longest one pass may be predicted to take: on a GPU, --max-time-ml-gpu
+  // (gpuRunCapUs); elsewhere 0, unbounded.
+  const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   constexpr size_t kNVariants = sizeof(kVariants) / sizeof(kVariants[0]);
   std::vector<VariantResult> results(kNVariants);
   std::vector<LitertPlan> plans;
@@ -220,14 +247,14 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
 
   // Time one regime end to end: mean us per block, or negative with the
   // point's status and error set.
-  auto measure = [&](const Variant &v, const LitertPlan &plan, bool decode, int64_t kvLen,
-                     int64_t prefillSeq, Point &pt)
+  auto measure = [&](const Variant &v, const LitertPlan &plan, const LitertForm &form, bool decode,
+                     int64_t kvLen, int64_t prefillSeq, Point &pt)
   {
     std::string err;
     auto s = LitertSession::create(rt, dev, litertBlockModel(plan, shapeFor(v, decode, kvLen, prefillSeq)),
-                                   litertConfigFor(plan), err);
-    const std::string what = decode ? "decode_kv" + std::to_string(kvLen)
-                                    : "prefill_s" + std::to_string(prefillSeq);
+                                   litertConfigFor(plan, form), err);
+    const std::string what = (decode ? "decode_kv" + std::to_string(kvLen) : "prefill_s" + std::to_string(prefillSeq)) +
+                             litertGpuFormWords(plan, form);
     if (!s)
     {
       CLPEAK_VLOG("litert-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
@@ -238,6 +265,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     CLPEAK_VLOG("litert-block[%s/%s]: %s create %.2f s\n", dev.displayName.c_str(), v.label, what.c_str(),
                 s->createUs / 1.0e6);
+    pt.createUs = s->createUs;
     if (!s->onDevice())
     {
       pt.error = s->offDevice();
@@ -261,6 +289,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     }
     auto m = litertMeasure(*s, warmupCount, kBlockBudgetUs, forceIters, specifiedIters);
+    pt.createUs += s->firstRunUs;   // the race's build cost, as in gemm.cpp
     if (m.meanUs <= 0.0)
     {
       pt.error = m.error.empty() ? "run failed" : m.error;
@@ -279,10 +308,84 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       CLPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
       pt.error = wrong;
       pt.status = ResultStatus::Error;
+      pt.nonFinite = true;
       return;
     }
     pt.us = m.meanUs;
     pt.status = ResultStatus::Ok;
+  };
+
+  // One point in every form the regime's race still runs: the faster one's
+  // time -- a tie keeps the first unless the other was ready to run twice
+  // as fast, FormRace's rule.  A form that
+  // cannot run a point leaves the race; the point fails only when no form
+  // runs it.  No point settles the race for the next: the GPU uses its 8-bit
+  // kernels on large layers only, so the 64-token point that validates a
+  // variant says nothing of the 512-token one, and an int8 variant has one
+  // prefill and one decode point to report anyway.
+  auto measureRaced = [&](size_t vi, bool decode, int64_t kvLen, int64_t prefillSeq, Point &pt)
+  {
+    VariantResult &vr = results[vi];
+    clpeak::MultiFormRace &race = decode ? vr.decodeRace : vr.prefillRace;
+    Point &left = decode ? vr.decodeLeft : vr.prefillLeft;
+    const size_t nf = vr.forms.size();
+    std::vector<Point> pts(nf);
+    std::vector<double> rate(nf, 0.0), build(nf, 0.0);
+    for (size_t f = 0; f < nf; f++)
+    {
+      if (!race.runs(f) || clpeak::cancelRequested())
+        continue;
+      measure(kVariants[vi], plans[vi], vr.forms[f], decode, kvLen, prefillSeq, pts[f]);
+      if (pts[f].us > 0.0)
+      {
+        rate[f] = 1.0 / pts[f].us;
+        build[f] = pts[f].createUs;
+      }
+      else
+      {
+        race.drop(f);
+        if (!pts[f].error.empty())
+          left = pts[f];
+      }
+    }
+    // A NaN from either form withholds the point, as in gemm.cpp: the other
+    // form is no alibi for the accelerator.
+    for (size_t f = 0; f < nf; f++)
+      if (pts[f].nonFinite)
+      {
+        pt = pts[f];
+        return;
+      }
+    size_t w = nf, failed = nf;
+    for (size_t f = 0; f < nf; f++)
+    {
+      if (rate[f] > 0.0 && (w == nf || rate[f] > rate[w] * clpeak::kFormRaceTie ||
+                            (rate[f] * clpeak::kFormRaceTie >= rate[w] && build[w] >= build[f] * clpeak::kFormRaceBuildGap)))
+        w = f;
+      if (failed == nf && !pts[f].error.empty())
+        failed = f;
+    }
+    if (w == nf)
+    {
+      if (failed != nf)
+        pt = pts[failed];
+      else if (!left.error.empty())
+      {
+        pt.status = left.status;
+        pt.error = "not run, as a smaller size already failed: " + left.error;
+      }
+      else
+      {
+        pt.status = ResultStatus::Error;
+        pt.error = "no form of the block ran";
+      }
+      return;
+    }
+    pt = pts[w];
+    pt.form = w;
+    for (size_t f = 0; f < nf; f++)
+      if (rate[f] > 0.0)
+        pt.slowestUs = std::max(pt.slowestUs, pts[f].us);
   };
 
   // Everything that has to be true before a variant is worth timing: the
@@ -300,12 +403,36 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       vr.skipReason = plan.whyNot;
       return false;
     }
-    if (const std::string wrong = wrongAnswer(rt, dev, v.f); !wrong.empty())
+    if (const std::string fence = variantFence(v, dev); !fence.empty())
     {
-      vr.skipReason = wrong;
+      vr.skipReason = fence;
+      return false;
+    }
+    // The forms it runs in, each gated on the format's answer in that form
+    // with float inputs and outputs -- the block's own boundary: its int8
+    // projections quantize and dequantize inside the graph, so an
+    // accelerator that cannot return an int8 tensor still runs it.
+    vr.forms.clear();
+    std::string firstWrong;
+    std::vector<LitertForm> asked;
+    for (int k = 0; k <= (plan.gpuInt8KernelChoice ? 1 : 0); k++)
+      asked.push_back(LitertForm{false, k == 1, true});
+    for (const LitertForm &form : litertWithPipelines(std::move(asked), plan))
+    {
+      const std::string wrong = wrongAnswer(rt, dev, v.f, form);
+      if (wrong.empty())
+        vr.forms.push_back(form);
+      else if (firstWrong.empty())
+        firstWrong = wrong;
+    }
+    if (vr.forms.empty())
+    {
+      vr.skipReason = firstWrong;
       vr.skipStatus = ResultStatus::Error;
       return false;
     }
+    vr.prefillRace = clpeak::MultiFormRace(vr.forms.size());
+    vr.decodeRace = clpeak::MultiFormRace(vr.forms.size());
     if (v.int8Kv && dev.accel != LitertAccel::Npu)
     {
       // XNNPACK dequantizes a constant int8 tensor once, when the model
@@ -333,7 +460,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
     Point pt;
     const bool decode = v.decodeOnly;
-    measure(v, plan, decode, kKvLadder[0], kPromptLadder[0], pt);
+    measureRaced(vi, decode, kKvLadder[0], kPromptLadder[0], pt);
     if (pt.us <= 0.0)
     {
       vr.skipReason = pt.error.empty() ? std::string("the block could not be built for ") + v.label : pt.error;
@@ -349,7 +476,44 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   };
 
   double refPrefillRate = 0.0, refDecodeRate = 0.0;
-  auto affordable = [&](double flops, double rate) { return rate <= 0.0 || (flops / rate) <= (double)kBlockBudgetUs; };
+  // Why a point whose one pass is `flops` at `rate` (flops per microsecond,
+  // from the last point timed; 0 before any) is not worth timing, or empty
+  // when it is: past the whole budget for measuring it, or on a GPU past what
+  // one run may keep the device busy.  `what` is "one pass" or "one token".
+  auto tooSlow = [&](double flops, double rate, const char *what) -> std::string
+  {
+    if (rate <= 0.0)
+      return std::string();
+    const double us = flops / rate;
+    if (us > (double)kBlockBudgetUs)
+      return std::string(what) + " would take about " + std::to_string((long long)(us / 1.0e6)) +
+             " s on this accelerator, too slow to measure";
+    if (runCapUs > 0.0 && us > runCapUs)
+    {
+      char buf[32];
+      std::snprintf(buf, sizeof buf, "%.1f", us / 1.0e6);
+      return std::string(what) + " would keep this GPU busy for about " + buf +
+             " s, longer than --max-time-ml-gpu lets one run hold it -- a driver may reset a GPU held longer";
+    }
+    return std::string();
+  };
+
+  // The rate a prompt is predicted from.  Off a GPU, the last point timed,
+  // whichever variant's.  On a GPU, the variant's own longest prompt so far
+  // at its slowest form -- every usable variant has its 64-token one, from
+  // validateVariant -- and the last point's only where it has none:
+  // formats run several times apart, and so do forms, and a 512-token pass
+  // predicted from another's rate can hold a GPU far longer than one run may
+  // (src/onnx/block.cpp, kBorrowedRateMargin, has the case).
+  auto promptRate = [&](const VariantResult &vr, int64_t seq) -> double
+  {
+    double rate = refPrefillRate;
+    if (runCapUs > 0.0)
+      for (const auto &[s, p] : vr.prefill)
+        if (s < seq && p.slowestUs > 0.0)
+          rate = blockFlops(s, s) / p.slowestUs;
+    return rate;
+  };
 
   auto measurePrefill = [&](size_t vi, int64_t seq)
   {
@@ -358,19 +522,62 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     Point pt;
     const double flops = blockFlops(seq, seq);
-    if (!affordable(flops, refPrefillRate))
+    if (std::string slow = tooSlow(flops, promptRate(vr, seq), "one pass"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
-      pt.error = "one pass would take about " + std::to_string((long long)(flops / refPrefillRate / 1.0e6)) +
-                 " s on this accelerator, too slow to measure";
+      pt.error = slow;
     }
     else
     {
-      measure(kVariants[vi], plans[vi], false, kDecodeKv, seq, pt);
+      measureRaced(vi, false, kDecodeKv, seq, pt);
       if (pt.us > 0.0)
         refPrefillRate = flops / pt.us;
     }
     vr.prefill[seq] = pt;
+  };
+
+  // The kernel the projections ran as at a prompt length, in the form the
+  // point's time is, from a profiled session of its own (gemm.cpp: profiling
+  // never touches a timed one), for a format whose weights are integer: it
+  // says whether they were multiplied as integers -- the unit of a
+  // weight-only row, and a full-integer row's word on a float kernel
+  // (litertRateUnit, litertKernelNote).  A profile that names no kernel
+  // whose arithmetic can be read ends the block's profiling on this
+  // accelerator: the next would not either, and on an NPU each is another
+  // compile (one that names no kernel at all ends every test's,
+  // litertProfiledKernel).
+  bool profileReadable = true;
+  auto profilePrefill = [&](size_t vi, int64_t seq)
+  {
+    const Variant &v = kVariants[vi];
+    const LitertPlan &plan = plans[vi];
+    VariantResult &vr = results[vi];
+    auto it = vr.prefill.find(seq);
+    if (!litertIntegerWeights(plan) || it == vr.prefill.end() || it->second.us <= 0.0 || it->second.profiled)
+      return;
+    Point &pt = it->second;
+    pt.profiled = true;
+    auto kernelOf = [&](size_t f) -> std::string
+    {
+      if (!profileReadable || !litertProfilesNameKernels(dev.accel))
+        return std::string();
+      LitertPlan sp = plan;
+      if (sp.act == clpeak_tflite::TfType::I8)
+        sp.act = clpeak_tflite::TfType::F32;
+      const std::string kernel = litertProfiledKernel(
+          rt, dev, [&] { return litertBlockModel(plan, shapeFor(v, false, kDecodeKv, seq)); },
+          litertConfigFor(plan, vr.forms[f], true), sp);
+      CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'\n", dev.displayName.c_str(),
+                  v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str());
+      if (litertKernelArithmetic(kernel, dev.accel) == LitertArithmetic::Unknown)
+      {
+        CLPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",
+                    dev.displayName.c_str());
+        profileReadable = false;
+      }
+      return kernel;
+    };
+    pt.kernel = kernelOf(pt.form);
   };
 
   auto measureDecode = [&](size_t vi, int64_t kv)
@@ -385,39 +592,58 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       pt.status = ResultStatus::Unsupported;
       pt.error = fence;
     }
-    else if (!affordable(flops, refDecodeRate))
+    else if (std::string slow = tooSlow(flops, refDecodeRate, "one token"); !slow.empty())
     {
       pt.status = ResultStatus::Error;
-      pt.error = "one token would take about " + std::to_string((long long)(flops / refDecodeRate / 1.0e6)) +
-                 " s on this accelerator, too slow to measure";
+      pt.error = slow;
     }
     else
     {
-      measure(kVariants[vi], plans[vi], true, kv, kPrefillSeq, pt);
+      measureRaced(vi, true, kv, kPrefillSeq, pt);
       if (pt.us > 0.0)
         refDecodeRate = flops / pt.us;
     }
     vr.decode[kv] = pt;
   };
 
+  // A raced variant's winner, inside one of a row's sentences: the form the
+  // point's time is.
+  auto formClause = [&](size_t vi, const Point &pt) -> std::string
+  {
+    const VariantResult &vr = results[vi];
+    if (vr.forms.size() < 2 || pt.us <= 0.0)
+      return std::string();
+    return "," + litertGpuFormWords(plans[vi], vr.forms[pt.form]);
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, size_t vi)
   {
     const Variant &v = kVariants[vi];
+    const LitertPlan &plan = plans[vi];
     const VariantResult &vr = results[vi];
     for (int64_t seq : promptsFor(v))
     {
       const std::string metric = std::string(v.label) + "_s" + std::to_string(seq);
+      auto it = vr.prefill.find(seq);
+      const Point *pt = it == vr.prefill.end() ? nullptr : &it->second;
+      // In the unit litertRateUnit gives the format and the projections'
+      // kernel.
+      const char *unit = litertRateUnit(plan, pt ? pt->kernel : std::string(), dev.accel);
+      const std::string form = !pt ? std::string() : formClause(vi, *pt);
+      const std::string kernel = !pt || pt->kernel.empty()
+                                     ? std::string()
+                                     : ", its projections as `" + pt->kernel + "`" +
+                                           litertKernelNote(plan, pt->kernel, dev.accel);
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  A prompt of " + std::to_string(seq) +
-                      " tokens in one pass, counting every multiply in the layer." + seedNote(seq);
-      if (v.unit)
-        o.unit = v.unit;
+      o.description = std::string(v.note) + "  A " + std::to_string(seq) + "-token prompt" + form +
+                      kernel + ".";
+      if (v.unit || std::strcmp(unit, "flops") != 0)
+        o.unit = unit;
       if (!vr.usable)
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
         continue;
       }
-      auto it = vr.prefill.find(seq);
       if (it == vr.prefill.end())
         continue;
       if (it->second.us > 0.0)
@@ -427,30 +653,28 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
   };
 
-  const std::string geometry =
-      "one 2048-wide, 16-head decoder block with a SwiGLU feed-forward (50.6M parameters)";
-
   const logger::TestSpec prefillSpec = {
       "litert_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
-      "Prefill through " + geometry + " on this accelerator, at each format a model ships "
-      "in: the phase that decides time to the first word.  Only the seven projections change "
-      "format between rows, and LiteRT's own answer proves every operation ran here.",
+      "Prompt processing through one 2048-wide, 16-head decoder block (SwiGLU "
+      "feed-forward, 50.6M parameters) at each precision a model ships in -- what "
+      "sets time to the first token.  LiteRT confirms every operation ran on this "
+      "accelerator.",
       TestShape::Heterogeneous, "format and prompt length"};
   const logger::TestSpec prefillOpsSpec = {
       "litert_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "format and prompt length"};
   const logger::TestSpec decodeSpec = {
       "litert_block_decode", "Transformer block, decode", "bps", Category::Ai,
-      "How fast " + geometry + " streams its weights while generating one token with 2048 "
-      "of context, counting the bytes each format actually moves.  A narrow-weight row far "
-      "below the 16-bit one is an accelerator unpacking to full width before using them.",
+      "Weight-streaming rate of the same block generating one token at 2048 "
+      "context, counting the bytes each format actually moves.  A narrow-weight "
+      "row far below fp16 means this accelerator unpacks the weights to full "
+      "width first.",
       TestShape::Heterogeneous, "format"};
   const logger::TestSpec latencySpec = {
       "litert_block_latency", "Transformer block latency", "s", Category::Ai,
-      "How long " + geometry + " takes at each format: multiply by a model's layer count "
-      "for a floor on its time-to-first-token and per-token time.  Everything but attention "
-      "costs the same at every context length, so what the decode rows add with context is "
-      "attention.",
+      "Time for one pass of the block at each precision; multiply by a model's "
+      "layer count for a floor on time to first token and per-token time.  What "
+      "the decode rows add as the context grows is attention.",
       TestShape::Heterogeneous, "format, phase and context length"};
 
   // ---- Prefill, flops ------------------------------------------------------
@@ -473,6 +697,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
+        profilePrefill(vi, seq);
       }
       VariantResult &vr = results[vi];
       if (auto it = vr.prefill.find(kPrefillSeq); it != vr.prefill.end() && it->second.us > 0.0)
@@ -501,6 +726,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
+        profilePrefill(vi, seq);
       }
       emitPrefillTo(test, vi);
     }
@@ -521,9 +747,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       const uint64_t wBytes = weightBytes(plan);
       const uint64_t kvB = kvBytes(plan, v.int8Kv, kDecodeKv);
       logger::EmitOptions o;
-      o.description = std::string(v.note) + "  One token with 2048 of context: " +
-                      std::to_string((unsigned long long)(wBytes >> 20)) + " MB of weights plus " +
-                      std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache, read once.";
+      const std::string head = std::string(v.note) + "  One token at " + std::to_string(kDecodeKv) +
+                               " context: " + std::to_string((unsigned long long)(wBytes >> 20)) +
+                               " MB of weights, " + std::to_string((unsigned long long)(kvB >> 20)) +
+                               " MB of cache";
+      o.description = head + ".";
       if (!validateVariant(vi))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -531,6 +759,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       }
       measureDecode(vi, kDecodeKv);
       const Point &pt = vr.decode[kDecodeKv];
+      o.description = head + formClause(vi, pt) + ".";
       if (pt.us > 0.0)
         test.emit(metric, (float)((double)(wBytes + kvB) / (pt.us * 1.0e-6)), o);
       else
@@ -551,14 +780,15 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
-        const std::string note = std::string("One pass over a 512-token prompt.  ") + v.note +
-                                 seedNote(kPrefillSeq);
         if (!vr.usable)
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason,
+                    std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) + "-token prompt.");
         else
         {
           measurePrefill(vi, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
+          const std::string note = std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) +
+                                   "-token prompt" + formClause(vi, pt) + ".";
           if (pt.us > 0.0)
             test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
           else
@@ -570,14 +800,16 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (clpeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
-        const std::string note = "One token with " + std::to_string(kv) + " of context.  " + v.note;
         if (!vr.usable)
         {
-          test.skip(metric, vr.skipStatus, vr.skipReason, note);
+          test.skip(metric, vr.skipStatus, vr.skipReason,
+                    std::string(v.note) + "  One token with " + std::to_string(kv) + " tokens of context.");
           continue;
         }
         measureDecode(vi, kv);
         const Point &pt = vr.decode[kv];
+        const std::string note = std::string(v.note) + "  One token with " + std::to_string(kv) +
+                                 " tokens of context" + formClause(vi, pt) + ".";
         if (pt.us > 0.0)
           test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
         else

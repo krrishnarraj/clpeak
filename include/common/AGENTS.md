@@ -13,7 +13,7 @@ No backend-specific includes live here.
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Emitting a diagnostic? → `CLPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `CLPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
-- Looking for gating? → `peak.h` (gating is part of Peak)
+- Looking for gating? → `peak.h` (gating is part of Peak): a backend's one gate per Benchmark per device is `admit()`, whose guard marks the Benchmark finished for the run's checkpoint; `isAllowed()` is for asking without starting anything
 - Classifying or documenting a test? → see *What a backend authors at beginTest()* below
 
 ## What a backend authors at `beginTest()`
@@ -114,6 +114,13 @@ table somewhere else:
   (see the `Level` struct in `src/cpu/latency.cpp`) so name and note stay
   adjacent.
 
+Both stay short: a test's in two sentences (three at most), a reading's in
+two counting everything appended at run time — fastest size, race winner,
+kernel that ran — and a sentence strung together with dashes and semicolons
+does not count as one. Say what is measured and what this row is; why the
+method is shaped that way belongs in a comment beside the code, not in the
+row, and a row never repeats its test's description.
+
 Authoring natively, next to the measurement, is what makes this work at all:
 CPU tags are ISA-slugged at runtime, so no static table keyed by tag could
 cover them, and the same tag means different things across backends.
@@ -138,18 +145,21 @@ cross-backend table: the same label means different things in different
 backends.  Vulkan's `int8_dp2` is a second *chain*, not a wider vector.
 
 Where a test reports a value by a non-obvious convention, the description is
-the place to say so — `transfer_bandwidth`'s zero-copy rows read `0.00` on
-unified-memory devices, and OpenCL's test description explains that.
+the place to say so — ROCm's `smfmac` counts its sparse work as
+dense-equivalent, and its test description says that.
 
 `src/cpu/latency.cpp` (`memory_latency`) is the worked example of both levels.
 
-Style: plain language for someone who doesn't know the term in the metric
-name; no "lower/higher is better" (the GUI already orders and scales the
-readings).  Say "the device", not "the GPU": OpenCL, Vulkan and oneAPI
-enumerate CPU devices too and show the same string for them -- and "the host"
-for the side submitting the work, since "the CPU" is ambiguous once the device
-is one.  A claim that only holds for graphics hardware names it as such
-("consumer graphics parts run these many times slower than 32-bit").
+Style: technical and terse — name formats as the metric labels do (fp16,
+int8, fp8 E4M3) instead of glossing them, and keep only a caveat the reader
+needs to read the number ("needs M3 or newer"); no "lower/higher is better"
+(the GUI already orders and scales the readings), and nothing the axis line
+already says ("one row per data type").  Say "the device", not "the GPU":
+OpenCL, Vulkan and oneAPI enumerate CPU devices too and show the same string
+for them -- and "the host" for the side submitting the work, since "the CPU"
+is ambiguous once the device is one.  In those three backends a claim that
+holds only for GPUs (consumer parts' fp64 rate, texture units, PCIe cards)
+stays out of the description.
 
 Trap: the sugar overload takes `const char *`, not `std::string` — a
 std::string parameter makes existing braced calls (`emit(m, v, {true})`)
@@ -173,10 +183,13 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
 | `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
+| `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (a `clpeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, so a run that dies, or is cancelled, can be continued |
+| `run_resume.h` | `--resume`: `loadResumePlan` / `resumeOptions` / `seedResume`, which both hosts call in that order to continue a run from its checkpoint (named by its own path or the result's) into the same document, then `RunCheckpoint::partRecord` for the part's `resumed` record |
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
-| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, LiteRT's int8 operators) |
+| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out). `clpeak::MultiFormRace` — the same rule over more forms, for work with more than one choice (LiteRT's int8 operators and GPU kernel policy) |
+| `answer_check.h` | `clpeak::AnswerCheck` — whether an ML runtime's answer is right: the line the ONNX Runtime, Core ML and LiteRT backends share (`kWrongAnswerPpm`, 50% RMS, and why it sits there), the figure (`judgeAnswer`), and the reasons a refused rate row (`wrongAnswerReason`) and a wrong answer's accuracy row (`wrongAnswerRowReason`) give. Each backend measures and memoises its own checks in its `numeric_error.cpp` |
 | `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory

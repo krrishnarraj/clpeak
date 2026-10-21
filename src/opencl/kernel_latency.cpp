@@ -16,7 +16,8 @@
 
 int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
-  if (!isAllowed(Benchmark::KernelLatency))
+  auto run = admit(Benchmark::KernelLatency);
+  if (!run)
     return 0;
 
   cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
@@ -27,18 +28,18 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
   auto test = currentDeviceScope->beginTest(
     {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
-     "The overhead of asking the device to do anything at all.  It is what "
-     "small, frequent jobs pay before any of their own work begins.",
+     "Time to launch a small kernel, the fixed cost every dispatch pays.",
      TestShape::Heterogeneous});
 
-  const char *dispatchNote = "One way only: from the moment the host queues the "
-                             "work to the moment the device starts running it.";
-  const char *roundtripNote = "The full round trip -- queue it, run it, and hear "
-                              "back that it finished.  This is what the host waits "
-                              "for if it has nothing else to get on with.";
+  const char *dispatchNote = "Host submit to kernel start, one way.";
+  const char *roundtripNote = "Host submit to completion seen by the host.";
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
 

@@ -1,6 +1,7 @@
 #ifdef ENABLE_LITERT
 
 #include "litert_model.h"
+#include "litert_runtime.h"
 
 #include <algorithm>
 #include <atomic>
@@ -48,15 +49,22 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
 {
   LitertPlan p;
   // The GPU accelerator's graph reader accepts fp32, fp16, int8, uint8,
-  // int4, int2, bool and int32 tensors and CHECK-fails on anything else --
-  // an abort, not a refusal (object_reader.cc, LiteRT 2.2.0: "Tensor
+  // int4, int2, bool and int32 tensors and, in LiteRT 2.2.0, CHECK-failed on
+  // anything else -- an abort, not a refusal (object_reader.cc: "Tensor
   // type(INT16) is not supported" followed by the process dying).  A
   // benchmark that takes the whole run down with it to prove that would be
-  // proving the wrong thing, so those formats never reach the GPU.
+  // proving the wrong thing, so those formats never reach such a GPU.
+  // 2.3.0 (ABI 1.1.0) declines bfloat16 and float8 and returns, and its
+  // refusal is the row's reason; int16 aborts it still (below).
+  const LitertRuntime *rt = litertRuntime();
+  const bool gpuDeclinesTypes = rt && rt->abi11;
+  p.gpuPipelineChoice = accel == LitertAccel::Gpu && rt && rt->abi11;
   auto gpuAborts = [&](const char *type) {
+    if (gpuDeclinesTypes)
+      return;
     p.applies = false;
-    p.whyNot = std::string("the GPU accelerator's graph reader aborts the process on ") + type +
-               " tensors rather than declining them (LiteRT 2.2.0), so this format is not sent to it";
+    p.whyNot = std::string("this LiteRT's GPU accelerator aborts the process on ") + type +
+               " tensors rather than declining them (fixed in LiteRT 2.3.0), so this format is not sent to it";
   };
   switch (f)
   {
@@ -78,6 +86,12 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     }
     else
       p.act = p.weight = TfType::F16;
+    // MediaTek's compiler plugin writes the bias a FULLY_CONNECTED left out
+    // as int32 for any input but fp32 (AddZeroBiasForConvBase, LiteRT
+    // 2.3.0), which no fp16 operator takes: a Dimensity 7300's APU took none
+    // of a bias-less fp16 graph's operators, while it ran the fp16
+    // convolutions, which carry their own.
+    p.floatBias = accel == LitertAccel::Npu;
     break;
   case LitertFormat::Fp16Acc32:
     if (accel != LitertAccel::Gpu)
@@ -101,21 +115,34 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     p.weight = TfType::I8;
     p.perChannel = true;
     p.integerOps = true;
-    p.gpuAllowQuantized = true;
+    p.gpuInt8KernelChoice = accel == LitertAccel::Gpu;
     break;
   case LitertFormat::Int16x8:
+    // int16 still aborts 2.3.0, both ways.  Its GraphFloat32 pipeline
+    // declines a FULLY_CONNECTED with an int16 input, but in the sixteen-layer
+    // chain it took another operator whose input is int16 and CHECK-failed
+    // reading it (object_reader.cc); its IrModel pipeline CHECK-fails on the
+    // QUANTIZE that writes int16 in the float-boundary form ("Type invalid
+    // for quantized tensor", ir_model_builder_helper.cc).
     if (accel == LitertAccel::Gpu)
-      gpuAborts("int16");
+    {
+      p.applies = false;
+      p.whyNot = "the GPU accelerator aborts the process on int16 tensors rather than declining them "
+                 "(LiteRT 2.2.0 and 2.3.0), so this format is not sent to it";
+    }
     p.act = TfType::I16;
     p.weight = TfType::I8;
     p.perChannel = true;
     p.integerOps = true;
-    p.gpuAllowQuantized = true;
     break;
   case LitertFormat::Int8Weight:
+    // What the GPU's 8-bit kernels were written for: dynamic-range
+    // quantization of a float input against int8 weights.
     p.weight = TfType::I8;
     p.perChannel = true;
     p.dynamicQuant = true;
+    p.gpuInt8KernelChoice = accel == LitertAccel::Gpu;
+    p.gpuShareConstants = true;
     break;
   case LitertFormat::Int4Weight:
     // Blockwise int4 is the one format the GPU accelerator gets memory-
@@ -123,7 +150,8 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
     // with an 8-bit 16x16 transpose microkernel (xnn_x8_transposec_ukernel)
     // that runs past the buffer, which guard malloc catches on the first
     // model and a normal run pays for as a heap corruption some rungs later
-    // (4096-cubed on an M1 Pro).  Per-row int4 goes through a different
+    // (4096-cubed on an M1 Pro).  Still so in 2.3.0, through both of its
+    // graph pipelines (RearrangeWeightsInt8AsUint4).  Per-row int4 goes through a different
     // path and is safe, but it is not the format language models ship in,
     // and a row that measures a different format under the same label
     // would mislead more than a refusal does.
@@ -132,7 +160,7 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
       p.applies = false;
       p.whyNot = "the GPU accelerator's blockwise int4 weight conversion overruns its buffer "
                  "(an 8-bit transpose microkernel reads and writes past the packed nibbles, "
-                 "LiteRT 2.2.0) and corrupts the heap, so this format is not sent to it";
+                 "LiteRT 2.2.0 and 2.3.0) and corrupts the heap, so this format is not sent to it";
     }
     p.weight = TfType::I4;
     p.weightBlock = 32;
@@ -415,6 +443,19 @@ float litertOutScale(int64_t K, int bits)
 TfType litertConstantType(const LitertPlan &p)
 {
   return (p.halfConstants && p.act == TfType::F32) ? TfType::F16 : p.act;
+}
+
+TfType litertIoType(const LitertPlan &p)
+{
+  const bool integer = p.act == TfType::I8 || p.act == TfType::I16;
+  return (p.floatIo && integer) ? TfType::F32 : p.act;
+}
+
+LitertPlan litertFormPlan(const LitertPlan &p, const LitertForm &form)
+{
+  LitertPlan fp = p;
+  fp.floatIo = form.floatIo;
+  return fp;
 }
 
 size_t litertElemBytes(TfType t, int64_t count)
@@ -797,9 +838,11 @@ int addWeight(Recipe &r, const LitertPlan &p, int64_t N, int64_t K, uint32_t see
 // graphs do, because a converted model always has one and an accelerator's
 // int8 kernel is written for that form (Mali's int8 path returned a wrong
 // answer for the bias-less form on a Pixel 7a; whether the bias is what it
-// wanted is what the next run there says).  The int16 plan stays bias-less:
-// its reference kernel wants an int64 bias and nothing else runs it.
-bool fcHasBias(const LitertPlan &p) { return p.act == TfType::I8 && p.weight == TfType::I8; }
+// wanted is what the next run there says).  So does a plan that asks
+// (LitertPlan::floatBias): a compiler that writes in the bias a layer left
+// out can get its type wrong.  The int16 plan stays bias-less: its reference
+// kernel wants an int64 bias and nothing else runs it.
+bool fcHasBias(const LitertPlan &p) { return (p.act == TfType::I8 && p.weight == TfType::I8) || p.floatBias; }
 
 // The int32 zero bias of an integer FULLY_CONNECTED: one per output row,
 // at the product of the input and weight scales.
@@ -812,8 +855,40 @@ int addFcBias(Recipe &r, int64_t N, float aScale, float wScale)
   return r.m.addTensor(0, {(int32_t)N}, TfType::I32, "bias", r.ints(std::vector<int32_t>((size_t)N, 0)), bq);
 }
 
-// The scalar input that keeps a graph live, in the activation type.
-int addScalar(Recipe &r, const LitertPlan &p)
+// A graph input of the activation type, `q` its quantization; the subgraph's
+// input goes to `input`.  Under `floatIo` an integer plan's input is float32
+// and a QUANTIZE -- the converter's default boundary -- makes the tensor the
+// graph reads from it.  The tensor the graph reads is returned either way,
+// and a plan without `floatIo` adds exactly the one tensor it always did.
+int addInput(Recipe &r, const LitertPlan &p, const std::vector<int32_t> &shape, const std::string &name,
+             const TfQuant &q, int &input)
+{
+  const int t = r.m.addTensor(0, shape, p.act, name, 0, q);
+  input = t;
+  if (litertIoType(p) == p.act)
+    return t;
+  input = r.m.addTensor(0, shape, TfType::F32, name + "_f", 0);
+  // op_version.cc: QUANTIZE to int16 2, else 1.
+  r.m.addOp(0, TfOp::Quantize, p.act == TfType::I16 ? 2 : 1, {input}, {t});
+  return t;
+}
+
+// What a graph returns for its result `t`: `t` itself, or under `floatIo` an
+// integer plan's DEQUANTIZE of it to float32.
+int addOutput(Recipe &r, const LitertPlan &p, int t, const std::vector<int32_t> &shape, const std::string &name)
+{
+  if (litertIoType(p) == p.act)
+    return t;
+  const int out = r.m.addTensor(0, shape, TfType::F32, name + "_f", 0);
+  // op_version.cc: DEQUANTIZE from int16 3, from int8 2.
+  r.m.addOp(0, TfOp::Dequantize, p.act == TfType::I16 ? 3 : 2, {t}, {out});
+  return out;
+}
+
+// The scalar input that keeps a graph live, in the activation type (under
+// `floatIo` taken as float32 and quantized, addInput); `input` receives the
+// subgraph's input.
+int addScalar(Recipe &r, const LitertPlan &p, int &input)
 {
   TfQuant q;
   if (p.act == TfType::I8)
@@ -826,7 +901,7 @@ int addScalar(Recipe &r, const LitertPlan &p)
     q.scale = {1.0f / 32767.0f};
     q.zeroPoint = {0};
   }
-  return r.m.addTensor(0, {1}, p.act, "s", 0, q);
+  return addInput(r, p, {1}, "s", q, input);
 }
 
 int mulVersion(const LitertPlan &p)
@@ -886,9 +961,10 @@ int convVersion(const LitertPlan &p, bool depthwise)
 }
 
 // The zero bias a CONV_2D carries -- its kernels want one ("Tensor at index
-// 2 was optional but was expected"): int32 at the product of the input and
-// weight scales for an integer plan, the activation type otherwise.
-int addConvBias(Recipe &r, const LitertPlan &p, int64_t N, float aScale, float wScale)
+// 2 was optional but was expected") -- and a FULLY_CONNECTED where
+// fcHasBias says: int32 at the product of the input and weight scales for an
+// integer plan, the activation type otherwise.
+int addZeroBias(Recipe &r, const LitertPlan &p, int64_t N, float aScale, float wScale)
 {
   if (isInteger(p.act))
     return addFcBias(r, N, aScale, wScale);
@@ -922,7 +998,8 @@ TfOptions conv1x1Options()
 
 std::string describe(const LitertPlan &p, const char *what)
 {
-  return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight);
+  return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
+         (litertIoType(p) != p.act ? " float I/O" : "");
 }
 
 } // namespace
@@ -936,18 +1013,18 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), M * K) + litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
 
   const int a = r.actConstant(p, {1, (int32_t)M, (int32_t)K}, "A", M, K, seedA, 1.0f,
                               isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int as = r.m.addTensor(0, {1, (int32_t)M, (int32_t)K}, p.act, "As", 0, aq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
   const bool bias = fcHasBias(p);
-  const int b = bias ? addFcBias(r, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
+  const int b = bias ? addZeroBias(r, p, N, aScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant cq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int c = r.m.addTensor(0, {1, (int32_t)M, (int32_t)N}, p.act, "C", 0, cq);
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
@@ -956,8 +1033,8 @@ TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {a, s}, {as}, mulOptions());
   r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {as, w, b}, {c}, fcOptions(p));
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {c, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, {1, 1, (int32_t)N}, "out")});
   return r.m.build(describe(p, "matmul"));
 }
 
@@ -967,8 +1044,6 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
   Recipe r;
   r.halfRounded = p.halfRounded;
   const int64_t sw = std::min(seedWidth, D);
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), D * sw) + litertWeightBytes(p, D, sw) +
-                   (uint64_t)layers * litertWeightBytes(p, D, D));
   const bool integer = isInteger(p.act);
   const int abits = bitsOf(p.act);
   const int qmax = integer ? qmaxOf(p.act) : 0;
@@ -982,7 +1057,8 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
 
   const TfQuant xq = actQuant(p, xScale);
   const int x0 = r.actConstant(p, shape(sw), "X0", D, sw, 0x243f6a88u, 1.0f, xScale, qmax, xq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape(sw), p.act, "X", 0, xq);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
 
@@ -1031,8 +1107,7 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
                    float mag, float outScale) -> int {
     float wScale = 1.0f;
     const int w = weight(name + "_w", D, K, seed, mag, wScale);
-    const int b = conv1x1 ? addConvBias(r, p, D, inScale, wScale)
-                          : (bias ? addFcBias(r, D, inScale, wScale) : -1);
+    const int b = conv1x1 || bias ? addZeroBias(r, p, D, inScale, wScale) : -1;
     const int out = r.m.addTensor(0, shape(D), p.act, name, 0, actQuant(p, outScale));
     if (conv1x1)
       r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {in, w, b}, {out}, conv1x1Options());
@@ -1059,12 +1134,12 @@ TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers, i
   // axes for the convolutions.
   const int ax = conv1x1 ? r.m.addTensor(0, {2}, TfType::I32, "axes", r.ints({1, 2}))
                          : r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
-  const int out = r.m.addTensor(0, conv1x1 ? std::vector<int32_t>{1, 1, 1, (int32_t)D}
-                                           : std::vector<int32_t>{1, 1, (int32_t)D},
-                                p.act, "out", 0, actQuant(p, cScale));
+  const std::vector<int32_t> outShape = conv1x1 ? std::vector<int32_t>{1, 1, 1, (int32_t)D}
+                                                 : std::vector<int32_t>{1, 1, (int32_t)D};
+  const int out = r.m.addTensor(0, outShape, p.act, "out", 0, actQuant(p, cScale));
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {t, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, outShape, "out")});
   return r.m.build(describe(p, conv1x1 ? "conv1x1 chain" : "matmul chain"));
 }
 
@@ -1073,26 +1148,27 @@ TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, in
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const float wScale = isInteger(p.weight) ? litertWeightScale(bitsOf(p.weight)) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
-  const int x = r.m.addTensor(0, conv1x1 ? convGrid(M, K) : std::vector<int32_t>{1, (int32_t)M, (int32_t)K},
-                              p.act, "x", 0, aq);
+  int xIn;
+  const int x = addInput(r, p, conv1x1 ? convGrid(M, K) : std::vector<int32_t>{1, (int32_t)M, (int32_t)K}, "x",
+                         aq, xIn);
   const Fill *wf = nullptr;
   const int w = addWeight(r, p, N, K, seedW, &wf, conv1x1);
   const bool bias = fcHasBias(p);
-  const int b = conv1x1 ? addConvBias(r, p, N, aScale, wScale) : (bias ? addFcBias(r, N, aScale, wScale) : -1);
+  const int b = conv1x1 || bias ? addZeroBias(r, p, N, aScale, wScale) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
-  const int y = r.m.addTensor(0, conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N},
-                              p.act, "y", 0, yq);
+  const std::vector<int32_t> yShape =
+      conv1x1 ? convGrid(M, N) : std::vector<int32_t>{1, (int32_t)M, (int32_t)N};
+  const int y = r.m.addTensor(0, yShape, p.act, "y", 0, yq);
   if (conv1x1)
     r.m.addOp(0, TfOp::Conv2d, convVersion(p, false), {x, w, b}, {y}, conv1x1Options());
   else
     r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
-  r.m.setInputs(0, {x});
-  r.m.setOutputs(0, {y});
+  r.m.setInputs(0, {xIn});
+  r.m.setOutputs(0, {addOutput(r, p, y, yShape, "y")});
   if (weights && wf)
   {
     weights->resize((size_t)(N * K));
@@ -1107,14 +1183,13 @@ TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t 
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(p.weight, N * K));
   const int abits = bitsOf(p.act);
   const float xScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant xq = actQuant(p, xScale);
   const int x = r.m.addTensor(0, {1, 1, (int32_t)K}, p.act, "x", 0, xq);
   const int w = addWeight(r, p, N, K, seedW, nullptr);
   const bool bias = fcHasBias(p);
-  const int b = bias ? addFcBias(r, N, xScale, litertWeightScale(bitsOf(p.weight))) : -1;
+  const int b = bias ? addZeroBias(r, p, N, xScale, litertWeightScale(bitsOf(p.weight))) : -1;
   const TfQuant yq = actQuant(p, isInteger(p.act) ? litertOutScale(K, abits) : 1.0f);
   const int y = r.m.addTensor(0, {1, 1, (int32_t)N}, p.act, "y", 0, yq);
   r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {x, w, b}, {y}, fcOptions(p));
@@ -1128,11 +1203,11 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), rows * cols));
   const std::vector<int32_t> shape = {1, (int32_t)rows, (int32_t)cols};
   // Magnitude 4: softmax and the normalisation need a spread to work on.
   const int x0 = r.actConstant(p, shape, "X0", rows, cols, 0x6a09e667u, 4.0f);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
   int y = x;
@@ -1192,7 +1267,7 @@ TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t col
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
   const int out = r.m.addTensor(0, {1, 1, (int32_t)cols}, p.act, "out", 0);
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
+  r.m.setInputs(0, {sIn});
   r.m.setOutputs(0, {out});
   return r.m.build(describe(p, "activation"));
 }
@@ -1288,7 +1363,6 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 {
   Recipe r;
   r.halfRounded = p.halfRounded;
-  r.m.reserveBytes(litertElemBytes(litertConstantType(p), channels * spatial * spatial));
   const int abits = bitsOf(p.act);
   const float aScale = isInteger(p.act) ? litertActScale(abits) : 1.0f;
   const TfQuant aq = actQuant(p, aScale);
@@ -1296,7 +1370,8 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
 
   const int x0 = r.actConstant(p, shape, "X0", spatial * spatial, channels, 0x9e3779b9u, 1.0f,
                                isInteger(p.act) ? aScale : 1.0f, isInteger(p.act) ? qmaxOf(p.act) : 0, aq);
-  const int s = addScalar(r, p);
+  int sIn;
+  const int s = addScalar(r, p, sIn);
   const int x = r.m.addTensor(0, shape, p.act, "X", 0, aq);
   r.m.addOp(0, TfOp::Mul, mulVersion(p), {x0, s}, {x}, mulOptions());
 
@@ -1305,7 +1380,7 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
                            ? litertWeightScale(bitsOf(p.weight)) *
                                  (2.0f / std::sqrt((float)((depthwise ? 1 : channels) * kernel * kernel)))
                            : 1.0f;
-  const int bias = addConvBias(r, p, channels, aScale, wScale);
+  const int bias = addZeroBias(r, p, channels, aScale, wScale);
   // The output's scale: a fan-in-deep dot product of the activations and
   // the shrunk weights lands within the activations' own range.
   const TfQuant yq = actQuant(p, aScale);
@@ -1321,8 +1396,8 @@ TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spati
   const int ax = r.m.addTensor(0, {2}, TfType::I32, "axes", r.ints({1, 2}));
   const int out = r.m.addTensor(0, {1, 1, 1, (int32_t)channels}, p.act, "out", 0, yq);
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(p), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
-  r.m.setOutputs(0, {out});
+  r.m.setInputs(0, {sIn});
+  r.m.setOutputs(0, {addOutput(r, p, out, {1, 1, 1, (int32_t)channels}, "out")});
   return r.m.build(describe(p, depthwise ? "depthwise conv" : "conv"));
 }
 
@@ -1399,12 +1474,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   fp.weightBlock = 0;
   fp.dynamicQuant = false;
 
-  const TfType stored = litertConstantType(fp);   // the float constants' stored type
   const int64_t sw = sh.seedWidth;
-  r.m.reserveBytes(4 * litertWeightBytes(p, d, d) + 2 * litertWeightBytes(p, ffn, d) +
-                   litertWeightBytes(p, d, ffn) +
-                   (decode ? 2 * litertElemBytes(sh.int8Kv ? TfType::I8 : stored, H * ctx * Dh) : 0) +
-                   litertElemBytes(stored, sw > 0 ? (S + d) * sw : S * d));
 
   auto tensor = [&](const std::vector<int32_t> &shape, const std::string &name) {
     return r.m.addTensor(0, shape, act, name, 0);
@@ -1422,24 +1492,26 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   // seedWidth products of the seed's [-0.25, 0.25) values sum to the plain
   // input's rms of 0.144; the input is rank seedWidth all the same, which is
   // what moves the magnitudes quoted above and at blockActScale.
-  int s, x;
+  int s, sIn, x;
   if (sw > 0)
   {
     const std::vector<int32_t> seedShape = {1, (int32_t)S, (int32_t)sw};
     const int x0 = r.actConstant(fp, seedShape, "X0", S, sw, 0xa5a5a5a5u, mag);
-    s = addScalar(r, fp);
+    s = addScalar(r, fp, sIn);
     const int xs = tensor(seedShape, "Xs");
     r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {xs}, mulOptions());
     // [d, seedWidth]: FULLY_CONNECTED's [N, K] weight layout.
     const int xp = r.actConstant(fp, {(int32_t)d, (int32_t)sw}, "Xp", d, sw, 0x5eed5eedu,
                                  2.0f * std::sqrt(3.0f / (float)sw));
     x = tensor(xShape, "X");
-    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, false), {xs, xp, -1}, {x}, fcOptions(fp));
+    const bool bias = fcHasBias(fp);
+    const int b = bias ? addZeroBias(r, fp, d, 1.0f, 1.0f) : -1;
+    r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(fp, bias), {xs, xp, b}, {x}, fcOptions(fp));
   }
   else
   {
     const int x0 = r.actConstant(fp, xShape, "X0", S, d, 0xa5a5a5a5u, mag);
-    s = addScalar(r, fp);
+    s = addScalar(r, fp, sIn);
     x = tensor(xShape, "X");
     r.m.addOp(0, TfOp::Mul, mulVersion(fp), {x0, s}, {x}, mulOptions());
   }
@@ -1491,7 +1563,9 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
     if (!qdq)
     {
       const int out = tensor(outShape, name);
-      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, false), {in, w, -1}, {out}, fcOptions(p));
+      const bool bias = fcHasBias(p);
+      const int b = bias ? addZeroBias(r, p, N, 1.0f, 1.0f) : -1;
+      r.m.addOp(0, TfOp::FullyConnected, litertFcVersion(p, bias), {in, w, b}, {out}, fcOptions(p));
       return out;
     }
     // W8A8: quantize in, integer multiply, dequantize out.
@@ -1682,7 +1756,7 @@ TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh)
   const int ax = r.m.addTensor(0, {1}, TfType::I32, "axes", r.ints({1}));
   const int out = tensor({1, 1, (int32_t)d}, "out");
   r.m.addOp(0, TfOp::ReduceMax, reduceVersion(fp), {y, ax}, {out}, reduceOptions());
-  r.m.setInputs(0, {s});
+  r.m.setInputs(0, {sIn});
   r.m.setOutputs(0, {out});
   return r.m.build(describe(p, decode ? "block decode" : "block prefill"));
 }

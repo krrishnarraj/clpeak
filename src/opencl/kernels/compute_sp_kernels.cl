@@ -17,10 +17,12 @@ MSTRINGIFY(
 \n#undef MAD_4
 \n#undef MAD_16
 \n#undef MAD_64
+\n#undef MAD_128
 \n
 \n#define MAD_4(x, c)     x = (x*x) + c;      x = (x*x) + c;      x = (x*x) + c;      x = (x*x) + c;
 \n#define MAD_16(x, c)    MAD_4(x, c);        MAD_4(x, c);        MAD_4(x, c);        MAD_4(x, c);
 \n#define MAD_64(x, c)    MAD_16(x, c);       MAD_16(x, c);       MAD_16(x, c);       MAD_16(x, c);
+\n#define MAD_128(x, c)   MAD_64(x, c);       MAD_64(x, c);
 \n
 
 __kernel void compute_sp_v1(__global float *ptr, float _A)
@@ -28,9 +30,9 @@ __kernel void compute_sp_v1(__global float *ptr, float _A)
     float x = _A;
     float c = (float)get_local_id(0);
 
-    for(int i=0; i<128; i++)
+    for(int i=0; i<16; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = x;
@@ -42,9 +44,9 @@ __kernel void compute_sp_v2(__global float *ptr, float _A)
     float2 x = (float2)(_A, (_A+1));
     float2 c = (float2)get_local_id(0);
 
-    for(int i=0; i<64; i++)
+    for(int i=0; i<8; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1);
@@ -55,9 +57,9 @@ __kernel void compute_sp_v4(__global float *ptr, float _A)
     float4 x = (float4)(_A, (_A+1), (_A+2), (_A+3));
     float4 c = (float4)get_local_id(0);
 
-    for(int i=0; i<32; i++)
+    for(int i=0; i<4; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1) + (x.S2) + (x.S3);
@@ -69,9 +71,9 @@ __kernel void compute_sp_v8(__global float *ptr, float _A)
     float8 x = (float8)(_A, (_A+1), (_A+2), (_A+3), (_A+4), (_A+5), (_A+6), (_A+7));
     float8 c = (float8)get_local_id(0);
 
-    for(int i=0; i<16; i++)
+    for(int i=0; i<2; i++)
     {
-        MAD_16(x, c);
+        MAD_128(x, c);
     }
 
     ptr[get_global_id(0)] = (x.S0) + (x.S1) + (x.S2) + (x.S3) + (x.S4) + (x.S5) + (x.S6) + (x.S7);
@@ -92,71 +94,88 @@ __kernel void compute_sp_v16(__global float *ptr, float _A)
     ptr[get_global_id(0)] = t.S0 + t.S1;
 }
 
-// ---- affine-chain variants (generated; see mad_chain.cl) ----
+// ---- affine-chain variants (see mad_chain.cl) ----
+//
+// One macro per width, instantiated as compute_sp_alt_v* at whatever sub-group
+// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// device with cl_intel_required_subgroup_size that offers 16), again as
+// compute_sp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
+// the squaring chain.
 
-__kernel void compute_sp_alt_v1(__global float *ptr, float _A)
-{
-    AF4_DECL(float, _A, (float)get_local_id(0))
-
-    for (int i = 0; i < 128; i++)
-    {
-        AF4_16
-    }
-
-    float r = AF4_RES;
-    ptr[get_global_id(0)] = r;
+\n#define SP_ALT_V1(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _A) \
+{ \
+    AF4_DECL(float, _A, (float)get_local_id(0)) \
+    for (int i = 0; i < 128; i++) \
+    { \
+        AF4_16 \
+    } \
+    float r = AF4_RES; \
+    ptr[get_global_id(0)] = r; \
 }
-
-__kernel void compute_sp_alt_v2(__global float *ptr, float _A)
-{
-    AF2_DECL(float2, (float2)(_A, (_A + 1)), (float2)get_local_id(0))
-
-    for (int i = 0; i < 64; i++)
-    {
-        AF2_16
-    }
-
-    float2 r = AF2_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1;
+\n
+\n#define SP_ALT_V2(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _A) \
+{ \
+    AF2_DECL(float2, (float2)(_A, (_A + 1)), (float2)get_local_id(0)) \
+    for (int i = 0; i < 64; i++) \
+    { \
+        AF2_16 \
+    } \
+    float2 r = AF2_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1; \
 }
-
-__kernel void compute_sp_alt_v4(__global float *ptr, float _A)
-{
-    AF1_DECL(float4, (float4)(_A, (_A + 1), (_A + 2), (_A + 3)), (float4)get_local_id(0))
-
-    for (int i = 0; i < 32; i++)
-    {
-        AF1_16
-    }
-
-    float4 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3;
+\n
+\n#define SP_ALT_V4(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _A) \
+{ \
+    AF1_DECL(float4, (float4)(_A, (_A + 1), (_A + 2), (_A + 3)), (float4)get_local_id(0)) \
+    for (int i = 0; i < 32; i++) \
+    { \
+        AF1_16 \
+    } \
+    float4 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3; \
 }
-
-__kernel void compute_sp_alt_v8(__global float *ptr, float _A)
-{
-    AF1_DECL(float8, (float8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (float8)get_local_id(0))
-
-    for (int i = 0; i < 16; i++)
-    {
-        AF1_16
-    }
-
-    float8 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7;
+\n
+\n#define SP_ALT_V8(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _A) \
+{ \
+    AF1_DECL(float8, (float8)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7)), (float8)get_local_id(0)) \
+    for (int i = 0; i < 16; i++) \
+    { \
+        AF1_16 \
+    } \
+    float8 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7; \
 }
-
-__kernel void compute_sp_alt_v16(__global float *ptr, float _A)
-{
-    AF1_DECL(float16, (float16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (float16)get_local_id(0))
-
-    for (int i = 0; i < 8; i++)
-    {
-        AF1_16
-    }
-
-    float16 r = AF1_RES;
-    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF;
+\n
+\n#define SP_ALT_V16(NAME, ATTR) \
+__kernel ATTR void NAME(__global float *ptr, float _A) \
+{ \
+    AF1_DECL(float16, (float16)(_A, (_A + 1), (_A + 2), (_A + 3), (_A + 4), (_A + 5), (_A + 6), (_A + 7), (_A + 8), (_A + 9), (_A + 10), (_A + 11), (_A + 12), (_A + 13), (_A + 14), (_A + 15)), (float16)get_local_id(0)) \
+    for (int i = 0; i < 8; i++) \
+    { \
+        AF1_16 \
+    } \
+    float16 r = AF1_RES; \
+    ptr[get_global_id(0)] = r.S0 + r.S1 + r.S2 + r.S3 + r.S4 + r.S5 + r.S6 + r.S7 + r.S8 + r.S9 + r.SA + r.SB + r.SC + r.SD + r.SE + r.SF; \
 }
+\n
+
+SP_ALT_V1(compute_sp_alt_v1, )
+SP_ALT_V2(compute_sp_alt_v2, )
+SP_ALT_V4(compute_sp_alt_v4, )
+SP_ALT_V8(compute_sp_alt_v8, )
+SP_ALT_V16(compute_sp_alt_v16, )
+
+\n#ifdef CLPEAK_ALT_SG16
+\nSP_ALT_V1(compute_sp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
+SP_ALT_V2(compute_sp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
+SP_ALT_V4(compute_sp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))
+SP_ALT_V8(compute_sp_alt_sg16_v8, __attribute__((intel_reqd_sub_group_size(16))))
+SP_ALT_V16(compute_sp_alt_sg16_v16, __attribute__((intel_reqd_sub_group_size(16))))
+\n#endif
+\n
 
 )

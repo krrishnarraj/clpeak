@@ -34,10 +34,10 @@ void main()
 {
     CHAIN_DECL(float16_t, float16_t(pc.A), float16_t(gl_LocalInvocationID.x))
 
-    // 128 iters * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
-    for (int i = 0; i < 128; i++)
+    // 128 MAD_16s * 16 FMAs * 2 ops = 4096 per WI (COMPUTE_FP_WORK_PER_WI).
+    for (int i = 0; i < CHAIN_TRIPS(128); i++)
     {
-        MAD_16
+        CHAIN_TRIP
     }
 
     float16_t r = CHAIN_RESULT;

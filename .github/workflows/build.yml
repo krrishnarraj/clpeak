@@ -46,6 +46,86 @@ jobs:
     uses: ./.github/workflows/ios.yml
 
   # ---------------------------------------------------------------------------
+  # Windows code signing — SignPath Foundation, on tag push
+  # ---------------------------------------------------------------------------
+  # Every Windows zip goes to SignPath in ONE request, so a release needs one
+  # approval in the dashboard rather than one per variant.  SignPath signs the
+  # binaries inside each zip (packaging/signpath/artifact-configuration.xml
+  # lists them) and hands the zips back under the same names.
+  #
+  # Setup lives in the repo settings, not here: secret SIGNPATH_API_TOKEN (a
+  # SignPath CI user with the submitter role), and variables
+  # SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
+  # SIGNPATH_SIGNING_POLICY_SLUG and SIGNPATH_ARTIFACT_CONFIGURATION_SLUG.
+  # Missing setup fails the job, and with it the release: a tag never ships
+  # unsigned Windows binaries by falling through.
+  #
+  # DISABLED until a release certificate is issued (the SignPath policy only
+  # has a test certificate).  Releases ship the unsigned Windows zips.  To
+  # re-enable: restore the `if` below, add sign-windows back to the release
+  # job's `needs`, and restore the signed-zip collection step there.
+  sign-windows:
+    name: Sign Windows binaries
+    if: false && startsWith(github.ref, 'refs/tags/')
+    needs: [desktop]
+    runs-on: ubuntu-latest
+    # The release-signing policy waits for a manual approval; give it the
+    # hosted-runner maximum rather than failing a release over a slow click.
+    timeout-minutes: 360
+    permissions:
+      actions: read     # SignPath fetches the unsigned artifact by id
+      contents: read
+
+    steps:
+      - name: Download Windows zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: clpeak-windows-*
+          path: unsigned
+          merge-multiple: true
+
+      - name: List Windows zips
+        run: ls -l unsigned && ls unsigned/clpeak-*-windows-*.zip
+
+      - name: Upload unsigned bundle
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: unsigned/clpeak-*-windows-*.zip
+          if-no-files-found: error
+
+      - name: Submit signing request
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 21000
+          output-artifact-directory: signed
+
+      # SignPath returns the zips it was given; a count mismatch means the
+      # bundle and the release would disagree, so stop here.
+      - name: Check every zip came back
+        run: |
+          ls -l signed
+          sent=$(ls unsigned/clpeak-*-windows-*.zip | wc -l)
+          got=$(ls signed/clpeak-*-windows-*.zip | wc -l)
+          echo "sent $sent, got $got"
+          test "$sent" -eq "$got"
+
+      - name: Upload signed zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-signed
+          path: signed/clpeak-*-windows-*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
   # GitHub Release — attach binaries on tag push
   # ---------------------------------------------------------------------------
   release:
@@ -67,7 +147,8 @@ jobs:
         run: |
           mkdir -p release
           # Each desktop job already produced a CPack zip (macOS also a .dmg
-          # holding clpeak-gui.app); just gather them.
+          # holding clpeak-gui.app); just gather them.  Windows zips are
+          # unsigned while sign-windows is disabled.
           find artifacts -name 'clpeak-*.zip' -exec cp {} release/ \;
           find artifacts -name 'clpeak-*.dmg' -exec cp {} release/ \;
           ls -l release

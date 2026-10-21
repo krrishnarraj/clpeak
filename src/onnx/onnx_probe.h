@@ -55,9 +55,12 @@ using OnnxProbeCache = std::unordered_map<std::string, OnnxProbeResult>;
 
 // Probe every gemm variant once at 32^3 (tiny) and cache result.
 // The cache is keyed by variant label (e.g. "fp16", "int8_qdq").
-// Returned reference is cached per EP (providerKey plus OpenVINO target)
-// for the lifetime of the process - subsequent calls for same EP return
-// the same map without rebuilding.
+// Returned reference is cached per runtime and provider -- its name, its
+// target (OpenVINO's device_type, a plugin's device label) and, for a
+// plugin, the library it was registered from, since a plugin can serve the
+// device a built-in provider of the same name does -- for the lifetime of
+// the process; subsequent calls for the same provider return the same map
+// without rebuilding.
 const OnnxProbeCache &onnxProbeGemmCache(const OrtRuntime &rt,
                                          const onnx_ep_info_t &ep);
 
@@ -74,27 +77,27 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt,
 // NPU, or NNAPI on a phone whose accelerator declines every graph -- so
 // listing and runAll() filter through this first instead of printing a
 // device that only ever reports Unsupported.  Creation only, no runs;
-// memoized per runtime and target.  `reason` carries the refusal when it
+// memoized per runtime and provider.  `reason` carries the refusal when it
 // answers false.
 bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                   std::string &reason);
 
 // The floating-point width this provider streams a resident tensor through
 // fastest: ONNX_DT_FLOAT16 or ONNX_DT_FLOAT.  One [1, K] x [K, N] matrix-
-// vector product over eight megabytes of weights, timed in each, and the
-// faster kept (fp16 on a tie).  The bandwidth-shaped tests take their
-// element type from this rather than assuming fp16: a provider without a
-// native fp16 kernel for the operation -- ONNX Runtime's CPU EP converts
-// every fp16 tensor on the way in -- would otherwise report its conversion
-// rate under a bandwidth heading (2 GB/s on a Threadripper whose fp32 rows
-// stream 38).  fp32 is not a candidate on a provider that narrows it
-// (onnxFp32Narrowed): there it wins every time by moving half the bytes it is
-// credited with.  Memoized per runtime and target.
+// vector product over 64 MB of weights (eight on a device too small to hold
+// that), timed in each, and the faster kept (fp16 on a tie).  The bandwidth-
+// shaped tests take their element type from this rather than assuming fp16:
+// a provider without a native fp16 kernel for the operation -- ONNX Runtime's
+// CPU EP converts every fp16 tensor on the way in -- would otherwise report
+// its conversion rate under a bandwidth heading (2 GB/s on a Threadripper
+// whose fp32 rows stream 38).  fp32 is not a candidate on a provider that
+// narrows it (onnxFp32Narrowed): there it wins every time by moving half the
+// bytes it is credited with.  Memoized per runtime and provider.
 int onnxStreamDtype(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // The bandwidth that probe measured in the width it chose, in bytes/second,
-// or 0 when neither width could be timed.  It is a read of eight megabytes of
-// resident weights through the operation every provider tunes hardest, *net
+// or 0 when neither width could be timed.  It is a read of 64 MB of resident
+// weights through the operation every provider tunes hardest, *net
 // of the cost of submitting it* -- the same floor subtraction onnx-tensor-bw
 // makes, and for the same reason: DirectML charges 156 us per submission, so
 // the raw figure came out at 48 GB/s where that provider streams 717.
@@ -112,22 +115,35 @@ double onnxStreamBps(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // weights that way -- QNN's HTP (enable_htp_fp16_precision), OpenVINO's GPU and
 // NPU, the XDNA NPUs in bf16 -- so an fp32 reading credited four bytes an
 // element moved two, and read twice the rate the device has.  The same
-// streaming probe answers it, from two things it measures anyway, and it takes
-// both: the fp32 matrix-vector product came back with half-precision error
-// against a host reference (a narrowed *computation*), and streamed half again
-// or more of fp16's bytes per second (narrowed *storage* -- the same bytes in
-// half the time).  Error alone would condemn NVIDIA's TF32, which rounds the
-// arithmetic and still reads all four bytes; speed alone would condemn a CPU
-// whose fp16 path converts.  False when either width could not be timed.
+// streaming probe answers it, and it takes both of two findings: the fp32
+// matrix-vector product came back with half-precision error against a host
+// reference (a narrowed *computation*), and it moved half its credited bytes
+// (narrowed *storage*) -- seen either as half again or more of fp16's bytes
+// per second, or as fp16's own time at the fp32 product's shape, where the
+// two are one 16-bit kernel; the second holds where time does not scale with
+// work.  Error alone would condemn NVIDIA's TF32, which rounds the arithmetic
+// and still reads all four bytes; speed alone would condemn a CPU whose fp16
+// path converts.  False when either width could not be timed.
 bool onnxFp32Narrowed(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 
 // Did this provider refuse a row reduction at some size and take the rank-4
 // view of it (OnnxReduceView)?  Learned by whichever test meets the refusal
 // first and kept for the provider, so the others build the view that works
 // instead of paying a refused compile to learn it again.  Memoized like the
-// probes: per runtime and target, for the life of the process.
+// probes: per runtime and provider, for the life of the process.
 void onnxNoteRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
+
+// The view onnx-gemm reduces a product of `dtype` in on this provider: Rank4
+// where it refused the 2-D form (above), TwoStep where a race timed that
+// faster than the column maxima, Rows otherwise.  The race is the activation
+// test's reference graph -- one [2048, 2048] constant scaled by a runtime
+// scalar and reduced, nothing else -- built once in each view, so it costs
+// two small sessions per provider and product dtype whatever the ladder then
+// builds, and the difference between the two is the reduction's.  Memoized
+// like the probes; a race graph that cannot be built or run leaves Rows.
+OnnxReduceView onnxGemmReduceView(const OrtRuntime &rt, const onnx_ep_info_t &ep,
+                                  int dtype);
 
 // onnx-gemm and onnx-numeric-error are a rate/accuracy pair over their
 // overlapping labels (the plain-float dtypes plus int8_qdq; the weight-only
@@ -138,9 +154,9 @@ bool onnxPrefersRank4Reduce(const OrtRuntime &rt, const onnx_ep_info_t &ep);
 // cannot fold (its activations are a runtime input), so without this its
 // number would stand alone beside a rate that was refused as meaningless.
 // runGemm records each folded label here; runNumericError consults it.
-// Keyed by EP exactly like the probe cache above.  Cleared per EP in runAll
-// (and again at runGemm entry for direct callers) so a stale run cannot
-// suppress a later one.
+// Keyed by provider like the probe cache above, though not by runtime: it
+// only lives for a run.  Cleared per EP in runAll (and again at runGemm entry
+// for direct callers) so a stale run cannot suppress a later one.
 void onnxNoteGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
 bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
 void onnxClearGemmFolded(const onnx_ep_info_t &ep);

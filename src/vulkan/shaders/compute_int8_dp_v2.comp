@@ -1,8 +1,10 @@
 #version 450
 #extension GL_EXT_integer_dot_product : require
+#extension GL_GOOGLE_include_directive : require
 
 // INT8 packed-dp4a v2: two independent dot-product chains per thread.
-// See v1 for the chain shape and why every other spelling of it is wrong.
+// See dp4a_chain.glsl for the chain shape and why every other spelling of it
+// is wrong.
 //
 // Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1/v4).
 
@@ -16,32 +18,24 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-
-
-#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
-                         q = dotPacked4x8AccSatEXT(x, p, q);
-#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
-#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
+#include "dp4a_chain.glsl"
 
 void main()
 {
-    int x = (pc.A & 0xff)
-          | (((pc.A + 1) & 0xff) << 8)
-          | (((pc.A + 2) & 0xff) << 16)
-          | (((pc.A + 3) & 0xff) << 24);
+    DP_DECL_X(pc.A)
     // No two accumulators start on the same value: chains that begin equal
     // stay bitwise equal forever and a compiler is free to keep one.
     int lid = int(gl_LocalInvocationID.x);
-    int a0 = lid,      a1 = lid + 4;
-    int b0 = lid + 8,  b1 = lid + 12;
+    DP_CHAIN_DECL(0, lid)
+    DP_CHAIN_DECL(1, lid + DP_CHAIN_STRIDE)
 
-    // 16 iters * (32 dots per chain * 2 chains) = 1024 dots.  Depth per trip
-    // is what keeps the loop counter off the dots' issue port -- see v1.
+    // 16 iters * (32 dots per chain * 2 chains) = 1024 dots.  Depth per trip:
+    // see v1.
     for (int i = 0; i < 16; i++)
     {
-        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
-        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
+        DP_CHAIN_16(0) DP_CHAIN_16(1)
+        DP_CHAIN_16(0) DP_CHAIN_16(1)
     }
 
-    outputBuf.data[gl_GlobalInvocationID.x] = (a0 + a1) + (b0 + b1);
+    outputBuf.data[gl_GlobalInvocationID.x] = DP_CHAIN_SUM(0) + DP_CHAIN_SUM(1);
 }

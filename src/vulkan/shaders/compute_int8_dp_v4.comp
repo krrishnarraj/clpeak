@@ -1,11 +1,12 @@
 #version 450
 #extension GL_EXT_integer_dot_product : require
+#extension GL_GOOGLE_include_directive : require
 
 // INT8 packed-dp4a v4: four independent dot-product chains per thread.
-// See v1 for the chain shape and why every other spelling of it is wrong.
-// v4 doubles v2's independent work per thread, letting the scheduler hide
-// more dp4a latency at the cost of register pressure -- if occupancy drops,
-// v2 is faster.
+// See dp4a_chain.glsl for the chain shape and why every other spelling of it
+// is wrong.  v4 doubles v2's independent work per thread, letting the
+// scheduler hide more dp4a latency at the cost of register pressure -- if
+// occupancy drops, v2 is faster.
 //
 // Per-WI op budget: 64 iters * 16 dots * 8 ops = 8192 (same as v1/v2).
 
@@ -19,33 +20,24 @@ layout(push_constant) uniform PushConstants {
     int A;
 } pc;
 
-
-
-#define STEP2(x, p, q)   p = dotPacked4x8AccSatEXT(x, q, p); \
-                         q = dotPacked4x8AccSatEXT(x, p, q);
-#define STEP2_4(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q) STEP2(x, p, q)
-#define STEP2_8(x, p, q) STEP2_4(x, p, q) STEP2_4(x, p, q)          // 16 dots
+#include "dp4a_chain.glsl"
 
 void main()
 {
-    int x = (pc.A & 0xff)
-          | (((pc.A + 1) & 0xff) << 8)
-          | (((pc.A + 2) & 0xff) << 16)
-          | (((pc.A + 3) & 0xff) << 24);
+    DP_DECL_X(pc.A)
     int lid = int(gl_LocalInvocationID.x);
-    int a0 = lid,      a1 = lid + 4;
-    int b0 = lid + 8,  b1 = lid + 12;
-    int c0 = lid + 16, c1 = lid + 20;
-    int d0 = lid + 24, d1 = lid + 28;
+    DP_CHAIN_DECL(0, lid)
+    DP_CHAIN_DECL(1, lid + DP_CHAIN_STRIDE)
+    DP_CHAIN_DECL(2, lid + 2 * DP_CHAIN_STRIDE)
+    DP_CHAIN_DECL(3, lid + 3 * DP_CHAIN_STRIDE)
 
-    // 16 iters * (16 dots per chain * 4 chains) = 1024 dots.  Depth per trip
-    // is what keeps the loop counter off the dots' issue port -- see v1.
+    // 16 iters * (16 dots per chain * 4 chains) = 1024 dots.  Depth per trip:
+    // see v1.
     for (int i = 0; i < 16; i++)
     {
-        STEP2_8(x, a0, a1) STEP2_8(x, b0, b1)
-        STEP2_8(x, c0, c1) STEP2_8(x, d0, d1)
+        DP_CHAIN_16(0) DP_CHAIN_16(1) DP_CHAIN_16(2) DP_CHAIN_16(3)
     }
 
     outputBuf.data[gl_GlobalInvocationID.x] =
-        ((a0 + a1) + (b0 + b1)) + ((c0 + c1) + (d0 + d1));
+        (DP_CHAIN_SUM(0) + DP_CHAIN_SUM(1)) + (DP_CHAIN_SUM(2) + DP_CHAIN_SUM(3));
 }

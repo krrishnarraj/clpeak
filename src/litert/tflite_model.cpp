@@ -507,8 +507,6 @@ TfliteModel::TfliteModel()
   buffers_.push_back(Buffer{nullptr, 0, nullptr, nullptr});   // buffer 0: empty
 }
 
-void TfliteModel::reserveBytes(size_t bytes) { reserve_ = bytes; }
-
 int TfliteModel::addBuffer(const void *data, size_t bytes)
 {
   buffers_.push_back(Buffer{static_cast<const uint8_t *>(data), bytes, nullptr, nullptr});
@@ -547,10 +545,27 @@ int TfliteModel::addSubgraph(const std::string &name)
 TfliteBytes TfliteModel::build(const std::string &description) const
 {
   const auto t0 = std::chrono::steady_clock::now();
-  size_t weightBytes = reserve_;
+  // Sized once, for exactly what the model holds.  Every byte reserved here
+  // stays allocated while a session holds the model, so the weights count
+  // once; and growing would copy everything already written, the weights
+  // included (they go first), so the rest is bounded from above: a table, a
+  // vtable and padding per object, plus the vectors and strings it carries
+  // -- per-channel scales and zero points among them, 96 KB a tensor at
+  // 8192 wide.
+  size_t bytes = 64 * 1024 + description.size();
   for (const auto &bf : buffers_)
-    weightBytes += bf.bytes + 32;
-  Builder b(weightBytes + 64 * 1024);
+    bytes += bf.bytes + 64;
+  for (const auto &sg : subgraphs_)
+  {
+    bytes += 256 + sg.name.size() + 4 * (sg.inputs.size() + sg.outputs.size());
+    for (const auto &t : sg.tensors)   // the name twice: the signature repeats it
+      bytes += 256 + 2 * t.name.size() + 4 * t.shape.size() + 4 * t.quant.scale.size() +
+               8 * t.quant.zeroPoint.size();
+    for (const auto &op : sg.ops)
+      bytes += 256 + 4 * (op.inputs.size() + op.outputs.size() + op.opts.newShape.size()) +
+               op.opts.compositeName.size() + op.opts.compositeAttributes.size();
+  }
+  Builder b(bytes);
 
   // ---- buffers ------------------------------------------------------------
   // Buffer: data(0) [ubyte] force_align 16, offset(1), size(2).  Written

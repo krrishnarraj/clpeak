@@ -294,6 +294,12 @@ CoremlProgram::CoremlProgram(int specVersion) : m_spec(specVersion)
   std::memcpy(&m_blob[4], &version, 4);
 }
 
+void CoremlProgram::reserveWeights(uint64_t bytes)
+{
+  // Each blob also takes 64 bytes of metadata and up to 63 of alignment.
+  m_blob.reserve(m_blob.size() + (size_t)(bytes + bytes / 64) + (64u << 10));
+}
+
 void CoremlProgram::input(const std::string &name, int dtype, const CoremlDims &dims)
 {
   m_inputs.push_back({name, dtype, dims});
@@ -830,8 +836,7 @@ float storedScale(float s, int dtype)
 // multiplies -- made the Neural Engine's int8 row read *worse* (348 ppm
 // against 294 on the M1 Pro): the ANE keeps the codes and applies the scale
 // after the accumulation, so the exact product is what it computes.  A unit
-// that does round to fp16 first reads a little above its fp16 row instead,
-// which the row descriptions say.
+// that does round to fp16 first reads a little above its fp16 row instead.
 float dequantizedTo(float scale, float code, int dtype)
 {
   (void)dtype;
@@ -1093,6 +1098,8 @@ CoremlProgram coremlMatMulChainModel(int spec, int64_t D, int layers, int64_t se
   auto keep = [](int64_t K) { return std::sqrt(12.0f / (float)K); };
   auto layerSeed = [](int l) { return 0x85a308d3u + 0x9e3779b9u * (uint32_t)l; };
   const uint32_t kSeedProj = 0x3c6ef372u;
+  p.reserveWeights(coremlElemBytes(act, D * sw) + coremlWeightBytes(w, sw, D) +
+                   (uint64_t)layers * coremlWeightBytes(w, D, D));
 
   p.input("s", ioDtype, {1});
   p.constTensor("X0", act, {D, sw}, coremlFillFloats(act, D * sw, 0x243f6a88u));
@@ -1199,6 +1206,49 @@ CoremlProgram coremlPlainMatMulModel(int spec, int64_t M, int64_t K, int64_t N,
   return p;
 }
 
+CoremlProgram coremlPlainConv1x1Model(int spec, int64_t M, int64_t K, int64_t N, int dtype,
+                                      std::vector<float> *weights)
+{
+  (void)spec;
+  CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
+  // As square a grid as M allows, as the ONNX backend's 1x1 form has.
+  int64_t H = 1, W = M;
+  while (H * H < M && W % 2 == 0)
+  {
+    H *= 2;
+    W /= 2;
+  }
+  p.reserveWeights(coremlElemBytes(dtype, N * K));
+  p.input("x", dtype, {1, K, H, W});
+  const std::string wRaw = coremlFillFloats(dtype, N * K, 0x85a308d3u);
+  if (weights)
+  {
+    weights->resize((size_t)(N * K));
+    for (int64_t i = 0; i < N * K; i++)
+    {
+      if (dtype == CML_FP32)
+        std::memcpy(&(*weights)[(size_t)i], wRaw.data() + i * 4, 4);
+      else
+      {
+        uint16_t h;
+        std::memcpy(&h, wRaw.data() + i * 2, 2);
+        (*weights)[(size_t)i] = coremlHalfToFloat(h);
+      }
+    }
+  }
+  p.constTensor("Wt", dtype, {N, K, 1, 1}, wRaw);
+  p.op("conv",
+       {{"x", "x"}, {"weight", "Wt"},
+        {"strides", p.constInts("strides", {1, 1})},
+        {"pad_type", p.constString("pad_type", "valid")},
+        {"pad", p.constInts("pad", {0, 0, 0, 0})},
+        {"dilations", p.constInts("dilations", {1, 1})},
+        {"groups", p.constInt("groups", 1)}},
+       {"y", dtype, {1, N, H, W}});
+  p.output("y", dtype, {1, N, H, W});
+  return p;
+}
+
 CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
 {
   (void)spec;
@@ -1206,6 +1256,7 @@ CoremlProgram coremlGemvModel(int spec, int64_t d, int64_t cols, uint32_t seed)
   // Uniform over +/-sqrt(3/d) so the result keeps the vector's magnitude: a
   // d-deep fp16 dot product of larger values would saturate.
   const float lim = std::sqrt(3.0f / (float)d);
+  p.reserveWeights(coremlElemBytes(CML_FP16, d * cols));
   p.input("x", CML_FP16, {1, d});
   p.constTensor("W", CML_FP16, {d, cols}, coremlFillFloats(CML_FP16, d * cols, seed, 2.0f * lim));
   p.op("matmul",
@@ -1223,6 +1274,8 @@ CoremlProgram coremlConvModel(int spec, int64_t channels, int64_t spatial,
   CoremlProgram p(coremlSpecNeeded(CoremlWeight::Fp16));
   const int64_t inPerGroup = channels / group;
   const int64_t outSide = spatial / stride;
+  p.reserveWeights(coremlElemBytes(dtype, channels * spatial * spatial) +
+                   coremlElemBytes(dtype, channels * inPerGroup * kernel * kernel));
   p.input("s", dtype, {1});
   p.constTensor("X0", dtype, {1, channels, spatial, spatial},
                 coremlFillFloats(dtype, channels * spatial * spatial, 0x9e3779b9u));

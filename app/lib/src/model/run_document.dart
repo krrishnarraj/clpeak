@@ -48,8 +48,9 @@ class TestResult {
   /// The reason shown for a fully-unavailable test.
   String get skipReason => metrics.isEmpty ? '' : metrics.first.reason;
 
-  /// Unit for one reading, honouring its override.
-  Units unitsOf(MetricResult m) => m.units ?? units;
+  /// Unit for one reading, honouring its override; the test's own when there
+  /// is no reading.
+  Units unitsOf(MetricResult? m) => m?.units ?? units;
 
   /// Whether one number can stand for the whole test.
   ///
@@ -59,16 +60,22 @@ class TestResult {
   bool get collapsible =>
       shape == TestShape.homogeneous || okMetrics.length <= 1;
 
-  /// The test's answer: best of the readings, by its own direction.  Only
-  /// meaningful when [collapsible]; a heterogeneous test has no single
-  /// answer, which is the whole reason for the distinction.
-  double get peakValue {
+  /// The test's answer: best of the readings, by its own direction, or null
+  /// when none was measured.  Only meaningful when [collapsible]; a
+  /// heterogeneous test has no single answer, which is the whole reason for
+  /// the distinction.
+  MetricResult? get peakMetric {
     final ok = okMetrics;
-    if (ok.isEmpty) return 0;
+    if (ok.isEmpty) return null;
     return header.direction == Direction.lowerIsBetter
-        ? ok.map((m) => m.value).reduce((a, b) => a < b ? a : b)
-        : ok.map((m) => m.value).reduce((a, b) => a > b ? a : b);
+        ? ok.reduce((a, b) => a.value < b.value ? a : b)
+        : ok.reduce((a, b) => a.value > b.value ? a : b);
   }
+
+  /// [peakMetric]'s value.  Print it in that reading's unit,
+  /// `unitsOf(peakMetric)`, not the test's: a FLOPS test whose one measured
+  /// row counts OPS collapses to TOPS.
+  double get peakValue => peakMetric?.value ?? 0;
 
   /// How full to draw one reading's meter: its size relative to the largest
   /// reading in the test, whichever direction is better.
@@ -265,7 +272,8 @@ class LogEntry {
   final LogLevel level;
 
   /// The library a message was relayed from ("onnxruntime", "vulkan",
-  /// "opencl", "console"); empty for clpeak's own.
+  /// "opencl", "console"), or "android" for how the OS says the process
+  /// ended (ProcessExit); empty for clpeak's own.
   final String source;
 
   /// The scope the line fired in; empty where no such scope was open.
@@ -298,6 +306,71 @@ class LogEntry {
       );
 }
 
+/// Where in a run something happened: a test on a device, named as the log
+/// names it.
+class RunPlace {
+  const RunPlace({
+    this.backend = '',
+    this.device = '',
+    this.deviceIndex = -1,
+    this.test = '',
+  });
+
+  final String backend;
+  final String device;
+  final int deviceIndex;
+
+  /// The test's key (`id` or `id@variant`), matching TestResult.key.
+  final String test;
+
+  bool get isEmpty => backend.isEmpty;
+
+  factory RunPlace.fromJson(Map<String, dynamic>? m) => m == null
+      ? const RunPlace()
+      : RunPlace(
+          backend: m['backend'] as String? ?? '',
+          device: m['device'] as String? ?? '',
+          deviceIndex: (m['device_index'] as num?)?.toInt() ?? -1,
+          test: m['test'] as String? ?? '',
+        );
+}
+
+/// One part of a run after its first: the process the run was in ended
+/// part-way and the run was continued from its checkpoint into the same
+/// document (`resumed` in docs/format-v3.md).
+class ResumedPart {
+  const ResumedPart({
+    this.at = '',
+    this.elapsedSeconds = 0,
+    this.after = '',
+    this.from = const RunPlace(),
+    this.skipped = const RunPlace(),
+  });
+
+  /// ISO-8601 UTC: when this part started.
+  final String at;
+
+  /// The same moment on the log's clock.
+  final double elapsedSeconds;
+
+  /// Why the part before ended, when that is known.
+  final String after;
+
+  /// The first test this part measured.
+  final RunPlace from;
+
+  /// Where the part before crashed, which this part did not run again.
+  final RunPlace skipped;
+
+  factory ResumedPart.fromJson(Map<String, dynamic> m) => ResumedPart(
+        at: m['at'] as String? ?? '',
+        elapsedSeconds: (m['elapsed_s'] as num?)?.toDouble() ?? 0,
+        after: m['after'] as String? ?? '',
+        from: RunPlace.fromJson(m['from'] as Map<String, dynamic>?),
+        skipped: RunPlace.fromJson(m['skipped'] as Map<String, dynamic>?),
+      );
+}
+
 /// How the run was invoked and what it ran on.  Present for a saved run;
 /// filled in only at the end of a live one, so null while it is in flight.
 class RunMeta {
@@ -309,10 +382,14 @@ class RunMeta {
     this.verbose = false,
     this.builtBackends = const [],
     this.host = const {},
+    this.argv = const [],
+    this.resumed = const [],
   });
 
   final String clpeakVersion;
   final String generatedAt;
+
+  /// Seconds spent running; for a resumed run, its parts summed.
   final double durationSeconds;
 
   /// The run recorded debug-level diagnostics (`--verbose`).
@@ -331,6 +408,13 @@ class RunMeta {
   /// which of them a platform can answer varies.
   final Map<String, dynamic> host;
 
+  /// The command line the run was started with (`invocation.argv`).
+  final List<String> argv;
+
+  /// Each part after the first, for a run that was continued after its
+  /// process ended part-way; empty for a run done in one go.
+  final List<ResumedPart> resumed;
+
   factory RunMeta.fromJson(Map<String, dynamic> m) => RunMeta(
         clpeakVersion: m['clpeak_version'] as String? ?? '',
         generatedAt: m['generated_at'] as String? ?? '',
@@ -345,6 +429,15 @@ class RunMeta {
               .cast<String>(),
         ],
         host: (m['host'] as Map<String, dynamic>?) ?? const {},
+        argv: [
+          ...((m['invocation'] as Map<String, dynamic>?)?['argv'] as List? ??
+                  const [])
+              .cast<String>(),
+        ],
+        resumed: [
+          for (final r in (m['resumed'] as List? ?? const []))
+            ResumedPart.fromJson(r as Map<String, dynamic>),
+        ],
       );
 }
 
@@ -360,6 +453,10 @@ class RunDocument {
   RunMeta? meta;
 
   bool get isEmpty => runs.isEmpty;
+
+  /// Tests recorded, over every device.
+  int get testCount => runs.fold(
+      0, (n, r) => n + r.categories.fold(0, (m, g) => m + g.tests.length));
 
   /// The lines a user is shown without asking: warnings and errors.
   List<LogEntry> get problems => log.where((e) => e.level.isProblem).toList();

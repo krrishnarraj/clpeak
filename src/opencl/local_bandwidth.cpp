@@ -5,7 +5,8 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   float timed, bps;
   cl::NDRange globalSize, localSize;
 
-  if (!isAllowed(Benchmark::LocalBW))
+  auto run = admit(Benchmark::LocalBW);
+  if (!run)
     return 0;
 
   unsigned int forced = forceIters ? specifiedIters : 0;
@@ -15,9 +16,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   auto test = currentDeviceScope->beginTest(
     {"local_memory_bandwidth", "Local memory bandwidth", "bps",
      Category::Unknown,
-     "How many bytes per second the device moves through local memory -- the "
-     "small on-chip scratchpad a group of work-items passes data through, "
-     "which never goes out to main memory.",
+     "Bandwidth of local memory, the scratchpad a work-group shares.",
      TestShape::Homogeneous, "vector width"});
 
   const int widths[] = {1, 2, 4, 8};
@@ -40,6 +39,10 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   try
   {
+    // A program that failed to build is a null handle, and an older ICD
+    // loader dereferences one rather than returning CL_INVALID_PROGRAM.
+    if (!prog())
+      throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
     cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
     cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (globalWIs * sizeof(cl_float)));
 

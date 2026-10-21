@@ -51,50 +51,29 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {LitertFormat::Fp32,
-     "Full precision, the control: hundreds of ppm here is an accelerator "
-     "substituting a narrower type for the fp32 it was asked for."},
+    {LitertFormat::Fp32, "Full 32-bit precision: hundreds of ppm would mean a narrower type was used."},
     {LitertFormat::Fp16,
-     "16-bit inputs and answer: around 200 ppm is fp32 accumulation rounded "
-     "once at the end, ten times that is accumulating in fp16 all the way."},
-    {LitertFormat::Fp16Acc32,
-     "The GPU's fp16 policy with fp32 accumulation; the difference from the "
-     "fp16 row is what the accumulator width was worth."},
-    {LitertFormat::Bf16,
-     "bfloat16 has three fewer mantissa bits than fp16, so eight times the "
-     "fp16 figure is what it costs, if any kernel takes it."},
+     "16-bit weights and arithmetic: about 200 ppm is fp32 accumulation, ten times that is fp16 "
+     "accumulation."},
+    {LitertFormat::Fp16Acc32, "The GPU's fp16 policy with fp32 accumulation."},
+    {LitertFormat::Bf16, "bfloat16 weights and arithmetic."},
     {LitertFormat::Int8Qdq,
-     "8-bit weights and activations with the answer itself quantized to 8 "
-     "bits: around 9000 ppm is what keeping the result in int8 costs on this "
-     "data (the operands' quantization is not counted)."},
+     "Full-integer int8 with the answer kept in 8 bits: about 9000 ppm on this data."},
     {LitertFormat::Int16x8,
-     "16-bit activations over 8-bit weights, the answer kept in 16 bits; its "
-     "result quantization costs about 256 times less than int8_qdq's."},
+     "Full-integer int16x8: 16-bit activations over 8-bit weights, the answer kept in 16 bits."},
     {LitertFormat::Int8Weight,
-     "8-bit weights against float activations: near the fp16 or fp32 row on "
-     "an accelerator that multiplies in float, and on XNNPACK -- which "
-     "quantizes the activations as it goes -- what dynamic-range quantization "
-     "really costs."},
+     "8-bit weights, one scale per output column, against float activations, counting the activations' "
+     "rounding where the kernel quantizes them."},
     {LitertFormat::Int4Weight,
-     "4-bit blockwise weights against float activations; the codes are shared "
-     "with the reference, so whatever separates this from int8_weight is the "
-     "accelerator's arithmetic."},
-    {LitertFormat::Fp8Weight, "8-bit float weights, if any kernel takes them."},
+     "4-bit weights in blocks of 32 against float activations, counting the activations' rounding where "
+     "the kernel quantizes them."},
+    {LitertFormat::Fp8Weight,
+     "8-bit float (E4M3) weights, one scale per output column, against float activations."},
 };
 
-double relativeRmsPpm(const std::vector<float> &got, const std::vector<double> &ref)
-{
-  double num = 0.0, den = 0.0;
-  for (size_t i = 0; i < got.size(); i++)
-  {
-    const double d = (double)got[i] - ref[i];
-    num += d * d;
-    den += ref[i] * ref[i];
-  }
-  if (den <= 0.0)
-    return -1.0;
-  return std::sqrt(num / den) * 1.0e6;
-}
+// How this backend's answer checks name things (include/common/answer_check.h).
+const clpeak::AnswerWords kWords = {"this accelerator's", "litert_numeric_error", "the host's reference",
+                                    "the host's double-precision reference"};
 
 // y[m][n] = sum_k x[m][k] * w[n][k], in double, across the host's threads.
 void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, int64_t M, int64_t K,
@@ -127,30 +106,172 @@ void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, in
     th.join();
 }
 
+// The marker every byte of an answer's output is set to before the run.  An
+// element still holding it was never written: as int8 it is -128, past the
+// 4-sigma code the scales put at 127, and as int16, fp16 and fp32 a value no
+// product here can take.
+constexpr uint8_t kUnwrittenByte = 0x80;
+// A share of the output past this still holding the marker is an answer not
+// written, not a coincidence.
+constexpr double kUnwrittenShare = 0.5;
+
+// How much of an output still holds the marker, element by element.
+double unwrittenShare(const std::vector<uint8_t> &out, size_t elemBytes)
+{
+  if (out.empty() || elemBytes == 0)
+    return -1.0;
+  const size_t n = out.size() / elemBytes;
+  size_t marked = 0;
+  for (size_t e = 0; e < n; e++)
+  {
+    bool all = true;
+    for (size_t b = 0; b < elemBytes && all; b++)
+      all = out[e * elemBytes + b] == kUnwrittenByte;
+    marked += all;
+  }
+  return n ? (double)marked / (double)n : -1.0;
+}
+
+// An output's elements as the values they stand for: `io` is the type the
+// graph returns, `act` the plan's activation type -- an integer answer comes
+// back as codes at the output scale, or under floatIo already dequantized.
+bool decodeOutput(const std::vector<uint8_t> &out, clpeak_tflite::TfType io, clpeak_tflite::TfType act,
+                  std::vector<float> &got)
+{
+  using clpeak_tflite::TfType;
+  switch (io)
+  {
+  case TfType::F32:
+    if (out.size() != got.size() * 4)
+      return false;
+    std::memcpy(got.data(), out.data(), out.size());
+    return true;
+  case TfType::F16:
+  case TfType::BF16:
+    if (out.size() != got.size() * 2)
+      return false;
+    for (size_t i = 0; i < got.size(); i++)
+    {
+      uint16_t h;
+      std::memcpy(&h, &out[i * 2], 2);
+      got[i] = io == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
+    }
+    return true;
+  case TfType::I8:
+  {
+    if (out.size() != got.size())
+      return false;
+    const float scale = litertOutScale(kDim, 8);
+    for (size_t i = 0; i < got.size(); i++)
+      got[i] = scale * (float)(int8_t)out[i];
+    return true;
+  }
+  case TfType::I16:
+  {
+    if (out.size() != got.size() * 2)
+      return false;
+    const float scale = litertOutScale(kDim, 16);
+    for (size_t i = 0; i < got.size(); i++)
+    {
+      int16_t code;
+      std::memcpy(&code, &out[i * 2], 2);
+      got[i] = scale * (float)code;
+    }
+    return true;
+  }
+  default:
+    (void)act;
+    return false;
+  }
+}
+
+// What the marker says of a wrong answer: never written (it survived two
+// runs), written only after the run returned (a second run's read was
+// right), or neither -- an answer written, and wrong.
+enum class Miss { Wrong, Never, Late };
+Miss missOf(const LitertPeak::AnswerCheck &c)
+{
+  if (c.unwritten >= kUnwrittenShare && c.unwrittenRerun >= kUnwrittenShare)
+    return Miss::Never;
+  if (c.unwritten >= kUnwrittenShare && c.rerunPpm >= 0.0 && c.rerunPpm < clpeak::kWrongAnswerPpm)
+    return Miss::Late;
+  return Miss::Wrong;
+}
+
+// What the rate rows do without a form whose answer is wrong (gemm.cpp,
+// conv.cpp, block.cpp), as the accuracy row says it.
+constexpr const char *kRowConsequence =
+    "so the rate rows leave this form of the format out, and are withheld where no form of it answers right";
+
+// The reason the accuracy row of a wrong answer is filed under, its figure
+// included: what the marker said of it, or what it read.
+std::string wrongRowReason(const LitertPeak::AnswerCheck &c)
+{
+  char pct[32];
+  const std::string figure =
+      c.ppm >= 0.0 ? " (" + std::to_string((long long)c.ppm) + " ppm against " + kWords.refFull + ")" : "";
+  if (missOf(c) == Miss::Never)
+  {
+    std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
+    return "this accelerator never wrote its answer" + figure + ": after two runs, " + pct +
+           " of the output still held what clpeak wrote there before the first -- a runtime that does not "
+           "return the result, not one that loses precision -- " + kRowConsequence;
+  }
+  if (missOf(c) == Miss::Late)
+    return "this accelerator's answer landed only after the run that computed it had returned" + figure +
+           ": the output still held what clpeak wrote there before the run, and a second run's read was "
+           "right -- its timings would not cover the work, " + kRowConsequence;
+  return clpeak::wrongAnswerRowReason(c, kWords, kRowConsequence);
+}
+
+// A form, in the words a reason or a note gives it after the format's label.
+std::string formWords(const LitertForm &form)
+{
+  std::string s;
+  if (form.conv1x1)
+    s += " written as a 1x1 convolution";
+  if (form.gpuInt8Kernels)
+    s += std::string(s.empty() ? "" : ",") + " with the GPU's 8-bit kernels allowed";
+  if (form.floatIo)
+    s += std::string(s.empty() ? "" : ",") + " with float inputs and outputs";
+  if (form.gpuIrModel)
+    s += std::string(s.empty() ? "" : ",") + " through the IrModel pipeline";
+  return s;
+}
+
 } // namespace
 
 const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev,
-                                                       LitertFormat f, bool conv1x1)
+                                                       LitertFormat f, const LitertForm &form)
 {
   using clpeak_tflite::TfType;
-  const auto key = std::make_tuple((int)dev.accel, (int)f, conv1x1);
+  const LitertPlan base = litertPlanFor(f, dev.accel);
+  // A choice the plan does not have is the form it does have, so one graph
+  // and one session is checked once whichever way it is asked for.
+  LitertForm k = form;
+  k.gpuInt8Kernels = k.gpuInt8Kernels && base.gpuInt8KernelChoice;
+  k.floatIo = k.floatIo && litertIoType(litertFormPlan(base, k)) != base.act;
+  k.gpuIrModel = k.gpuIrModel && base.gpuPipelineChoice;
+  const auto key = std::make_tuple((int)dev.accel, (int)f, k.conv1x1, k.gpuInt8Kernels, k.floatIo, k.gpuIrModel);
   auto found = answerChecks_.find(key);
   if (found != answerChecks_.end())
     return found->second;
   AnswerCheck &c = answerChecks_[key];
-  const LitertPlan plan = litertPlanFor(f, dev.accel);
-  if (!plan.applies)
+  if (!base.applies)
   {
     c.status = ResultStatus::Unsupported;
-    c.error = plan.whyNot;
+    c.error = base.whyNot;
     return c;
   }
+  const LitertPlan plan = litertFormPlan(base, k);
+  const TfType io = litertIoType(plan);
+  const std::string label = std::string(litertFormatLabel(f)) + formWords(k);
 
   std::vector<float> weights;   // exactly what the accelerator multiplies
   std::string err;
   auto s = LitertSession::create(rt, dev,
-                                 litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights, 0x85a308d3u, conv1x1),
-                                 litertConfigFor(plan), err);
+                                 litertPlainMatMulModel(plan, kDim, kDim, kDim, &weights, 0x85a308d3u, k.conv1x1),
+                                 litertConfigFor(plan, k), err);
   if (!s)
   {
     c.status = ResultStatus::Unsupported;
@@ -165,7 +286,9 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   }
 
   // The activations: the same generator as the speed rows, rounded to the
-  // width the model takes them in, which is the width the device sees.
+  // width the model takes them in, which is the width the device sees -- an
+  // integer plan's codes, handed over as codes or, under floatIo, as the
+  // float values they stand for, which its QUANTIZE maps back exactly.
   const int64_t count = kDim * kDim;
   std::vector<double> a((size_t)count);
   std::string raw;
@@ -203,22 +326,29 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   {
     const float scale = litertActScale(abits);
     const long qmax = (1L << (abits - 1)) - 1;
-    raw.resize((size_t)count * (abits / 8));
+    const size_t eb = io == TfType::F32 ? 4 : (size_t)(abits / 8);
+    raw.resize((size_t)count * eb);
     for (int64_t i = 0; i < kDim; i++)
       for (int64_t j = 0; j < kDim; j++)
       {
         const float v = litertValueAt(i, j, 0x243f6a88u);
         long q = std::lround(v / scale);
         q = std::max(-qmax, std::min(qmax, q));
-        if (abits == 8)
+        char *dst = &raw[(size_t)(i * kDim + j) * eb];
+        if (io == TfType::F32)
+        {
+          const float fv = scale * (float)q;
+          std::memcpy(dst, &fv, 4);
+        }
+        else if (abits == 8)
         {
           const int8_t code = (int8_t)q;
-          std::memcpy(&raw[(size_t)(i * kDim + j)], &code, 1);
+          std::memcpy(dst, &code, 1);
         }
         else
         {
           const int16_t code = (int16_t)q;
-          std::memcpy(&raw[(size_t)(i * kDim + j) * 2], &code, 2);
+          std::memcpy(dst, &code, 2);
         }
         a[(size_t)(i * kDim + j)] = scale * (double)q;
       }
@@ -230,61 +360,26 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
     return c;
   }
 
+  // The marker goes in first, so an answer never written reads as one
+  // (AnswerCheck::unwritten).  A buffer that cannot be marked leaves the
+  // check as it was.
+  std::string markErr;
+  const bool marked = s->fillOutput(0, kUnwrittenByte, markErr);
   std::vector<uint8_t> out;
   if (!s->writeInput(0, raw.data(), raw.size(), err) || !s->run(err) || !s->outputBytes(0, out, err))
   {
-    c.status = ResultStatus::Error;
+    // A kernel that declines the type at its first inference ("failed to
+    // prepare") is a capability, as in every rate row.
+    c.status = litertFailureStatus(err);
     c.error = err;
     return c;
   }
-  s.reset();
+  const size_t elemBytes = litertElemBytes(io, 1);
+  if (marked)
+    c.unwritten = unwrittenShare(out, elemBytes);
 
   std::vector<float> got((size_t)count);
-  bool sized = true;
-  switch (plan.act)
-  {
-  case TfType::F32:
-    sized = out.size() == got.size() * 4;
-    if (sized)
-      std::memcpy(got.data(), out.data(), out.size());
-    break;
-  case TfType::F16:
-  case TfType::BF16:
-    sized = out.size() == got.size() * 2;
-    if (sized)
-      for (size_t i = 0; i < got.size(); i++)
-      {
-        uint16_t h;
-        std::memcpy(&h, &out[i * 2], 2);
-        got[i] = plan.act == TfType::F16 ? litertHalfToFloat(h) : litertBf16ToFloat(h);
-      }
-    break;
-  case TfType::I8:
-  {
-    sized = out.size() == got.size();
-    const float scale = litertOutScale(kDim, 8);
-    if (sized)
-      for (size_t i = 0; i < got.size(); i++)
-        got[i] = scale * (float)(int8_t)out[i];
-    break;
-  }
-  case TfType::I16:
-  {
-    sized = out.size() == got.size() * 2;
-    const float scale = litertOutScale(kDim, 16);
-    if (sized)
-      for (size_t i = 0; i < got.size(); i++)
-      {
-        int16_t code;
-        std::memcpy(&code, &out[i * 2], 2);
-        got[i] = scale * (float)code;
-      }
-    break;
-  }
-  default:
-    sized = false;
-  }
-  if (!sized)
+  if (!decodeOutput(out, io, plan.act, got))
   {
     c.status = ResultStatus::Error;
     c.error = "unexpected output size";
@@ -293,53 +388,78 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
 
   std::vector<double> ref;
   referenceGemm(a, weights, kDim, kDim, kDim, ref);
-  const double ppm = relativeRmsPpm(got, ref);
-  if (ppm < 0.0)
-  {
-    c.status = ResultStatus::Error;
-    c.error = "reference result was all zero";
+  // The reference multiplies values under 1 in magnitude, in double, so a NaN
+  // or an infinity in the figure is the accelerator's; and no sum here can
+  // pass 256, which overflows no width a kernel accumulates in.  It is a
+  // wrong answer, not lost precision, and wrongAnswer() refuses the format's
+  // rates for it as it does for one past the line.
+  clpeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
+  if (c.status != ResultStatus::Ok && !c.nonFinite)
     return c;
-  }
-  // A NaN or an infinity anywhere in the answer makes the figure one too.
-  // The reference multiplies values under 1 in magnitude, in double, so the
-  // non-finite side is the accelerator's; and no sum here can pass 256, which
-  // overflows no width a kernel accumulates in.  It is a wrong answer, not
-  // lost precision, and wrongAnswer() refuses the format's rates for it as it
-  // does for one past 10%.
-  if (!std::isfinite(ppm))
+
+  // A wrong answer is run once more and read again, the marker left as the
+  // first run left it: an answer never written still reads as the marker,
+  // and one written only after the run returned reads right this time.
+  if (c.wrong())
   {
-    c.nonFinite = true;
-    c.status = ResultStatus::Error;
-    c.error = "this accelerator's answer holds NaN or infinity where the host's "
-              "double-precision reference is finite everywhere: it computed something "
-              "other than this matmul, so there is no error figure to report";
-    return c;
+    std::vector<uint8_t> again;
+    std::vector<float> got2((size_t)count);
+    std::string rerr;
+    if (s->run(rerr) && s->outputBytes(0, again, rerr) && decodeOutput(again, io, plan.act, got2))
+    {
+      if (marked)
+        c.unwrittenRerun = unwrittenShare(again, elemBytes);
+      const double p2 = clpeak::answerPpm(got2.data(), ref.data(), got2.size());
+      c.rerunPpm = std::isfinite(p2) ? p2 : -1.0;
+    }
+    CLPEAK_VLOG("litert-numeric-error[%s/%s]: wrong answer, %.0f ppm%s; %.1f%% of the output still held the "
+                "marker after the run, %.1f%% after a second run, which read %.0f ppm\n",
+                dev.displayName.c_str(), label.c_str(), c.ppm, c.nonFinite ? " (NaN or infinity)" : "",
+                100.0 * c.unwritten, 100.0 * c.unwrittenRerun, c.rerunPpm);
   }
-  c.ppm = ppm;
-  CLPEAK_VLOG("litert-numeric-error[%s/%s%s]: %.2f ppm\n", dev.displayName.c_str(), litertFormatLabel(f),
-              conv1x1 ? " as 1x1 convolution" : "", ppm);
+  else
+    CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label.c_str(), c.ppm);
   return c;
 }
 
-std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
-                                    bool conv1x1)
+LitertForm LitertPeak::resolveIo(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                                 LitertForm form)
 {
-  const AnswerCheck &c = answerCheck(rt, dev, f, conv1x1);
-  const std::string what =
-      std::string(litertFormatLabel(f)) + (conv1x1 ? " written as a 1x1 convolution" : "");
-  if (c.nonFinite)
-    return "this accelerator's answer for " + what +
-           " holds NaN or infinity where the host's reference is finite everywhere "
-           "(litert_numeric_error) -- a kernel that does not compute the format, not one that "
-           "loses precision -- so its rate is not reported";
-  if (c.ppm < kLitertWrongAnswerPpm)
+  const LitertPlan plan = litertPlanFor(f, dev.accel);
+  form.floatIo = false;
+  if (!plan.applies || litertIoType(litertFormPlan(plan, LitertForm{false, false, true})) == plan.act)
+    return form;
+  auto right = [](const AnswerCheck &c) { return c.status == ResultStatus::Ok && c.ppm >= 0.0 && !c.wrong(); };
+  if (right(answerCheck(rt, dev, f, form)))
+    return form;
+  LitertForm floated = form;
+  floated.floatIo = true;
+  if (right(answerCheck(rt, dev, f, floated)))
+    return floated;
+  return form;
+}
+
+std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device_info_t &dev, LitertFormat f,
+                                    const LitertForm &form)
+{
+  const AnswerCheck &c = answerCheck(rt, dev, f, form);
+  if (!c.wrong())
     return std::string();
+  const std::string what = std::string(litertFormatLabel(f)) + formWords(form);
   char pct[32];
-  std::snprintf(pct, sizeof pct, "%.0f%%", c.ppm / 10000.0);
-  return "this accelerator's answer for " + what + " is wrong by " + pct +
-         " (litert_numeric_error: " + std::to_string((long long)c.ppm) +
-         " ppm against the host's reference) -- a kernel that does not compute the format, not one "
-         "that loses precision -- so its rate is not reported";
+  // The marker clpeak wrote before the run said where the answer went.
+  if (missOf(c) == Miss::Never)
+  {
+    std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
+    return "this accelerator never wrote its answer for " + what + ": after two runs, " + pct +
+           " of the output still held what clpeak wrote there before the first -- a runtime that does "
+           "not return the result, not one that loses precision -- so its rate is not reported";
+  }
+  if (missOf(c) == Miss::Late)
+    return "this accelerator's answer for " + what + " landed only after the run that computed it had "
+           "returned: the output still held what clpeak wrote there before the run, and a second run's "
+           "read was right -- its timings would not cover the work, so its rate is not reported";
+  return clpeak::wrongAnswerReason(c, kWords, what);
 }
 
 int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_info_t &dev,
@@ -349,43 +469,86 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
 
   auto test = currentDeviceScope->beginTest(
       {"litert_numeric_error", "LiteRT matmul numeric error", "ppm", Category::Compute,
-       "How far each format's 1024-cubed matmul drifts from a double-precision "
-       "reference built from the exact values the accelerator was handed, in "
-       "parts per million -- what the speed rows cost.  The stored operands' "
-       "rounding cancels; what remains is the arithmetic and the width the "
-       "answer was kept in.",
+       "How far each format's answer on a 1024-cubed matmul drifts from a "
+       "double-precision reference, in parts per million.  The reference "
+       "multiplies the exact values this accelerator was given, so only the "
+       "arithmetic and the width the answer was kept in remain.",
        TestShape::Heterogeneous, "model format"});
+
+  // What another form of the same product read, for the clause that quotes
+  // it: its figure, or why it has none.
+  auto reading = [&](LitertFormat f, const LitertForm &form) -> std::string {
+    const AnswerCheck &c = answerCheck(rt, dev, f, form);
+    if (c.wrong() && missOf(c) == Miss::Never)
+      return "no answer";
+    if (c.wrong() && missOf(c) == Miss::Late)
+      return "a late answer";
+    if (c.wrong())
+      return "a wrong answer";
+    if (c.ppm < 0.0)
+      return "nothing";
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.0f ppm", c.ppm);
+    return buf;
+  };
 
   for (const Variant &v : kVariants)
   {
     if (clpeak::cancelRequested())
       break;
     const char *label = litertFormatLabel(v.f);
-    const AnswerCheck &c = answerCheck(rt, dev, v.f);
+    const LitertPlan plan = litertPlanFor(v.f, dev.accel);
+    // The row reads FULLY_CONNECTED with the GPU's 8-bit kernels disallowed,
+    // in the inputs and outputs the format answers right with (resolveIo).
+    const LitertForm form = resolveIo(rt, dev, v.f, LitertForm());
+    const AnswerCheck &c = answerCheck(rt, dev, v.f, form);
     std::string note = v.note;
-    if (c.nonFinite || c.ppm >= kLitertWrongAnswerPpm)
-      note += "  A wrong answer, not a loss of precision: the accelerator's kernel does not "
-              "compute this format, and its rate rows are withheld.";
-    if (c.ppm < 0.0)
+    if (c.ppm < 0.0 && !c.wrong())
     {
       test.skip(label, c.status, c.error, note);
       continue;
     }
-    // int8's rate races its layers written as 1x1 convolutions too
-    // (gemm.cpp): the row reads the FULLY_CONNECTED answer and says what
-    // the convolution's read.
-    if (v.f == LitertFormat::Int8Qdq)
+    // One sentence after the format's: an integer format the accelerator
+    // answered only with float inputs and outputs, and what its own int8 or
+    // int16 ones gave; then the other forms the rate rows race -- int8's
+    // layers as 1x1 convolutions (gemm.cpp), and on the GPU its 8-bit
+    // kernels and its IrModel pipeline.
+    std::string extra;
+    if (form.floatIo)
     {
-      const AnswerCheck &cc = answerCheck(rt, dev, v.f, true);
-      if (cc.ppm >= 0.0)
-      {
-        char buf[160];
-        std::snprintf(buf, sizeof buf,
-                      "  Written as a 1x1 convolution, the form litert_gemm races it against, the "
-                      "same product reads %.0f ppm.",
-                      cc.ppm);
-        note += buf;
-      }
+      LitertForm own = form;
+      own.floatIo = false;
+      extra = "Float inputs and outputs, as " +
+              std::string(plan.act == clpeak_tflite::TfType::I16 ? "int16" : "int8") + " ones gave " +
+              reading(v.f, own);
+    }
+    const bool conv = v.f == LitertFormat::Int8Qdq;
+    std::vector<std::pair<std::string, std::string>> alts;   // (reading, how)
+    if (conv)
+      alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{true, false, false})), "as a 1x1 convolution"});
+    if (plan.gpuInt8KernelChoice)
+      alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{false, true, false})),
+                      "with 8-bit kernels"});
+    if (conv && plan.gpuInt8KernelChoice)
+      alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{true, true, false})), "both ways"});
+    if (plan.gpuPipelineChoice)
+      alts.push_back({reading(v.f, resolveIo(rt, dev, v.f, LitertForm{false, false, false, true})),
+                      "through the IrModel pipeline"});
+    if (!alts.empty())
+    {
+      extra += extra.empty() ? "Other forms gave " : "; other forms gave ";
+      for (size_t i = 0; i < alts.size(); i++)
+        extra += std::string(i == 0 ? "" : (i + 1 == alts.size() ? " and " : ", ")) + alts[i].first + " " +
+                 alts[i].second;
+    }
+    if (!extra.empty())
+      note += "  " + extra + ".";
+    // A wrong answer is no precision figure: the row is an Error carrying
+    // it, beside the rate rows it withheld.
+    if (c.wrong())
+    {
+      test.skip(label, ResultStatus::Error, wrongRowReason(c), note);
+      continue;
     }
     test.emit(label, (float)c.ppm, note.c_str());
   }

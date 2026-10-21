@@ -102,10 +102,15 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // swizzle too.  Which block size wins is the swizzle granularity and the two
 // disagree -- Mali climbs to 16x16, Apple peaks at 2x2 -- so both ends run.
 //
-// The other five backends carry the two 1D shapes alone.  On an M1 Pro that
-// leaves OpenCL at 164 and Metal at 160 where Vulkan's blocked walk reaches
-// 176, so porting it is worth real bandwidth on Apple; Mali's OpenCL images are
-// evidently linear, since they sit at the roof on the row-major walk already.
+// OpenCL and oneAPI race the same four shapes, all of them divide-free: the
+// extent and the block are powers of two, so every coordinate is a shift and
+// a mask, where a divide by a run-time value is a long emulated sequence on a
+// GPU without an integer divider -- Intel's among them.  With the 1D shapes
+// alone, and OpenCL dividing three times a fetch, an Arc A380 read about half
+// its Vulkan rate through both.  CUDA, ROCm and Metal still carry the two 1D
+// shapes alone: on an M1 Pro that leaves Metal at 160 where Vulkan's blocked
+// walk reaches 176.  Mali's OpenCL images are evidently linear, since they sat
+// at the roof on the row-major walk already.
 //
 // Unlike the MAD chains, no walk can flatter the result and no ratio guard is
 // needed: every shape reads every pixel exactly once, so the byte count is
@@ -145,6 +150,28 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    totals below are the same as they were under the ping-pong form and the
 //    numbers stay comparable in units.
 //
+//  - The squaring shape runs 128 chain instructions per loop trip (MAD_128).
+//    The trip counter's add, compare and branch are ops the per-work-item
+//    budget does not count, and Apple's compilers keep the loop as written:
+//    on an M1 Pro the identical chain read 4.45 TFLOPS at 16 per trip and
+//    5.13 at 128, against a 5.31 peak, and a runtime trip count read the
+//    same.  That 16% is why mixed precision, already 128 deep, read above
+//    fp32 there.  Compilers that unroll lose nothing: Intel's OpenCL compiler
+//    turns both depths into the same 256-instruction trip.  16-wide vectors
+//    keep MAD_16 -- already 256 lane-FMAs a trip -- because as one
+//    straight-line trip Intel's CPU OpenCL runtime stopped vectorising
+//    float16 across work-items, 1962 -> 829 GFLOPS on a Threadripper 3955WX.
+//    The affine shape keeps 16 per trip in Vulkan, OpenCL and Metal: deeper,
+//    it gained nothing on any GPU measured and cost llvmpipe's emulated fp16
+//    26-43%.  oneAPI keeps both shapes as they were and races a third, the
+//    uniform-b affine chain at 128 a trip: its loops are pinned rolled
+//    (#pragma unroll 1) on every device, Intel's GPUs included, where the
+//    affine shape is the one that wins, but in place of its affine shape that
+//    one cost Intel's CPU runtime up to 63% at widths 2-4 (compute_float.cpp
+//    there has the numbers).  fp64 stays at 16: Vulkan's and
+//    oneAPI's 512-op fp64 budget cannot fill a 128-deep trip at width 4, and
+//    Apple GPUs, where the counter costs, have no fp64.
+//
 //  - Quadratic, never affine.  x = c*x + c is an affine recurrence: two steps
 //    compose into c*c*x + c*c + c, so a compiler is free to hoist the
 //    coefficient and halve the loop.  Squaring raises the polynomial degree,
@@ -154,8 +181,8 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //    second shape (below) is the one exception, and it is why that exception
 //    is worth revisiting.
 //
-// Two shapes, raced.  No single recurrence reaches peak on every vendor: the
-// two dominant register files have opposite constraints.
+// Two recurrences, raced.  No single recurrence reaches peak on every vendor:
+// the two dominant register files have opposite constraints.
 //
 //   x = x*x + c      reads {x, x, c}.  Intel Alchemist (Xe-HPG) halves any
 //                    three-source mad whose operands are not all distinct
@@ -164,13 +191,41 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 //                    chain count and every work-group size.  Full rate on
 //                    NVIDIA, Apple, Adreno and pre-Xe Intel.
 //
-//   x = a*x + b      reads three distinct registers.  Full rate on Alchemist;
-//                    NVIDIA is the mirror image and halves it at one chain,
-//                    which four independent chains restore.
+//   x = a*x + b      a per-lane: three distinct registers.  NVIDIA is the
+//                    mirror image and halves it at one chain, which four
+//                    independent chains restore.
 //
-// Vulkan, OpenCL, oneAPI and Metal carry both shapes, time both, and report
-// the faster -- landing within 3% of the best measured shape on every device
-// tested.  That covers every backend that can run on Alchemist.
+// On Alchemist three distinct registers are not enough either.  At SIMD32 a
+// 32-lane fp32 value spans four GRFs, two in each register bank in the same
+// order, and a mad that reads all three sources from one bank pays for the
+// conflict -- which the allocator's natural layout makes the common case.  At
+// SIMD16 each value sits in one bank and the conflict mostly goes away, but
+// Vulkan's and OpenCL's fp16 then runs at its fp32 rate.  So Vulkan, OpenCL
+// and oneAPI time the float families' affine chain at two sub-group widths:
+// Vulkan at the width its pipelines are pinned to and at half of it, OpenCL
+// and oneAPI at the compiler's choice and pinned to 16
+// (intel_reqd_sub_group_size, reqd_sub_group_size, where it is offered).  On
+// an Arc A380 (driver 8993), whose fp32 peak is ~5.0 TFLOPS, fp32 read
+// 4.78-4.83 in Vulkan, 3.92-3.95 in OpenCL and 4.08-4.12 in oneAPI at the
+// compiler's width against 4.87-4.88, 4.93-4.98 and 4.85-4.88 at 16; mixed
+// precision 3.44-3.55, 3.98-4.88 and 3.89 against 4.60-4.80, 4.68-4.89 and
+// 4.60.  fp16 read 9.48-9.56 at SIMD32 in Vulkan and OpenCL against 4.92-4.95
+// at 16 -- but 9.50 at 16 in oneAPI, whose compiler keeps the packed rate
+// there.  The two widths race as a clpeak::FormRace (form_race.h) that drops
+// only a clear loser: a tie at one vector width does not predict the next,
+// because the allocator lays each width out afresh.
+//
+// A uniform addend is no substitute.  b = the kernel's scalar + 2 caps the
+// conflict at one half of a mad, and IGC's own listing (ocloc -device
+// acm-g11) showed it conflict-free at SIMD32 -- yet the same A380 read it at
+// 4.12 in Vulkan fp32 and 6.60 in Vulkan fp16, against 4.81 and 9.50 with b
+// per-lane.  So b is per-lane (a + 2), and a listing is no substitute for
+// timing.  oneAPI still races a uniform-b chain as its third kernel (see the
+// loop-trip rule above).
+//
+// Vulkan, OpenCL and oneAPI race these and report the fastest.  Metal, which
+// never runs on Alchemist, races the two shapes alone.  That covers every
+// backend that can run on Alchemist.
 //
 // CUDA and ROCm deliberately do not race.  Each targets a single vendor, and
 // racing costs roughly 2x the compute-test budget: on NVIDIA the squaring
@@ -218,7 +273,7 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // fold was 15.5x.
 static const float MAX_ALT_CHAIN_RATIO = 6.0f;
 
-// compute_sp/hp/dp_kernels.cl  (128 iters * MAD_16 * 2 ops per MAD = 4096)
+// compute_sp/hp/mp_kernels.cl  (16 iters * MAD_128 * 2 ops per MAD = 4096)
 static const unsigned int COMPUTE_FP_WORK_PER_WI = 4096;
 
 // fp64 runs at 1/16-1/64 of fp32 on most consumer GPUs, so the same per-WI
@@ -237,14 +292,17 @@ static const unsigned int COMPUTE_INT_WORK_PER_WI = 2048;
 // same way -- one STEP is two dots into a pair of accumulators that feed each
 // other -- and every variant issues 512 STEPs, so 1024 dots * 8 ops = 8192 per
 // WI (1 chain = 64 iters * 8 steps, 8 chains = 64 * 1 * 8; OpenCL's v16 is
-// 32 * 1 * 16).  Read the comment at the top of any of those files for why the
-// chain has to be shaped that way; a different shape silently reports a wrong
-// number.
+// 32 * 1 * 16).  Vulkan also races a second shape, four accumulators in a
+// cycle, over the same 1024 dots.  Read the comment at the top of any of those
+// files (Vulkan's is shaders/dp4a_chain.glsl) for why the chain has to be
+// shaped that way; a different shape silently reports a wrong number.
 static const unsigned int COMPUTE_INT8_DP_WORK_PER_WI = 8192;
 
-// coopmat_*.comp: 16x16x16 tile, 256 MulAdds per subgroup, one subgroup
-// (32 threads) per work-group.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops;
-// per work-item: 2,097,152 / 32 = 65,536 ops.
+// The unit tensor-core runs are budgeted in: 256 MulAdds of a 16x16x16 tile
+// per 32-wide subgroup.  Per subgroup: M*N*K*2*MulAdds = 2,097,152 ops; per
+// work-item: 2,097,152 / 32 = 65,536 ops.  Vulkan's coopmat_*.comp run four
+// times it per work-group (kCoopGroupScale in src/vulkan/coopmat.cpp), as
+// CUDA's fp16, bf16 and int8 WMMA kernels do.
 static const unsigned int COOPMAT_WORK_PER_WI = 65536;
 
 // MulAdds in one trip of the coopmat inner loop.  Must match CM_MMA_PER_TRIP
@@ -287,13 +345,30 @@ static inline uint64_t targetGlobalThreads(uint32_t numCUs)
 // Calibration
 // ---------------------------------------------------------------------------
 
-// Default --max-time budget (microseconds).  500 ms is comfortably above
-// the empirical M1 clock-ramp window (220-440 ms) so peak-frequency steady
-// state is reached, while still leaving usable headroom under Adreno's
-// 500 ms hangcheck.  This is the single source of truth -- CliOptions,
-// benchmark_config_t::forDevice, and the backend constructors all read it.
-// Keep the "500 ms" mention in the --help text in src/common/options.cpp in sync.
+// Default --max-time-gpu budget (microseconds): how long a GPU backend may
+// keep a GPU busy in one go.  Every GPU backend sizes a test's timed batch
+// to it -- Vulkan records that batch as a single submission.  A driver
+// resets a GPU that one submission holds too long: Windows' TDR and older
+// Qualcomm kernel drivers allow 2 s, and a Galaxy S24's Adreno 750 ran a
+// 0.93 s submission and was reset 2.8 s into a 7.4 s one, so its limit lies
+// between those.  500 ms is well under both, and past the M1's clock ramp
+// (220-440 ms), so the batch is timed at steady clocks.  The ML runtimes on a
+// GPU have their own budget (DEFAULT_ML_GPU_TARGET_TIME_US).  This is the
+// single source of truth -- CliOptions, benchmark_config_t::forDevice, and
+// the backend constructors all read it.  Keep the "500 ms" mention in the
+// --help text in src/common/options.cpp in sync.
 static const unsigned int DEFAULT_TARGET_TIME_US = 500000;
+
+// Default --max-time-ml-gpu budget (microseconds): the longest one run of an
+// ML runtime's graph on a GPU may be predicted to take (gpuRunCapUs).  The
+// ONNX Runtime, LiteRT and Core ML backends size no batch to it: a run is
+// the whole graph, and the cap can only end a ladder before a size whose one
+// run would take longer.  So it sits above the GPU backends' 500 ms, which
+// would stop the ladders short of the sizes a GPU peaks at, and under TDR's
+// 2 s and the 2.8 s the S24 was reset at -- though above the 0.93 s it was
+// seen to survive.  Keep the "1000 ms" mention in the --help text in
+// src/common/options.cpp in sync.
+static const unsigned int DEFAULT_ML_GPU_TARGET_TIME_US = 1000000;
 
 // The native CPU backend has no GPU watchdog to dodge, and its per-test timed
 // phases complete much faster, so a longer budget steadies the numbers against
@@ -321,6 +396,60 @@ static const unsigned int DEFAULT_CPU_TARGET_TIME_US = 2000000;  // 2000 ms
 // instead of stopping at 10000 iterations.
 unsigned int pickIters(double per_iter_us, unsigned int target_us,
                        unsigned int forced, unsigned int max_iters = 10000);
+
+// A run this long is its own warm-up.  An ML runtime's rung warms its graph
+// before the probe that sizes the timed batch: one run for the runtime's
+// lazy compilation, then --warmup more for clocks and caches.  At the top of
+// a ladder one run is seconds of unbroken load -- a Galaxy S24's CPU took
+// 28 s per run of a 4096-wide fp32 chain, and ran it four times for one
+// reading, heating the phone so the reading fell -- where a clock ramp takes
+// milliseconds.
+constexpr double kSelfWarmingRunUs = 1.0e6;
+
+// Warm a graph and return its probe: one timed run, in microseconds, <= 0 if
+// a run failed.  `run(n)` runs the graph n times and returns the mean per
+// run, <= 0 on failure.  The first run is never timed: runtimes compile on
+// it.  When it lasted kSelfWarmingRunUs the probe follows at once, and a
+// probe that lasts as long stands -- the warm-up would only have repeated
+// it.  A shorter probe says the first run was mostly compilation, and the
+// warm-up goes ahead with the probe counted as one of its runs.
+template <class RunN>
+double warmAndProbe(RunN &&run, unsigned int warmup)
+{
+  const double first = run(1);
+  if (first <= 0.0)
+    return first;
+  if (first >= kSelfWarmingRunUs)
+  {
+    const double probe = run(1);
+    if (probe <= 0.0 || probe >= kSelfWarmingRunUs || warmup == 0)
+      return probe;
+    warmup--;
+  }
+  if (warmup > 0 && run(warmup) <= 0.0)
+    return -1.0;
+  return run(1);
+}
+
+// When an ML runtime's ladder stops climbing at a size that fell: below
+// kLadderDropShare of the row's best, with one run of the next size
+// predicted at kLadderDropRunUs or more.  A ladder grants one size without
+// gain past the best, because a dip the next size recovers from is
+// ordinary -- QNN's int8 matmul read 3.98, 3.66, 13.2 TOPS across
+// 2048..8192; ONNX Runtime's CPU provider on a Threadripper reads 650, 590
+// and, half the time, 1630 GFLOPS fp32 across 1024..4096; Core ML's CPU
+// depthwise convolution 28, 19, 35.  Where the next size is cheap it keeps
+// that chance: the Threadripper's was predicted at 4 s a run.  Where one run
+// of it is seconds of every core, as on a phone, it is heat spent on a
+// falling ladder: on a Galaxy S24's CPU two such sizes, predicted at 12.6
+// and 12.8 s a run, read 0.32x and 0.40x of their rows' best.
+constexpr double kLadderDropShare = 0.90;
+constexpr double kLadderDropRunUs = 8.0e6;
+
+inline bool ladderDropEnds(double rate, double best, double nextRunUs)
+{
+  return rate < best * kLadderDropShare && nextRunUs >= kLadderDropRunUs;
+}
 
 // ---------------------------------------------------------------------------
 // Benchmark data initialisation
@@ -397,6 +526,35 @@ struct benchmark_config_t {
                                       uint64_t dedicatedMemBytes = 0);
 };
 
+// The longest one run of an ML runtime's graph -- an ONNX Runtime Run, a
+// LiteRT invoke, a Core ML prediction -- may be predicted to take on a device
+// of `type`, in microseconds, or 0 where nothing bounds it.  A runtime can
+// hand a GPU a whole graph as one submission, and a driver resets a GPU one
+// submission holds too long: ONNX Runtime's WebGPU provider submits every
+// sixteen dispatches, so a 4096-wide fp32 chain went to a Galaxy S24's
+// Adreno 750 as 7.4 s of work and the device was reset 2.8 s in.  On a GPU
+// the bound is --max-time-ml-gpu (DEFAULT_ML_GPU_TARGET_TIME_US), which the
+// ML backends carry in cfg.targetTimeUs -- nothing else there reads it.
+// Only on a GPU: those watchdogs guard a device that also drives a display,
+// and an NPU drives none.
+inline double gpuRunCapUs(DeviceType type, const benchmark_config_t &cfg)
+{
+  return type == DeviceType::Gpu ? (double)cfg.targetTimeUs : 0.0;
+}
+
+// Whether an ML runtime's matmul ladder on a device of `type` times a scout
+// -- a chain an eighth of its first size's work -- before that size.  The
+// scout's rate predicts the first size for the caps on one run and one
+// multiply, and a row too slow for the first size starts at the scout's
+// instead: on a mid-range phone's CPU LiteRT's int16x8 ran a 1024-wide chain
+// at 38 s a run, five times for one reading.  Not on an NPU, where a scout
+// is one more compile and no format has come near the caps at the first
+// size.
+inline bool mlLadderScouts(DeviceType type)
+{
+  return type != DeviceType::Accelerator;
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostics.  Everything clpeak has to say outside a reading -- a missing
 // library, a failed kernel build, a calibration decision -- is one message
@@ -454,7 +612,10 @@ LogSink *logSink();
 // crash can take the process down.
 void stderrWrite(const std::string &text);
 // The fd stderrWrite() uses while a capture is redirecting fd 2, or -1.
+// Captures nest (an ONNX attach mute inside the inventory's), so a scope
+// reads the current one on entry and puts it back on exit.
 void setRealStderrFd(int fd);
+int  realStderrFd();
 }
 
 // ---------------------------------------------------------------------------

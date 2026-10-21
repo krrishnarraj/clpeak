@@ -29,6 +29,12 @@ class _StubBindings implements ClpeakBindings {
   ClpeakRequestCancel get requestCancel => () {};
 
   @override
+  void setOnScreen(bool onScreen) {}
+
+  @override
+  void setPaused(bool paused) {}
+
+  @override
   String version() => 'test';
 
   @override
@@ -156,7 +162,7 @@ void main() {
       ),
     );
 
-    // The list loads off disk; settle until both sections render.
+    // The list loads off disk; settle until it renders.
     for (var i = 0;
         i < 50 && find.text('DID NOT FINISH').evaluate().isEmpty;
         i++) {
@@ -167,8 +173,11 @@ void main() {
     await tester.pump();
 
     expect(find.text('DID NOT FINISH'), findsNWidgets(2));
-    expect(find.text('RUNS THAT DID NOT FINISH'), findsOneWidget);
     expect(find.text('20260918_151958'), findsOneWidget);
+    // One list, newest first: the saved run of the 18th above the two of
+    // the 16th that did not finish, which have no section of their own.
+    expect(tester.getTopLeft(find.text('20260918_151958')).dy,
+        lessThan(tester.getTopLeft(find.text('DID NOT FINISH').first).dy));
 
     // A RenderFlex overflow paints an error and reports it to the binding.
     expect(tester.takeException(), isNull);

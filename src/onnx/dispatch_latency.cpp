@@ -181,40 +181,36 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   auto test = currentDeviceScope->beginTest(
       {"onnx_dispatch_latency", "ONNX dispatch latency", "s",
        Category::Latency,
-       "The fixed cost of handing one piece of work to this provider, with "
-       "the arithmetic made deliberately negligible.  It is why a chip "
-       "advertising tens of TOPS can still lose to the host on small work, "
-       "and no throughput row can show it.",
+       "The fixed cost of handing this provider one piece of work whose "
+       "arithmetic is negligible, and of creating a session for it.  It is why "
+       "a chip rated at tens of TOPS can still lose to the host on small "
+       "work.",
        TestShape::Heterogeneous, "what is submitted"});
 
+  const char *trivialNote =
+      "One multiply over 64 values, so nearly all of this is overhead.";
   if (trivial.perRunUs > 0.0)
-    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6),
-              "One multiply over 64 values -- as close to doing nothing as a "
-              "graph can get, so almost all of this is overhead.");
+    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote);
   else
-    test.skip("trivial_op", trivial.status, trivial.error,
-              "One multiply over 64 values.");
+    test.skip("trivial_op", trivial.status, trivial.error, trivialNote);
 
   const std::string mmNote =
-      std::string("A 256x256x256 matrix multiply in ") +
+      std::string("A 256-cubed matmul in ") +
       (mmDtype == ONNX_DT_FLOAT ? "fp32" : "fp16") +
-      ": 34 million operations, which any accelerator here should finish in "
-      "well under a millisecond.  Whatever this reads above the row before "
-      "it is still mostly overhead.";
+      ", 34 million operations: what it adds over trivial_op is still mostly "
+      "overhead on an accelerator.";
   if (matmul.perRunUs > 0.0)
     test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str());
   else
-    test.skip("matmul_256", matmul.status, matmul.error,
-              "A 256x256x256 matrix multiply.");
+    test.skip("matmul_256", matmul.status, matmul.error, mmNote);
 
+  const char *createNote =
+      "Creating a session for the trivial graph; on providers that compile "
+      "ahead of time, this runs a compiler.";
   if (trivial.createUs > 0.0)
-    test.emit("session_create", (float)(trivial.createUs * 1e-6),
-              "Preparing that trivial graph for execution.  On providers "
-              "that compile ahead of time this runs a compiler, not "
-              "bookkeeping.");
+    test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote);
   else
-    test.skip("session_create", trivial.status, trivial.error,
-              "Preparing the trivial graph for execution.");
+    test.skip("session_create", trivial.status, trivial.error, createNote);
 
   test.end();
   return 0;

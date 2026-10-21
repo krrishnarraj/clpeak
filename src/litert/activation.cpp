@@ -67,14 +67,10 @@ struct Variant
 };
 
 const Variant kVariants[] = {
-    {LitertActivation::Silu, "silu",
-     "x times sigmoid(x), the feed-forward gate of most language models."},
-    {LitertActivation::Softmax, "softmax",
-     "Softmax across each row, the heart of attention: a maximum and two "
-     "passes before it can divide."},
+    {LitertActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
+    {LitertActivation::Softmax, "softmax", "Softmax across each row"},
     {LitertActivation::LayerNorm, "layernorm",
-     "Mean, variance and rescale across each row, seven operators in a "
-     ".tflite; every transformer layer does it at least twice."},
+     "Layer norm as seven .tflite operators (each row's mean and variance, then a rescale)"},
 };
 
 struct Run
@@ -142,11 +138,9 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
 
   auto test = currentDeviceScope->beginTest(
       {"litert_activation", "LiteRT activation throughput", "bps", Category::Bandwidth,
-       "How fast this accelerator applies the operations between the matrix "
-       "multiplies -- the SiLU gate, softmax, layer norm -- as the bandwidth "
-       "each achieves over a transformer-shaped tensor.  Each is net of a "
-       "reference graph that reads, scales and reduces the same tensor with "
-       "nothing applied.",
+       "Bandwidth of the operations between the matmuls -- SiLU gate, softmax, "
+       "layer norm -- over a transformer-shaped tensor.  Each is net of a "
+       "reference graph that reads the same tensor and applies nothing.",
        TestShape::Heterogeneous, "operation and working set"});
 
   struct Ref
@@ -164,8 +158,8 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
         break;
       const Size &sz = kSizes[si];
       const std::string metric = std::string(v.label) + "_" + sz.label;
-      const std::string note = std::string(v.note) + "  Over " + sz.label +
-                               " of activations, net of the read, scale and reduction around it.";
+      const std::string note =
+          std::string(v.note) + ", over " + std::to_string(sz.bytes >> 20) + " MB of activations.";
       // The working set is sized in the bytes the accelerator streams, half
       // on every accelerator under this plan; `graphBytes` is what the model
       // holds, which is the same now that the GPU's constants are stored as
@@ -230,9 +224,8 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       const double refStreamBps = 3.0 * (double)sz.bytes / (ref.run.us * 1.0e-6);
       std::string row = note;
       if (bps > 2.0 * refStreamBps)
-        row += "  Faster than the reference graph streamed the same tensor, so the "
-               "operation was fused into the passes around it or stayed in cache: the rate "
-               "of its arithmetic, not of memory.";
+        row += "  Faster than the reference graph streams the tensor, so it was fused or "
+               "stayed in cache: an arithmetic rate, not a memory one.";
       test.emit(metric, (float)bps, row.c_str());
     }
   }

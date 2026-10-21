@@ -2,15 +2,18 @@ MSTRINGIFY(
 
 // The alternate MAD chains, shared by every compute_*_alt_v* kernel.
 //
-// Each compute family defines its chain twice: the squaring recurrence
+// Each compute family defines its chain at least twice: the squaring
+// recurrence
 //
 //     x = x*x + c                       (c a per-lane loop invariant)
 //
 // which the compute_*_v* kernels have always used, and a second shape with
-// three distinct source registers, which the compute_*_alt_v* kernels add.
-// runComputeTest times both and reports the faster.  Every macro here spells
-// 16 chain instructions per _16, so the per-work-item op budget matches the
-// kernel it is raced against and the two readings are comparable.
+// three distinct source registers, which the compute_*_alt_v* kernels add --
+// the float families' once more pinned to sub-group 16 where the device
+// offers it (AF*, below).  runComputeTest times them all and reports the
+// fastest.  Every macro here spells 16 chain instructions per _16, so the
+// per-work-item op budget matches the kernel it is raced against and the
+// readings are comparable.
 //
 // Why two shapes.  No single recurrence reaches peak on every vendor:
 //
@@ -32,6 +35,20 @@ MSTRINGIFY(
 // at vector width 1, 2 at width 2 and 1 from width 4 up, where the vector
 // itself already supplies the instruction-level parallelism.
 //
+// Every float family builds AF* twice where the host defines CLPEAK_ALT_SG16:
+// compute_*_alt_v* at whatever sub-group size the compiler picks, and
+// compute_*_alt_sg16_v* pinned to 16 with intel_reqd_sub_group_size.  Intel's
+// compiler picks SIMD32 for these, and at SIMD32 Alchemist's register banks
+// catch a, b and x lined up more often than not: an Arc A380 read the fp32
+// widths at 3.92-3.95 TFLOPS there and 4.93-4.98 pinned to 16, mixed precision
+// 3.98-4.88 against 4.68-4.89 -- but fp16 9.48-9.56 at SIMD32 against 4.92-4.95
+// at 16, where this compiler drops fp16 to its fp32 rate.  Intel's CPU runtime
+// offers 16 as well, and there it changes the vectorisation: a Threadripper
+// 3955WX read fp32 at widths 1-2 at 1.92-2.06 TFLOPS pinned against
+// 1.52-1.63, and fp64 and fp16 slower.  So both are raced wherever 16 is
+// offered.  The measurements are in the MAD chain block of
+// include/common/common.h.
+//
 // RT* (rotating, x_k = x_k * x_(k+1) + c) is the integer families' second
 // shape, and the reason they differ is not stylistic.  The affine form is
 // foldable -- two steps compose into a*a*x + a*b + b -- and for integers that
@@ -49,10 +66,10 @@ MSTRINGIFY(
 // M24_* is the same rotating shape as RT*, spelled with mad24 for the 24-bit
 // fast-integer family.
 //
-// MP* is the mixed-precision family's second shape.  It is now just AF* over
-// an fp32 accumulator with a narrowing round-trip every 128 chain
-// instructions (MP*_128 + MP*_NARROW), which is the shape the CUDA, ROCm,
-// Metal, Vulkan and oneAPI mp kernels all use.
+// MP* is the mixed-precision family's second shape: AF* over an fp32
+// accumulator with a narrowing round-trip once per AF*_128 trip
+// (MP*_NARROW), which is the shape the CUDA, ROCm, Metal, Vulkan and oneAPI mp
+// kernels all use.
 //
 // It used to narrow once per MAC, inside the chain:
 //
@@ -101,14 +118,17 @@ MSTRINGIFY(
 \n#undef AF4_DECL
 \n#undef AF4_G
 \n#undef AF4_16
+\n#undef AF4_128
 \n#undef AF4_RES
 \n#undef AF2_DECL
 \n#undef AF2_G
 \n#undef AF2_16
+\n#undef AF2_128
 \n#undef AF2_RES
 \n#undef AF1_DECL
 \n#undef AF1_G
 \n#undef AF1_16
+\n#undef AF1_128
 \n#undef AF1_RES
 \n#undef RT4_DECL
 \n#undef RT4_G
@@ -119,11 +139,8 @@ MSTRINGIFY(
 \n#undef RT2_16
 \n#undef RT2_RES
 \n#undef MP_NARROW
-\n#undef MP4_128
 \n#undef MP4_NARROW
-\n#undef MP2_128
 \n#undef MP2_NARROW
-\n#undef MP1_128
 \n#undef MP1_NARROW
 \n#undef M24_4_DECL
 \n#undef M24_4_16
@@ -136,16 +153,19 @@ MSTRINGIFY(
 \n#define AF4_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE); T x2 = (seed) + (T)(2*CH_STRIDE); T x3 = (seed) + (T)(3*CH_STRIDE);
 \n#define AF4_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b) CH_MAD(x2, a, x2, b) CH_MAD(x3, a, x3, b)
 \n#define AF4_16                 AF4_G AF4_G AF4_G AF4_G
+\n#define AF4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
 \n#define AF4_RES                ((x0 + x1) + (x2 + x3))
 \n
 \n#define AF2_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed); T x1 = (seed) + (T)(CH_STRIDE);
 \n#define AF2_G                  CH_MAD(x0, a, x0, b) CH_MAD(x1, a, x1, b)
 \n#define AF2_16                 AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G AF2_G
+\n#define AF2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
 \n#define AF2_RES                (x0 + x1)
 \n
 \n#define AF1_DECL(T, seed, inv) T a = (inv); T b = a + (T)(2); T x0 = (seed);
 \n#define AF1_G                  CH_MAD(x0, a, x0, b)
 \n#define AF1_16                 AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G AF1_G
+\n#define AF1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16
 \n#define AF1_RES                (x0)
 \n
 \n#define RT4_DECL(T, seed, inv) T c = (inv); T x0 = (seed); T x1 = (seed) + (T)(1); T x2 = (seed) + (T)(2); T x3 = (seed) + (T)(3);
@@ -159,7 +179,7 @@ MSTRINGIFY(
 \n#define RT2_RES                (x0 + x1)
 \n
 \n// Mixed-precision (mp) chains.  The accumulator is FT throughout and the
-\n// narrow round-trip happens once per MP*_128 round, not once per MAC: the
+\n// narrow round-trip happens once per AF*_128 trip, not once per MAC: the
 \n// conversion is an uncounted instruction sitting in the dependent chain, so
 \n// at one per MAC it issued two instructions per counted FMA and halved the
 \n// reading.  An Arc A380 read mp at 2.78 TFLOPS against 4.89 for fp32 (57%)
@@ -172,13 +192,10 @@ MSTRINGIFY(
 \n// as the oneAPI mp alt kernel seeds it.
 \n#define MP_NARROW(HT, FT, x)   x = convert_##FT(convert_##HT(x));
 \n
-\n#define MP4_128                AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16 AF4_16
 \n#define MP4_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1) MP_NARROW(HT,FT,x2) MP_NARROW(HT,FT,x3)
 \n
-\n#define MP2_128                AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16 AF2_16
 \n#define MP2_NARROW(HT, FT)     MP_NARROW(HT,FT,x0) MP_NARROW(HT,FT,x1)
 \n
-\n#define MP1_128                AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16 AF1_16
 \n#define MP1_NARROW(HT, FT)     MP_NARROW(HT,FT,x0)
 \n
 \n#define M24_MAD(d, m1, m2, ad)  d = mad24(m1, m2, ad);

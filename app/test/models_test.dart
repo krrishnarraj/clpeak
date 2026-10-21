@@ -143,10 +143,11 @@ void main() {
 
     test('non-default budgets emit time flags', () {
       final catalog = _catalog();
-      final config =
-          RunConfig.allDevices(catalog, maxTimeMs: 200, maxTimeCpuMs: 500);
+      final config = RunConfig.allDevices(catalog,
+          maxTimeMs: 200, maxTimeMlGpuMs: 400, maxTimeCpuMs: 500);
       final args = config.toArgs(catalog);
-      expect(args, containsAllInOrder(['--max-time', '200']));
+      expect(args, containsAllInOrder(['--max-time-gpu', '200']));
+      expect(args, containsAllInOrder(['--max-time-ml-gpu', '400']));
       expect(args, containsAllInOrder(['--max-time-cpu', '500']));
     });
 

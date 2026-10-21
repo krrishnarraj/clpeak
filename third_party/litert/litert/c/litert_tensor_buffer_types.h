@@ -21,7 +21,19 @@ extern "C" {
 
 typedef struct AHardwareBuffer AHardwareBuffer;
 
+// The required byte alignment for host memory tensor buffers on CPU.
+//
+// This is an immutable ABI constant guaranteed across all LiteRT versions and
+// runtime environments (including LiteRT in Google Play services). Callers
+// using host memory for CPU inference must ensure their buffers are aligned to
+// at least this boundary. Changing this value is a breaking ABI change that
+// requires increasing the LiteRT major version.
+//
+// Hardware accelerators or custom delegates with different alignment
+// requirements specify them dynamically via LiteRtTensorBufferRequirements.
+// LINT.IfChange(host_memory_buffer_alignment)
 #define LITERT_HOST_MEMORY_BUFFER_ALIGNMENT 64
+// LINT.ThenChange(internal/litert_runtime_c_api.h:version_number)
 
 typedef void (*LiteRtHostMemoryDeallocator)(void* addr);
 typedef void (*LiteRtAhwbDeallocator)(AHardwareBuffer* ahwb);
@@ -90,7 +102,10 @@ typedef enum {
   kLiteRtTensorBufferTypeOpenVINOTensorBuffer = 100,
   kLiteRtTensorBufferTypeUserCustomBufferEnd = 199,
 } LiteRtTensorBufferType;
-// LINT.ThenChange(../kotlin/src/main/kotlin/com/google/ai/edge/litert/TensorBuffer.kt:tensor_buffer_types)
+// LINT.ThenChange(
+//   ../kotlin/src/main/kotlin/com/google/ai/edge/litert/TensorBuffer.kt:tensor_buffer_types,
+//   ../objc/apis/LRTTensorBuffer.h:tensor_buffer_types
+// )
 
 inline bool IsUserCustomBuffer(LiteRtTensorBufferType buffer_type) {
   return buffer_type >= kLiteRtTensorBufferTypeUserCustomBuffer &&

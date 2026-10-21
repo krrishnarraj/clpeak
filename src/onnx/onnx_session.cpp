@@ -49,6 +49,20 @@ std::string onnxDtypeUnsupportedReason(const OrtRuntime &rt, int dtype)
   return std::string();
 }
 
+bool onnxProviderHasOwnMemory(const onnx_ep_info_t &ep)
+{
+  return ep.providerKey == "TensorrtExecutionProvider" ||
+         ep.providerKey == "NvTensorRTRTXExecutionProvider" ||
+         ep.providerKey == "CUDAExecutionProvider" ||
+         ep.providerKey == "MIGraphXExecutionProvider" ||
+         ep.providerKey == "ROCMExecutionProvider";
+}
+
+uint64_t onnxHeldBytes(const onnx_ep_info_t &ep, uint64_t constants, uint64_t activations)
+{
+  return 3 * constants + (onnxProviderHasOwnMemory(ep) ? 0 : activations);
+}
+
 std::string onnxProviderFenceReason(const onnx_ep_info_t &ep, int dtype,
                                     bool qdq, int64_t blockSize)
 {
@@ -270,14 +284,18 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   // for RTX plugin's pool allocator does the same per *run*: a
   // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
   // Run(), which over a ladder is tens of thousands of lines saying the
-  // output buffer came and went.  Everything else INFO says (provider
+  // output buffer came and went.  The CPU provider's arena does it too: a
+  // "Reserving memory in BFCArena" per allocation per Run() was 44,373 of a
+  // Galaxy S24's verbose lines, 3.3 MB of the 4 MiB the log was capped at
+  // then, and pushed the run's last 8,452 entries out.  Everything else INFO says (provider
   // registration, partitioning, the session options, the pool's creation
   // and the arena's growth) is kept.
   if (level == clpeak::LogLevel::Debug && message &&
       (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
        std::strncmp(message, "Running graph optimizations", 27) == 0 ||
        std::strncmp(message, "CudaMempoolAllocator::DoAlloc", 29) == 0 ||
-       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0))
+       std::strncmp(message, "CudaMempoolAllocator::DoFree", 28) == 0 ||
+       std::strncmp(message, "Reserving memory in BFCArena", 28) == 0))
     return;
   std::string text;
   if (category && *category && std::strcmp(category, "onnxruntime") != 0)
@@ -774,6 +792,12 @@ static std::string uniqueProfilePrefixPath()
 // reject the model while creating the session, though, after ORT has already
 // opened a profile file and before there is a session to end. The unique
 // prefix above gives that failure path a safe cleanup target.
+//
+// Names are compared in the platform's own encoding.  The walk crosses every
+// file in the temp directory, and on Windows path::string() converts to the
+// ANSI code page and *throws* on a name that has no spelling there -- one
+// such file in %TEMP% then killed the run at the first refused session,
+// whatever the runtime or provider.
 static void removeProfileArtifacts(const std::string &prefix)
 {
   if (prefix.empty())
@@ -782,13 +806,15 @@ static void removeProfileArtifacts(const std::string &prefix)
   const std::filesystem::path prefixPath(prefix);
   const std::filesystem::path dir = prefixPath.parent_path().empty()
       ? std::filesystem::path(".") : prefixPath.parent_path();
-  const std::string namePrefix = prefixPath.filename().string();
+  const std::filesystem::path::string_type namePrefix =
+      prefixPath.filename().native();
 
   std::error_code ec;
   std::filesystem::directory_iterator it(dir, ec), end;
   for (; !ec && it != end; it.increment(ec))
   {
-    const std::string name = it->path().filename().string();
+    const std::filesystem::path::string_type name =
+        it->path().filename().native();
     if (name.compare(0, namePrefix.size(), namePrefix) != 0)
       continue;
 

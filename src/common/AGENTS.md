@@ -16,8 +16,11 @@ document's `log` — scoped by whichever backend logger is open, timed from the
 run's start, mirrored line by line to the `-o` sidecar — and is dispatched
 as a `Log` event for the channel to render.  The loggers add the run's
 structure to it on every run (a line as each backend, device and test
-starts, so a crash's sidecar ends where the run died), and under
-`--verbose -o` the readings as well.
+starts, so a crash's sidecar ends where the run died), and the readings:
+on the sidecar always, on the document's `log` under `--verbose -o`.
+Beside the sidecar, `RunCheckpoint` (`run_checkpoint.cpp`) keeps what has
+finished, which `--resume` (`run_resume.cpp`) continues a dead or cancelled
+run from.
 
 ## Quick Lookups
 
@@ -27,17 +30,19 @@ starts, so a crash's sidecar ends where the run died), and under
 - Understanding result output format? → `run_document.cpp` + `include/common/run_document.h`, schema in `docs/format-v3.md`
 - Understanding calibration? → `common.cpp` (`pickIters()`) + `include/common/common.h`
 - Understanding gating? → `peak.cpp` + `include/common/peak.h` (gating lives in Peak)
-- Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`kBackend` + `backend()`, `runAll()`, `isAllowed()`, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` (its position is the run order) and a row in the backend table in `options.cpp` give it its flags; `src/registry/backend_registry.cpp` and `cmake/backends.cmake` put it in both binaries
+- Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`kBackend` + `backend()`, `runAll()`, `admit()` -- the one gate per Benchmark per device, `if (auto run = admit(Benchmark::X)) runX(...)` -- with `isAllowed()` for asking, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` (its position is the run order) and a row in the backend table in `options.cpp` give it its flags; `src/registry/backend_registry.cpp` and `cmake/backends.cmake` put it in both binaries
 - Understanding device inventory structs / JSON? → `inventory.cpp` + `include/common/inventory.h`
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, and the `--devices` items that name `backend()`) |
+| `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, the `--devices` items that name `backend()`, and what a resumed run's part before finished); `admit()`'s guard tells the run's checkpoint a Benchmark finished, and on a `--skip-crashed` resume records the first one reached instead of running it |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `clpeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
 | `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, and `runLogHeaderJson()` for the sidecar's first line |
-| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps the log at 4 MiB of Debug/Info, and renders through the attached logger or the host's fallback |
+| `run_log.cpp` | `RunLog` — the run's `clpeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps Debug alone (64 MiB in the document, 128 MiB in the sidecar), and renders through the attached logger or the host's fallback.  A resumed run continues the sidecar and the log's clock |
+| `run_checkpoint.cpp` | `RunCheckpoint` — the run's progress (backends, devices and Benchmarks finished) and the `<output>.partial.json` checkpoint, rewritten through a rename at each of those boundaries (`Peak::admit`'s guard, the logger's scope ends), carrying a resumed part's own `resumed` record, and removed once the document is saved unless the run was cancelled |
+| `run_resume.cpp` | `--resume`: reads the checkpoint (by its path or the result's) and the sidecar -- or a cancelled run's saved document, whose sidecar went -- refuses another build or OS release, re-parses the run's own argv with the skip sets, and seeds the document, log, checkpoint and the part's `resumed` record |
 | `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
 | `json.cpp` | Recursive-descent JSON parser, classic-locale numbers. Hand-rolled: it is the only parser clpeak needs, and it is smaller than the XML/CSV line scanners it replaced |
 | `host_info.cpp` | `probeHost()`. Deliberately records no hostname, username or serial — result files get shared |
@@ -49,6 +54,8 @@ starts, so a crash's sidecar ends where the run died), and under
 | `coreml_cache.mm` / `coreml_cache_stub.cpp` | `clpeak::purgeCoreMLCompileCache()` — removes this process's Core ML runtime cache (`~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`), which keeps every compiled model with its weights and never evicts; called by the Core ML backend per session and by the ONNX backend per provider. Apple-only, a stub elsewhere |
 | `dynlib.cpp` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries (cuBLASLt / hipBLASLt / rocBLAS, ONNX Runtime, LiteRT) so the shipped binary needs only the driver. Deliberately no close: see `include/common/dynlib.h` |
 | `keep_awake.cpp` | `clpeak::KeepAwake` — holds the machine out of idle sleep for one run; the CLI's and the FFI's run loops each own one. A Windows power request, a macOS IOKit assertion, and on Linux logind's and the desktop's inhibitors through a libsystemd loaded at run time; a no-op on Android/iOS, where the app holds the screen. What each platform takes and why: `include/common/keep_awake.h` |
+| `screen_hold.cpp` | `setHostOnScreen()` / `setRunPaused()` / `holdGate()`: the app says through `clpeak_set_on_screen` whether it is on screen and through `clpeak_set_paused` whether the run is paused, and at the thermal gate's boundaries a run waits, without limit, while it is off screen or paused -- a phone moves an off-screen app to background cores and clocks and then freezes it. Each change is on the run's log (`RunLog::hostNote`); the CLI never says, so never waits: `include/common/screen_hold.h` |
+| `thermal.cpp`, `thermal_ios.mm` | `clpeak::ThermalWatch` (one per run, beside `KeepAwake`) and `thermalGate()`, which the logger calls as each test begins and after each reading: while Android's AThermal or iOS's thermal state reads severe or worse it waits, up to five minutes, for the device to cool to light, and logs each status (lines starting `thermal status`, which the app's pause indicator reads). A no-op elsewhere: `include/common/thermal.h` |
 
 ## Scope invariant: one open test at a time
 

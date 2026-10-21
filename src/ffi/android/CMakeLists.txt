@@ -57,9 +57,9 @@ if(ANDROID_VULKAN_LIB)
     set(Vulkan_LIBRARIES ${ANDROID_VULKAN_LIB})
 
     # The NDK ships the runtime stub (libvulkan.so) plus headers, but those
-    # headers lag the Vulkan spec (NDK r28 = VK_HEADER_VERSION 275), so they
-    # lack newer symbols the backend uses (bfloat16 / float8 cooperative
-    # matrix, etc.).  The headers are pure spec-defined declarations — enum
+    # headers lag the Vulkan spec (NDK r30 = VK_HEADER_VERSION 335), so they
+    # lack newer symbols the backend uses (VK_EXT_cooperative_matrix_maintenance1,
+    # etc.).  The headers are pure spec-defined declarations — enum
     # values, struct layouts, extension-name strings — and every non-core
     # entry point is loaded at runtime via vkGetInstanceProcAddr, so compiling
     # against newer headers while linking the NDK stub is safe.  Use the

@@ -116,6 +116,14 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
 CoreMLPeak::CoreMLPeak() = default;
 CoreMLPeak::~CoreMLPeak() = default;
 
+void CoreMLPeak::applyOptions(const CliOptions &opts)
+{
+  Peak::applyOptions(opts);
+  // This backend's budget is the longest one run may hold a GPU
+  // (gpuRunCapUs): --max-time-ml-gpu, not the GPU backends' --max-time-gpu.
+  targetTimeUs = opts.targetTimeUsMlGpu;
+}
+
 int CoreMLPeak::runAll()
 {
   std::string why;
@@ -170,29 +178,29 @@ int CoreMLPeak::runAll()
     currentDeviceScope = &deviceScope;
 
     // ---- Compute (FLOPS + OPS) ---------------------------------------------
-    if (isAllowed(Benchmark::Gemm))
+    if (auto run = admit(Benchmark::Gemm))
       runGemm(dev, cfg);
-    if (isAllowed(Benchmark::Conv))
+    if (auto run = admit(Benchmark::Conv))
       runConv(dev, cfg);
 
     // ---- What the speed rows cost in accuracy ------------------------------
-    if (isAllowed(Benchmark::NumericError))
+    if (auto run = admit(Benchmark::NumericError))
       runNumericError(dev, cfg);
 
     // ---- AI composite (whole transformer block) ----------------------------
-    if (isAllowed(Benchmark::TransformerBlock))
+    if (auto run = admit(Benchmark::TransformerBlock))
       runBlock(dev, cfg);
 
     // ---- Bandwidth ---------------------------------------------------------
-    if (isAllowed(Benchmark::Activation))
+    if (auto run = admit(Benchmark::Activation))
       runActivation(dev, cfg);
-    if (isAllowed(Benchmark::TensorBW))
+    if (auto run = admit(Benchmark::TensorBW))
       runTensorBandwidth(dev, cfg);
-    if (isAllowed(Benchmark::TransferBW))
+    if (auto run = admit(Benchmark::TransferBW))
       runTransferBandwidth(dev, cfg);
 
     // ---- Latency -----------------------------------------------------------
-    if (isAllowed(Benchmark::KernelLatency))
+    if (auto run = admit(Benchmark::KernelLatency))
       runDispatchLatency(dev, cfg);
 
     currentDeviceScope = nullptr;

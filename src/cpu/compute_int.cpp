@@ -71,9 +71,10 @@ int CpuPeak::runComputeInt8DP(benchmark_config_t &cfg)
 int CpuPeak::runComputeInt16DP(benchmark_config_t &cfg)
 {
   // Same family, same test.  Reached only when --int8-dot-product-compute was
-  // deselected and this one was not; otherwise the call above already ran it,
-  // and running it twice would double every reading.
-  if (isAllowed(Benchmark::ComputeInt8DP))
+  // deselected and this one was not; otherwise the call above ran it -- in
+  // this part of the run or, resumed, the one before -- and running it twice
+  // would double every reading.
+  if (isSelected(Benchmark::ComputeInt8DP))
     return 0;
   emitFamily(*this, kIntDotSpec, intDotRows(), cfg);
   return 0;
@@ -95,7 +96,7 @@ int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
                         TestShape::Homogeneous, "threads"};
   auto test = currentDeviceScope->beginTest(spec);
   if (v.fn)
-    emitCompute(*this, test, "u64", v.opsPerIter, v.fn, cfg);
+    emitCompute(*this, test, "u64", v, cfg);
   else
     test.skip("u64 ST", ResultStatus::Unsupported, "no integer divide kernel");
   return 0;

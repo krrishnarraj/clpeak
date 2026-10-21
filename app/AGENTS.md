@@ -28,24 +28,62 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `armeabi-v7a`/`x86` are excluded as legacy 32-bit ABIs; see the packaging
   block in `android/app/build.gradle.kts`. With AAB Play serves a split APK
   per ABI, so per-device size stays bounded (fat APK would be 86 MB vs
-  107 MB for every slice).  LiteRT's NPU dispatch shims are not on Maven:
-  `tools/fetch_litert_npu.sh qualcomm|google_tensor` stages one vendor's under
-  `android/app/src/main/jniLibs/` (git-ignored) before a build that should
-  reach that NPU -- one vendor, because LiteRT loads the first shim it lists.
-  Staging any switches the build to extracting native libraries at install
-  (LiteRT finds the shim by listing a directory, which an APK's internal
-  `lib/` is not).  Qualcomm's own runtime is a further 67 MB opt-in,
-  `clpeakQnn=true` in `android/gradle.properties` (Maven Central's
-  `com.qualcomm.qti:qnn-runtime`, every Hexagon generation); MediaTek's and
-  Google Tensor's are system libraries on the device.  See
-  `src/litert/AGENTS.md`, Packaging.
+  107 MB for every slice).  The NPU libraries are not part of that:
+  `tools/fetch_android_npu.sh` stages every vendor's into the NPU modules
+  under `android/npu/` (git-ignored `jniLibs/`) before a build that should
+  reach an NPU, and the build packages each module staged -- LiteRT's vendor shims (with several vendors present the app
+  picks the SoC's at launch) and, for Qualcomm, the QNN runtime both
+  backends load and ONNX Runtime's QNN plugin.  Staging any switches the
+  build to extracting native libraries at install (LiteRT finds the shim
+  by listing a directory, which an APK's internal `lib/` is not), and
+  Gradle refuses an incomplete Qualcomm set or libraries an older script
+  left in the base.  MediaTek's and Google Tensor's runtimes are system
+  libraries on the device; Samsung's shims are published nowhere.  See NPU
+  delivery below and `src/litert/AGENTS.md`, Packaging.
+- NPU delivery (Android, Play): each NPU module is a dynamic feature
+  module -- `android/npu/<module>/AndroidManifest.xml` names its device
+  groups, `android/npu/module.gradle.kts` builds them all, and
+  `settings.gradle.kts` includes those staged -- that Play installs with
+  the app only on the chipsets of its groups: `qualcomm_runtime` (the QNN
+  runtime and both stacks' Qualcomm libraries) on every whitelisted
+  Snapdragon, `qualcomm_runtime_vNN` (one Hexagon generation's Skel/Stub) on
+  that generation's, `google_tensor_runtime` on Tensor G3–G6 and
+  `mediatek_runtime` on the Dimensity chipsets LiteRT's MediaTek plugin
+  names; any other phone downloads none.  The whitelist is
+  `android/app/device_targeting_configuration.xml`.
+  Play matches the exact pair the phone reports (`ro.soc.manufacturer`,
+  `ro.soc.model`) and has no vendor-wide selector, so a chipset missing
+  there gets no NPU libraries and lists no NPU, silently.  **Keep the
+  whitelist current, from time to time as new chipsets reach phones and at
+  every LiteRT bump**: diff it against LiteRT's
+  `litert/vendors/qualcomm/supported_soc.csv` (chipset → Hexagon
+  generation), the Tensor models in
+  `litert/python/aot/vendors/google_tensor/target.py` and the MediaTek
+  models in `kPluginSocModels` (`litert/vendors/mediatek/compiler/
+  compiler_plugin.cc`) and `litert/vendors/mediatek/supported_soc.csv`,
+  at the tag `third_party/litert/README.md` pins, and add each new
+  Snapdragon to its generation's group under both "QTI" and "Qualcomm"
+  (Play cannot tell them apart), each MediaTek under "Mediatek".  A
+  chipset with no published generation stays out until one is published
+  (SM8735, SM7750 and SM7635 at LiteRT 2.3.0) -- the wrong Skel loads
+  nothing.  A new generation needs a module directory and
+  a group of its own; `fetch_android_npu.sh` stops on a Skel with no
+  module.  bundletool refuses a bundle whose modules carry native
+  libraries for different ABI sets, so each module also builds an empty
+  library for every ABI of the base (`android/npu/stub/`), keeping the
+  32-bit and x86_64 splits; and it decides extraction per module, so
+  `module.gradle.kts` copies the base's `useLegacyPackaging`.  Device
+  targeting is an experimental AGP API
+  (`android.experimental.enableDeviceTargetingConfigApi`).  A universal APK
+  built from the bundle (bundletool `--mode=universal`) fuses every module;
+  `flutter build apk` carries none.
 - iOS: `tools/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
   Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
   `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
   own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
-  and its Metal accelerator, device and simulator slices, ~31 MB, from its
+  and its Metal accelerator, device and simulator slices, ~42 MB, from its
   litert bucket -- and stages them under `ios/clpeak_native/embed-{device,
   simulator}/`, from where the Runner's embed phase copies and signs them
   into `Frameworks/` to be dlopen'd; `--no-litert` leaves the backend out,
@@ -85,19 +123,60 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `_DiagnosticsSection` at the foot of `results_body.dart` is counts-only
   (total lines + a pointer at the exported file): rendering per-line rows
   made the GUI sluggish on phones during heavy runs, so the file a user
-  exports is where the contents are read.  Settings → "Verbose diagnostics"
+  exports is where the contents are read.  The live run (and its
+  just-finished results) hides the section unless that run was started
+  verbose (`BenchmarkService.runVerbose` → `ResultsBody.showDiagnostics`);
+  saved runs always show it when the file holds a log.  Settings → "Verbose diagnostics"
   (`settings_screen.dart`) turns debug-level recording on for every run and
   links to the issue tracker, which is how a problem on a phone reaches a
   maintainer
 - A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
   streams `<id>.clpeak.log` while a run is in flight and removes it once the
   document is written, so one left behind is a crashed run's only record.
-  History lists it under "Runs that did not finish" (`_CrashLogTile`) with
-  export and delete; the in-flight run's own sidecar is excluded by
-  `BenchmarkService.inFlightRunId`.  On desktop the engine process dies
+  History lists it, marked "did not finish" (`_CrashLogTile`), among the
+  saved runs in one list by start time, with export and delete; the
+  in-flight run's own sidecar is excluded by
+  `BenchmarkService.inFlightRunId`.  On Android the run's id is stamped on
+  the process while it is in flight, and the listing first appends
+  Android's record of that process's death -- reason, memory, the native
+  tombstone -- to the run's sidecar (`lib/src/services/process_exit.dart`,
+  with its platform half in `MainActivity.kt`).  On desktop the engine process dies
   instead of the app: `ChildRun` ends the run with a synthesized `done`,
   `BenchmarkService.runFailure` says how, the results screen shows it over
   the readings that arrived, and nothing is indexed -- there is no document
+- Continuing a run that stopped part-way? → beside its sidecar the native
+  side keeps `<id>.clpeak.partial.json`, what it finished
+  (`include/common/run_checkpoint.h`), and the app `<id>.clpeak.resume.json`,
+  the device catalog and OS release it started on (`RunResumeState`).  A
+  cancelled run keeps both beside the result it saved, and a cancelled run
+  continued that died in turn is listed as one that did not finish
+  (`RunHistoryStore.listCrashLogs`).  `ResumeOffer`
+  (`lib/src/services/resume_offer.dart`) says whether a run can be
+  continued -- same clpeak, OS release, devices and runtimes -- and how to
+  word what happened; a run that died on screen, unless the user ended it,
+  is continued with `--skip-crashed`.  History offers Continue on every run
+  that can be, the dead ones' tiles with "View what's saved"
+  (`openCheckpoint` in `results_screen.dart`);
+  `BenchmarkService.refreshResumeOffer` puts only the newest the app died in
+  on the dashboard (`_ResumePanel`, dismissible), within a day and while no
+  newer run has started.  `BenchmarkService.resume` shows the checkpoint at
+  once and launches `--resume`, which saves every part as one document under
+  the same id
+- Pausing a run? → Pause in the live view (`BenchmarkService.setPaused` →
+  `EngineRun.setPaused`: `clpeak_set_paused` in process, a "pause" line to
+  the engine process on desktop).  The run finishes the reading in flight
+  and holds at its next boundary between readings
+  (`include/common/screen_hold.h`), whose `held until the run is resumed`
+  line is what turns "Pausing" into "Paused"; it stays paused, wherever the
+  app goes, until Resume
+- The "Run paused" notification? → `lib/src/services/run_notice.dart`, with
+  its platform halves in `MainActivity.kt` (channel `kr.clpeak/notify`, the
+  POST_NOTIFICATIONS request) and `ios/Runner/AppDelegate.swift`.  The
+  permission is asked once, at the first run; `BenchmarkService` posts on
+  `hidden` while a run is in flight, clears it on `resumed`, at the run's
+  end and on cancel -- or swaps it for "Run finished" when the run ends off
+  screen -- and `main()` clears a stale one at launch.  Its status-bar icon
+  is generated with the rest (`tools/icons/generate_icons.py`)
 - Run grouping / formatting? → `lib/src/model/run_document.dart`
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
@@ -188,6 +267,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   for, which moves the scores of everything measured after it).  A desktop
   machine sleeping mid-run is the native launch's to prevent, as in the CLI:
   `include/common/keep_awake.h`
+- Run sitting on "Paused — the device is hot"? → the native side waits for a
+  hot phone to cool (`include/common/thermal.h`); `BenchmarkService.coolingDown`
+  follows its `thermal status` log lines
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
 - Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`
@@ -246,10 +328,11 @@ the platform dirs:
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.clpeak.ios` +
   "Embed clpeak native frameworks" script phase (consumes
   `ios/clpeak_native/`, staged by `tools/build_ios_native.sh`)
-- `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters,
-  `externalNativeBuild` → `src/ffi/android/CMakeLists.txt`
+- `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters, the
+  NDK pin (`ndkVersion`), `externalNativeBuild` → `src/ffi/android/CMakeLists.txt`
 - `android/app/src/main/AndroidManifest.xml` — `uses-native-library
-  libOpenCL.so`
+  libOpenCL.so`, POST_NOTIFICATIONS
+- `ios/Runner/AppDelegate.swift` — the `RunNotice` channel
 - every platform's app icon — all generated by
   `tools/icons/generate_icons.py` (needs Pillow) from the original clpeak
   wordmark in `tools/icons/clpeak_master_1024.png` (both repo-root `tools/`,
@@ -270,3 +353,5 @@ the platform dirs:
   `src/common/options.cpp`.
 - versionCode continues the retired native app's sequence (pubspec
   `version: x.y.z+N`).
+- New Snapdragon or Tensor chipsets in phones, or a LiteRT bump → update
+  the NPU whitelist (NPU delivery, above) before the next Play release.

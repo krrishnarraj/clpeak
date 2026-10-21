@@ -30,19 +30,24 @@ micro-graphs on all three side by side.
 
 | File | Purpose |
 |------|---------|
-| `coreml_peak.mm` | `CoreMLPeak`: `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
+| `coreml_peak.mm` | `CoreMLPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
-| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()`, `coremlNonFiniteReason()` (the readback below), `CoremlLayoutRace` (the weight-layout race below) |
+| `coreml_bench.h` | `coremlMeasure()` (warmup / probe / timed), `coremlBindScalar()`, `coremlOffDeviceReason()`, `coremlNonFiniteReason()` (the readback below), `CoremlLayoutRace` (the weight-layout race below), `coremlHeldBytes()` (what a session holds: every memory gate's count) |
 | `gemm.cpp` | `runGemm` (`--gemm`) — `coreml_gemm`: matmul peak per weight format, the ONNX backend's chain (sixteen distinct square layers per prediction from a 64-wide live seed) over a doubling width ladder; fp16, fp32, bf16, int8_weight, int4_weight, int4_lut, fp8_weight in flops, int8_qdq in ops |
-| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm |
+| `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference (Accelerate `cblas_dgemm`), in ppm; and the answer checks behind every rate row (`CoreMLPeak::answerCheck` / `wrongAnswer`: per weight layout, and for the convolution rows the product as a 1x1 convolution, `coremlPlainConv1x1Model`) |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels, fp16 and fp32, swept over feature-map size |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block through Core ML: `coreml_block_prefill` (flops, `ops` for int8_qdq), `coreml_block_decode` (bps), `coreml_block_latency` (s) |
 | `activation.cpp` | `runActivation` (`--activation`) — SiLU / softmax / layer norm as GB/s at 8/32/128 MB, net of a reference graph |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight, 8 MB to 2 GB, net of the dispatch floor |
 | `transfer.cpp` | `runTransferBandwidth` (`--transfer-bandwidth`) — h2d / d2h / round trip as differences between three spellings of one matmul |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — the smallest work the planner sends to the unit, and model creation |
+
+On the GPU, gemm, conv and the block also hold one prediction to
+`--max-time-ml-gpu` (`gpuRunCapUs()`), and gemm predicts each layout's first
+rung from one prediction of a 512-wide chain -- the ONNX backend's rule, for
+its reason (`src/onnx/AGENTS.md`, "Bound a ladder on what it measured").
 
 Test ids are lower_snake and keep the `coreml_` prefix (`coreml_gemm`,
 `coreml_block_decode`); the CLI flags that gate them are backend-neutral
@@ -154,6 +159,32 @@ gemm chains keep each layer's magnitude (the reduced row reads 11-48 on an
 M1 Pro) and the block's largest value sits 31x under fp16's.  It sees only
 the reduced row, so it is a tripwire, not an accuracy test.
 
+## A fast kernel can be a wrong one
+
+The accuracy matmul sees the whole answer, so it doubles as the check every
+rate row asks before it publishes (`CoreMLPeak::answerCheck` /
+`wrongAnswer`; the line and the words are the three ML backends',
+`include/common/answer_check.h`): memoised per compute unit and weight
+format, measured by whichever test asks first -- gemm, before each ladder,
+since the rate tests run before the accuracy one.
+
+- **Each weight layout is checked on its own**, since a layout can change the
+  kernel: the check builds and times both (the accuracy row reads the faster
+  of those that answer right) and measures each answer.  A wrong layout
+  leaves the gemm and block races, LiteRT's rule for a wrong form, and the
+  row says so; with no layout right the rows are withheld.  The block's
+  variants ask their projections' format (fp16's for `fp16_explicit` and
+  `int8_kv`).
+- **The convolution rows ask their precision's product written as a 1x1
+  convolution** (`coremlPlainConv1x1Model`, x[1, K, 32, 32]): the conv1x1
+  row's operator and the nearest there is to the other shapes'.
+- **Wrong is at or past 50% RMS, or NaN or infinity anywhere**
+  (`clpeak::kWrongAnswerPpm`; the header says why the line sits there).  A
+  withheld rate row is an `Error` naming the figure, and the accuracy row an
+  `Error` carrying it, so the pair stands together.  A check that could not
+  be measured -- a format the OS lacks, a session refused or sent to another
+  unit -- gates nothing.
+
 ## Every weight is raced in both layouts
 
 `coremlEmitWeight` stores a weight matrix as `[in, out]`, W[K, N] the way it
@@ -165,8 +196,8 @@ every width, the block at every point (its prompt and its cache race
 separately, since one unit can take the wide multiply and the one-row one
 in opposite layouts), and the accuracy matmul times both and reads the
 faster one's answer, because a layout can change the kernel and with it
-the arithmetic.  Each row reports the faster and names its layout, with
-what the other read beside it.  `CoremlLayoutRace` (`coreml_bench.h`) has
+the arithmetic.  Each row reports the faster and names its layout.
+`CoremlLayoutRace` (`coreml_bench.h`) has
 the M1 Pro's cases, and `clpeak::FormRace` (`include/common/form_race.h`)
 the rule that closes a race once its readings settle it, so most rows pay
 for one extra model; on the Neural Engine, which runs
@@ -403,7 +434,7 @@ point's row instead of settling the variant.
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `CMakeLists.txt`, a call in
-  `runAll()` gated on a `Benchmark` value, and a row in Key Files.  Reuse an
+  `runAll()` gated by `admit()` on a `Benchmark` value, and a row in Key Files.  Reuse an
   existing value when the measurement already has a name on another backend
   (`include/common/benchmark_enums.h`); a new one needs a flag row in
   `src/common/options.cpp` -- named for what it measures, never for Core ML.

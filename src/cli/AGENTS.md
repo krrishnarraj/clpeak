@@ -14,7 +14,7 @@ runs benchmarks, and handles centralized file output.
 
 | File | Purpose |
 |------|---------|
-| `main.cpp` | `main()` — backend dispatch, `--list-devices`, centralized file output; constructs `LoggerText(std::cout, …)` |
+| `main.cpp` | `main()` — backend dispatch, `--list-devices`, `--resume` (`include/common/run_resume.h`), centralized file output; constructs `LoggerText(std::cout, …)` |
 
 ## When You Change This Directory
 
