@@ -3,7 +3,7 @@ description: "clpeak (compute latency peak): peak compute, memory bandwidth and 
 publish_to: 'none'
 
 # versionName / versionCode
-version: 3.0.2+45
+version: 3.0.3+46
 
 environment:
   sdk: ^3.12.2
@@ -27,6 +27,14 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+dependency_overrides:
+  # 2.5.0 reaches its Kotlin API through package:jni, which looks up
+  # kotlin.coroutines.Continuation and friends by name; R8 renames them in
+  # release builds, so the first SharedPreferences call throws and the app
+  # never leaves the splash (flutter/flutter#194649).  Drop this pin for
+  # 2.5.2, which ships the keep rules.
+  shared_preferences_android: 2.4.28
 
 flutter:
   uses-material-design: true
