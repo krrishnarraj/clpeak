@@ -59,9 +59,14 @@ jobs:
   # SIGNPATH_SIGNING_POLICY_SLUG and SIGNPATH_ARTIFACT_CONFIGURATION_SLUG.
   # Missing setup fails the job, and with it the release: a tag never ships
   # unsigned Windows binaries by falling through.
+  #
+  # DISABLED until a release certificate is issued (the SignPath policy only
+  # has a test certificate).  Releases ship the unsigned Windows zips.  To
+  # re-enable: restore the `if` below, add sign-windows back to the release
+  # job's `needs`, and restore the signed-zip collection step there.
   sign-windows:
     name: Sign Windows binaries
-    if: startsWith(github.ref, 'refs/tags/')
+    if: false && startsWith(github.ref, 'refs/tags/')
     needs: [desktop]
     runs-on: ubuntu-latest
     # The release-signing policy waits for a manual approval; give it the
@@ -127,7 +132,7 @@ jobs:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/')
     # Android/iOS are sanity builds only and are intentionally not shipped.
-    needs: [desktop, sign-windows]
+    needs: [desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -142,11 +147,9 @@ jobs:
         run: |
           mkdir -p release
           # Each desktop job already produced a CPack zip (macOS also a .dmg
-          # holding clpeak-gui.app); just gather them.  Windows zips come only
-          # from sign-windows: the unsigned copies carry the same names, so
-          # they are excluded rather than left to whichever cp runs last.
-          find artifacts -name 'clpeak-*.zip' ! -name 'clpeak-*-windows-*' -exec cp {} release/ \;
-          cp artifacts/windows-signed/clpeak-*-windows-*.zip release/
+          # holding clpeak-gui.app); just gather them.  Windows zips are
+          # unsigned while sign-windows is disabled.
+          find artifacts -name 'clpeak-*.zip' -exec cp {} release/ \;
           find artifacts -name 'clpeak-*.dmg' -exec cp {} release/ \;
           ls -l release
 
