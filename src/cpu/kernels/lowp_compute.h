@@ -388,7 +388,15 @@ static double runInt16DpChain(uint64_t outer)
 #elif defined(__AVXVNNIINT16__)
 // The AVX-VNNI-INT16 TU: mixed-sign VPDPWSUD (its distinct contribution --
 // the ssd form already rides in the VNNI TUs above).  Same rate, own ISA row.
+// GCC's avxvnniint16intrin.h names it _mm256_dpwsud_avx_epi32 (14 and later);
+// clang has only Intel's bare name, which newer GCC also answers to but only
+// through a macro in its AVX10.2 header -- GCC 14 has no such header.
 #define CPU_HAS_INT16DP_KERNEL 1
+#if defined(__clang__)
+#define CPU_MM256_DPWSUD _mm256_dpwsud_epi32
+#else
+#define CPU_MM256_DPWSUD _mm256_dpwsud_avx_epi32
+#endif
 static constexpr int I16_NACC = 12, I16_OPS_PER_INSTR = 32;
 static double runInt16DpChain(uint64_t outer)
 {
@@ -402,7 +410,7 @@ static double runInt16DpChain(uint64_t outer)
     for (int k = 0; k < INNER; k++)
     {
       CPU_UNROLL_FULL
-      for (int j = 0; j < I16_NACC; j++) acc[j] = _mm256_dpwsud_epi32(acc[j], acc[j], b);
+      for (int j = 0; j < I16_NACC; j++) acc[j] = CPU_MM256_DPWSUD(acc[j], acc[j], b);
     }
   __m256i sAll = acc[0];
   for (int j = 1; j < I16_NACC; j++) sAll = _mm256_add_epi32(sAll, acc[j]);
