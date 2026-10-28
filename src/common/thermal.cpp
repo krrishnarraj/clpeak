@@ -118,7 +118,7 @@ ThermalWatch::~ThermalWatch()
   watching = false;
 }
 
-void thermalGate()
+void thermalGate(const std::function<void()> &beforePausing)
 {
   if (!watching)
     return;
@@ -131,6 +131,8 @@ void thermalGate()
   if (h < kPauseAt)
     return;
 
+  if (beforePausing)
+    beforePausing();
   note(LogLevel::Warning, std::string("thermal status ") + heatName(h) + ": pausing until the device cools to " +
                               heatName(kResumeAt) + ", for at most " + seconds(kMaxPauseS));
   const auto t0 = std::chrono::steady_clock::now();

@@ -24,6 +24,8 @@
 // run's log says which rows were measured hot; a pause is a warning, which
 // the CLI prints with the results, and its end an info line.
 
+#include <functional>
+
 namespace clpeak {
 
 // The OS's thermal status is watched for as long as one lives: one per run,
@@ -41,8 +43,9 @@ public:
 };
 
 // A boundary between readings: log a changed status, and wait while it is
-// severe or worse.  A cancelled run stops waiting at once.
-void thermalGate();
+// severe or worse.  A cancelled run stops waiting at once.  `beforePausing`
+// runs once, when the gate is about to wait (see holdGate in screen_hold.h).
+void thermalGate(const std::function<void()> &beforePausing = {});
 
 } // namespace clpeak
 

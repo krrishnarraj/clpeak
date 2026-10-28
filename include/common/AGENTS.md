@@ -183,7 +183,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
 | `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
-| `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (a `clpeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, so a run that dies, or is cancelled, can be continued |
+| `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (a `clpeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, and before the run waits at a boundary between readings, so a run that dies, or is cancelled, can be continued |
 | `run_resume.h` | `--resume`: `loadResumePlan` / `resumeOptions` / `seedResume`, which both hosts call in that order to continue a run from its checkpoint (named by its own path or the result's) into the same document, then `RunCheckpoint::partRecord` for the part's `resumed` record |
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |

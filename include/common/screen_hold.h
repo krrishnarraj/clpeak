@@ -25,6 +25,8 @@
 // and only an app pauses (clpeak_set_paused; the desktop engine process's
 // "pause" line).  The CLI never does either, so its runs never wait.
 
+#include <functional>
+
 namespace clpeak {
 
 // Whether the app is on screen; true until said otherwise.  Each change
@@ -39,8 +41,11 @@ void setRunPaused(bool paused);
 
 // A boundary between readings: while the run is paused or the app is off
 // screen, log where the run stopped and wait.  A cancelled run stops waiting
-// at once.
-void holdGate();
+// at once.  `beforeWaiting` runs once, when the gate is about to wait -- the
+// logger's saves what the run has measured, since a phone may end an app it
+// holds off screen.  True when it waited: whatever was timed just before ran
+// off screen or paused.
+bool holdGate(const std::function<void()> &beforeWaiting = {});
 
 } // namespace clpeak
 

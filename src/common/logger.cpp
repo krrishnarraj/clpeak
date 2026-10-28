@@ -119,6 +119,25 @@ MetricResult &logger::record(MetricResult m)
     return t->metrics.back();
 }
 
+// A boundary between readings: a device too hot to measure cools first, and
+// a paused run, or one whose app is off screen, waits.  Before either waits,
+// the run's checkpoint takes what this backend has measured, the test it
+// waits in included: a phone may end an app it holds off screen, and a test
+// otherwise reaches the checkpoint only once its Benchmark is over
+// (Peak::admit).  A Galaxy S24 Ultra was held right after the last reading of
+// its QNN matmul test, ended 95 minutes later, and the test -- 38.3 TOPS, the
+// best that NPU read -- was measured again in a later part, warm, at 30.3.
+void logger::boundary()
+{
+    auto save = [this] {
+        if (RunCheckpoint *checkpoint = RunCheckpoint::current())
+            if (contextDepth >= 2)
+                checkpoint->held(curBackend, curDeviceIndex, doc);
+    };
+    clpeak::thermalGate(save);
+    clpeak::holdGate(save);
+}
+
 // ── Top-level entry ────────────────────────────────────────────────────────
 
 logger::BackendScope logger::beginBackend(const std::string &name)
@@ -480,10 +499,7 @@ logger::TestScope logger::DeviceScope::beginTest(const TestSpec &spec)
                   "' was still open; closed it first (call end() on the "
                   "previous TestScope before starting a sibling test)");
     }
-    // A boundary between readings: a device too hot to measure cools first,
-    // and a paused run, or one whose app is off screen, waits.
-    clpeak::thermalGate();
-    clpeak::holdGate();
+    log->boundary();
     return TestScope(log, spec);
 }
 
@@ -581,8 +597,7 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
     log->dispatchEvent(e);
-    clpeak::thermalGate();   // and so is a reading recorded
-    clpeak::holdGate();
+    log->boundary();
 }
 
 void logger::TestScope::emit(std::string metric, float value,

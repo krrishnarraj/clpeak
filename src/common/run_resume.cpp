@@ -314,4 +314,10 @@ void seedResume(const ResumePlan &plan, const CliOptions &opts, RunDocument &doc
     CLPEAK_LOG(Info, "%s%s, which had measured %zu tests when it stopped%s%s", kResumedLine,
                plan.seed.meta.generatedAt.c_str(), tests, plan.after.empty() ? "" : ": ",
                plan.after.c_str());
+    // Where it stopped while held: what it measures again keeps those readings.
+    for (const RunProgress::Device &d : plan.progress.devices)
+        for (const std::string &t : d.held)
+            CLPEAK_LOG(Info, "it stopped while held in %s (%s device %d): that test runs again, "
+                       "and the readings it had are kept",
+                       t.c_str(), d.backend.c_str(), d.deviceIndex);
 }
