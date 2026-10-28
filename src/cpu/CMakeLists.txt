@@ -45,6 +45,7 @@ add_library(peak_cpu STATIC
     crypto.cpp
     string.cpp
     bandwidth.cpp
+    cache_probe.cpp
     latency.cpp
     microarch.cpp
 )

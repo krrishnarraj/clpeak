@@ -324,6 +324,9 @@ int CpuPeak::runAll()
       ids.push_back(c.id);
     pool = new CpuThreadPool(ids.empty() ? info.logicalCores : (int)ids.size(), ids);
   }
+  // Sizes the OS lists a cache without -- an Android device tree with none
+  // -- are measured on the pinned workers before the header names them.
+  probeCacheSizes(info, *pool);
   if (clpeak::verboseEnabled())
   {
     std::string order;
@@ -370,15 +373,19 @@ int CpuPeak::runAll()
     props.push_back({"ST core", info.stCore});
   if (info.clockMHz > 0)
     props.push_back({"Clock", std::to_string(info.clockMHz) + " MHz"});
-  // A level the OS gave no size for is left out, as are the rows that need it.
+  // A level with no size, the OS's or measured, is left out, as are the rows
+  // that need it; a measured one says so.
+  auto level = [](const std::vector<uint64_t> &sizes, uint64_t total, bool measured) {
+    return fmtCacheLevel(sizes, total) + (measured ? " (measured)" : "");
+  };
   if (info.l1dTotalBytes)
-    props.push_back({"L1d", fmtCacheLevel(info.l1dSizes, info.l1dTotalBytes)});
+    props.push_back({"L1d", level(info.l1dSizes, info.l1dTotalBytes, info.l1dMeasured)});
   if (info.l2TotalBytes)
-    props.push_back({"L2", fmtCacheLevel(info.l2Sizes, info.l2TotalBytes)});
+    props.push_back({"L2", level(info.l2Sizes, info.l2TotalBytes, info.l2Measured)});
   // Omitted entirely on the many CPUs that have no L3 at all (Apple Silicon,
   // Snapdragon X, most phone SoCs).
   if (info.l3TotalBytes)
-    props.push_back({"L3", fmtCacheLevel(info.l3Sizes, info.l3TotalBytes)});
+    props.push_back({"L3", level(info.l3Sizes, info.l3TotalBytes, info.l3Measured)});
   if (info.totalMemBytes)
     props.push_back({"RAM", fmtBytes(info.totalMemBytes)});
 

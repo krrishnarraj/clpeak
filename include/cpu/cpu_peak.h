@@ -33,6 +33,21 @@ struct cpu_core_t {
   int      maxMHz = 0;      // 0 when the OS does not say
   uint64_t l1dBytes = 0, l2Bytes = 0, l3Bytes = 0;
   int      l1dSharers = 1, l2Sharers = 1, l3Sharers = 1;
+  // The instance it reads at L1d / L2 / L3: an index into
+  // cpu_device_info_t::cacheInstances, -1 where the OS lists none.
+  int      cacheInstance[4] = {-1, -1, -1, -1};
+};
+
+// ---------------------------------------------------------------------------
+// One cache instance the OS lists (Linux / Android: sysfs, the device tree)
+// and every CPU that reads it.  0 bytes is a level listed without its size,
+// which probeCacheSizes() measures.
+// ---------------------------------------------------------------------------
+struct cpu_cache_instance_t {
+  int      level    = 0;          // 1 = L1d, 2, 3
+  uint64_t bytes    = 0;
+  bool     measured = false;      // from the latency sweep, not the OS
+  std::vector<int> cpus;
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +92,15 @@ struct cpu_device_info_t {
   bool l1dUnsized = false;           // the OS lists the level but gives no size for it
   bool l2Unsized  = false;           // (an Android device tree without sizes); its
   bool l3Unsized  = false;           // size field stays 0
+  // Sizes the OS withheld are measured (probeCacheSizes): which levels have
+  // an instance measured, and whether the sweep ran at all -- a level still
+  // unsized after it is one the sweep found no step for.
+  bool l1dMeasured = false, l2Measured = false, l3Measured = false;
+  bool cacheProbed = false;
+  // Linux: every instance the OS lists, from which the per-core sizes, the
+  // ST core's, the instance lists and the totals above are derived
+  // (refreshCacheSizes).  Empty elsewhere.
+  std::vector<cpu_cache_instance_t> cacheInstances;
   uint64_t totalMemBytes = 0;
 
   // ISA capability flags (best-effort runtime detection).
@@ -102,6 +126,11 @@ struct cpu_device_info_t {
 
 // Populate `info` from the host (cpu_device.cpp).
 void detectCpuInfo(cpu_device_info_t &info);
+
+// Derive every cache field of `info` from its cacheInstances again -- after
+// probeCacheSizes() has filled some -- and the totals from the instance
+// lists (cpu_device.cpp).
+void refreshCacheSizes(cpu_device_info_t &info);
 
 // Why a working set cannot be sized for cache level `level` (1 = L1d, 2 = L2,
 // 3 = L3), or nullptr when it can: that level's size and every smaller level's
@@ -151,6 +180,14 @@ private:
   uint64_t                  generation  = 0;     // bumped each dispatch
   bool                      stop = false;
 };
+
+// Measure the cache sizes the OS lists without one -- an Android device tree
+// often has none -- on each kind of core the pool runs on, from where a
+// dependent-load walk slows down as its working set grows (cache_probe.cpp),
+// and refresh `info` with them.  A level whose step is not found stays
+// unsized, and the rows that need it skip.  Does nothing where every listed
+// size is known, or where workers are not pinned (macOS).
+void probeCacheSizes(cpu_device_info_t &info, CpuThreadPool &pool);
 
 class CpuPeak : public Peak {
 public:

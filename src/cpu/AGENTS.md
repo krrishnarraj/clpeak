@@ -15,6 +15,7 @@ local memory, DRAM ↔ global memory.
 
 - Main class / orchestrator / `runAll()` / `runWorkload()`? → `cpu_peak.cpp`
 - CPU detection (name, cores, cache sizes, ISA flags), which core is fastest? → `cpu_device.cpp`
+- A cache size the OS lists a level without? → measured by `cache_probe.cpp` (`probeCacheSizes`, run by `runAll()` once the pool is pinned)
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers, `NACC`, unroll macros)? → `cpu_simd.h`
 - Run-all-ISA-variants list / per-ISA labels? → `cpu_dispatch.cpp` (`kernelMenu()`)
@@ -37,6 +38,7 @@ local memory, DRAM ↔ global memory.
 |------|---------|
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch, device header), `runWorkload` (ST: warmup → probe → `pickIters` timed batch; MT: warmup → deadline settle that doubles as the probe → work claimed from a shared counter, timed until it runs dry; returns a rate), `enumerate` |
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates |
+| `cache_probe.cpp` | `probeCacheSizes()` — the sizes of cache levels the OS lists without one, from where a dependent-load walk slows down (two walks, the faster kept; timed against a 4 KB walk for the clock), one core of each rank, matched in order to the listed levels, a private L2 checked against a neighbour streaming beside it; `cache_probe.h` has the walker and the step finder on their own |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, pinning worker i to the i-th id it is given (the main pool: `info.cores`, fastest first), re-applied at every job |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
 | `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run). A `ChainVariant` can carry other spellings of its work (`alts`), which `emitCompute()` races |
@@ -235,10 +237,15 @@ changing a kernel.
   and undersized the STREAM arrays. Apple additionally needs its L2 total
   summed over `hw.perflevel*.cpusperl2` — one sysctl reports one cluster.
   "No L3" is concluded only after every CPU's sysfs and the device tree have
-  none; an L3 listed without a size (`l3Unsized`) skips with that reason.
-- **A cache size the OS never gave is never assumed.** arm64 kernels list cache
-  levels without a `size` file when their device tree carries none — Android
-  does, and the emulator reproduces it. The size stays 0 (`l1dUnsized` /
+  none, and never from a listing with nothing past the L1d, which is one the
+  OS cut short; an L3 listed without a size (`l3Unsized`) is measured.
+- **A cache size the OS never gave is measured, never assumed.** arm64
+  kernels list cache levels without a `size` file when their device tree
+  carries none — Android does, and the emulator reproduces it; a tree with
+  no cache nodes leaves an L1d alone (CMF Phone 1). `probeCacheSizes()`
+  measures the sizes of the levels listed, marks them `measured` (the header
+  says so), and matches its steps only to listed levels: a level the OS does
+  not list is not made up. A size it cannot measure stays 0 (`l1dUnsized` /
   `l2Unsized` / `l3Unsized` say it was listed), the header omits the level,
   and every cache-bandwidth, L1-write and latency row for it skips as
   Unsupported with `cacheSizeGap()`'s reason: a level runs only when its own

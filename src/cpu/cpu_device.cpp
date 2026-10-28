@@ -472,20 +472,24 @@ struct CpuRecord
 
 } // anonymous namespace
 
-// Order the usable CPUs fastest first into info.cores, point the ST fields at
-// the first of them, and list every sized instance for the header.  `usable`
-// is what this process may run on; the instance lists cover every CPU.
+// Order the usable CPUs fastest first into info.cores, keep every cache
+// instance the OS listed on info.cacheInstances with the cores pointing at
+// theirs, and derive the per-core and ST sizes from them.  `usable` is what
+// this process may run on; the instance lists cover every CPU.
 static void applyTopology(cpu_device_info_t &info, const std::vector<CpuRecord> &recs,
                           const std::map<std::string, CacheInstance> &inst,
                           const std::vector<int> &usable)
 {
+  info.cacheInstances.clear();
+  std::map<std::string, int> index;
   for (const auto &kv : inst)
   {
-    const CacheInstance &c = kv.second;
-    if (!c.size) continue;
-    if (c.level == 1)      info.l1dSizes.push_back(c.size);
-    else if (c.level == 2) info.l2Sizes.push_back(c.size);
-    else if (c.level == 3) info.l3Sizes.push_back(c.size);
+    cpu_cache_instance_t c;
+    c.level = kv.second.level;
+    c.bytes = kv.second.size;
+    c.cpus  = kv.second.cpus;
+    index[kv.first] = (int)info.cacheInstances.size();
+    info.cacheInstances.push_back(std::move(c));
   }
 
   auto isUsable = [&](int id) {
@@ -499,17 +503,11 @@ static void applyTopology(cpu_device_info_t &info, const std::vector<CpuRecord> 
     c.id     = r.id;
     c.rank   = r.rank;
     c.maxMHz = r.maxMHz;
-    uint64_t *bytes[4] = {nullptr, &c.l1dBytes, &c.l2Bytes, &c.l3Bytes};
-    int *sharers[4]    = {nullptr, &c.l1dSharers, &c.l2Sharers, &c.l3Sharers};
     for (int lvl = 1; lvl <= 3; lvl++)
     {
-      auto it = r.key[lvl].empty() ? inst.end() : inst.find(r.key[lvl]);
-      if (it == inst.end()) continue;
-      *bytes[lvl] = it->second.size;
-      int n = 0;
-      for (int id : it->second.cpus)
-        if (isUsable(id)) n++;
-      *sharers[lvl] = std::max(n, 1);
+      auto it = r.key[lvl].empty() ? index.end() : index.find(r.key[lvl]);
+      if (it != index.end())
+        c.cacheInstance[lvl] = it->second;
     }
     info.cores.push_back(c);
   }
@@ -519,20 +517,9 @@ static void applyTopology(cpu_device_info_t &info, const std::vector<CpuRecord> 
                    });
   if (info.cores.empty())
     return;
-
-  const cpu_core_t &fast = info.cores.front();
-  info.l1dCacheBytes = fast.l1dBytes;
-  info.l2CacheBytes  = fast.l2Bytes;
-  info.l3CacheBytes  = fast.l3Bytes;
-  if (fast.maxMHz > 0)
-    info.clockMHz = fast.maxMHz;
-  for (const CpuRecord &r : recs)
-    if (r.id == fast.id)
-    {
-      info.l1dUnsized = !r.key[1].empty() && !fast.l1dBytes;
-      info.l2Unsized  = !r.key[2].empty() && !fast.l2Bytes;
-      info.l3Unsized  = !r.key[3].empty() && !fast.l3Bytes;
-    }
+  if (info.cores.front().maxMHz > 0)
+    info.clockMHz = info.cores.front().maxMHz;
+  refreshCacheSizes(info);
 }
 
 // Name the ST core for the header when the cores are not all alike: the part
@@ -890,6 +877,93 @@ static void detectIsa(cpu_device_info_t &info)
 }
 
 // ---------------------------------------------------------------------------
+// The per-core and ST cache fields and the instance lists, from
+// info.cacheInstances -- the OS's sizes, and what probeCacheSizes() measured
+// where it gave none.  A platform that lists no instances (macOS, Windows)
+// sets those fields itself.
+static void deriveCacheFields(cpu_device_info_t &info)
+{
+  if (info.cacheInstances.empty())
+    return;
+  std::vector<uint64_t> *lists[4] = {nullptr, &info.l1dSizes, &info.l2Sizes, &info.l3Sizes};
+  bool *measured[4] = {nullptr, &info.l1dMeasured, &info.l2Measured, &info.l3Measured};
+  for (int lvl = 1; lvl <= 3; lvl++)
+  {
+    lists[lvl]->clear();
+    *measured[lvl] = false;
+  }
+  for (const cpu_cache_instance_t &c : info.cacheInstances)
+  {
+    if (!c.bytes || c.level < 1 || c.level > 3)
+      continue;
+    lists[c.level]->push_back(c.bytes);
+    *measured[c.level] = *measured[c.level] || c.measured;
+  }
+  for (cpu_core_t &core : info.cores)
+  {
+    uint64_t *bytes[4] = {nullptr, &core.l1dBytes, &core.l2Bytes, &core.l3Bytes};
+    int *sharers[4]    = {nullptr, &core.l1dSharers, &core.l2Sharers, &core.l3Sharers};
+    for (int lvl = 1; lvl <= 3; lvl++)
+    {
+      const int i = core.cacheInstance[lvl];
+      if (i < 0)
+        continue;
+      const cpu_cache_instance_t &c = info.cacheInstances[(size_t)i];
+      *bytes[lvl] = c.bytes;
+      // The pool's workers that read it: an SMT sibling counts.
+      int n = 0;
+      for (int id : c.cpus)
+        for (const cpu_core_t &u : info.cores)
+          if (u.id == id)
+          {
+            n++;
+            break;
+          }
+      *sharers[lvl] = std::max(n, 1);
+    }
+  }
+  if (info.cores.empty())
+    return;
+  // The ST core's -- or a size the platform found some other way (sysconf),
+  // until an instance has one.
+  const cpu_core_t &fast = info.cores.front();
+  if (fast.l1dBytes) info.l1dCacheBytes = fast.l1dBytes;
+  if (fast.l2Bytes)  info.l2CacheBytes  = fast.l2Bytes;
+  if (fast.l3Bytes)  info.l3CacheBytes  = fast.l3Bytes;
+  info.l1dUnsized = fast.cacheInstance[1] >= 0 && !info.l1dCacheBytes;
+  info.l2Unsized  = fast.cacheInstance[2] >= 0 && !info.l2CacheBytes;
+  info.l3Unsized  = fast.cacheInstance[3] >= 0 && !info.l3CacheBytes;
+}
+
+// Totals are the sum of every instance the OS listed.  Where it listed
+// none, a platform branch may have left a total of its own (Windows with
+// several processor groups), and the floors below cover the rest.
+static void cacheTotals(cpu_device_info_t &info)
+{
+  auto sum = [](const std::vector<uint64_t> &v) {
+    uint64_t t = 0;
+    for (uint64_t x : v) t += x;
+    return t;
+  };
+  if (!info.l1dSizes.empty()) info.l1dTotalBytes = sum(info.l1dSizes);
+  if (!info.l2Sizes.empty())  info.l2TotalBytes  = sum(info.l2Sizes);
+  if (!info.l3Sizes.empty())  info.l3TotalBytes  = sum(info.l3Sizes);
+  // If totals couldn't be determined, fall back to the per-core size (no breakdown shown).
+  if (info.l1dTotalBytes < info.l1dCacheBytes)
+    info.l1dTotalBytes = info.l1dCacheBytes;
+  if (info.l2TotalBytes < info.l2CacheBytes)
+    info.l2TotalBytes = info.l2CacheBytes;
+  if (info.l3TotalBytes < info.l3CacheBytes)
+    info.l3TotalBytes = info.l3CacheBytes;
+}
+
+void refreshCacheSizes(cpu_device_info_t &info)
+{
+  deriveCacheFields(info);
+  cacheTotals(info);
+}
+
+// ---------------------------------------------------------------------------
 void detectCpuInfo(cpu_device_info_t &info)
 {
   info.logicalCores = (int)std::thread::hardware_concurrency();
@@ -1124,18 +1198,6 @@ void detectCpuInfo(cpu_device_info_t &info)
   if (info.physicalCores <= 0)
     info.physicalCores = info.logicalCores;
 
-  // Totals are the sum of every instance the OS listed.  Where it listed
-  // none, a platform branch may have left a total of its own (Windows with
-  // several processor groups), and the floors below cover the rest.
-  auto sum = [](const std::vector<uint64_t> &v) {
-    uint64_t t = 0;
-    for (uint64_t x : v) t += x;
-    return t;
-  };
-  if (!info.l1dSizes.empty()) info.l1dTotalBytes = sum(info.l1dSizes);
-  if (!info.l2Sizes.empty())  info.l2TotalBytes  = sum(info.l2Sizes);
-  if (!info.l3Sizes.empty())  info.l3TotalBytes  = sum(info.l3Sizes);
-
   // No fallback sizes.  A 32 KB / 512 KB guess once stood in for an L1d / L2
   // the OS gave no size for -- an Android kernel whose device tree has none
   // lists its caches without one -- and the cache rows then measured a working
@@ -1145,30 +1207,36 @@ void detectCpuInfo(cpu_device_info_t &info)
   // that does not exist, reported an L3 *faster* than the L2 next to it, and
   // undersized the STREAM arrays.  A size stays 0 when unknown -- with
   // l1dUnsized / l2Unsized / l3Unsized when the level is listed without one --
-  // and the rows that would need it skip (cacheSizeGap).
-  // If totals couldn't be determined, fall back to the per-core size (no breakdown shown).
-  if (info.l1dTotalBytes < info.l1dCacheBytes)
-    info.l1dTotalBytes = info.l1dCacheBytes;
-  if (info.l2TotalBytes < info.l2CacheBytes)
-    info.l2TotalBytes = info.l2CacheBytes;
-  if (info.l3TotalBytes < info.l3CacheBytes)
-    info.l3TotalBytes = info.l3CacheBytes;
+  // until probeCacheSizes() measures it, and the rows that would need one it
+  // could not measure skip (cacheSizeGap).
+  cacheTotals(info);
 }
 
 const char *cacheSizeGap(const cpu_device_info_t &info, int level)
 {
   // The level's own size first, so a CPU with no L3 says so whatever else the
-  // OS withheld; then the levels beneath.
+  // OS withheld; then the levels beneath.  A size the OS withheld that the
+  // latency sweep could not find either says so.
+  const bool p = info.cacheProbed;
+  // A listing with nothing past the L1d is one the OS cut short -- no core
+  // has an L1 alone -- not a CPU without an L2 or an L3: an Android kernel
+  // whose device tree has no cache nodes lists the L1 its CPU reports.
+  bool pastL1 = info.cacheInstances.empty();
+  for (const cpu_cache_instance_t &c : info.cacheInstances)
+    pastL1 = pastL1 || c.level >= 2;
   if (level >= 3 && !info.l3CacheBytes)
-    return info.l3Unsized ? "the OS lists an L3 but gives no size for it"
-                          : "no L3 on this CPU";
+    return !info.l3Unsized ? (pastL1 ? "no L3 on this CPU" : "the OS lists no cache past the L1d")
+           : p ? "the OS lists an L3 but gives no size for it, and measuring found no step for it"
+               : "the OS lists an L3 but gives no size for it";
   if (level >= 2 && !info.l2CacheBytes && (level == 2 || info.l2Unsized))
-    return info.l2Unsized ? "the OS lists an L2 but gives no size for it"
-                          : "the OS lists no L2";
+    return !info.l2Unsized ? (pastL1 ? "the OS lists no L2" : "the OS lists no cache past the L1d")
+           : p ? "the OS lists an L2 but gives no size for it, and measuring found no step for it"
+               : "the OS lists an L2 but gives no size for it";
   // Every CPU has an L1d, so one with no size is unknown, listed or not.
   if (!info.l1dCacheBytes)
-    return info.l1dUnsized ? "the OS lists an L1d but gives no size for it"
-                           : "the OS gives no L1d size";
+    return !info.l1dUnsized ? "the OS gives no L1d size"
+           : p ? "the OS lists an L1d but gives no size for it, and measuring found no step for it"
+               : "the OS lists an L1d but gives no size for it";
   return nullptr;
 }
 
