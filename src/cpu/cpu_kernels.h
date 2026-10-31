@@ -21,7 +21,7 @@ namespace clpeak_cpu {
 // Runtime CPU feature flags (filled by detectFeatures() in cpu_dispatch.cpp).
 struct CpuFeatures {
   // x86
-  bool sse42 = false, avx2 = false, fma = false;
+  bool sse42 = false, avx = false, avx2 = false, fma = false;
   bool avx512f = false, avx512bw = false, avx512vl = false, avx512dq = false;
   bool avx512vnni = false, avx512bf16 = false, avx512fp16 = false;
   bool avxvnni = false;      // 256-bit VEX AVX-VNNI (Alder Lake+, Zen 5, Sierra Forest)
