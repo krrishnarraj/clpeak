@@ -18,6 +18,7 @@
 #include <map>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -987,15 +988,14 @@ void detectCpuInfo(cpu_device_info_t &info)
     int coresPerSocket = std::atoi(firstLineValue(cpuinfo, "cpu cores").c_str());
     int sockets = 0;
     size_t p = 0;
+    std::unordered_set<std::string> socket_ids;
     while ((p = cpuinfo.find("physical id", p)) != std::string::npos)
     {
       sockets++;
       p += 11;
+      socket_ids.insert(cpuinfo.substr(p, cpuinfo.find("\n", p) - p));
     }
-    // physical id lines repeat per logical CPU; count distinct is overkill —
-    // approximate sockets as 1 when the field is present at all.
-    if (sockets > 0)
-      sockets = 1;
+    sockets = socket_ids.size();
     info.physicalCores = coresPerSocket > 0 ? coresPerSocket * (sockets ? sockets : 1) : 0;
   }
 
