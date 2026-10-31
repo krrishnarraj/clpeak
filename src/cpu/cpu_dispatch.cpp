@@ -143,6 +143,7 @@ static CpuFeatures detect()
   {
     uint64_t xcr0 = xgetbv0();
     osAvx    = (xcr0 & 0x6) == 0x6;
+    f.avx    = avxcpu && osAvx;
     osAvx512 = osAvx && ((xcr0 & 0xE0) == 0xE0);
   }
 
@@ -415,6 +416,7 @@ const char *isaName()
   const CpuFeatures &f = cpuFeatures();
   if (f.avx512f) return "AVX-512";
   if (f.avx2)    return "AVX2+FMA";
+  if (f.avx)     return "AVX";
   if (f.sse42)   return "SSE4.2";
   if (f.sve2)    return "SVE2";
   if (f.sve)     return "SVE";
@@ -434,6 +436,9 @@ const CpuKernelTable &kernels()
 #endif
 #if CLPEAK_TU_sse42
     if (f.sse42) merge(t, clpeak_table_sse42());
+#endif
+#if CLPEAK_TU_avx
+    if (f.avx) merge(t, clpeak_table_avx());
 #endif
 #if CLPEAK_TU_avx2
     if (f.avx2 && f.fma) merge(t, clpeak_table_avx2());
@@ -631,6 +636,14 @@ const CpuKernelMenu &kernelMenu()
       // too (SSSE3 is implied by -msse4.2; f.sse42 covers the runtime gate).
       add(m.strscan, t->strscan_istri, "SSE4.2 PCMPISTRI", "SSE4.2");
       add(m.utf8, t->utf8, "SSSE3", "SSSE3");
+    }
+    if (f.avx)
+    {
+      const CpuKernelTable *t = TU(avx);
+      add(m.fp32, t->fp32, "AVX", "AVX");
+      add(m.fp32lat, t->fp32lat, "AVX", "AVX");
+      add(m.fp64, t->fp64, "AVX", "AVX");
+      addDivSqrt(t, "AVX", "AVX");
     }
     if (f.avx2 && f.fma)
     {

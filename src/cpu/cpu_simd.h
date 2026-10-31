@@ -93,6 +93,23 @@ CPU_SIMD_ALWAYS_INLINE float f32_hsum(f32v a)
   lo = _mm_hadd_ps(lo, lo);
   return _mm_cvtss_f32(lo);
 }
+#elif defined(__AVX__)
+using f32v = __m256;
+constexpr int F32_LANES = 8;
+constexpr int F32_NACC  = 12;
+CPU_SIMD_ALWAYS_INLINE f32v f32_set(float a)            { return _mm256_set1_ps(a); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_load(const float *p)    { return _mm256_loadu_ps(p); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_fma(f32v a, f32v b, f32v c) { return _mm256_add_ps(_mm256_mul_ps(a, b), c); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_add(f32v a, f32v b)     { return _mm256_add_ps(a, b); }
+CPU_SIMD_ALWAYS_INLINE float f32_hsum(f32v a)
+{
+  __m128 lo = _mm256_castps256_ps128(a);
+  __m128 hi = _mm256_extractf128_ps(a, 1);
+  lo = _mm_add_ps(lo, hi);
+  lo = _mm_hadd_ps(lo, lo);
+  lo = _mm_hadd_ps(lo, lo);
+  return _mm_cvtss_f32(lo);
+}
 #elif defined(__SSE2__) || defined(_M_X64)
 // MSVC never defines __SSE2__, but x86-64 always has SSE2 (this is the MSVC
 // baseline/sse42 TU, which has no /arch:AVX2 so __AVX2__ is undefined above).
@@ -152,6 +169,20 @@ constexpr int F64_LANES = 4;
 constexpr int F64_NACC  = 12;
 CPU_SIMD_ALWAYS_INLINE f64v f64_set(double a)           { return _mm256_set1_pd(a); }
 CPU_SIMD_ALWAYS_INLINE f64v f64_fma(f64v a, f64v b, f64v c) { return _mm256_fmadd_pd(a, b, c); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_add(f64v a, f64v b)     { return _mm256_add_pd(a, b); }
+CPU_SIMD_ALWAYS_INLINE double f64_hsum(f64v a)
+{
+  __m128d lo = _mm256_castpd256_pd128(a);
+  __m128d hi = _mm256_extractf128_pd(a, 1);
+  lo = _mm_add_pd(lo, hi);
+  return _mm_cvtsd_f64(_mm_hadd_pd(lo, lo));
+}
+#elif defined(__AVX__)
+using f64v = __m256d;
+constexpr int F64_LANES = 4;
+constexpr int F64_NACC  = 12;
+CPU_SIMD_ALWAYS_INLINE f64v f64_set(double a)           { return _mm256_set1_pd(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_fma(f64v a, f64v b, f64v c) { return _mm256_add_pd(_mm256_mul_pd(a, b), c); }
 CPU_SIMD_ALWAYS_INLINE f64v f64_add(f64v a, f64v b)     { return _mm256_add_pd(a, b); }
 CPU_SIMD_ALWAYS_INLINE double f64_hsum(f64v a)
 {
@@ -301,6 +332,11 @@ CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm512_div_pd(a
 CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm512_sqrt_ps(a); }
 CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return _mm512_sqrt_pd(a); }
 #elif defined(__AVX2__) && (defined(__FMA__) || defined(_MSC_VER))
+CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return _mm256_div_ps(a, b); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm256_div_pd(a, b); }
+CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm256_sqrt_ps(a); }
+CPU_SIMD_ALWAYS_INLINE f64v f64_sqrt(f64v a)            { return _mm256_sqrt_pd(a); }
+#elif defined(__AVX__)
 CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return _mm256_div_ps(a, b); }
 CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return _mm256_div_pd(a, b); }
 CPU_SIMD_ALWAYS_INLINE f32v f32_sqrt(f32v a)            { return _mm256_sqrt_ps(a); }
