@@ -991,7 +991,6 @@ void detectCpuInfo(cpu_device_info_t &info)
     std::unordered_set<std::string> socket_ids;
     while ((p = cpuinfo.find("physical id", p)) != std::string::npos)
     {
-      sockets++;
       p += 11;
       socket_ids.insert(cpuinfo.substr(p, cpuinfo.find("\n", p) - p));
     }
