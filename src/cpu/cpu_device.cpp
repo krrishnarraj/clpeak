@@ -994,7 +994,7 @@ void detectCpuInfo(cpu_device_info_t &info)
       p += 11;
       socket_ids.insert(cpuinfo.substr(p, cpuinfo.find("\n", p) - p));
     }
-    sockets = socket_ids.size();
+    sockets = (int)socket_ids.size();
     info.physicalCores = coresPerSocket > 0 ? coresPerSocket * (sockets ? sockets : 1) : 0;
   }
 
