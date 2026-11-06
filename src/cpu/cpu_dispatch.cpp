@@ -637,7 +637,7 @@ const CpuKernelMenu &kernelMenu()
       add(m.strscan, t->strscan_istri, "SSE4.2 PCMPISTRI", "SSE4.2");
       add(m.utf8, t->utf8, "SSSE3", "SSSE3");
     }
-    if (f.avx)
+    if (f.avx && !(f.avx2 && f.fma))
     {
       const CpuKernelTable *t = TU(avx);
       add(m.fp32, t->fp32, "AVX", "AVX");
