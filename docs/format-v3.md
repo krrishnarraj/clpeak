@@ -327,17 +327,22 @@ the meta, and the devices with every Benchmark finished so far (one
 ```jsonc
 {"schema": "clpeak/run-partial", "format_version": 3, …, "progress": {
   "backends_done": ["Vulkan", "OpenCL"],
-  "devices": [{"backend": "CPU", "device_index": 0, "benchmarks_done": ["single-precision-compute", …]}]},
+  "devices": [{"backend": "CPU", "device_index": 0, "benchmarks_done": ["single-precision-compute", …],
+               "held_tests": ["integer_compute@NEON"]}]},
  "devices": [ … ]}
 ```
 
 `backends_done` names the backends finished whole, and `devices` the devices
 of the one in flight: each `done`, or with the Benchmarks finished on it by
 their flag names. It is rewritten whole, through a rename, as each Benchmark,
-device and backend finishes, and removed with the sidecar once the document is
-saved, so one left behind is a run that did not finish — or one that was
-cancelled, which keeps it beside the document it saved. It is not a result —
-`--compare` refuses it — and `--resume` continues the run from it.
+device and backend finishes, and when the run is about to wait between two
+readings — held while the app is off screen or paused, or cooling — since a
+phone may end an app it holds. Then the devices also carry the tests of the
+Benchmark in flight with the readings they have, and `held_tests` names them
+by key (`id` or `id@variant`). It is removed with the sidecar once the
+document is saved, so one left behind is a run that did not finish — or one
+that was cancelled, which keeps it beside the document it saved. It is not a
+result — `--compare` refuses it — and `--resume` continues the run from it.
 
 ## Resumed runs
 
@@ -347,7 +352,9 @@ continued: `clpeak --resume run.clpeak.json` (or `run.clpeak.partial.json`)
 runs, with the options the run started with, only what its checkpoint does
 not hold. The Benchmark the run was in when it stopped runs again
 from its start, or with `--skip-crashed`, for a crash that would repeat, is
-recorded in its place as an `error` reading `crashed` instead. Only the build
+recorded in its place as an `error` reading `crashed` instead. Where the run
+stopped while held, the readings its `held_tests` had are kept, and the
+Benchmark run again adds only the ones they lack. Only the build
 that started a run continues it, on the OS release it started on.
 
 The parts end in one document under the same name. `generated_at` is the first

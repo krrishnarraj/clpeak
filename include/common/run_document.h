@@ -289,6 +289,9 @@ struct RunProgress {
         int         deviceIndex = -1;
         bool        done = false;   // every Benchmark that was going to run on it did
         std::vector<std::string> benchmarks;   // "single-precision-compute", ...
+        // Tests ("id" or "id@variant") of a Benchmark not finished, saved
+        // with the readings they had when the run held (RunCheckpoint::held).
+        std::vector<std::string> held;
     };
     std::vector<std::string> backendsDone;
     std::vector<Device>      devices;

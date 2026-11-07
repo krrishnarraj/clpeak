@@ -22,7 +22,9 @@
 // It is rewritten whole, through a temporary file and a rename so that a
 // death mid-write leaves the one before, at each boundary that adds to it: a
 // Benchmark finishing (Peak::admit's guard), a device or a backend closing
-// (the logger's scopes).  Nothing is being timed at those moments.  It is
+// (the logger's scopes), and the run about to wait at a boundary between
+// readings -- a hold or a thermal pause, during which a phone may end the
+// app.  Nothing is being timed at those moments.  It is
 // removed with the sidecar once the document is saved, so one left behind is
 // a run that did not finish, and `--resume <output>` continues it
 // (run_resume.h) -- except that a cancelled run keeps it beside the document
@@ -81,6 +83,15 @@ public:
                         const RunDocument &live);
     void backendFinished(const std::string &backend, const RunDocument &live);
 
+    // The run is about to wait at a boundary between readings on this
+    // device: save what it has, the tests of the Benchmark in flight among
+    // it, as held (RunProgress::Device::held).  If the app is ended while it
+    // waits, a resumed run still measures that Benchmark again from its
+    // start -- a runner cannot begin part-way -- but keeps the readings the
+    // held tests had, and takes from its own only the ones they lack
+    // (RunDocument::append).
+    void held(const std::string &backend, int deviceIndex, const RunDocument &live);
+
     // ---- --skip-crashed ----------------------------------------------------
     // The part before died in a Benchmark: the first one a resumed run is
     // admitted to is where, so it is recorded instead of run (Peak::admit).
@@ -104,6 +115,10 @@ public:
 private:
     void write(const RunDocument &live);
 
+    // Every test the document has for this device, the ones in `live`
+    // included: those of finished Benchmarks once one finishes.
+    void finishTests(const std::string &backend, int deviceIndex, const RunDocument &live);
+
     RunDocument &doc;
     std::string  path;
     RunProgress  prog;
@@ -118,6 +133,7 @@ private:
     bool                  inPart = false;
     ResumeRecord          partStart;
     std::set<std::string> priorTests;   // device key + '\n' + test key
+    std::set<std::string> finished;     // the same keys: tests of finished Benchmarks
 };
 
 #endif  // CLPEAK_RUN_CHECKPOINT_H
