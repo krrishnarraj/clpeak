@@ -336,6 +336,11 @@ private:
   void recordTranscriptLine(const LogEvent &e, const std::string &message,
                             bool toDocument = true);
 
+  // A boundary between readings -- a test starting, a reading recorded: the
+  // thermal gate, then the hold, the run's checkpoint saved before either
+  // waits (RunCheckpoint::held).
+  void boundary();
+
   // Scope handles are friends so they can manipulate context state directly.
   friend class BackendScope;
   friend class DeviceScope;

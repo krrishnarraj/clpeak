@@ -26,6 +26,7 @@
   /* x86 tiers */                                                           \
   CLPEAK_TU(generic)  /* SSE2 floor (x86) / NEON floor (arm) / scalar */    \
   CLPEAK_TU(sse42)                                                          \
+  CLPEAK_TU(avx)      /* AVX but no AVX2 (Sandy/Ivy Bridge) */              \
   CLPEAK_TU(avx2)                                                           \
   CLPEAK_TU(avxvnni)      /* 256-bit AVX-VNNI int8 dot */                   \
   CLPEAK_TU(avxvnniint8)  /* 256-bit AVX-VNNI-INT8 signed dot */            \

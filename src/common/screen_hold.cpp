@@ -50,7 +50,7 @@ void setRunPaused(bool on)
     RunLog::hostNote(LogLevel::Info, "app", "the run was resumed after a pause");
 }
 
-void holdGate()
+bool holdGate(const std::function<void()> &beforeWaiting)
 {
   // The run's own line, in the scope of the test it stopped in -- again
   // when what it waits for changes.
@@ -59,12 +59,15 @@ void holdGate()
   {
     const char *why = holdReason();
     if (!why)
-      return;
+      break;
+    if (!said && beforeWaiting)
+      beforeWaiting();
     if (why != said)
       logMessage(LogLevel::Info, "", why);
     said = why;
     std::this_thread::sleep_for(kSlice);
   }
+  return said != nullptr;
 }
 
 } // namespace clpeak

@@ -4,6 +4,7 @@
 #include <common/json_writer.h>
 #include <version.h>
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
 #include <iostream>
@@ -119,13 +120,20 @@ void RunDocument::append(const RunDocument &other)
         }
         // Same device seen twice (two loggers, or a backend that enumerates
         // it more than once): fold the tests in rather than emitting a second
-        // device block the GUI would show as a separate run.
+        // device block the GUI would show as a separate run.  A reading this
+        // document already has stays: a resumed run measures again a test the
+        // part before was held in, and that part's readings are the ones kept
+        // (RunCheckpoint::held).
         for (const TestResult &t : d.tests)
         {
             TestResult *known = existing->findTest(t.key());
             if (!known) { existing->tests.push_back(t); continue; }
-            known->metrics.insert(known->metrics.end(),
-                                  t.metrics.begin(), t.metrics.end());
+            for (const MetricResult &m : t.metrics)
+            {
+                const bool had = std::any_of(known->metrics.begin(), known->metrics.end(),
+                                             [&](const MetricResult &k) { return k.id == m.id; });
+                if (!had) known->metrics.push_back(m);
+            }
         }
         if (existing->properties.empty()) existing->properties = d.properties;
     }
@@ -135,7 +143,7 @@ RunProgress::Device &RunProgress::device(const std::string &backend, int deviceI
 {
     for (Device &d : devices)
         if (d.backend == backend && d.deviceIndex == deviceIndex) return d;
-    devices.push_back(Device{backend, deviceIndex, false, {}});
+    devices.push_back(Device{backend, deviceIndex, false, {}, {}});
     return devices.back();
 }
 
@@ -410,6 +418,12 @@ void writeProgress(JsonWriter &w, const RunProgress &p)
             w.beginArray("benchmarks_done");
             for (const std::string &b : d.benchmarks) w.rawString(b);
             w.endArray();
+            if (!d.held.empty())
+            {
+                w.beginArray("held_tests");
+                for (const std::string &t : d.held) w.rawString(t);
+                w.endArray();
+            }
         }
         w.endObject();
     }
@@ -654,6 +668,8 @@ void readProgress(const JsonValue &v, RunProgress &p)
             dev.done        = d.flag("done");
             if (const JsonValue *bs = d.find("benchmarks_done"))
                 for (const JsonValue &b : bs->items()) dev.benchmarks.push_back(b.asString());
+            if (const JsonValue *hs = d.find("held_tests"))
+                for (const JsonValue &h : hs->items()) dev.held.push_back(h.asString());
             p.devices.push_back(std::move(dev));
         }
 }
