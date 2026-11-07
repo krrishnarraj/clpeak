@@ -40,7 +40,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates |
 | `cache_probe.cpp` | `probeCacheSizes()` — the sizes of cache levels the OS lists without one, from where a dependent-load walk slows down (two walks, the faster kept; timed against a 4 KB walk for the clock), one core of each rank, matched in order to the listed levels, a private L2 checked against a neighbour streaming beside it; `cache_probe.h` has the walker and the step finder on their own |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, pinning worker i to the i-th id it is given (the main pool: `info.cores`, fastest first), re-applied at every job |
-| `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
+| `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / AVX / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
 | `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run). A `ChainVariant` can carry other spellings of its work (`alts`), which `emitCompute()` races |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
 | `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains (plus `fp32lat`, the one-accumulator fp32 chain only the SMT test runs), fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
@@ -117,9 +117,9 @@ row shares the test with its floating-point rows.
 
 TU tags (`cpu_tu_registry.h`):
 
-- **x86**: `generic` (SSE2 floor), `sse42`, `avx2`, `avxvnni`, `avxvnniint8`,
-  `avxvnniint16`, `avx512`, `avx512vnni`, `avx512bf16`, `avx512fp16`,
-  `avx10bf16`, `amx`, `amxfp16`, `amxfp8`; crypto `aes`, `vaes`,
+- **x86**: `generic` (SSE2 floor), `sse42`, `avx`, `avx2`, `avxvnni`,
+  `avxvnniint8`, `avxvnniint16`, `avx512`, `avx512vnni`, `avx512bf16`,
+  `avx512fp16`, `avx10bf16`, `amx`, `amxfp16`, `amxfp8`; crypto `aes`, `vaes`,
   `sha` — CRC32-C has no TU of its own here, it rides in `sse42` (the CRC32
   instruction is part of SSE4.2).
 - **ARM**: `generic` (NEON floor, pinned to `apple-m1` on macOS), `fp16`,
