@@ -147,7 +147,7 @@ jobs:
         run: |
           mkdir -p release
           # Each desktop job already produced a CPack zip (macOS also a .dmg
-          # holding xpupeak-gui.app); just gather them.  Windows zips are
+          # holding XpuPeak.app); just gather them.  Windows zips are
           # unsigned while sign-windows is disabled.
           find artifacts -name 'xpupeak-*.zip' -exec cp {} release/ \;
           find artifacts -name 'xpupeak-*.dmg' -exec cp {} release/ \;

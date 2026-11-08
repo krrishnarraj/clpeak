@@ -289,12 +289,61 @@ jobs:
         run: ${{ matrix.binary }} --version || true
 
       # Package with CPack into a self-contained zip whose top-level folder is
-      # xpupeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
-      # any bundled runtime libs.  -C Release picks the Release artifacts on
-      # multi-config generators (Windows); harmless on single-config.
+      # xpupeak-<version>-<os>-<arch>[-backend], holding both commands
+      # (bin/xpupeak and bin/clpeak), the GUI, LICENSE, and any bundled runtime
+      # libs.  -C Release picks the Release artifacts on multi-config
+      # generators (Windows); harmless on single-config.
       - name: Package
         shell: bash
         run: cd build && cpack -G ZIP -C Release
+
+      # The zip as a user unpacks it.  bin/ holds both commands: clpeak is the
+      # same program under its 3.x name -- a link to xpupeak on Unix, which the
+      # zip has to keep as a link, and a copy of the exe on Windows -- and each
+      # prints the same version line under its own name.  A packaged xpupeak
+      # that cannot start fails the rows the Run step is strict on; on the
+      # others the runner lacks the GPU runtime the binary loads.
+      - name: Verify package
+        shell: bash
+        env:
+          STRICT: ${{ !matrix.cuda && !matrix.oneapi && !(matrix.rocm && runner.os == 'Windows') }}
+        run: |
+          rm -rf pkg && mkdir pkg
+          (cd pkg && cmake -E tar xf ../build/xpupeak-*.zip)
+          bin=$(echo pkg/xpupeak-*/bin)
+          ls -l "$bin"
+          exe=
+          if [ "$RUNNER_OS" = Windows ]; then
+            exe=.exe
+            test -f "$bin/clpeak.exe"
+          else
+            test -L "$bin/clpeak"
+            test "$(readlink "$bin/clpeak")" = xpupeak
+          fi
+          # Installing drops the build tree's RPATH, so hand the loader the
+          # same directories: what the Run step's binary found, the packaged
+          # one finds.  The CUDA rows add the stub libcuda the Run CUDA step
+          # made.
+          if [ "$RUNNER_OS" = Linux ]; then
+            rp=$(readelf -d "${{ matrix.binary }}" | sed -n 's/.*R[UN]*PATH.*\[\(.*\)\]/\1/p')
+            if [ -d "$RUNNER_TEMP/cuda-stub" ]; then
+              rp="$RUNNER_TEMP/cuda-stub${rp:+:$rp}"
+            fi
+            export LD_LIBRARY_PATH="$rp${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          elif [ "$RUNNER_OS" = macOS ]; then
+            rp=$(otool -l "${{ matrix.binary }}" | awk '/LC_RPATH/ { getline; getline; print $2 }' | paste -sd: -)
+            export DYLD_LIBRARY_PATH="$rp"
+          fi
+          if x=$("$bin/xpupeak$exe" --version); then
+            c=$("$bin/clpeak$exe" --version)
+            echo "$x"
+            echo "$c"
+            test "$c" = "${x/xpupeak/clpeak}"
+          elif [ "$STRICT" = true ]; then
+            exit 1
+          else
+            echo "::warning::the packaged xpupeak could not start on this runner"
+          fi
 
       # macOS additionally ships a drag-to-Applications disk image: the zip is
       # for CLI users, the .dmg is how the GUI actually gets installed.  The app

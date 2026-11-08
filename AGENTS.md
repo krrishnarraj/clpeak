@@ -76,7 +76,11 @@ run and the result document all share.
 
 ## Build
 
-- Desktop: `cmake -B build && cmake --build build`
+- Desktop: `cmake -B build && cmake --build build` gives `build/xpupeak`, and
+  `build/clpeak` beside it: the 3.x command, the same program under its old
+  name (a link; on Windows a copy of the exe). Help, usage and error messages
+  print the name it was started as (`programName()`,
+  `include/common/options.h`), and nothing else differs.
 - Each backend: `-DXPUPEAK_ENABLE_VULKAN=OFF`, etc.
 - GUI: built automatically as `xpupeak-gui` when the Flutter SDK is detected
   (disable with `-DXPUPEAK_ENABLE_GUI=OFF`); bundle lands in `build/xpupeak-gui/`.
@@ -84,10 +88,11 @@ run and the result document all share.
 - All backend static libs are built PIC (`CMAKE_POSITION_INDEPENDENT_CODE`):
   they link into both `xpupeak` and the `xpupeak_ffi` shared library.
 - Packaging: `cpack -G ZIP` ships CLI + GUI in one archive — `bin/xpupeak`,
-  `bin/xpupeak-gui` (wrapper) and the Flutter bundle under `gui/`; macOS puts
-  `xpupeak-gui.app` at the archive root instead. macOS also has
-  `--target xpupeak-gui-dmg` (`tools/make_dmg.sh`) for the drag-to-Applications
-  disk image shipped next to the zip.
+  `bin/clpeak` (kept as a link on Unix), `bin/xpupeak-gui` (wrapper) and the
+  Flutter bundle under `gui/`; macOS puts `XpuPeak.app` at the archive root
+  instead. macOS also has `--target xpupeak-gui-dmg` (`tools/make_dmg.sh`) for
+  the drag-to-Applications disk image, volume `XpuPeak <version>`, shipped next
+  to the zip. CI's Verify package step unpacks each zip and runs both commands.
 
 ## Quick Lookups
 

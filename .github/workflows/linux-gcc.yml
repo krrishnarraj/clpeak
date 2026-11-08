@@ -52,4 +52,6 @@ jobs:
           cmake --build build --config Release -j4
 
       - name: Run
-        run: ./build/xpupeak --version
+        run: |
+          ./build/xpupeak --version
+          ./build/clpeak --version

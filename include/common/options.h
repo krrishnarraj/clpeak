@@ -183,6 +183,13 @@ struct CliOptions {
 // Lives here because the category and test flag-name tables do.
 Invocation invocationFrom(const CliOptions &opts, int argc, char **argv);
 
+// The name help, usage and error messages give the program: the one it was
+// started as (argv[0]'s file name, less .exe), so `clpeak` says clpeak and
+// `xpupeak` says xpupeak.  The CLI sets it before parsing; anything that
+// never does, xpupeak_ffi among them, keeps "xpupeak".
+void setProgramName(const char *argv0);
+const char *programName();
+
 // Parse argv into out.  On --help / --version / parse error this calls
 // exit() directly.  Returns 0 on success.
 int parseCliOptions(int argc, char **argv, CliOptions &out);
