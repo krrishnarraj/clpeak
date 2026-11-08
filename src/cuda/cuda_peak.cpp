@@ -39,7 +39,7 @@ bool CudaPeak::initDriver()
   if (r != CUDA_SUCCESS)
   {
     m_initResult = r;
-    CLPEAK_LOG(Error, "CUDA: cuInit failed: %s", cuErrStr(r));
+    XPUPEAK_LOG(Error, "CUDA: cuInit failed: %s", cuErrStr(r));
     return false;
   }
   int n = 0;
@@ -122,7 +122,7 @@ int CudaPeak::runAll()
 
   for (int idx : devIndices)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;

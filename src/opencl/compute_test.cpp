@@ -208,7 +208,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     // nothing about the next, because the register allocator lays every width
     // out afresh -- that is how Alchemist's mixed-precision chain tied at width
     // 4 and then read 16-28% low at 8 and 16.  See kernels/mad_chain.cl.
-    clpeak::FormRace widthRace;
+    xpupeak::FormRace widthRace;
 
     // Run each vector width. run_kernel clamps the local size to each kernel's
     // own work-group limit (wide vector widths can be capped by register
@@ -246,7 +246,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           twin[0] = timeTwin(altKernels[w]);
         if (hasSg16[w] && widthRace.runs(true))
           twin[1] = timeTwin(sg16Kernels[w]);
-        if (clpeak::verboseEnabled() && (twin[0] > 0.0 || twin[1] > 0.0))
+        if (xpupeak::verboseEnabled() && (twin[0] > 0.0 || twin[1] > 0.0))
         {
           std::string alts;
           for (int f = 0; f < 2; f++)
@@ -262,10 +262,10 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                                   std::to_string(simdHint(altKernels[w]));
           if (hasSg16[w])
             multiples += "/" + std::to_string(simdHint(sg16Kernels[w]));
-          CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %s %s; work-group "
-                      "multiples %s\n",
-                      resultTag.c_str(), labels[w].c_str(), throughput, alts.c_str(),
-                      unit.c_str(), multiples.c_str());
+          XPUPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %s %s; work-group "
+                       "multiples %s\n",
+                       resultTag.c_str(), labels[w].c_str(), throughput, alts.c_str(),
+                       unit.c_str(), multiples.c_str());
         }
         // The fold guard first, so a reading it rejects cannot decide the race.
         const float squaring = throughput;
@@ -274,9 +274,9 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
         {
           if (twin[f] > squaring * MAX_ALT_CHAIN_RATIO)
           {
-            CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                        "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
-                        twin[f] / squaring);
+            XPUPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                         "compiler fold\n", resultTag.c_str(), labels[w].c_str(),
+                         twin[f] / squaring);
             raced[f] = 0.0;
           }
           else if (twin[f] > throughput)
@@ -290,11 +290,11 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           {
             widthRace.dropTrailing(raced);
             if (!widthRace.runs(false) || !widthRace.runs(true))
-              CLPEAK_VLOG("%s %s: alt chain at the %s sub-group trails by %.1fx -- "
-                          "dropped from here\n",
-                          resultTag.c_str(), labels[w].c_str(),
-                          widthRace.runs(true) ? "compiler's" : "16",
-                          widthRace.runs(true) ? twin[1] / twin[0] : twin[0] / twin[1]);
+              XPUPEAK_VLOG("%s %s: alt chain at the %s sub-group trails by %.1fx -- "
+                           "dropped from here\n",
+                           resultTag.c_str(), labels[w].c_str(),
+                           widthRace.runs(true) ? "compiler's" : "16",
+                           widthRace.runs(true) ? twin[1] / twin[0] : twin[0] / twin[1]);
           }
         }
 

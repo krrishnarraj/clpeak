@@ -1,4 +1,4 @@
-if(NOT CLPEAK_ENABLE_CUDA OR NOT CUDAToolkit_FOUND)
+if(NOT XPUPEAK_ENABLE_CUDA OR NOT CUDAToolkit_FOUND)
   return()
 endif()
 
@@ -47,10 +47,10 @@ int main() {
   cudaDataType_t t = CUDA_R_4F_E2M1;
   (void)s0; (void)s1; (void)a; (void)t;
   return 0;
-}" CLPEAK_CUBLASLT_HAS_FP4)
+}" XPUPEAK_CUBLASLT_HAS_FP4)
 unset(CMAKE_REQUIRED_INCLUDES)
-if(CLPEAK_CUBLASLT_HAS_FP4)
-  target_compile_definitions(peak_cuda PRIVATE CLPEAK_CUBLASLT_HAS_FP4)
+if(XPUPEAK_CUBLASLT_HAS_FP4)
+  target_compile_definitions(peak_cuda PRIVATE XPUPEAK_CUBLASLT_HAS_FP4)
 endif()
 
 # Ahead-of-time compile each .cu to a multi-arch fatbin and embed the bytes.
@@ -64,38 +64,38 @@ endif()
 # per 54 slots (as sm_110/120/121 do) where sm_107 code issues one per 3-4.
 # sm_87/88 are left out: nvcc gives them sm_86's code (plus, on sm_87, an entry
 # prologue).  70 builds only with CUDA 12; nvcc 13 starts at sm_75.
-set(CLPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;107;110;120;121" CACHE STRING
+set(XPUPEAK_CUDA_ARCHS "70;75;80;86;89;90;100;103;107;110;120;121" CACHE STRING
     "CUDA compute capabilities to bake into the fatbins (ascending)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedCudaKernels.cmake)
 
 # Broad group: generic compute + bandwidth + fp16 wmma -- valid sm_70+.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 70
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 70
     KERNELS compute_sp compute_hp compute_dp compute_mp compute_int32
             compute_int8_dp global_bandwidth local_bandwidth image_bandwidth
             kernel_latency wmma_fp16)
 
 # INT8 wmma fragment tile (m16n16k16) -- sm_72+.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 72
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 72
     KERNELS wmma_int8)
 
 # INT4 mma.sync -- sm_75..sm_89, the only parts with a native s4 IMMA.  nvcc
 # still assembles it for every later target, consumer Blackwell sm_120/121
 # included, but as nibble unpacking around int8 IMMA.16816: an int8 rate that
 # would be reported as int4.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 75 MAX_ARCH 89
     KERNELS wmma_int4)
 
 # Ampere+ tensor cores: bf16 / tf32 (native mma.sync m16n8k8) / fp64 / int8
 # m16n8k32 + int8 2:4 sparse, plus the fp16-accumulate full-rate fp16 kernel
 # (all sm_80+).
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 80
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 80
     KERNELS compute_bf16 wmma_bf16 wmma_tf32 wmma_fp64 wmma_int8_k32 wmma_int8_sparse
             wmma_fp16_f16)
 
 # FP8 mma.sync (E4M3 / E5M2), the fp16-accumulate E4M3 variant, and E4M3
 # mma.sp 2:4 sparsity with fp32 accumulate (m16n8k64) -- all sm_89+.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 89
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 89
     KERNELS wmma_fp8_e4m3 wmma_fp8_e5m2 wmma_fp8_f16 wmma_fp8_sparse)
 
 # FP8 mma.sp 2:4 sparsity with fp16 accumulate.  Ada does the fp16-accumulate
@@ -104,14 +104,14 @@ embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH
 # point type' not supported on .target 'sm_89'".  Targeted at consumer
 # Blackwell for now -- the floor is provisional, set to where it is known to
 # assemble rather than to a documented cutoff; widen if it builds lower.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 999
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 999
     EXTRA_ARCHS "120a;121a"
     KERNELS wmma_fp8_sparse_f16)
 
 # FP4 / MXFP4 / NVFP4 mma.sync (dense + 2:4 sparse) -- consumer Blackwell
 # sm_120a (RTX 50) and sm_121a (GB10). Datacenter Blackwell (sm_100a/103a) uses
 # the tcgen05 path instead and is not covered by these mma.sync kernels.
-embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${CLPEAK_CUDA_ARCHS}" MIN_ARCH 999
+embed_cuda_kernels(TARGET peak_cuda MASTER_ARCHS "${XPUPEAK_CUDA_ARCHS}" MIN_ARCH 999
     EXTRA_ARCHS "120a;121a"
     KERNELS wmma_fp4_e2m1 wmma_mxf4_e2m1 wmma_nvf4_e2m1
             wmma_mxf4_sparse wmma_nvf4_sparse)

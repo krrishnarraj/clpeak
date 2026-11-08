@@ -24,54 +24,54 @@
 // ---- Backend table --------------------------------------------------------
 
 #ifdef ENABLE_OPENCL
-#define CLPEAK_BUILT_OPENCL true
+#define XPUPEAK_BUILT_OPENCL true
 #else
-#define CLPEAK_BUILT_OPENCL false
+#define XPUPEAK_BUILT_OPENCL false
 #endif
 #ifdef ENABLE_VULKAN
-#define CLPEAK_BUILT_VULKAN true
+#define XPUPEAK_BUILT_VULKAN true
 #else
-#define CLPEAK_BUILT_VULKAN false
+#define XPUPEAK_BUILT_VULKAN false
 #endif
 #ifdef ENABLE_CUDA
-#define CLPEAK_BUILT_CUDA true
+#define XPUPEAK_BUILT_CUDA true
 #else
-#define CLPEAK_BUILT_CUDA false
+#define XPUPEAK_BUILT_CUDA false
 #endif
 #ifdef ENABLE_ROCM
-#define CLPEAK_BUILT_ROCM true
+#define XPUPEAK_BUILT_ROCM true
 #else
-#define CLPEAK_BUILT_ROCM false
+#define XPUPEAK_BUILT_ROCM false
 #endif
 #ifdef ENABLE_METAL
-#define CLPEAK_BUILT_METAL true
+#define XPUPEAK_BUILT_METAL true
 #else
-#define CLPEAK_BUILT_METAL false
+#define XPUPEAK_BUILT_METAL false
 #endif
 #ifdef ENABLE_ONEAPI
-#define CLPEAK_BUILT_ONEAPI true
+#define XPUPEAK_BUILT_ONEAPI true
 #else
-#define CLPEAK_BUILT_ONEAPI false
+#define XPUPEAK_BUILT_ONEAPI false
 #endif
 #ifdef ENABLE_CPU
-#define CLPEAK_BUILT_CPU true
+#define XPUPEAK_BUILT_CPU true
 #else
-#define CLPEAK_BUILT_CPU false
+#define XPUPEAK_BUILT_CPU false
 #endif
 #ifdef ENABLE_ONNX
-#define CLPEAK_BUILT_ONNX true
+#define XPUPEAK_BUILT_ONNX true
 #else
-#define CLPEAK_BUILT_ONNX false
+#define XPUPEAK_BUILT_ONNX false
 #endif
 #ifdef ENABLE_COREML
-#define CLPEAK_BUILT_COREML true
+#define XPUPEAK_BUILT_COREML true
 #else
-#define CLPEAK_BUILT_COREML false
+#define XPUPEAK_BUILT_COREML false
 #endif
 #ifdef ENABLE_LITERT
-#define CLPEAK_BUILT_LITERT true
+#define XPUPEAK_BUILT_LITERT true
 #else
-#define CLPEAK_BUILT_LITERT false
+#define XPUPEAK_BUILT_LITERT false
 #endif
 
 struct BackendRow
@@ -84,16 +84,16 @@ struct BackendRow
 // static_asserts below enforce so a row can never describe the wrong
 // backend.
 static constexpr BackendRow backendTable[] = {
-    {{Backend::Cuda, "CUDA", "cuda", CLPEAK_BUILT_CUDA}, "CUDA"},
-    {{Backend::Rocm, "ROCm", "rocm", CLPEAK_BUILT_ROCM}, "ROCm/HIP"},
-    {{Backend::Metal, "Metal", "metal", CLPEAK_BUILT_METAL}, "Metal"},
-    {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
-    {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
-    {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
-    {{Backend::Cpu, "CPU", "cpu", CLPEAK_BUILT_CPU}, "native CPU"},
-    {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
-    {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
-    {{Backend::Onnx, "ONNX", "onnx", CLPEAK_BUILT_ONNX}, "ONNX Runtime (NPU / GPU / CPU via execution providers)"},
+    {{Backend::Cuda, "CUDA", "cuda", XPUPEAK_BUILT_CUDA}, "CUDA"},
+    {{Backend::Rocm, "ROCm", "rocm", XPUPEAK_BUILT_ROCM}, "ROCm/HIP"},
+    {{Backend::Metal, "Metal", "metal", XPUPEAK_BUILT_METAL}, "Metal"},
+    {{Backend::Oneapi, "oneAPI", "oneapi", XPUPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
+    {{Backend::Vulkan, "Vulkan", "vulkan", XPUPEAK_BUILT_VULKAN}, "Vulkan"},
+    {{Backend::OpenCL, "OpenCL", "opencl", XPUPEAK_BUILT_OPENCL}, "OpenCL"},
+    {{Backend::Cpu, "CPU", "cpu", XPUPEAK_BUILT_CPU}, "native CPU"},
+    {{Backend::Coreml, "CoreML", "coreml", XPUPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
+    {{Backend::Litert, "LiteRT", "litert", XPUPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
+    {{Backend::Onnx, "ONNX", "onnx", XPUPEAK_BUILT_ONNX}, "ONNX Runtime (NPU / GPU / CPU via execution providers)"},
 };
 static constexpr int numBackends = sizeof(backendTable) / sizeof(backendTable[0]);
 static_assert(numBackends == static_cast<int>(Backend::COUNT),
@@ -267,7 +267,7 @@ static void helpLine(std::string &s, const std::string &flag, const char *text,
 static std::string helpText()
 {
   std::string s;
-  s += "\n clpeak [OPTIONS]\n";
+  s += "\n xpupeak [OPTIONS]\n";
   s += "\n";
   s += " Selection flags come in pairs: --<x> runs only what is named (an allow-list;\n";
   s += " several combine) and --no-<x> subtracts.  Backends say where, categories and\n";
@@ -449,7 +449,7 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
 
 // Parse outcome of the exit-free core.  parseCliOptions maps Help/Version/
 // Error onto the historical print-and-exit behavior; parseCliOptionsNoExit
-// surfaces them as a bool + message so embedders (clpeak_ffi) never die on
+// surfaces them as a bool + message so embedders (xpupeak_ffi) never die on
 // a bad argv.
 enum class ParseResult
 {
@@ -468,13 +468,13 @@ static const char *nextArg(int argc, char **argv, int &i)
 
 static ParseResult missingArg(std::string &err, const char *flag)
 {
-  err = std::string("clpeak: missing argument for ") + flag + "\n";
+  err = std::string("xpupeak: missing argument for ") + flag + "\n";
   return ParseResult::Error;
 }
 
 static ParseResult invalidValue(std::string &err, const char *flag, const char *v)
 {
-  err = std::string("clpeak: invalid value for ") + flag + ": " + v + "\n";
+  err = std::string("xpupeak: invalid value for ") + flag + ": " + v + "\n";
   return ParseResult::Error;
 }
 
@@ -622,7 +622,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       std::string why;
       if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
       {
-        err = std::string("clpeak: invalid --devices ") + why + "\n";
+        err = std::string("xpupeak: invalid --devices ") + why + "\n";
         return ParseResult::Error;
       }
       continue;
@@ -665,7 +665,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       const char *eq = strchr(v, '=');
       if (!eq || eq == v || !eq[1])
       {
-        err = std::string("clpeak: --onnx-ep expects NAME=PATH, the "
+        err = std::string("xpupeak: --onnx-ep expects NAME=PATH, the "
                           "registration name the provider wants (Qualcomm's "
                           "QNN: QNNExecutionProvider) and the library to load; got '") +
               v + "'\n";
@@ -740,20 +740,20 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         continue;
     }
 
-    err = std::string("clpeak: unknown option '") + a + "'\n";
+    err = std::string("xpupeak: unknown option '") + a + "'\n";
     return ParseResult::Error;
   }
 
   if (!out.resumeFile.empty() && otherOption)
   {
-    err = std::string("clpeak: --resume continues a run with the options it started with, "
+    err = std::string("xpupeak: --resume continues a run with the options it started with, "
                       "so it takes none but --skip-crashed; got '") +
           otherOption + "'\n";
     return ParseResult::Error;
   }
   if (out.skipCrashed && out.resumeFile.empty())
   {
-    err = "clpeak: --skip-crashed goes with --resume\n";
+    err = "xpupeak: --skip-crashed goes with --resume\n";
     return ParseResult::Error;
   }
 
@@ -767,7 +767,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         any = true;
     if (!any)
     {
-      err = "clpeak: --devices names only devices of backends that are switched off\n";
+      err = "xpupeak: --devices names only devices of backends that are switched off\n";
       return ParseResult::Error;
     }
   }
@@ -786,7 +786,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     printHelpAndExit(0);
     break;
   case ParseResult::Version:
-    std::cout << "clpeak version: " << CLPEAK_VERSION_STR << "\n";
+    std::cout << "xpupeak version: " << XPUPEAK_VERSION_STR << "\n";
     std::exit(0);
     break;
   case ParseResult::Error:
@@ -805,10 +805,10 @@ bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
   case ParseResult::Ok:
     return true;
   case ParseResult::Help:
-    errorMsg = "clpeak: --help is not available in embedded mode\n";
+    errorMsg = "xpupeak: --help is not available in embedded mode\n";
     return false;
   case ParseResult::Version:
-    errorMsg = "clpeak: --version is not available in embedded mode\n";
+    errorMsg = "xpupeak: --version is not available in embedded mode\n";
     return false;
   case ParseResult::Error:
   default:

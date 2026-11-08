@@ -1,6 +1,6 @@
 #include <common/coreml_cache.h>
 
 // Nothing to clear where there is no Core ML.
-namespace clpeak {
+namespace xpupeak {
 void purgeCoreMLCompileCache() {}
-} // namespace clpeak
+} // namespace xpupeak

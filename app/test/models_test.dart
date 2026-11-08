@@ -1,9 +1,9 @@
-import 'package:clpeak/src/ffi/clpeak_events.dart';
-import 'package:clpeak/src/model/catalog.dart';
-import 'package:clpeak/src/model/result_model.dart';
-import 'package:clpeak/src/model/run_config.dart';
-import 'package:clpeak/src/model/run_document.dart';
-import 'package:clpeak/src/model/run_summary.dart';
+import 'package:xpupeak/src/ffi/xpupeak_events.dart';
+import 'package:xpupeak/src/model/catalog.dart';
+import 'package:xpupeak/src/model/result_model.dart';
+import 'package:xpupeak/src/model/run_config.dart';
+import 'package:xpupeak/src/model/run_document.dart';
+import 'package:xpupeak/src/model/run_summary.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 BackendCatalog _catalog() => BackendCatalog.fromJson({
@@ -186,7 +186,7 @@ void main() {
         };
 
     test('test_begin carries the resolved header', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'test_begin',
         'backend': 'CPU',
         'platform': 'CPU',
@@ -216,7 +216,7 @@ void main() {
     });
 
     test('an undocumented test decodes with empty documentation', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'test_begin',
         'backend': 'CPU',
         'device': 'M1',
@@ -226,7 +226,7 @@ void main() {
     });
 
     test('metric event carries the reading and its note', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'metric',
         'backend': 'CPU',
         'platform': 'CPU',
@@ -247,7 +247,7 @@ void main() {
     });
 
     test('a reading with a variant keys off id@variant', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'metric',
         'backend': 'CPU',
         'test': 'single_precision_compute',
@@ -259,7 +259,7 @@ void main() {
     });
 
     test('a reading that overrides its unit keeps its own', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'metric',
         'backend': 'CUDA',
         'test': 'cublas_gemm',
@@ -275,7 +275,7 @@ void main() {
     });
 
     test('a failed reading carries status and reason, not a value', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'metric',
         'backend': 'Metal',
         'test': 'mps_gemm',
@@ -290,14 +290,14 @@ void main() {
     });
 
     test('done event', () {
-      final e = ClpeakEvent.fromJson(
+      final e = XpupeakEvent.fromJson(
           {'t': 'done', 'status': -2, 'cancelled': true});
       expect(e, isA<DoneEvent>());
       expect((e as DoneEvent).cancelled, isTrue);
     });
 
     test('test_skipped names every reading it stands in for', () {
-      final e = ClpeakEvent.fromJson({
+      final e = XpupeakEvent.fromJson({
         't': 'test_skipped',
         'backend': 'Metal',
         'platform': 'Metal',
@@ -554,7 +554,7 @@ void main() {
         },
         'host': {'os': 'Macintosh', 'cpu': 'Apple M1 Pro'},
         'invocation': {
-          'argv': ['clpeak', '--verbose'],
+          'argv': ['xpupeak', '--verbose'],
           'verbose': true,
         },
         'log': [

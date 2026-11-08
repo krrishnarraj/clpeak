@@ -3,7 +3,7 @@
 
 #import <Foundation/Foundation.h>
 
-namespace clpeak {
+namespace xpupeak {
 
 void purgeCoreMLCompileCache()
 {
@@ -15,7 +15,7 @@ void purgeCoreMLCompileCache()
     if (caches.count == 0)
       return;
     // E5RT files the cache under the process name for a plain executable
-    // (~/Library/Caches/clpeak) and under the bundle identifier for an app
+    // (~/Library/Caches/xpupeak) and under the bundle identifier for an app
     // (~/Library/Caches/kr.clpeak for the unsandboxed macOS app); clear
     // whichever exists.  Inside an app container -- iOS, or a sandboxed
     // macOS app, whose Caches directory is private to the app -- the cache
@@ -39,12 +39,12 @@ void purgeCoreMLCompileCache()
         continue;
       NSError *err = nil;
       if ([fm removeItemAtPath:dir error:&err])
-        CLPEAK_VLOG("coreml: removed the compile cache at %s\n", dir.UTF8String);
+        XPUPEAK_VLOG("coreml: removed the compile cache at %s\n", dir.UTF8String);
       else
-        CLPEAK_VLOG("coreml: could not remove %s: %s\n", dir.UTF8String,
-                    err.localizedDescription.UTF8String);
+        XPUPEAK_VLOG("coreml: could not remove %s: %s\n", dir.UTF8String,
+                     err.localizedDescription.UTF8String);
     }
   }
 }
 
-} // namespace clpeak
+} // namespace xpupeak

@@ -14,7 +14,7 @@
 // row carries its own unit (ops) so it shares the test with the floating-
 // point rows.
 
-using clpeak_cpu::kernelMenu;
+using xpupeak_cpu::kernelMenu;
 
 int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
 {

@@ -27,7 +27,7 @@
 // Its note names the form; --verbose logs every form's rate.
 [[maybe_unused]] static void emitCompute(CpuPeak &peak, logger::TestScope &test,
                                          const std::string &label,
-                                         const clpeak_cpu::ChainVariant &v,
+                                         const xpupeak_cpu::ChainVariant &v,
                                          benchmark_config_t &cfg,
                                          const char *description = nullptr,
                                          const char *unit = nullptr)
@@ -37,18 +37,18 @@
   unsigned int forced = peak.forceIters ? peak.specifiedIters : 0;
 
   // Ops per second of one form on `nThreads`, timed over `budgetUs`; <= 0 on failure.
-  auto rate = [&](const clpeak_cpu::ChainVariant &f, int nThreads, unsigned int budgetUs) {
+  auto rate = [&](const xpupeak_cpu::ChainVariant &f, int nThreads, unsigned int budgetUs) {
     CpuPeak::Workload body = [&](int tid, uint64_t iters) {
       sink[(size_t)tid] += f.fn(iters);
     };
     return f.opsPerIter * peak.runWorkload(nThreads, body, budgetUs, forced);
   };
 
-  std::vector<const clpeak_cpu::ChainVariant *> forms{&v};
+  std::vector<const xpupeak_cpu::ChainVariant *> forms{&v};
   for (int i = 0; i < v.nAlts; i++)
     forms.push_back(&v.alts[i]);
 
-  struct Reading { double rate; const clpeak_cpu::ChainVariant *form; };
+  struct Reading { double rate; const xpupeak_cpu::ChainVariant *form; };
   auto measure = [&](int nThreads, const char *threads) -> Reading {
     if (forms.size() == 1)
       return {rate(v, nThreads, cfg.targetTimeUs), &v};
@@ -61,10 +61,10 @@
     for (size_t i = 0; i < forms.size(); i++)
     {
       probe[i] = rate(*forms[i], nThreads, cfg.targetTimeUs / 4);
-      if (probe[i] > probe[best] * clpeak::kFormRaceTie)
+      if (probe[i] > probe[best] * xpupeak::kFormRaceTie)
         best = i;
     }
-    if (clpeak::verboseEnabled())
+    if (xpupeak::verboseEnabled())
     {
       std::string line;
       for (size_t i = 0; i < forms.size(); i++)
@@ -73,8 +73,8 @@
         snprintf(r, sizeof(r), " %.4g G/s", probe[i] * 1e-9);
         line += (i ? "; " : "") + std::string(forms[i]->form) + r;
       }
-      CLPEAK_VLOG("[cpu] %s %s race: %s -- timing %s\n", label.c_str(), threads,
-                  line.c_str(), forms[best]->form);
+      XPUPEAK_VLOG("[cpu] %s %s race: %s -- timing %s\n", label.c_str(), threads,
+                   line.c_str(), forms[best]->form);
     }
     return {rate(*forms[best], nThreads, cfg.targetTimeUs), forms[best]};
   };
@@ -122,14 +122,14 @@
 
 // Why `slot` has no variant on this host.  `cpuLacks` is the call site's
 // reason, right when the CPU lacks every feature that would give one; when the
-// CPU has one but this binary cannot run it (clpeak_cpu::MissingKernel), the
+// CPU has one but this binary cannot run it (xpupeak_cpu::MissingKernel), the
 // skip names whose gap it is instead -- one clause per cause:
 //   "this CPU has FEAT_SME, but this build has no kernel for it (its compiler
 //    could not build one)"
-[[maybe_unused]] static std::string unsupportedReason(const clpeak_cpu::MenuSlot &slot,
+[[maybe_unused]] static std::string unsupportedReason(const xpupeak_cpu::MenuSlot &slot,
                                                       const char *cpuLacks)
 {
-  using clpeak_cpu::MissingKernel;
+  using xpupeak_cpu::MissingKernel;
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
   const char *arch = "x86";
 #else
@@ -162,7 +162,7 @@
       out += std::string("the OS refused ") + (one ? "its" : "their") + " tile state";
       break;
     case MissingKernel::NotWritten:
-      out += std::string("clpeak has no ") + arch + " kernel for " + it + " yet";
+      out += std::string("xpupeak has no ") + arch + " kernel for " + it + " yet";
       break;
     }
   }
@@ -177,7 +177,7 @@
 // the CPU lacks the kernel's feature (see unsupportedReason()).
 [[maybe_unused]] static void emitVariants(CpuPeak &peak, const logger::TestSpec &base,
                          const std::string &metric,
-                         const clpeak_cpu::MenuSlot &slot,
+                         const xpupeak_cpu::MenuSlot &slot,
                          const char *unsupReason, benchmark_config_t &cfg)
 {
   logger::TestSpec spec = base;
@@ -217,7 +217,7 @@ struct FamilyRow {
   const char *metric;        // "bf16", "fdiv fp32"
   const char *description;   // what this row measures, beyond the family
   const char *unsupReason;   // shown when the CPU lacks every variant of it
-  const clpeak_cpu::MenuSlot *slot;
+  const xpupeak_cpu::MenuSlot *slot;
   const char *unit = nullptr;  // nullptr = the test's unit
 };
 
@@ -301,7 +301,7 @@ struct FamilyRow {
     auto test = peak.currentDeviceScope->beginTest(spec);
     for (const FamilyRow &r : rows)
     {
-      const clpeak_cpu::IsaVariant *match = nullptr;
+      const xpupeak_cpu::IsaVariant *match = nullptr;
       for (const auto &iv : r.slot->vars)
         if (std::string(iv.isa) == isa) { match = &iv; break; }
 

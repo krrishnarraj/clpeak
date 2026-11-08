@@ -1,21 +1,21 @@
-#ifndef CLPEAK_FFI_H
-#define CLPEAK_FFI_H
+#ifndef XPUPEAK_FFI_H
+#define XPUPEAK_FFI_H
 
-// ── clpeak C ABI ────────────────────────────────────────────────────────────
+// ── xpupeak C ABI ────────────────────────────────────────────────────────────
 //
-// The single native bridge for every clpeak GUI (Flutter desktop, Android,
+// The single native bridge for every xpupeak GUI (Flutter desktop, Android,
 // iOS — all consume this via Dart FFI).  Exposes device enumeration, a
 // blocking benchmark launch with a streaming event callback, cooperative
 // cancellation, and saved-result loading.
 //
 // String ownership: functions returning `char *` return a malloc'd UTF-8
-// string the caller must release with clpeak_free_string().  `const char *`
+// string the caller must release with xpupeak_free_string().  `const char *`
 // returns are static and must not be freed.
 
 #if defined(_WIN32)
-#define CLPEAK_FFI_EXPORT __declspec(dllexport)
+#define XPUPEAK_FFI_EXPORT __declspec(dllexport)
 #else
-#define CLPEAK_FFI_EXPORT __attribute__((visibility("default")))
+#define XPUPEAK_FFI_EXPORT __attribute__((visibility("default")))
 #endif
 
 #ifdef __cplusplus
@@ -24,8 +24,8 @@ extern "C" {
 
 // ---- Version / catalog ------------------------------------------------------
 
-// clpeak version string (e.g. "2.0.18-3-gabc1234").  Static; do not free.
-CLPEAK_FFI_EXPORT const char *clpeak_version(void);
+// xpupeak version string (e.g. "2.0.18-3-gabc1234").  Static; do not free.
+XPUPEAK_FFI_EXPORT const char *xpupeak_version(void);
 
 // Device catalog for every backend compiled into this library, as the
 // inventoryToJson() document (include/common/inventory.h has the keys):
@@ -36,27 +36,27 @@ CLPEAK_FFI_EXPORT const char *clpeak_version(void);
 // names a device, and a run's argv narrows to exactly the devices listed.
 // `reason` says why an unavailable backend is unavailable; `info` is a
 // backend-level fact (the ONNX Runtime version, the OS release).
-CLPEAK_FFI_EXPORT char *clpeak_copy_backend_catalog_json(void);
+XPUPEAK_FFI_EXPORT char *xpupeak_copy_backend_catalog_json(void);
 
-CLPEAK_FFI_EXPORT void clpeak_free_string(char *s);
+XPUPEAK_FFI_EXPORT void xpupeak_free_string(char *s);
 
 // Choose which onnxruntime shared library the ONNX backend loads, ahead of
 // the platform's conventional names.  Pass an
 // absolute path, or NULL/"" to go back to searching.  This is the settings-
 // screen entry point: the CLI grammar's `--onnx-lib` cannot serve it, because
-// clpeak_copy_backend_catalog_json() takes no arguments and enumeration is
+// xpupeak_copy_backend_catalog_json() takes no arguments and enumeration is
 // what loads the runtime -- so the choice has to be in place before the
 // catalog is asked for.
 //
-// The library and the Windows ML catalog (clpeak_set_onnx_winml) are one
+// The library and the Windows ML catalog (xpupeak_set_onnx_winml) are one
 // runtime setup, fixed for the process by the first runtime that loads
 // (src/onnx/onnx_runtime.h).  Until one has, a choice takes effect on the
 // next enumeration or run, however many attempts that takes; after, it is
 // kept and loads the next time the process starts
-// (clpeak_copy_onnx_status_json's `pendingRuntime`).  Call it between runs
+// (xpupeak_copy_onnx_status_json's `pendingRuntime`).  Call it between runs
 // only.  A no-op on builds that link ONNX Runtime statically (iOS) or omit
 // the backend entirely.
-CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
+XPUPEAK_FFI_EXPORT void xpupeak_set_onnx_library(const char *path);
 
 // Plugin execution-provider libraries to register on the ONNX Runtime
 // environment (ONNX Runtime 1.22+; src/onnx/onnx_plugin.h): `spec` is one
@@ -69,20 +69,20 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_library(const char *path);
 // clears the set.  Unlike the runtime setup this stays live: the next
 // enumeration or run unregisters what went and registers what came, so it
 // is between runs only -- no session may be using a library then.
-CLPEAK_FFI_EXPORT void clpeak_set_onnx_ep_libraries(const char *spec);
+XPUPEAK_FFI_EXPORT void xpupeak_set_onnx_ep_libraries(const char *spec);
 
 // Windows ML's execution-provider catalog (Windows 11 24H2+): when
 // `enabled`, the vendor providers the catalog installs from the Microsoft
 // Store are registered as plugin libraries on the next enumeration or run.
 // `path` names Microsoft.Windows.AI.MachineLearning.dll or its directory,
 // or is NULL/"" to search beside the loaded runtime and the executable; with
-// a path and no library chosen through clpeak_set_onnx_library(), the
+// a path and no library chosen through xpupeak_set_onnx_library(), the
 // onnxruntime.dll beside the catalog becomes the runtime.  Installing a
 // provider is a download, which is why this is a switch and not a default.
 // Part of the runtime setup, so a change after a runtime has loaded waits
-// for the next start, as clpeak_set_onnx_library()'s does.  Accepted
+// for the next start, as xpupeak_set_onnx_library()'s does.  Accepted
 // everywhere; off Windows the status reports the catalog as unavailable.
-CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
+XPUPEAK_FFI_EXPORT void xpupeak_set_onnx_winml(int enabled, const char *path);
 
 // State of the ONNX Runtime, for a settings screen to report back with:
 //   {"available":bool,"linkedIn":bool,"version":str,"path":str,"error":str,
@@ -91,7 +91,7 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 //    "winml":{"enabled":bool,"path":str,"error":str},
 //    "pendingRuntime"?:{"path":str,"winml":{"enabled":bool,"path":str}}}
 // `linkedIn` means the runtime is built into this binary (iOS) and
-// clpeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
+// xpupeak_set_onnx_library() has nothing to do.  `path` is what was loaded,
 // the resolved file even when it was found by name (empty only when
 // statically linked).  `error` says why nothing loaded --
 // naming a library that cannot be opened is the ordinary way to get here.
@@ -104,10 +104,10 @@ CLPEAK_FFI_EXPORT void clpeak_set_onnx_winml(int enabled, const char *path);
 // pending until the next enumeration or run, like `epLibraries`.
 // `winml` is the catalog as the runtime was set up with it.
 // `pendingRuntime`, present only then, is a setup chosen after the runtime
-// loaded (see clpeak_set_onnx_library), which loads at the next start: the
+// loaded (see xpupeak_set_onnx_library), which loads at the next start: the
 // library (`path`, empty = the default search) and the catalog.
 // {"available":false,"error":"ONNX backend not built in"} without one.
-CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
+XPUPEAK_FFI_EXPORT char *xpupeak_copy_onnx_status_json(void);
 
 // The same two entry points for LiteRT: which libLiteRt to load (absolute
 // path, or NULL/"" to search the conventional names) and, separately, the
@@ -115,13 +115,13 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_onnx_status_json(void);
 // vendor runtime (NULL/"" = beside the LiteRT library).  Between runs only;
 // no-ops on a build without the backend.  The library, like ONNX Runtime's,
 // is fixed for the process by the first one that loads: a later choice
-// loads at the next start (clpeak_copy_litert_status_json's
+// loads at the next start (xpupeak_copy_litert_status_json's
 // `pendingRuntime`).  The NPU directory stays live.  On iOS the runtime is
 // dlopen'd from the app bundle's own Frameworks directory, the one place
 // the platform loads a library from, so a path named here could never be
 // loaded there and the settings screen does not offer one.
-CLPEAK_FFI_EXPORT void clpeak_set_litert_library(const char *path);
-CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
+XPUPEAK_FFI_EXPORT void xpupeak_set_litert_library(const char *path);
+XPUPEAK_FFI_EXPORT void xpupeak_set_litert_npu_dir(const char *dir);
 
 // Android: a writable directory (the app's support directory) where the
 // backend stages one vendor's NPU shims when the APK carries several.
@@ -129,7 +129,7 @@ CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_dir(const char *dir);
 // the shims for this SoC (ro.soc.manufacturer) get `<dir>/<vendor>/` of
 // links to the packaged files, remade at every launch.  Before enumeration;
 // a no-op elsewhere and with one vendor or none packaged.
-CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_stage_dir(const char *dir);
+XPUPEAK_FFI_EXPORT void xpupeak_set_litert_npu_stage_dir(const char *dir);
 
 // State of the LiteRT runtime, for a settings screen:
 //   {"available":bool,"version":str,"path":str,"error":str,
@@ -139,13 +139,13 @@ CLPEAK_FFI_EXPORT void clpeak_set_litert_npu_stage_dir(const char *dir);
 // is a library chosen after one loaded, which loads at the next start
 // (`path` empty = the default search).  {"available":false,"error":"LiteRT
 // backend not built in"} without the backend.
-CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
+XPUPEAK_FFI_EXPORT char *xpupeak_copy_litert_status_json(void);
 
 // ---- Event stream -------------------------------------------------------------
 
 // Every run event arrives as one malloc'd UTF-8 JSON document.  OWNERSHIP
 // TRANSFERS to the callee: it must release the string with
-// clpeak_free_string() once consumed.  This makes the callback safe for
+// xpupeak_free_string() once consumed.  This makes the callback safe for
 // asynchronous consumers (Dart NativeCallable.listener) that decode the
 // payload after the native call has already returned.
 //
@@ -193,24 +193,24 @@ CLPEAK_FFI_EXPORT char *clpeak_copy_litert_status_json(void);
 // saved document holds in its `log` array (docs/format-v3.md): `level` is
 // error | warning | info | debug, `source` names the library a message was
 // relayed from ("onnxruntime", "vulkan", "opencl", "console") or is empty
-// for clpeak's own, `elapsed_s` is seconds since the run started, and the
+// for xpupeak's own, `elapsed_s` is seconds since the run started, and the
 // scope fields say where it fired.  Debug entries arrive only when argv has
 // --verbose.  The scope fields are empty for a message outside any backend
 // (a rejected argument, a backend not in this build).
 //
-// Callbacks fire on the thread that called clpeak_launch(), except `log`
+// Callbacks fire on the thread that called xpupeak_launch(), except `log`
 // events relayed from a vendor runtime's own logging callback or a console
 // capture, which fire on whatever thread produced them.  The Dart listener
 // (NativeCallable.listener) is built for exactly that.
-typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
+typedef void (*XpupeakEventCallback)(void *user_data, char *event_json);
 
 // ---- Run -----------------------------------------------------------------------
 
-#define CLPEAK_RUN_OK         0   /* all backends completed                  */
+#define XPUPEAK_RUN_OK         0   /* all backends completed                  */
 /* > 0: OR'd backend error statuses (driver init / runtime failures)         */
-#define CLPEAK_RUN_BAD_ARGS  (-1) /* argv rejected; nothing ran              */
-#define CLPEAK_RUN_CANCELLED (-2) /* clpeak_request_cancel() honored         */
-#define CLPEAK_RUN_BUSY      (-3) /* another launch is already in progress   */
+#define XPUPEAK_RUN_BAD_ARGS  (-1) /* argv rejected; nothing ran              */
+#define XPUPEAK_RUN_CANCELLED (-2) /* xpupeak_request_cancel() honored         */
+#define XPUPEAK_RUN_BUSY      (-3) /* another launch is already in progress   */
 
 // Run benchmarks.  Blocking — call from a worker thread; events stream via
 // on_event as they happen and a final `done` event is emitted before this
@@ -228,17 +228,17 @@ typedef void (*ClpeakEventCallback)(void *user_data, char *event_json);
 // continues that run into the same document, with its own options
 // (run_resume.h).
 // Never calls exit().
-CLPEAK_FFI_EXPORT int clpeak_launch(int argc, const char **argv,
-                                    ClpeakEventCallback on_event,
-                                    void *user_data);
+XPUPEAK_FFI_EXPORT int xpupeak_launch(int argc, const char **argv,
+                                      XpupeakEventCallback on_event,
+                                      void *user_data);
 
 // ---- Cancellation ----------------------------------------------------------------
 
 // Request cooperative cancellation of the in-flight launch.  Observed at
 // test boundaries (the currently-running test finishes first); remaining
 // tests and devices are skipped silently.  Safe to call from any thread.
-// The flag auto-resets at the start of the next clpeak_launch().
-CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
+// The flag auto-resets at the start of the next xpupeak_launch().
+XPUPEAK_FFI_EXPORT void xpupeak_request_cancel(void);
 
 // ---- The app on screen -----------------------------------------------------------
 
@@ -249,7 +249,7 @@ CLPEAK_FFI_EXPORT void clpeak_request_cancel(void);
 // and clocks and then freezes it (include/common/screen_hold.h).  Each change
 // during a run is recorded on its log -- the document's `log` and the
 // sidecar -- with source "app".  Safe to call from any thread, at any time.
-CLPEAK_FFI_EXPORT void clpeak_set_on_screen(int on_screen);
+XPUPEAK_FFI_EXPORT void xpupeak_set_on_screen(int on_screen);
 
 // ---- Pausing --------------------------------------------------------------------
 
@@ -258,41 +258,41 @@ CLPEAK_FFI_EXPORT void clpeak_set_on_screen(int on_screen);
 // readings, as one whose app is off screen does, until it is resumed or
 // cancelled; it logs `held until the run is resumed` in the scope of the test
 // it stopped in once it waits.  Each change during a run is recorded on its
-// log with source "app".  Every clpeak_launch() starts unpaused.  Safe to
+// log with source "app".  Every xpupeak_launch() starts unpaused.  Safe to
 // call from any thread.
-CLPEAK_FFI_EXPORT void clpeak_set_paused(int paused);
+XPUPEAK_FFI_EXPORT void xpupeak_set_paused(int paused);
 
 // ---- Engine process (desktop) ----------------------------------------------------
 //
-// The desktop app runs its catalog and its runs in `clpeak-engine`, a process
+// The desktop app runs its catalog and its runs in `xpupeak-engine`, a process
 // of their own (src/ffi/engine_host.cpp loads this library and calls this),
 // so a vendor runtime never shares a process with the app's GUI toolkit and
 // GL driver (src/ffi/engine.cpp says what that broke).  Mobile calls the
 // functions above in-process.
 //
-//   clpeak-engine <this library> <mode> [setup...] [-- run argv...]
+//   xpupeak-engine <this library> <mode> [setup...] [-- run argv...]
 //
-// argv here starts at <mode>.  Setup options, each the clpeak_set_* call of
+// argv here starts at <mode>.  Setup options, each the xpupeak_set_* call of
 // the same name, applied before anything loads:
 //   --set-onnx-library PATH   --set-onnx-ep [!]NAME=PATH (one per library)
 //   --set-onnx-winml PATH (switches the catalog on; PATH may be "")
 //   --set-litert-library PATH
 // Modes:
 //   catalog  writes one line to stdout,
-//              {"t":"catalog","catalog":<clpeak_copy_backend_catalog_json>,
-//               "onnx":<clpeak_copy_onnx_status_json>,
-//               "litert":<clpeak_copy_litert_status_json>}
+//              {"t":"catalog","catalog":<xpupeak_copy_backend_catalog_json>,
+//               "onnx":<xpupeak_copy_onnx_status_json>,
+//               "litert":<xpupeak_copy_litert_status_json>}
 //            the statuses as that enumeration left them.
-//   launch   clpeak_launch() with the argv after `--` (no program name),
+//   launch   xpupeak_launch() with the argv after `--` (no program name),
 //            each event one line of stdout, ending with `done`.  A "cancel"
-//            line on stdin is clpeak_request_cancel(); stdin closing is too,
+//            line on stdin is xpupeak_request_cancel(); stdin closing is too,
 //            since it means the app has gone.  "pause" and "resume" lines
-//            are clpeak_set_paused(1) and (0).
+//            are xpupeak_set_paused(1) and (0).
 // Nothing else reaches stdout: what a library prints there goes to stderr.
 // Returns only on a usage error (64); otherwise the process ends when the
 // mode does, without running static destructors -- every result is saved by
 // then, and runtime teardown is where some crash.
-CLPEAK_FFI_EXPORT int clpeak_engine_main(int argc, const char **argv);
+XPUPEAK_FFI_EXPORT int xpupeak_engine_main(int argc, const char **argv);
 
 // ---- Saved results ------------------------------------------------------------------
 //
@@ -305,4 +305,4 @@ CLPEAK_FFI_EXPORT int clpeak_engine_main(int argc, const char **argv);
 }
 #endif
 
-#endif // CLPEAK_FFI_H
+#endif // XPUPEAK_FFI_H

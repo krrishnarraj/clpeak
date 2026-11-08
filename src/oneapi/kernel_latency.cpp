@@ -40,7 +40,7 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
   }
   catch (const sycl::exception &e)
   {
-    CLPEAK_VLOG("SYCL kernel-latency warmup failed: %s\n", e.what());
+    XPUPEAK_VLOG("SYCL kernel-latency warmup failed: %s\n", e.what());
     submitFailed = true;
   }
 
@@ -53,7 +53,7 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
       try { launchNoop(); dev.stream.wait_and_throw(); }
       catch (const sycl::exception &e)
       {
-        CLPEAK_VLOG("SYCL kernel-latency submit failed: %s\n", e.what());
+        XPUPEAK_VLOG("SYCL kernel-latency submit failed: %s\n", e.what());
         submitFailed = true;
         break;
       }

@@ -102,7 +102,7 @@ constexpr unsigned int kSizeBudgetUs = 2000000;
 // physical memory -- a fixed ceiling would be a crash on a phone and a
 // needless limit on a Mac Studio -- and at 8 GB, which still admits an
 // 8192-wide fp16 chain, for a GPU that runs one inside --max-time-ml-gpu.
-uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
+uint64_t maxRungBytes() { return xpupeak::memoryBudget(8ull << 30); }
 
 struct Variant
 {
@@ -168,7 +168,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
   for (const Variant &v : kVariants)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const char *label = coremlWeightLabel(v.w);
     const bool isInt = (v.w == CoremlWeight::Int8Qdq);
@@ -199,7 +199,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     if (!wrongWhy[0].empty() && !wrongWhy[1].empty())
     {
       const int read = answerCheck(dev, v.w).read;
-      CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[read == 1].c_str());
+      XPUPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[read == 1].c_str());
       test.skip(label, ResultStatus::Error, wrongWhy[read == 1], o);
       continue;
     }
@@ -220,7 +220,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     for (int t = 0; t < 2; t++)
       if (!wrongWhy[t].empty())
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[t].c_str());
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrongWhy[t].c_str());
         race.drop(t);
       }
     struct Lane
@@ -236,7 +236,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
     // unit or cannot run leaves it unpredicted.
     for (int t = 0; t < 2 && mlLadderScouts(dev.deviceType); t++)
     {
-      if (!race.runs(t) || clpeak::cancelRequested())
+      if (!race.runs(t) || xpupeak::cancelRequested())
         continue;
       std::string err;
       auto s = CoremlSession::create(
@@ -254,29 +254,29 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                                lanes[t].lastRate;
         if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / kChainLayers > kMaxIterUs)
           lanes[t].startDim = kScoutDim;
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
-                    (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3,
-                    lanes[t].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
-                                                   : "");
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
+                     (long long)kScoutDim, kChainLayers, coremlLayoutName(t), us / 1.0e3,
+                     lanes[t].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
+                                                    : "");
       }
       else
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
-                    dev.displayName.c_str(), label, (long long)kScoutDim, coremlLayoutName(t),
-                    err.empty() ? "no reason given" : err.c_str());
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
+                     dev.displayName.c_str(), label, (long long)kScoutDim, coremlLayoutName(t),
+                     err.empty() ? "no reason given" : err.c_str());
     }
 
     const int64_t firstDim = std::min(lanes[0].startDim, lanes[1].startDim);
     for (int64_t D = firstDim; D <= kMaxDim && !race.done(); D *= 2)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       const uint64_t bytes = rungBytes(v.w, D), budget = maxRungBytes();
       if (bytes > budget)
       {
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
-                    (unsigned long long)(budget >> 20));
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
+                     dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
+                     (unsigned long long)(budget >> 20));
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;
@@ -293,15 +293,15 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         if (runTooLong || runUs / kChainLayers > kMaxIterUs)
         {
           if (runTooLong)
-            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would keep the GPU busy ~%.2f s a "
-                        "prediction, past --max-time-ml-gpu (%.2f s), stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, layout, runUs / 1.0e6,
-                        runCapUs / 1.0e6);
+            XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would keep the GPU busy ~%.2f s a "
+                         "prediction, past --max-time-ml-gpu (%.2f s), stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, layout, runUs / 1.0e6,
+                         runCapUs / 1.0e6);
           else
-            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
-                        "stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, layout,
-                        runUs / kChainLayers / 1.0e6);
+            XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s would take ~%.1f s per multiply, "
+                         "stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, layout,
+                         runUs / kChainLayers / 1.0e6);
           // Before any rung the prediction is the scout's, and it is all the
           // row has to say.
           if (ln.rungs == 0 && firstErr.empty())
@@ -330,11 +330,11 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
               coremlPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, strikes > 0);
           if (predictedUs > kCoremlMaxChainCreateUs)
           {
-            CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s predicted create %.1f s (prev "
-                        "%.1f s%s) > %.1f s, stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, layout, predictedUs / 1.0e6,
-                        ln.prevCreateUs / 1.0e6, strikes > 0 ? ", after a size that did not gain" : "",
-                        kCoremlMaxChainCreateUs / 1.0e6);
+            XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s predicted create %.1f s (prev "
+                         "%.1f s%s) > %.1f s, stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, layout, predictedUs / 1.0e6,
+                         ln.prevCreateUs / 1.0e6, strikes > 0 ? ", after a size that did not gain" : "",
+                         kCoremlMaxChainCreateUs / 1.0e6);
             race.drop(t);
             continue;
           }
@@ -345,8 +345,8 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
             dev, coremlMatMulChainModel(spec, D, kChainLayers, kSeedWidth, v.w, t), err);
         if (!s)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s create failed: %s\n",
-                      dev.displayName.c_str(), label, (long long)D, layout, err.c_str());
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s create failed: %s\n",
+                       dev.displayName.c_str(), label, (long long)D, layout, err.c_str());
           if (firstErr.empty())
             firstErr = err;
           // Larger sizes need strictly more of everything.
@@ -354,16 +354,16 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
           continue;
         }
         const double cu = coremlCreateUs(*s);
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s create %.2f s (compile %.2f, load %.2f, "
-                    "plan %.2f)\n",
-                    dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, cu / 1.0e6,
-                    s->compileUs / 1.0e6, s->loadUs / 1.0e6, s->planUs / 1.0e6);
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s create %.2f s (compile %.2f, load %.2f, "
+                     "plan %.2f)\n",
+                     dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, cu / 1.0e6,
+                     s->compileUs / 1.0e6, s->loadUs / 1.0e6, s->planUs / 1.0e6);
 
         if (!s->onDevice())
         {
           const std::string why = coremlOffDeviceReason(dev, *s);
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s %s\n", dev.displayName.c_str(), label,
-                      (long long)D, layout, why.c_str());
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s %s\n", dev.displayName.c_str(), label,
+                       (long long)D, layout, why.c_str());
           if (ln.rungs == 0)
           {
             if (firstErr.empty())
@@ -409,8 +409,8 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         {
           // Logged whatever the row says: above a measured width it
           // publishes the widths below, and this failure would leave no trace.
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
-                      (long long)D, layout, m.error.c_str());
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
+                       (long long)D, layout, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -424,7 +424,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         // alibi for the unit.
         if (!bad.empty())
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, bad.c_str());
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, bad.c_str());
           firstErr = bad;
           errStatus = ResultStatus::Error;
           wrong = true;
@@ -435,18 +435,18 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         rate[t] = layerOps * kChainLayers * 1.0e6 / m.meanUs;
         createUs[t] = cu;
         ln.lastRate = layerOps * kChainLayers / m.meanUs;
-        CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s -> %.3f (%.1f us, %u iters)\n",
-                    dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, rate[t],
-                    m.meanUs, m.iters);
+        XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide x%d %s -> %.3f (%.1f us, %u iters)\n",
+                     dev.displayName.c_str(), label, (long long)D, kChainLayers, layout, rate[t],
+                     m.meanUs, m.iters);
 
         // Measured, not predicted: an extrapolation cannot see a cliff, and
         // the next size is eight times the work.
         if (m.probeUs / kChainLayers > kMaxIterUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.1f s per multiply, "
-                      "stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, layout,
-                      m.probeUs / kChainLayers / 1.0e6);
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.1f s per multiply, "
+                       "stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, layout,
+                       m.probeUs / kChainLayers / 1.0e6);
           race.drop(t);
         }
         // The same for a GPU's prediction (gpuRunCapUs): this one held the
@@ -454,10 +454,10 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         // would hold it eight times as long.
         else if (runCapUs > 0.0 && m.probeUs > runCapUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.2f s a prediction, past "
-                      "--max-time-ml-gpu (%.2f s), stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, layout, m.probeUs / 1.0e6,
-                      runCapUs / 1.0e6);
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s measured %.2f s a prediction, past "
+                       "--max-time-ml-gpu (%.2f s), stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, layout, m.probeUs / 1.0e6,
+                       runCapUs / 1.0e6);
           race.drop(t);
         }
         // A size that compiled past the cap anyway is kept, and ends this
@@ -465,9 +465,9 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         // prediction.
         else if (D != ln.startDim && cu > kCoremlMaxChainCreateUs)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s create %.1f s > %.1f s, stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, layout, cu / 1.0e6,
-                      kCoremlMaxChainCreateUs / 1.0e6);
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers %s create %.1f s > %.1f s, stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, layout, cu / 1.0e6,
+                       kCoremlMaxChainCreateUs / 1.0e6);
           race.drop(t);
         }
         ln.prevPrevCreateUs = ln.prevCreateUs;
@@ -483,9 +483,9 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
       {
         race.settle(rate, createUs);
         if (!race.runs(0) || !race.runs(1))
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: layouts settled at %lld-wide layers: %s goes on\n",
-                      dev.displayName.c_str(), label, (long long)D,
-                      race.runs(1) ? coremlLayoutName(true) : coremlLayoutName(false));
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: layouts settled at %lld-wide layers: %s goes on\n",
+                       dev.displayName.c_str(), label, (long long)D,
+                       race.runs(1) ? coremlLayoutName(true) : coremlLayoutName(false));
       }
       const bool t = rate[1] > rate[0];
       if (rate[t] <= 0.0)
@@ -509,15 +509,15 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
         const double nextUs = 8.0 * layerOps * kChainLayers * 1.0e6 / rate[t];
         if (ladderDropEnds(rate[t], best, nextUs))
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers fell to %.0f%% of the best, and the next size "
-                      "would take ~%.0f s a prediction, stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, 100.0 * rate[t] / best, nextUs / 1.0e6);
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: %lld-wide layers fell to %.0f%% of the best, and the next size "
+                       "would take ~%.0f s a prediction, stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, 100.0 * rate[t] / best, nextUs / 1.0e6);
           break;
         }
         if (++strikes >= kMaxStrikes)
         {
-          CLPEAK_VLOG("coreml-gemm[%s/%s]: no further gain past %lld-wide layers\n",
-                      dev.displayName.c_str(), label, (long long)bestDim);
+          XPUPEAK_VLOG("coreml-gemm[%s/%s]: no further gain past %lld-wide layers\n",
+                       dev.displayName.c_str(), label, (long long)bestDim);
           break;
         }
       }

@@ -18,71 +18,71 @@ jobs:
         include:
           - name: Linux x64
             runner: ubuntu-latest
-            artifact: clpeak-linux-x86_64
-            binary: build/clpeak
+            artifact: xpupeak-linux-x86_64
+            binary: build/xpupeak
             suffix: ""
             cuda: false
 
           - name: Linux arm64
             runner: ubuntu-26.04-arm
-            artifact: clpeak-linux-arm64
-            binary: build/clpeak
+            artifact: xpupeak-linux-arm64
+            binary: build/xpupeak
             suffix: ""
             cuda: false
 
           - name: Windows x64
             runner: windows-latest
-            artifact: clpeak-windows-x86_64
-            binary: build/Release/clpeak.exe
+            artifact: xpupeak-windows-x86_64
+            binary: build/Release/xpupeak.exe
             suffix: ""
             cuda: false
 
           - name: Windows arm64
             runner: windows-11-arm
-            artifact: clpeak-windows-arm64
-            binary: build/Release/clpeak.exe
+            artifact: xpupeak-windows-arm64
+            binary: build/Release/xpupeak.exe
             suffix: ""
             cuda: false
 
           - name: macOS arm64
             runner: macos-latest
-            artifact: clpeak-macos-arm64
-            binary: build/clpeak
+            artifact: xpupeak-macos-arm64
+            binary: build/xpupeak
             suffix: ""
             cuda: false
 
           - name: Linux x64 CUDA
             runner: ubuntu-latest
-            artifact: clpeak-linux-x86_64-cuda
-            binary: build/clpeak
+            artifact: xpupeak-linux-x86_64-cuda
+            binary: build/xpupeak
             suffix: cuda
             cuda: true
 
           - name: Linux arm64 CUDA
             runner: ubuntu-26.04-arm
-            artifact: clpeak-linux-arm64-cuda
-            binary: build/clpeak
+            artifact: xpupeak-linux-arm64-cuda
+            binary: build/xpupeak
             suffix: cuda
             cuda: true
 
           - name: Windows x64 CUDA
             runner: windows-latest
-            artifact: clpeak-windows-x86_64-cuda
-            binary: build/Release/clpeak.exe
+            artifact: xpupeak-windows-x86_64-cuda
+            binary: build/Release/xpupeak.exe
             suffix: cuda
             cuda: true
 
           - name: Windows arm64 CUDA
             runner: windows-11-arm
-            artifact: clpeak-windows-arm64-cuda
-            binary: build/Release/clpeak.exe
+            artifact: xpupeak-windows-arm64-cuda
+            binary: build/Release/xpupeak.exe
             suffix: cuda
             cuda: true
 
           - name: Linux x64 ROCm
             runner: ubuntu-latest
-            artifact: clpeak-linux-x86_64-rocm
-            binary: build/clpeak
+            artifact: xpupeak-linux-x86_64-rocm
+            binary: build/xpupeak
             suffix: rocm
             cuda: false
             rocm: true
@@ -91,8 +91,8 @@ jobs:
           # Windows Server 2022 build (see .github/actions/setup-rocm).
           - name: Windows x64 ROCm
             runner: windows-2022
-            artifact: clpeak-windows-x86_64-rocm
-            binary: build/Release/clpeak.exe
+            artifact: xpupeak-windows-x86_64-rocm
+            binary: build/Release/xpupeak.exe
             suffix: rocm
             cuda: false
             rocm: true
@@ -101,12 +101,12 @@ jobs:
           # so the whole binary is built with it -- icpx on Linux, icx on Windows
           # (see the root CMakeLists).  Windows additionally needs Ninja, because
           # icx cannot drive the multi-config MSBuild generator's device link;
-          # that is why this row's binary is build/clpeak.exe and not
-          # build/Release/clpeak.exe like every other Windows row.
+          # that is why this row's binary is build/xpupeak.exe and not
+          # build/Release/xpupeak.exe like every other Windows row.
           - name: Linux x64 oneAPI
             runner: ubuntu-latest
-            artifact: clpeak-linux-x86_64-oneapi
-            binary: build/clpeak
+            artifact: xpupeak-linux-x86_64-oneapi
+            binary: build/xpupeak
             suffix: oneapi
             cuda: false
             oneapi: true
@@ -126,8 +126,8 @@ jobs:
           # becomes next.
           - name: Windows x64 oneAPI
             runner: windows-2022
-            artifact: clpeak-windows-x86_64-oneapi
-            binary: build/clpeak.exe
+            artifact: xpupeak-windows-x86_64-oneapi
+            binary: build/xpupeak.exe
             suffix: oneapi
             cuda: false
             oneapi: true
@@ -205,7 +205,7 @@ jobs:
       - name: Configure CMake & Build
         if: ${{ !matrix.oneapi }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DXPUPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
       # setup-oneapi already exported what setvars produces into the job
@@ -216,7 +216,7 @@ jobs:
         shell: bash
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_args }} \
-            -DCLPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
+            -DXPUPEAK_PACKAGE_SUFFIX=${{ matrix.suffix }}
           cmake --build build --config Release -j4
 
       # Assert the backend actually got enabled before anything is run or
@@ -228,7 +228,7 @@ jobs:
         uses: ./.github/actions/verify-backend
         with:
           backend: ROCm
-          required: hip_DIR CLPEAK_HIPCC
+          required: hip_DIR XPUPEAK_HIPCC
 
       # hipBLASLt is Linux-only and rocWMMA may not ship in the Windows SDK, so
       # neither is required -- both are already feature-gated in the CMake.
@@ -289,7 +289,7 @@ jobs:
         run: ${{ matrix.binary }} --version || true
 
       # Package with CPack into a self-contained zip whose top-level folder is
-      # clpeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
+      # xpupeak-<version>-<os>-<arch>[-backend], holding the binary, LICENSE, and
       # any bundled runtime libs.  -C Release picks the Release artifacts on
       # multi-config generators (Windows); harmless on single-config.
       - name: Package
@@ -302,13 +302,13 @@ jobs:
       # a Developer ID identity is wired in here.
       - name: Package DMG (macOS)
         if: runner.os == 'macOS'
-        run: cmake --build build --target clpeak-gui-dmg
+        run: cmake --build build --target xpupeak-gui-dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: build/clpeak-*.zip
+          path: build/xpupeak-*.zip
 
       # Its own artifact rather than a second file in the one above: the
       # Actions UI always serves an artifact as a zip, so bundling the .dmg
@@ -320,4 +320,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-dmg
-          path: build/clpeak-*.dmg
+          path: build/xpupeak-*.dmg

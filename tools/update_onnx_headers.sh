@@ -5,7 +5,7 @@
 #   update_onnx_headers.sh --check      report the pinned tag and the latest
 #                                       upstream release, then exit
 #
-# The ONNX backend dlopens the runtime, so clpeak needs only these headers to
+# The ONNX backend dlopens the runtime, so xpupeak needs only these headers to
 # build — see src/onnx/AGENTS.md.  They are checked in rather than submoduled
 # because a --depth 1 clone of microsoft/onnxruntime costs ~814 MB (10,866
 # files) to deliver three files.  This script is the "easy update" half of
@@ -52,7 +52,7 @@ if [ ! -d "$dest" ]; then
     exit 1
 fi
 
-staging=$(mktemp -d "${TMPDIR:-/tmp}/clpeak-ort.XXXXXX")
+staging=$(mktemp -d "${TMPDIR:-/tmp}/xpupeak-ort.XXXXXX")
 trap 'rm -rf "$staging"' EXIT INT TERM
 
 # Fetch everything before touching the tree, so a 404 on the last file cannot

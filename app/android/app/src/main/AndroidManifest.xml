@@ -5,7 +5,7 @@
          Java-side declarations along too.  The permissions below are dropped
          again; the uses-native-library entries are what let the runtimes
          reach vendor libraries on Android 12+, and are kept.
-         Nothing in clpeak talks to the network: url_launcher opens links in
+         Nothing in xpupeak talks to the network: url_launcher opens links in
          the external browser and share_plus hands a local file to the system
          share sheet.  src/debug and src/profile put INTERNET back for the
          Flutter tool's connection to the running app. -->
@@ -16,7 +16,7 @@
     <uses-permission
         android:name="android.permission.ACCESS_NETWORK_STATE"
         tools:node="remove" />
-    <!-- LiteRT's AiPack model downloader, which clpeak never uses (its
+    <!-- LiteRT's AiPack model downloader, which xpupeak never uses (its
          litert-api AAR asks for these, should it come back in). -->
     <uses-permission
         android:name="android.permission.FOREGROUND_SERVICE"
@@ -29,7 +29,7 @@
          permission from Android 13, asked once, at the first run. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
-        android:label="clpeak"
+        android:label="xpupeak"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -64,7 +64,7 @@
              without it loads nothing by that name, as before.  LiteRT's own
              list is in its litert-api AAR, which the build leaves out
              (build.gradle.kts), so it is repeated here, as of 2.3.0. -->
-        <!-- OpenCL: clpeak's OpenCL stub and LiteRT's GPU accelerator, which
+        <!-- OpenCL: xpupeak's OpenCL stub and LiteRT's GPU accelerator, which
              also opens a Pixel's and a car's own names for it. -->
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
@@ -108,7 +108,7 @@
              at process start: it System.loadLibrary()s the 32 MB runtime
              before Flutter is up and starts ORT's telemetry client (a
              network-state callback and a battery receiver).  The ONNX backend
-             dlopens the runtime itself when it is first used, and clpeak
+             dlopens the runtime itself when it is first used, and xpupeak
              never touches the Java API, so the provider goes. -->
         <provider
             android:name="ai.onnxruntime.TelemetryInitializer"

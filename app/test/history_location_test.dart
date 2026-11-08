@@ -2,7 +2,7 @@
 // touching it on macOS raises a TCC consent dialog on first run.
 import 'dart:io';
 
-import 'package:clpeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 

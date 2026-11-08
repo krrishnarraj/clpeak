@@ -10,14 +10,14 @@ Apache-2.0 licensed (copyright notices retained in each file).
 Only the C API is vendored (`litert/c/`, 35 headers): the transitive include
 closure of the entry points `src/litert/litert_runtime.cpp` resolves by name.
 The C++ wrapper in the same zip (`litert/cc/`) is deliberately left out — it
-pulls in Abseil and FlatBuffers, neither of which clpeak builds against.
+pulls in Abseil and FlatBuffers, neither of which xpupeak builds against.
 
 `litert/build_common/build_config.h` is not upstream's: LiteRT's own CMake
 generates it at configure time from `build_config.h.in`, and the copy here
 is that template with both feature toggles off.
 
 Headers only — the LiteRT backend dlopens the runtime at run time
-(`src/litert/litert_runtime.cpp`), so building clpeak needs no LiteRT
+(`src/litert/litert_runtime.cpp`), so building xpupeak needs no LiteRT
 installation, and the shipped binary has no link-time dependency on it.
 
 ## Why these are checked in, not a submodule

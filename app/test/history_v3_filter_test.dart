@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:clpeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 String v3Doc() => jsonEncode({
@@ -25,7 +25,7 @@ Map<String, dynamic> indexRow(String id, String fileName) => {
     };
 
 Future<Directory> makeStore() async {
-  final tmp = Directory.systemTemp.createTempSync('clpeak_hist_v3');
+  final tmp = Directory.systemTemp.createTempSync('xpupeak_hist_v3');
   return tmp;
 }
 

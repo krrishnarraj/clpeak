@@ -7,23 +7,23 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
-#define CLPEAK_DUP    _dup
-#define CLPEAK_DUP2   _dup2
-#define CLPEAK_CLOSE  _close
-#define CLPEAK_FILENO _fileno
-#define CLPEAK_READ   _read
-#define CLPEAK_DEVNULL "NUL"
+#define XPUPEAK_DUP    _dup
+#define XPUPEAK_DUP2   _dup2
+#define XPUPEAK_CLOSE  _close
+#define XPUPEAK_FILENO _fileno
+#define XPUPEAK_READ   _read
+#define XPUPEAK_DEVNULL "NUL"
 #else
 #include <unistd.h>
-#define CLPEAK_DUP    dup
-#define CLPEAK_DUP2   dup2
-#define CLPEAK_CLOSE  close
-#define CLPEAK_FILENO fileno
-#define CLPEAK_READ   read
-#define CLPEAK_DEVNULL "/dev/null"
+#define XPUPEAK_DUP    dup
+#define XPUPEAK_DUP2   dup2
+#define XPUPEAK_CLOSE  close
+#define XPUPEAK_FILENO fileno
+#define XPUPEAK_READ   read
+#define XPUPEAK_DEVNULL "/dev/null"
 #endif
 
-namespace clpeak {
+namespace xpupeak {
 
 namespace {
 
@@ -51,8 +51,8 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
 {
   (void)fflush(stdout);
   (void)fflush(stderr);
-  savedOut = CLPEAK_DUP(CLPEAK_FILENO(stdout));
-  savedErr = CLPEAK_DUP(CLPEAK_FILENO(stderr));
+  savedOut = XPUPEAK_DUP(XPUPEAK_FILENO(stdout));
+  savedErr = XPUPEAK_DUP(XPUPEAK_FILENO(stderr));
   keepText = (mode == Capture::Always);
   // Inside another scope, fd 2 is that scope's pipe and savedErr a copy of
   // it: a line rendered there would be recorded again as library output,
@@ -75,9 +75,9 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
     {
       readFd = fds[0];
       if (!stderrOnly)
-        (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stdout));
-      (void)CLPEAK_DUP2(fds[1], CLPEAK_FILENO(stderr));
-      (void)CLPEAK_CLOSE(fds[1]);
+        (void)XPUPEAK_DUP2(fds[1], XPUPEAK_FILENO(stdout));
+      (void)XPUPEAK_DUP2(fds[1], XPUPEAK_FILENO(stderr));
+      (void)XPUPEAK_CLOSE(fds[1]);
       // Whatever renders a captured line must not write it into the capture.
       setRealStderrFd(realErr);
       try
@@ -90,9 +90,9 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
         // always did.
         setRealStderrFd(outerRealErr);
         if (!stderrOnly)
-          (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
-        (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
-        (void)CLPEAK_CLOSE(readFd);
+          (void)XPUPEAK_DUP2(savedOut, XPUPEAK_FILENO(stdout));
+        (void)XPUPEAK_DUP2(savedErr, XPUPEAK_FILENO(stderr));
+        (void)XPUPEAK_CLOSE(readFd);
         readFd = -1;
       }
     }
@@ -101,16 +101,16 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
 
 #ifdef _MSC_VER
   FILE *nul = nullptr;
-  (void)fopen_s(&nul, CLPEAK_DEVNULL, "w");
+  (void)fopen_s(&nul, XPUPEAK_DEVNULL, "w");
 #else
-  FILE *nul = fopen(CLPEAK_DEVNULL, "w");
+  FILE *nul = fopen(XPUPEAK_DEVNULL, "w");
 #endif
   if (nul)
   {
-    if (savedOut >= 0 && !stderrOnly) (void)CLPEAK_DUP2(CLPEAK_FILENO(nul), CLPEAK_FILENO(stdout));
-    if (savedErr >= 0) (void)CLPEAK_DUP2(CLPEAK_FILENO(nul), CLPEAK_FILENO(stderr));
+    if (savedOut >= 0 && !stderrOnly) (void)XPUPEAK_DUP2(XPUPEAK_FILENO(nul), XPUPEAK_FILENO(stdout));
+    if (savedErr >= 0) (void)XPUPEAK_DUP2(XPUPEAK_FILENO(nul), XPUPEAK_FILENO(stderr));
     (void)fclose(nul);
-    // Even while discarding the library's console, clpeak's own diagnostics
+    // Even while discarding the library's console, xpupeak's own diagnostics
     // must still reach the real stderr rather than the bit bucket -- the same
     // bypass the capture path installs, so a warning emitted inside a muted
     // scope is not lost with the noise.
@@ -128,15 +128,15 @@ void ScopedConsoleMute::finish()
   finished = true;
   (void)fflush(stdout);
   (void)fflush(stderr);
-  if (savedOut >= 0 && !stderrOnly) (void)CLPEAK_DUP2(savedOut, CLPEAK_FILENO(stdout));
-  if (savedErr >= 0) (void)CLPEAK_DUP2(savedErr, CLPEAK_FILENO(stderr));
+  if (savedOut >= 0 && !stderrOnly) (void)XPUPEAK_DUP2(savedOut, XPUPEAK_FILENO(stdout));
+  if (savedErr >= 0) (void)XPUPEAK_DUP2(savedErr, XPUPEAK_FILENO(stderr));
   // fd 2 is what it was before this scope, so the bypass goes back to the
   // enclosing scope's (or none) before the saved copy is closed -- a line
   // the reader is still rendering must not land on a closed (or, worse,
   // reused) descriptor, nor on fd 2 while that is an outer scope's pipe.
   setRealStderrFd(outerRealErr);
-  if (savedOut >= 0) (void)CLPEAK_CLOSE(savedOut);
-  if (savedErr >= 0) (void)CLPEAK_CLOSE(savedErr);
+  if (savedOut >= 0) (void)XPUPEAK_CLOSE(savedOut);
+  if (savedErr >= 0) (void)XPUPEAK_CLOSE(savedErr);
   if (readFd < 0)
     return;
 
@@ -144,7 +144,7 @@ void ScopedConsoleMute::finish()
   // and returns.
   if (reader.joinable())
     reader.join();
-  (void)CLPEAK_CLOSE(readFd);
+  (void)XPUPEAK_CLOSE(readFd);
 
   if (!pending.empty())
   {
@@ -184,7 +184,7 @@ void ScopedConsoleMute::drain()
   char buf[4096];
   for (;;)
   {
-    const auto n = CLPEAK_READ(readFd, buf, sizeof buf);
+    const auto n = XPUPEAK_READ(readFd, buf, sizeof buf);
     if (n <= 0)
       break;
     pending.append(buf, static_cast<size_t>(n));
@@ -207,4 +207,4 @@ void ScopedConsoleMute::drain()
   }
 }
 
-} // namespace clpeak
+} // namespace xpupeak

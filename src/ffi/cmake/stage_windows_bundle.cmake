@@ -1,7 +1,7 @@
 # stage_windows_bundle.cmake — copy Flutter's Windows runner bundle into the
-# clpeak-gui staging dir, without hard-coding the arch directory.
+# xpupeak-gui staging dir, without hard-coding the arch directory.
 #
-#   cmake -DAPP_DIR=<app> -DOUT_DIR=<build>/clpeak-gui -DARCH=<x64|arm64> \
+#   cmake -DAPP_DIR=<app> -DOUT_DIR=<build>/xpupeak-gui -DARCH=<x64|arm64> \
 #         -P stage_windows_bundle.cmake
 #
 # Flutter emits build/windows/<arch>/runner/Release, where <arch> follows the
@@ -22,7 +22,7 @@ else()
             "${APP_DIR}/build/windows (expected ${_expected}).")
     endif()
     list(GET _candidates 0 _src)
-    message(STATUS "clpeak-gui: ${_expected} absent, using ${_src}")
+    message(STATUS "xpupeak-gui: ${_expected} absent, using ${_src}")
 endif()
 
 file(REMOVE_RECURSE "${OUT_DIR}")

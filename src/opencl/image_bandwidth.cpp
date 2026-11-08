@@ -118,7 +118,7 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
         timed = run_kernel(queue, kernel_v1, globalSize, localSize,
                            cfg.targetTimeUs, forced);
         float shapeBps = timed > 0.0f ? (float)bytesPerCall / timed * 1e6f : 0.0f;
-        CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, shapeBps);
+        XPUPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, shapeBps);
         bps = std::max(bps, shapeBps);
       }
 

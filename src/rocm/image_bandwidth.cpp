@@ -116,8 +116,8 @@ int RocmPeak::runImageBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   float colUs = timeWalk(1);
   float rowBps = rowUs > 0.0f ? (float)bytes / rowUs * 1e6f : 0.0f;
   float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
-  CLPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
-              rowBps, colBps);
+  XPUPEAK_VLOG("image_memory_bandwidth: row-major %.1f, column-major %.1f B/s\n",
+               rowBps, colBps);
 
   if (rowBps <= 0.0f && colBps <= 0.0f)
     test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);

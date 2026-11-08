@@ -134,7 +134,7 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     auto timeWalk = [&](auto walkTag, const char *label) {
       float us = runKernel(dev, submit(walkTag), cfg.targetTimeUs, forced);
       float bps = us > 0.0f ? (float)bytes / us * 1e6f : 0.0f;
-      CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", label, bps);
+      XPUPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", label, bps);
       best = std::max(best, bps);
     };
     timeWalk(ImageWalk<imgW, 1, false>{}, "row");

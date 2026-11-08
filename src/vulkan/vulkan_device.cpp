@@ -141,8 +141,8 @@ static void queryDriverInfo(VulkanDevice *self, VkPhysicalDevice physDev,
                                                  drv.driverID);
   // driverInfo is where a driver names its build -- Qualcomm's carries its
   // shader compiler's version -- which a crash in that compiler is filed by.
-  CLPEAK_VLOG("Vulkan: %s: %s (%s)\n", self->info.deviceName.c_str(),
-              drv.driverName, drv.driverInfo);
+  XPUPEAK_VLOG("Vulkan: %s: %s (%s)\n", self->info.deviceName.c_str(),
+               drv.driverName, drv.driverInfo);
 }
 
 // ---------------------------------------------------------------------------
@@ -337,13 +337,13 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       dpProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
       dpProps2.pNext = &dpProps;
       vkGetPhysicalDeviceProperties2(physDev, &dpProps2);
-      CLPEAK_VLOG("Vulkan: 4x8-bit dot accelerated? packed signed %s, "
-                  "packed unsigned %s, packed sat signed %s (the one the "
-                  "shader emits), packed sat unsigned %s\n",
-                  dpProps.integerDotProduct4x8BitPackedSignedAccelerated ? "yes" : "no",
-                  dpProps.integerDotProduct4x8BitPackedUnsignedAccelerated ? "yes" : "no",
-                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated ? "yes" : "no",
-                  dpProps.integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated ? "yes" : "no");
+      XPUPEAK_VLOG("Vulkan: 4x8-bit dot accelerated? packed signed %s, "
+                   "packed unsigned %s, packed sat signed %s (the one the "
+                   "shader emits), packed sat unsigned %s\n",
+                   dpProps.integerDotProduct4x8BitPackedSignedAccelerated ? "yes" : "no",
+                   dpProps.integerDotProduct4x8BitPackedUnsignedAccelerated ? "yes" : "no",
+                   dpProps.integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated ? "yes" : "no",
+                   dpProps.integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated ? "yes" : "no");
     }
 #endif
 #if defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_COOPMAT_BF16)
@@ -408,9 +408,9 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       coopmatInCompute =
           (cmProps.cooperativeMatrixSupportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0;
       if (!coopmatInCompute)
-        CLPEAK_VLOG("Vulkan: cooperative matrix is advertised but not for the "
-                    "compute stage (stages=0x%x); skipping every coopmat row\n",
-                    cmProps.cooperativeMatrixSupportedStages);
+        XPUPEAK_VLOG("Vulkan: cooperative matrix is advertised but not for the "
+                     "compute stage (stages=0x%x); skipping every coopmat row\n",
+                     cmProps.cooperativeMatrixSupportedStages);
     }
     if (hasCoopmatExt && coopmatFeatures.cooperativeMatrix &&
         vmmFeatures.vulkanMemoryModel && coopmatInCompute)

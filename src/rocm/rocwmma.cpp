@@ -13,7 +13,7 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
      "WMMA or MFMA instructions.",
      TestShape::Heterogeneous, "data type"});
 
-#ifndef CLPEAK_ROCM_HAS_ROCWMMA
+#ifndef XPUPEAK_ROCM_HAS_ROCWMMA
   {
     logger::EmitOptions o; o.description = "fp16 inputs, fp32 accumulator (rocWMMA 16x16x16).";
     test.skip("fp16", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", o);

@@ -24,7 +24,7 @@ LogEntry capNotice(const LogEntry &dropped, std::size_t cap, const char *where)
 {
     LogEntry e;
     e.elapsedS    = dropped.elapsedS;
-    e.level       = clpeak::LogLevel::Warning;
+    e.level       = xpupeak::LogLevel::Warning;
     e.backend     = dropped.backend;
     e.device      = dropped.device;
     e.deviceIndex = dropped.deviceIndex;
@@ -42,12 +42,12 @@ RunLog::RunLog(RunDocument &doc)
         std::lock_guard<std::mutex> lock(g_currentMutex);
         g_current = this;
     }
-    clpeak::setLogSink(this);
+    xpupeak::setLogSink(this);
 }
 
 RunLog::~RunLog()
 {
-    if (clpeak::logSink() == this) clpeak::setLogSink(nullptr);
+    if (xpupeak::logSink() == this) xpupeak::setLogSink(nullptr);
     {
         std::lock_guard<std::mutex> lock(g_currentMutex);
         if (g_current == this) g_current = nullptr;
@@ -130,15 +130,15 @@ void RunLog::openSidecar(const std::string &outputFile, bool append)
             for (std::size_t i = from; i < doc.log.size(); i++)
             {
                 const LogEntry &e = doc.log[i];
-                if (e.level == clpeak::LogLevel::Debug)
+                if (e.level == xpupeak::LogLevel::Debug)
                     sidecarDebugBytes += e.message.size();
                 sidecarWriteLocked(logEntryToJson(e));
             }
         }
     }
     if (!failed.empty())
-        clpeak::logMessage(clpeak::LogLevel::Warning, "",
-                           "cannot open the run log sidecar " + failed +
+        xpupeak::logMessage(xpupeak::LogLevel::Warning, "",
+                            "cannot open the run log sidecar " + failed +
                                "; diagnostics will only reach the document");
 }
 
@@ -172,7 +172,7 @@ void RunLog::record(LogEntry &entry)
     appendLocked(entry, /*toDocument=*/true);
 }
 
-void RunLog::hostNote(clpeak::LogLevel level, const std::string &source,
+void RunLog::hostNote(xpupeak::LogLevel level, const std::string &source,
                       const std::string &message)
 {
     std::lock_guard<std::mutex> current(g_currentMutex);
@@ -197,7 +197,7 @@ void RunLog::recordToSidecar(LogEntry &entry)
 void RunLog::appendLocked(LogEntry &entry, bool toDocument)
 {
     bool toSidecar = sidecar != nullptr;
-    if (entry.level == clpeak::LogLevel::Debug)
+    if (entry.level == xpupeak::LogLevel::Debug)
     {
         // Each side drops on its own cap, from the first entry that does not
         // fit on -- a later, shorter one would make a liar of the notice --
@@ -228,7 +228,7 @@ void RunLog::appendLocked(LogEntry &entry, bool toDocument)
     if (toSidecar) sidecarWriteLocked(logEntryToJson(entry));
 }
 
-void RunLog::onLog(clpeak::LogLevel level, const std::string &source,
+void RunLog::onLog(xpupeak::LogLevel level, const std::string &source,
                    const std::string &message)
 {
     // The attached logger records the entry with its scope and renders it on
@@ -249,8 +249,8 @@ void RunLog::onLog(clpeak::LogLevel level, const std::string &source,
         fallback(e);
         return;
     }
-    if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled()) return;
-    clpeak::stderrWrite(message + "\n");
+    if (level == xpupeak::LogLevel::Debug && !xpupeak::verboseEnabled()) return;
+    xpupeak::stderrWrite(message + "\n");
 }
 
 void RunLog::attach(logger *l)
@@ -277,7 +277,7 @@ void RunLog::seedPrior(std::vector<LogEntry> prior, double clockOffsetS)
     // The part before's Debug counts against both caps: the document keeps
     // it, and the sidecar holds it already.
     for (const LogEntry &e : prior)
-        if (e.level == clpeak::LogLevel::Debug)
+        if (e.level == xpupeak::LogLevel::Debug)
         {
             documentDebugBytes += e.message.size();
             sidecarDebugBytes  += e.message.size();
@@ -295,8 +295,8 @@ void RunLog::finish()
         n = documentDropped;
     }
     if (n > 0)
-        clpeak::logMessage(clpeak::LogLevel::Warning, "",
-                           "log truncated: " + std::to_string(n) +
+        xpupeak::logMessage(xpupeak::LogLevel::Warning, "",
+                            "log truncated: " + std::to_string(n) +
                                " debug entries left out after " +
                                std::to_string(kMaxDocumentDebugBytes >> 20) +
                                " MiB of debug messages");

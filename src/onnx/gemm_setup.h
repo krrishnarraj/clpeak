@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONNX_GEMM_SETUP_H
-#define CLPEAK_ONNX_GEMM_SETUP_H
+#ifndef XPUPEAK_ONNX_GEMM_SETUP_H
+#define XPUPEAK_ONNX_GEMM_SETUP_H
 
 #ifdef ENABLE_ONNX
 
@@ -164,4 +164,4 @@ double timeRuns(const OrtRuntime &rt, GemmSetup &g, unsigned int n);
 } // namespace onnxgemm
 
 #endif // ENABLE_ONNX
-#endif // CLPEAK_ONNX_GEMM_SETUP_H
+#endif // XPUPEAK_ONNX_GEMM_SETUP_H

@@ -1,7 +1,7 @@
-#ifndef CLPEAK_LITERT_RUNTIME_H
-#define CLPEAK_LITERT_RUNTIME_H
+#ifndef XPUPEAK_LITERT_RUNTIME_H
+#define XPUPEAK_LITERT_RUNTIME_H
 
-// Load-on-demand LiteRT.  libLiteRt is dlopen'd so clpeak ships with no hard
+// Load-on-demand LiteRT.  libLiteRt is dlopen'd so xpupeak ships with no hard
 // dependency, exactly as the ONNX backend treats onnxruntime: a machine
 // without it gets a one-line "library not found" and no rows, the shape a
 // missing GPU driver produces.  Unlike ONNX Runtime there is no single entry
@@ -51,7 +51,7 @@
 // SDK, not exports of libLiteRt.  What the runtime actually receives is an
 // opaque payload -- a TOML string under an identifier such as "gpu_options"
 // or "xnnpack" -- and litert_session.cpp writes those strings directly.
-#define CLPEAK_LITERT_REQUIRED(X)                                     \
+#define XPUPEAK_LITERT_REQUIRED(X)                                    \
   X(LiteRtCreateEnvironment)                                          \
   X(LiteRtDestroyEnvironment)                                         \
   X(LiteRtCreateOptions)                                              \
@@ -90,7 +90,7 @@
 // LiteRtCompiledModelIsNonCpuFullyAccelerated is ABI 1.1.0's (LiteRT
 // 2.3.0), and its presence is how the runtime's ABI is told
 // (LitertRuntime::abi11).
-#define CLPEAK_LITERT_OPTIONAL(X)                                     \
+#define XPUPEAK_LITERT_OPTIONAL(X)                                    \
   X(LiteRtGetStatusString)                                            \
   X(LiteRtCompiledModelIsNonCpuFullyAccelerated)                      \
   X(LiteRtCreateSinkLogger)                                           \
@@ -116,10 +116,10 @@ struct LitertApi
 // Pin the global lookup with `::`: without it `&name` inside the class
 // would re-resolve to the member being declared in the completed scope,
 // which GCC rejects as "declaration changes meaning" (Clang accepts).
-#define CLPEAK_LITERT_DECL(name) decltype(&::name) name = nullptr;
-  CLPEAK_LITERT_REQUIRED(CLPEAK_LITERT_DECL)
-  CLPEAK_LITERT_OPTIONAL(CLPEAK_LITERT_DECL)
-#undef CLPEAK_LITERT_DECL
+#define XPUPEAK_LITERT_DECL(name) decltype(&::name) name = nullptr;
+  XPUPEAK_LITERT_REQUIRED(XPUPEAK_LITERT_DECL)
+  XPUPEAK_LITERT_OPTIONAL(XPUPEAK_LITERT_DECL)
+#undef XPUPEAK_LITERT_DECL
 };
 
 struct LitertRuntime
@@ -140,7 +140,7 @@ struct LitertRuntime
 
 // Point the loader at a specific library, ahead of the platform's conventional
 // names; empty clears the choice.  Backs `--litert-lib` and the FFI's
-// clpeak_set_litert_library().  The first library that loads is the one
+// xpupeak_set_litert_library().  The first library that loads is the one
 // for the process: until one has, a choice takes effect on the next
 // litertRuntime() call (a library that fails to load sets nothing up); from
 // then on it is kept, reported by litertPendingLibrary(), and loads the next
@@ -183,4 +183,4 @@ std::string litertLoadDiagnostic();
 // LiteRT's status codes as text, for row reasons.
 std::string litertStatusText(const LitertRuntime &rt, LiteRtStatus st);
 
-#endif // CLPEAK_LITERT_RUNTIME_H
+#endif // XPUPEAK_LITERT_RUNTIME_H

@@ -4,7 +4,7 @@
 
 // cl_khr_integer_dot_product enums, defined here when the platform's OpenCL
 // headers predate the extension -- the OpenCL 2.2 headers that ship with ROCm
-// do, and clpeak builds against whatever headers the system provides.  The
+// do, and xpupeak builds against whatever headers the system provides.  The
 // values are fixed by the extension spec, so defining them locally is safe;
 // querying them on a device that lacks the extension is not, which is why the
 // call below stays behind the extension-string check.
@@ -22,7 +22,7 @@ namespace
 {
 
 // Whether OpenCL C 3.0 is among the device's CL_DEVICE_OPENCL_C_ALL_VERSIONS,
-// an OpenCL 3.0 query the headers clpeak targets (1.2) do not declare.  The
+// an OpenCL 3.0 query the headers xpupeak targets (1.2) do not declare.  The
 // entries are cl_name_version: a packed version (major in the top 10 bits)
 // and a 64-byte name.  A device that predates the query fails it, which
 // reads as no.

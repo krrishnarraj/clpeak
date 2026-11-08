@@ -15,7 +15,7 @@
 // category is passed explicitly: categoryFromUnit() would otherwise file
 // these under Bandwidth.
 
-using clpeak_cpu::kernelMenu;
+using xpupeak_cpu::kernelMenu;
 
 int CpuPeak::runStringScan(benchmark_config_t &cfg)
 {

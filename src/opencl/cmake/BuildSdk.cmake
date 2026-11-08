@@ -14,7 +14,7 @@ set(CMAKE_LIST_CONTENT "
       -DCMAKE_INSTALL_PREFIX=${SDK_ROOT}
       -DCMAKE_BUILD_TYPE=Release
       -DBUILD_SHARED_LIBS=OFF
-      # The ICD loader ends up inside libclpeak_ffi.so (the GUI bridge), and
+      # The ICD loader ends up inside libxpupeak_ffi.so (the GUI bridge), and
       # ELF rejects non-PIC objects in a shared library.  Matches the root
       # project's CMAKE_POSITION_INDEPENDENT_CODE; this nested build wouldn't
       # otherwise inherit it.

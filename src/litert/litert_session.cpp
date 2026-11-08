@@ -58,13 +58,13 @@ void installSink(const LitertRuntime &rt)
 }
 
 // LiteRT prefixes each sink line with its severity name and "[file:line]".
-clpeak::LogLevel levelOf(const std::string &line)
+xpupeak::LogLevel levelOf(const std::string &line)
 {
   if (line.rfind("ERROR", 0) == 0)
-    return clpeak::LogLevel::Error;
+    return xpupeak::LogLevel::Error;
   if (line.rfind("WARNING", 0) == 0)
-    return clpeak::LogLevel::Warning;
-  return clpeak::LogLevel::Debug;
+    return xpupeak::LogLevel::Warning;
+  return xpupeak::LogLevel::Debug;
 }
 
 } // namespace
@@ -88,9 +88,9 @@ std::string litertDrainLog(const LitertRuntime &rt)
       line.pop_back();
     if (line.empty())
       continue;
-    const clpeak::LogLevel lvl = levelOf(line);
-    if (lvl != clpeak::LogLevel::Debug || clpeak::verboseEnabled())
-      clpeak::logMessage(lvl, "litert", line);
+    const xpupeak::LogLevel lvl = levelOf(line);
+    if (lvl != xpupeak::LogLevel::Debug || xpupeak::verboseEnabled())
+      xpupeak::logMessage(lvl, "litert", line);
     text += line;
     text += '\n';
   }
@@ -175,10 +175,10 @@ std::vector<Said> warningsAndErrors(const std::string &log)
     }
     open = false;
     const bool glogBad = (l.size() > 5 && (l[0] == 'E' || l[0] == 'W') && l[1] == '0');
-    const clpeak::LogLevel level = levelOf(l);
-    if (level == clpeak::LogLevel::Debug && !glogBad)
+    const xpupeak::LogLevel level = levelOf(l);
+    if (level == xpupeak::LogLevel::Debug && !glogBad)
       continue;
-    const bool error = glogBad ? l[0] == 'E' : level == clpeak::LogLevel::Error;
+    const bool error = glogBad ? l[0] == 'E' : level == xpupeak::LogLevel::Error;
     if (glogBad)
     {
       // "E0000 00:00:123.456 7 file.cc:9] text"
@@ -408,8 +408,8 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
               " environment of the previously loaded LiteRT still has sessions alive";
       return nullptr;
     }
-    CLPEAK_VLOG("litert: dropping the %s environment of the previously loaded runtime\n",
-                litertAccelName(accel));
+    XPUPEAK_VLOG("litert: dropping the %s environment of the previously loaded runtime\n",
+                 litertAccelName(accel));
     if (it->second.env)
       it->second.api.LiteRtDestroyEnvironment(it->second.env);
     g_envs.erase(it);
@@ -419,8 +419,8 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
       kGpuModelsPerEnvironment > 0 && it->second.models >= kGpuModelsPerEnvironment &&
       it->second.live == 0)
   {
-    CLPEAK_VLOG("litert: recreating the GPU environment after %d compiled models\n",
-                it->second.models);
+    XPUPEAK_VLOG("litert: recreating the GPU environment after %d compiled models\n",
+                 it->second.models);
     it->second.api.LiteRtDestroyEnvironment(it->second.env);
     g_envs.erase(it);
     it = g_envs.end();
@@ -463,7 +463,7 @@ LiteRtEnvironment environmentFor(const LitertRuntime &rt, LitertAccel accel, std
   {
     // Accelerator libraries announce themselves on the console (the Metal
     // one through glog) below any logger LiteRT lets us set.
-    clpeak::ScopedConsoleMute mute(clpeak::ScopedConsoleMute::Capture::Always);
+    xpupeak::ScopedConsoleMute mute(xpupeak::ScopedConsoleMute::Capture::Always);
     st = rt.api.LiteRtCreateEnvironment((int)opts.size(), opts.data(), &env);
     mute.finish();
     logged = mute.text();
@@ -605,7 +605,7 @@ std::string litertEnvironmentLog(LitertAccel accel)
 
 std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
                                                      const litert_device_info_t &dev,
-                                                     clpeak_tflite::TfliteBytes &&model,
+                                                     xpupeak_tflite::TfliteBytes &&model,
                                                      const LitertSessionConfig &cfg,
                                                      std::string &error)
 {
@@ -634,8 +634,8 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
     // line, but only its first ScopedConsoleMute::kMaxLines, and what
     // explains a failure is usually last.  A failed session's console goes
     // on whole; one that came up needs no second copy.
-    if (!console.empty() && clpeak::verboseEnabled())
-      CLPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
+    if (!console.empty() && xpupeak::verboseEnabled())
+      XPUPEAK_VLOG("litert: console during creation:\n%s", console.c_str());
     error = what + ": " + litertStatusText(rt, st);
     std::string why = lastLines(s->creationLog, dev.accel);
     if (const std::string took = partitionWords(s->creationLog, s->accelName_); !took.empty())
@@ -744,7 +744,7 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   const auto t0 = Clock::now();
   LiteRtStatus loadSt, compileSt = kLiteRtStatusOk;
   {
-    clpeak::ScopedConsoleMute mute(clpeak::ScopedConsoleMute::Capture::Always);
+    xpupeak::ScopedConsoleMute mute(xpupeak::ScopedConsoleMute::Capture::Always);
     loadSt = rt.api.LiteRtCreateModelFromBuffer(s->env_, s->bytes_.data(), s->bytes_.size(), &s->model_);
     if (loadSt == kLiteRtStatusOk && s->model_)
       compileSt = rt.api.LiteRtCreateCompiledModel(s->env_, s->model_, s->options_, &s->compiled_);
@@ -763,9 +763,9 @@ std::unique_ptr<LitertSession> LitertSession::create(const LitertRuntime &rt,
   // Where a session's time went, for the run log: the host generating the
   // model against the runtime loading and compiling it.  On a phone both
   // can dwarf the measurement that follows.
-  CLPEAK_VLOG("litert: %s: %.1f MB built in %.0f ms, loaded and compiled for the %s in %.0f ms\n",
-              s->bytes_.description.c_str(), (double)s->bytes_.size() / 1048576.0, s->bytes_.buildUs / 1000.0,
-              s->accelName_.c_str(), s->createUs / 1000.0);
+  XPUPEAK_VLOG("litert: %s: %.1f MB built in %.0f ms, loaded and compiled for the %s in %.0f ms\n",
+               s->bytes_.description.c_str(), (double)s->bytes_.size() / 1048576.0, s->bytes_.buildUs / 1000.0,
+               s->accelName_.c_str(), s->createUs / 1000.0);
 
   // Every operation on the accelerator, by the runtime's own count.  The
   // older answer counts what any delegate took, the CPU's XNNPACK one
@@ -911,7 +911,7 @@ bool LitertSession::run(std::string &error)
   {
     ran_ = true;
     const auto t0 = Clock::now();
-    clpeak::ScopedConsoleMute mute(clpeak::ScopedConsoleMute::Capture::Always);
+    xpupeak::ScopedConsoleMute mute(xpupeak::ScopedConsoleMute::Capture::Always);
     st = rt_->api.LiteRtRunCompiledModel(compiled_, 0, inputs_.size(), inputs_.data(),
                                          outputs_.size(), outputs_.data());
     mute.finish();
@@ -922,7 +922,7 @@ bool LitertSession::run(std::string &error)
       sync(ignored);   // the first run's time is to completion, like the rest
     }
     firstRunUs = elapsedUs(t0);
-    CLPEAK_VLOG("litert: %s: first inference %.0f ms\n", bytes_.description.c_str(), firstRunUs / 1000.0);
+    XPUPEAK_VLOG("litert: %s: first inference %.0f ms\n", bytes_.description.c_str(), firstRunUs / 1000.0);
   }
   else
     st = rt_->api.LiteRtRunCompiledModel(compiled_, 0, inputs_.size(), inputs_.data(),
@@ -930,8 +930,8 @@ bool LitertSession::run(std::string &error)
   if (st != kLiteRtStatusOk)
   {
     // Whole, as for a failed creation.
-    if (!console.empty() && clpeak::verboseEnabled())
-      CLPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
+    if (!console.empty() && xpupeak::verboseEnabled())
+      XPUPEAK_VLOG("litert: console during the first inference:\n%s", console.c_str());
     const std::string logged = console + litertDrainLog(*rt_);
     error = "inference failed: " + litertStatusText(*rt_, st);
     const std::string why = lastLines(logged, accel_);

@@ -7,7 +7,7 @@
 
 void Peak::applyOptions(const CliOptions &opts)
 {
-    clpeak::setVerbose(opts.verbose);
+    xpupeak::setVerbose(opts.verbose);
     forceIters     = opts.forceIters;
     specifiedIters = opts.iters;
     warmupCount    = opts.warmupCount;
@@ -122,7 +122,7 @@ Peak::Admission::~Admission()
     if (!admitted || !peak) return;
     // Cut short: a cancel stops a runner at its next test boundary, and an
     // exception unwinding through here never let it finish.
-    if (clpeak::cancelRequested() || std::uncaught_exceptions() > exceptionsAtEntry)
+    if (xpupeak::cancelRequested() || std::uncaught_exceptions() > exceptionsAtEntry)
         return;
     peak->benchmarkFinished(bench);
 }

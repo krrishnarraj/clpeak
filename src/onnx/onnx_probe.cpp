@@ -193,8 +193,8 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     if (std::string why = onnxProviderFenceReason(ep, v.dtype, v.qdq, v.blockSize);
         !why.empty())
     {
-      CLPEAK_VLOG("onnx-probe[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
-                  v.label, why.c_str());
+      XPUPEAK_VLOG("onnx-probe[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
+                   v.label, why.c_str());
       r.reason = why;
       out[v.label] = r;
       return;
@@ -224,13 +224,13 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
     for (size_t si = 0; si < nSchemes && !r.ok; si++)
     {
       const QuantScheme &qs = schemes[si];
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       bool reduceInFloat = false;
       for (OnnxLiveShape shape : shapes)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
 
         // Plain rows retry with the product cast to fp32 when the native
@@ -246,12 +246,12 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                          qs.wDtype, shape);
           if (b.built && rif == 1)
             reduceInFloat = true;
-          CLPEAK_VLOG("onnx-probe[%s/%s]: %s %s%s %lld^3 create %.1f s (%s)\n",
-                      ep.providerKey.c_str(), v.label, qs.name,
-                      shapeName(shape),
-                      (reduceInFloat || rif == 1) ? " fp32-reduce" : "",
-                      (long long)kProbeDim, b.createUs / 1.0e6,
-                      b.built ? onnxJoinOps(b.ops).c_str() : b.error.c_str());
+          XPUPEAK_VLOG("onnx-probe[%s/%s]: %s %s%s %lld^3 create %.1f s (%s)\n",
+                       ep.providerKey.c_str(), v.label, qs.name,
+                       shapeName(shape),
+                       (reduceInFloat || rif == 1) ? " fp32-reduce" : "",
+                       (long long)kProbeDim, b.createUs / 1.0e6,
+                       b.built ? onnxJoinOps(b.ops).c_str() : b.error.c_str());
         }
         if (!b.built)
         {
@@ -269,9 +269,9 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
                              !b.matmulInType.empty() && b.matmulInType != want;
         if (widened)
         {
-          CLPEAK_VLOG("onnx-probe[%s/%s]: %s ran the multiply in %s, not %s\n",
-                      ep.providerKey.c_str(), v.label, shapeName(shape),
-                      b.matmulInType.c_str(), want);
+          XPUPEAK_VLOG("onnx-probe[%s/%s]: %s ran the multiply in %s, not %s\n",
+                       ep.providerKey.c_str(), v.label, shapeName(shape),
+                       b.matmulInType.c_str(), want);
           wide.push_back({shape, reduceInFloat, b.createUs, b.runUs,
                           b.matmulInType});
           continue;
@@ -314,22 +314,22 @@ OnnxProbeCache onnxProbeGemmVariants(const OrtRuntime &rt, const onnx_ep_info_t 
       r.ranWider = w.ranAs;
       for (const Widened &x : wide)
         r.shapes.push_back(x.shape);
-      CLPEAK_VLOG("onnx-probe[%s/%s]: no shape keeps %s; the provider computes "
-                  "it in %s, measuring that\n",
-                  ep.providerKey.c_str(), v.label, want, w.ranAs.c_str());
+      XPUPEAK_VLOG("onnx-probe[%s/%s]: no shape keeps %s; the provider computes "
+                   "it in %s, measuring that\n",
+                   ep.providerKey.c_str(), v.label, want, w.ranAs.c_str());
     }
 
     if (r.ok)
-      CLPEAK_VLOG("onnx-probe[%s/%s]: shapes %zu (first %s)%s\n",
-                  ep.providerKey.c_str(), v.label, r.shapes.size(),
-                  shapeName(r.shapes.front()),
-                  r.reduceInFloat ? ", product cast to fp32" : "");
+      XPUPEAK_VLOG("onnx-probe[%s/%s]: shapes %zu (first %s)%s\n",
+                   ep.providerKey.c_str(), v.label, r.shapes.size(),
+                   shapeName(r.shapes.front()),
+                   r.reduceInFloat ? ", product cast to fp32" : "");
 
     if (r.ok && r.createUs > kOnnxTinyMaxCreateUs)
     {
-      CLPEAK_VLOG("onnx-probe[%s/%s]: tiny %.1f s > %.1f s, skipping\n",
-                  ep.providerKey.c_str(), v.label, r.createUs / 1.0e6,
-                  kOnnxTinyMaxCreateUs / 1.0e6);
+      XPUPEAK_VLOG("onnx-probe[%s/%s]: tiny %.1f s > %.1f s, skipping\n",
+                   ep.providerKey.c_str(), v.label, r.createUs / 1.0e6,
+                   kOnnxTinyMaxCreateUs / 1.0e6);
       r.ok = false;
       r.reason = "session creation at " + std::to_string(kProbeDim) +
                  "^3 took " + std::to_string((long long)(r.createUs / 1.0e6)) +
@@ -449,7 +449,7 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   constexpr int64_t kK = 2048;
   constexpr int64_t kFloorDim = 256; // 128 KB either way: cannot matter
   const uint64_t kBytes =
-      (clpeak::memoryBudget(1ull << 30) > onnxHeldBytes(ep, 96ull << 20, 0))
+      (xpupeak::memoryBudget(1ull << 30) > onnxHeldBytes(ep, 96ull << 20, 0))
           ? (64ull << 20)
           : (8ull << 20);
   // Below this share the reading is dispatch, not bandwidth.  Reporting it
@@ -500,8 +500,8 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     std::string().swap(model);
     if (!ses.session)
     {
-      CLPEAK_VLOG("onnx-stream[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
-                  dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", ses.error.c_str());
+      XPUPEAK_VLOG("onnx-stream[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
+                   dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", ses.error.c_str());
       release(g);
       return false;
     }
@@ -596,7 +596,7 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
   for (size_t ci = 0; ci < 2; ci++)
   {
     const int dtype = candidates[ci];
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const size_t es = dtypeSize(dtype);
     // The floor has to be small in *both* dimensions.  Shrinking only the
@@ -620,23 +620,23 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     const double netUs = us - floorOf[ci];
     if (netUs < kMinNetShare * us)
     {
-      CLPEAK_VLOG("onnx-stream[%s]: %s %.0f us against a %.0f us floor -- "
-                  "dispatch, not bandwidth; no reading\n",
-                  ep.providerKey.c_str(),
-                  dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", us, floorUs);
+      XPUPEAK_VLOG("onnx-stream[%s]: %s %.0f us against a %.0f us floor -- "
+                   "dispatch, not bandwidth; no reading\n",
+                   ep.providerKey.c_str(),
+                   dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", us, floorUs);
       continue;
     }
     const double bps = (double)kBytes / (netUs * 1.0e-6);
-    CLPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s (%.0f us less a %.0f us floor)\n",
-                ep.providerKey.c_str(),
-                dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9,
-                us, floorUs);
+    XPUPEAK_VLOG("onnx-stream[%s]: %s %.1f GB/s (%.0f us less a %.0f us floor)\n",
+                 ep.providerKey.c_str(),
+                 dtype == ONNX_DT_FLOAT ? "fp32" : "fp16", bps / 1.0e9,
+                 us, floorUs);
     bpsOf[ci] = bps;
   }
   if (fp32RelErr >= 0.0)
-    CLPEAK_VLOG("onnx-stream[%s]: fp32 result within %.1f ppm of a double-"
-                "precision reference\n",
-                ep.providerKey.c_str(), fp32RelErr * 1.0e6);
+    XPUPEAK_VLOG("onnx-stream[%s]: fp32 result within %.1f ppm of a double-"
+                 "precision reference\n",
+                 ep.providerKey.c_str(), fp32RelErr * 1.0e6);
 
   // fp32 came back rounded like a 16-bit type, which is storage held at half
   // width or arithmetic rounded the way TF32 rounds it.  fp16 at the fp32
@@ -681,22 +681,22 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     if (read)
     {
       sameShapeRatio = net32 / net16;
-      CLPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
-                  "fp16 %.0f us less %.0f / %.0f us floors: %.2fx the time for "
-                  "twice the bytes\n",
-                  ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
-                  floorOf[0], sameShapeRatio);
+      XPUPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
+                   "fp16 %.0f us less %.0f / %.0f us floors: %.2fx the time for "
+                   "twice the bytes\n",
+                   ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
+                   floorOf[0], sameShapeRatio);
     }
     else if (us32 > 0.0 && us16 > 0.0)
-      CLPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
-                  "fp16 %.0f us against %.0f / %.0f us floors -- dispatch, not "
-                  "bandwidth; no reading\n",
-                  ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
-                  floorOf[0]);
+      XPUPEAK_VLOG("onnx-stream[%s]: at fp32's %llu MB shape, fp32 %.0f us and "
+                   "fp16 %.0f us against %.0f / %.0f us floors -- dispatch, not "
+                   "bandwidth; no reading\n",
+                   ep.providerKey.c_str(), mb, us32, us16, floorOf[1],
+                   floorOf[0]);
     return read;
   };
   if (fp32Rounded && bpsOf[0] > 0.0 && bpsOf[1] > 0.0 &&
-      !clpeak::cancelRequested())
+      !xpupeak::cancelRequested())
   {
     const int64_t n = (int64_t)(kBytes / (kK * dtypeSize(ONNX_DT_FLOAT)));
     double us32 = -1.0, us16 = -1.0;
@@ -713,8 +713,8 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     // gate counts them.
     const int64_t n4 = 4 * n;
     const uint64_t pairBytes = (uint64_t)kK * (uint64_t)n4 * 6ull;
-    if (!read && us32 > 0.0 && us16 > 0.0 && !clpeak::cancelRequested() &&
-        clpeak::memoryBudget(2ull << 30) > onnxHeldBytes(ep, pairBytes, 0))
+    if (!read && us32 > 0.0 && us16 > 0.0 && !xpupeak::cancelRequested() &&
+        xpupeak::memoryBudget(2ull << 30) > onnxHeldBytes(ep, pairBytes, 0))
     {
       Gemv big;
       if (build(big, ONNX_DT_FLOAT, kK, n4, false))
@@ -739,19 +739,19 @@ static StreamProbe onnxStreamProbe(const OrtRuntime &rt, const onnx_ep_info_t &e
     if (sameShapeRatio > 0.0)
       std::snprintf(same, sizeof(same), ", %.2fx its time at the same shape",
                     sameShapeRatio);
-    CLPEAK_VLOG("onnx-stream[%s]: fp32 is held at half width here (%.0f ppm, "
-                "%.2fx fp16's rate per credited byte%s); streaming fp16\n",
-                ep.providerKey.c_str(), fp32RelErr * 1.0e6, bps32 / bps16,
-                same);
+    XPUPEAK_VLOG("onnx-stream[%s]: fp32 is held at half width here (%.0f ppm, "
+                 "%.2fx fp16's rate per credited byte%s); streaming fp16\n",
+                 ep.providerKey.c_str(), fp32RelErr * 1.0e6, bps32 / bps16,
+                 same);
   }
   else if (sameShapeRatio > kSameShapeTimeRatio)
-    CLPEAK_VLOG("onnx-stream[%s]: fp32 is rounded in the arithmetic, not the "
-                "storage: it moves its full width\n",
-                ep.providerKey.c_str());
+    XPUPEAK_VLOG("onnx-stream[%s]: fp32 is rounded in the arithmetic, not the "
+                 "storage: it moves its full width\n",
+                 ep.providerKey.c_str());
   else if (sameShapeRatio > 0.0)
-    CLPEAK_VLOG("onnx-stream[%s]: fp16 is the slower of the two at fp32's "
-                "shape, which says nothing about how fp32 is held\n",
-                ep.providerKey.c_str());
+    XPUPEAK_VLOG("onnx-stream[%s]: fp16 is the slower of the two at fp32's "
+                 "shape, which says nothing about how fp32 is held\n",
+                 ep.providerKey.c_str());
 
   // fp16 on a tie, and fp32 only where it is what it says it is.
   if (bps16 > 0.0)
@@ -866,9 +866,9 @@ OnnxReduceView onnxGemmReduceView(const OrtRuntime &rt, const onnx_ep_info_t &ep
     std::string().swap(model);
     if (!ses.session)
     {
-      CLPEAK_VLOG("onnx-reduce[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
-                  view == OnnxReduceView::TwoStep ? "two-step" : "rows",
-                  ses.error.c_str());
+      XPUPEAK_VLOG("onnx-reduce[%s]: %s refused (%s)\n", ep.providerKey.c_str(),
+                   view == OnnxReduceView::TwoStep ? "two-step" : "rows",
+                   ses.error.c_str());
       return -1.0;
     }
     const int64_t outCount = onnxReducedDims(view, n)[0];
@@ -922,19 +922,19 @@ OnnxReduceView onnxGemmReduceView(const OrtRuntime &rt, const onnx_ep_info_t &ep
   };
 
   OnnxReduceView pick = OnnxReduceView::Rows;
-  if (!clpeak::cancelRequested())
+  if (!xpupeak::cancelRequested())
   {
     const double rowsUs = timeView(OnnxReduceView::Rows);
-    const double twoUs = (rowsUs > 0.0 && !clpeak::cancelRequested())
+    const double twoUs = (rowsUs > 0.0 && !xpupeak::cancelRequested())
                              ? timeView(OnnxReduceView::TwoStep)
                              : -1.0;
     if (twoUs > 0.0 && twoUs < rowsUs * kTwoStepWinShare)
       pick = OnnxReduceView::TwoStep;
-    CLPEAK_VLOG("onnx-reduce[%s/%s]: %lld^2 down the columns %.0f us, along the "
-                "rows then down %.0f us -> %s\n",
-                ep.providerKey.c_str(), onnxProfileTypeName(dtype), (long long)n,
-                rowsUs, twoUs,
-                pick == OnnxReduceView::TwoStep ? "two-step" : "columns");
+    XPUPEAK_VLOG("onnx-reduce[%s/%s]: %lld^2 down the columns %.0f us, along the "
+                 "rows then down %.0f us -> %s\n",
+                 ep.providerKey.c_str(), onnxProfileTypeName(dtype), (long long)n,
+                 rowsUs, twoUs,
+                 pick == OnnxReduceView::TwoStep ? "two-step" : "columns");
   }
 
   std::lock_guard<std::mutex> lk(mtx);
@@ -1047,9 +1047,9 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     auto t0 = std::chrono::steady_clock::now();
     std::string attachErr = onnxProviderAttach(rt, ep);
-    CLPEAK_VLOG("onnx-viable[%s]: attach %.1f ms (%s)\n", tag.c_str(),
-                elapsedUs(t0) / 1000.0,
-                attachErr.empty() ? "ok" : attachErr.c_str());
+    XPUPEAK_VLOG("onnx-viable[%s]: attach %.1f ms (%s)\n", tag.c_str(),
+                 elapsedUs(t0) / 1000.0,
+                 attachErr.empty() ? "ok" : attachErr.c_str());
     if (!attachErr.empty())
     {
       reason = attachErr;
@@ -1071,21 +1071,21 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const double us = elapsedUs(t0);
     if (ses.session)
     {
-      CLPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (ok)\n", tag.c_str(),
-                  us / 1000.0);
+      XPUPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (ok)\n", tag.c_str(),
+                   us / 1000.0);
       rt.api->ReleaseSession(ses.session);
       reason.clear();
       std::lock_guard<std::mutex> lk(mtx);
       memo.emplace(memoKey, std::make_pair(true, reason));
       return true;
     }
-    CLPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (%s)\n", tag.c_str(),
-                us / 1000.0, ses.error.c_str());
+    XPUPEAK_VLOG("onnx-viable[%s]: trivial %.1f ms (%s)\n", tag.c_str(),
+                 us / 1000.0, ses.error.c_str());
     firstErr = ses.error;
   }
 
   auto tryBuild = [&](const Variant &v, int actDtype, int wgtDtype) {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       return false;
     auto t0 = std::chrono::steady_clock::now();
     GemmSetup s =
@@ -1096,10 +1096,10 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const bool ok = (s.session != nullptr);
     if (!ok && firstErr.empty())
       firstErr = s.error;
-    CLPEAK_VLOG("onnx-viable[%s]: %s%d%s %.1f ms (%s)\n", tag.c_str(),
-                v.qdq ? "qdq-" : "", v.dtype,
-                v.qdq ? (actDtype == ONNX_DT_UINT8 ? "-u8" : "-s8") : "",
-                us / 1000.0, ok ? "ok" : s.error.c_str());
+    XPUPEAK_VLOG("onnx-viable[%s]: %s%d%s %.1f ms (%s)\n", tag.c_str(),
+                 v.qdq ? "qdq-" : "", v.dtype,
+                 v.qdq ? (actDtype == ONNX_DT_UINT8 ? "-u8" : "-s8") : "",
+                 us / 1000.0, ok ? "ok" : s.error.c_str());
     destroySetup(rt, s);
     return ok;
   };

@@ -1,4 +1,4 @@
-// The one list of backends.  Compiled into both clpeak and clpeak_ffi (see
+// The one list of backends.  Compiled into both xpupeak and xpupeak_ffi (see
 // src/common/cmake/backends.cmake), with the same ENABLE_* macros as the
 // backend libraries it links, so the two binaries can never disagree about
 // which backends exist or in what order they run.

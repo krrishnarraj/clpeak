@@ -34,7 +34,7 @@ static std::string formatHipVersionLocal(int v)
     hipError_t _r = (call);                                                           \
     if (_r != hipSuccess)                                                             \
     {                                                                                 \
-      CLPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(_r));      \
+      XPUPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(_r));     \
       initError = std::string(what) + ": " + hipErrStr(_r);                           \
       return false;                                                                   \
     }                                                                                 \
@@ -79,7 +79,7 @@ bool RocmDevice::init(int devIndex)
   // bundle names its slices by processor alone, so compare against that.
   archBase = info.archName.substr(0, info.archName.find(':'));
 
-  // compute_sp is built for every arch in the build (CLPEAK_ROCM_ALL in
+  // compute_sp is built for every arch in the build (XPUPEAK_ROCM_ALL in
   // src/rocm/CMakeLists.txt), so its bundle is the build's coverage.
   archCovered = sliceFor(rocm_kernels::compute_sp) != Slice::Absent;
 
@@ -92,7 +92,7 @@ bool RocmDevice::init(int devIndex)
   const hipError_t sr = hipStreamCreateWithFlags(&stream, hipStreamNonBlocking);
   if (sr != hipSuccess)
   {
-    CLPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(sr));
+    XPUPEAK_VLOG("HIP error at %s:%d: %s\n", __FILE__, __LINE__, hipErrStr(sr));
     initError = std::string("hipStreamCreateWithFlags: ") + hipErrStr(sr) +
                 " (HIP reports any failure to set up a stream this way; "
                 "AMD_LOG_LEVEL=1 prints the cause)";
@@ -212,7 +212,7 @@ RocmKernel RocmDevice::getKernel(const rocm_kernels::Blob &blob,
   {
     if (sliceFor(blob) == Slice::Absent)
     {
-      CLPEAK_VLOG("%s has no %s code object\n", blob.name, archBase.c_str());
+      XPUPEAK_VLOG("%s has no %s code object\n", blob.name, archBase.c_str());
       if (!archCovered)
       {
         k.reason = "this build has no " + archBase + " code";
@@ -233,7 +233,7 @@ RocmKernel RocmDevice::getKernel(const rocm_kernels::Blob &blob,
     hipError_t hr = hipModuleLoadData(&mod, blob.data);
     if (hr != hipSuccess)
     {
-      CLPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", blob.name, hipErrStr(hr));
+      XPUPEAK_VLOG("hipModuleLoadData(%s) failed: %s\n", blob.name, hipErrStr(hr));
       k.reason = std::string("code object failed to load: ") + hipErrStr(hr);
       return k;
     }
@@ -243,8 +243,8 @@ RocmKernel RocmDevice::getKernel(const rocm_kernels::Blob &blob,
   hipError_t r = hipModuleGetFunction(&k.fn, mod, kernelName);
   if (r != hipSuccess)
   {
-    CLPEAK_VLOG("hipModuleGetFunction(%s in %s) failed: %s\n",
-                kernelName, blob.name, hipErrStr(r));
+    XPUPEAK_VLOG("hipModuleGetFunction(%s in %s) failed: %s\n",
+                 kernelName, blob.name, hipErrStr(r));
     k.fn = nullptr;
     k.reason = std::string("kernel missing from its code object: ") + hipErrStr(r);
     return k;

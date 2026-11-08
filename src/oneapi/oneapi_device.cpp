@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 
-#ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #endif
 
@@ -23,7 +23,7 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
   }
   catch (const sycl::exception &e)
   {
-    CLPEAK_VLOG("SYCL queue create failed: %s\n", e.what());
+    XPUPEAK_VLOG("SYCL queue create failed: %s\n", e.what());
     return false;
   }
 
@@ -105,7 +105,7 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
         n.find("Ponte Vecchio") != std::string::npos;
   }
 
-#ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
   // Authoritative override: a non-empty joint_matrix combination table means a
   // matrix engine is present, regardless of marketing name.  This catches
   // unnamed / engineering parts that enumerate as "Intel(R) Graphics [0xXXXX]"
@@ -116,12 +116,12 @@ bool OneapiDevice::init(int devIndex, const sycl::device &d)
         sycl::ext::oneapi::experimental::info::device::matrix_combinations>();
     if (!combos.empty())
       info.xmxSupported = true;
-    CLPEAK_VLOG("oneAPI: device '%s' reports %zu joint_matrix combination(s)\n",
-                info.deviceName.c_str(), combos.size());
+    XPUPEAK_VLOG("oneAPI: device '%s' reports %zu joint_matrix combination(s)\n",
+                 info.deviceName.c_str(), combos.size());
   }
   catch (const std::exception &e)
   {
-    CLPEAK_VLOG("oneAPI: matrix_combinations query unavailable: %s\n", e.what());
+    XPUPEAK_VLOG("oneAPI: matrix_combinations query unavailable: %s\n", e.what());
   }
 #endif
 
@@ -137,7 +137,7 @@ bool OneapiDevice::resetQueue()
   }
   catch (const sycl::exception &e)
   {
-    CLPEAK_VLOG("SYCL queue reset failed: %s\n", e.what());
+    XPUPEAK_VLOG("SYCL queue reset failed: %s\n", e.what());
     return false;
   }
 }

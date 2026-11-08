@@ -11,10 +11,10 @@
 
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
-#define CLPEAK_ONEMKL_HAS_BF16 1
+#define XPUPEAK_ONEMKL_HAS_BF16 1
 #endif
 
-#ifdef CLPEAK_ONEAPI_HAS_ONEMKL
+#ifdef XPUPEAK_ONEAPI_HAS_ONEMKL
 #include <oneapi/mkl.hpp>
 #endif
 
@@ -70,7 +70,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
     return o;
   };
 
-#ifndef CLPEAK_ONEAPI_HAS_ONEMKL
+#ifndef XPUPEAK_ONEAPI_HAS_ONEMKL
   test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp32Note));
   test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp64Note));
   test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp16Note));
@@ -129,8 +129,8 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       }
       catch (const std::exception &e)
       {
-        CLPEAK_VLOG("oneMKL %s: private context create failed (%s); shared queue\n",
-                    label, e.what());
+        XPUPEAK_VLOG("oneMKL %s: private context create failed (%s); shared queue\n",
+                     label, e.what());
         return dev.stream;
       }
     }();
@@ -171,7 +171,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       catch (const std::exception &e)
       {
         // Contained to this dtype's private context (see above).
-        CLPEAK_VLOG("oneMKL %s as %s failed: %s\n", label, form.name.c_str(), e.what());
+        XPUPEAK_VLOG("oneMKL %s as %s failed: %s\n", label, form.name.c_str(), e.what());
         return -1.0;
       }
     };
@@ -203,8 +203,8 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
         probeIters += more;
       }
       if (forms.size() > 1)
-        CLPEAK_VLOG("oneMKL %s as %s: %.1f %s over a %u-call probe\n", label,
-                    forms[f].name.c_str(), flops * 1.0e6 / us, unit, probeIters);
+        XPUPEAK_VLOG("oneMKL %s as %s: %.1f %s over a %u-call probe\n", label,
+                     forms[f].name.c_str(), flops * 1.0e6 / us, unit, probeIters);
       if (best == forms.size() || us < bestUs)
       {
         best = f;
@@ -296,7 +296,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
 
   // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
   // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
-#if defined(CLPEAK_ONEMKL_HAS_BF16)
+#if defined(XPUPEAK_ONEMKL_HAS_BF16)
   if (dev.info.bf16Supported)
   {
     using bfloat16 = sycl::ext::oneapi::bfloat16;

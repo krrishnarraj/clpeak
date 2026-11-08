@@ -29,12 +29,12 @@ static LitertRuntime g_rt;
 static bool g_loaded = false;
 static bool g_attempted = false;
 static std::string g_loadError;
-// --litert-lib / clpeak_set_litert_library: what was last asked for, and
+// --litert-lib / xpupeak_set_litert_library: what was last asked for, and
 // what is in effect -- the same until a runtime has loaded, fixed after.
 static std::string g_requested;
 static std::string g_override;
 static std::string g_npuDir;     // --litert-npu-dir
-static std::string g_npuStage;   // clpeak_set_litert_npu_stage_dir (Android)
+static std::string g_npuStage;   // xpupeak_set_litert_npu_stage_dir (Android)
 static std::string g_npuResolved; // the vendor directory staged there, if any
 
 // The file a loaded handle came from, when the platform can say.  A bare
@@ -70,16 +70,16 @@ static std::string dirOf(const std::string &path)
 static bool resolveApi(void *lib, LitertApi &api, const char *what)
 {
   std::string missing;
-#define CLPEAK_LITERT_RESOLVE_REQ(name)                                        \
-  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));   \
+#define XPUPEAK_LITERT_RESOLVE_REQ(name)                                       \
+  api.name = reinterpret_cast<decltype(&::name)>(xpupeak::dynSym(lib, #name));  \
   if (!api.name)                                                              \
     missing += missing.empty() ? #name : std::string(", ") + #name;
-  CLPEAK_LITERT_REQUIRED(CLPEAK_LITERT_RESOLVE_REQ)
-#undef CLPEAK_LITERT_RESOLVE_REQ
-#define CLPEAK_LITERT_RESOLVE_OPT(name)                                        \
-  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));
-  CLPEAK_LITERT_OPTIONAL(CLPEAK_LITERT_RESOLVE_OPT)
-#undef CLPEAK_LITERT_RESOLVE_OPT
+  XPUPEAK_LITERT_REQUIRED(XPUPEAK_LITERT_RESOLVE_REQ)
+#undef XPUPEAK_LITERT_RESOLVE_REQ
+#define XPUPEAK_LITERT_RESOLVE_OPT(name)                                       \
+  api.name = reinterpret_cast<decltype(&::name)>(xpupeak::dynSym(lib, #name));
+  XPUPEAK_LITERT_OPTIONAL(XPUPEAK_LITERT_RESOLVE_OPT)
+#undef XPUPEAK_LITERT_RESOLVE_OPT
   if (!missing.empty())
   {
     g_loadError = std::string(what) + " lacks " + missing +
@@ -96,21 +96,21 @@ static void loadRuntime()
   // will do: falling through to whatever else is installed would report one
   // runtime's numbers under another's name.  Absolute before the loader
   // sees it: a relative module path finds the file itself but not the
-  // sibling libraries beside it (see clpeak::absoluteModulePath).
+  // sibling libraries beside it (see xpupeak::absoluteModulePath).
   const char *named = g_override.empty() ? nullptr : g_override.c_str();
   const std::string absNamed =
-      named ? clpeak::absoluteModulePath(named) : std::string();
+      named ? xpupeak::absoluteModulePath(named) : std::string();
 
   void *lib = nullptr;
   if (named)
   {
-    lib = clpeak::dynOpen({absNamed.c_str()});
+    lib = xpupeak::dynOpen({absNamed.c_str()});
     if (!lib)
       g_loadError = std::string("could not load LiteRT from '") + absNamed + "'";
   }
   else
   {
-    lib = clpeak::dynOpen({
+    lib = xpupeak::dynOpen({
 #if defined(_WIN32)
         "libLiteRt.dll",
         "LiteRt.dll",
@@ -183,7 +183,7 @@ bool litertPendingLibrary(std::string &path)
     return false;
   // The loaded file named by another spelling -- or named now, where the
   // default search found it -- is no change.
-  if (!g_requested.empty() && clpeak::sameModulePath(g_requested, g_rt.path))
+  if (!g_requested.empty() && xpupeak::sameModulePath(g_requested, g_rt.path))
     return false;
   path = g_requested;
   return true;

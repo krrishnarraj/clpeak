@@ -134,8 +134,8 @@ void logger::boundary()
             if (contextDepth >= 2)
                 checkpoint->held(curBackend, curDeviceIndex, doc);
     };
-    clpeak::thermalGate(save);
-    clpeak::holdGate(save);
+    xpupeak::thermalGate(save);
+    xpupeak::holdGate(save);
 }
 
 // ── Top-level entry ────────────────────────────────────────────────────────
@@ -147,10 +147,10 @@ logger::BackendScope logger::beginBackend(const std::string &name)
 
 void logger::note(const std::string &msg)
 {
-    log(clpeak::LogLevel::Warning, msg);
+    log(xpupeak::LogLevel::Warning, msg);
 }
 
-void logger::log(clpeak::LogLevel level, std::string message, std::string source)
+void logger::log(xpupeak::LogLevel level, std::string message, std::string source)
 {
     // Trailing line endings are the renderer's to add; call sites still
     // write "...\n" from the days notes were printed raw.  Embedded newlines
@@ -192,7 +192,7 @@ static const char kReadingIndent[] = "      ";
 
 bool logger::isReadingLine(const LogEntry &e)
 {
-    return e.level == clpeak::LogLevel::Info && e.source.empty() && !e.test.empty() &&
+    return e.level == xpupeak::LogLevel::Info && e.source.empty() && !e.test.empty() &&
            e.message.compare(0, sizeof(kReadingIndent) - 1, kReadingIndent) == 0;
 }
 
@@ -203,7 +203,7 @@ void logger::recordTranscriptLine(const LogEvent &e, const std::string &message,
     RunLog *run = RunLog::current();
     if (!run) return;
     LogEntry entry;
-    entry.level       = clpeak::LogLevel::Info;
+    entry.level       = xpupeak::LogLevel::Info;
     entry.backend     = e.backend;
     entry.device      = e.device;
     entry.deviceIndex = e.deviceIndex;
@@ -374,7 +374,7 @@ void logger::BackendScope::end()
     // Every device it was going to run is behind it: a resumed run does not
     // construct it again.  Not when a cancel or an exception cut it short.
     if (RunCheckpoint *checkpoint = RunCheckpoint::current())
-        if (!clpeak::cancelRequested() && std::uncaught_exceptions() == 0)
+        if (!xpupeak::cancelRequested() && std::uncaught_exceptions() == 0)
             checkpoint->backendFinished(log->curBackend, log->doc);
     log->curBackend.clear();
     log->contextDepth = 0;
@@ -457,7 +457,7 @@ void logger::DeviceScope::end()
     log->dispatchEvent(log->makeEvent(LogEvent::Kind::DeviceEnd));
     // Likewise its device, which a resumed run then does not open.
     if (RunCheckpoint *checkpoint = RunCheckpoint::current())
-        if (!clpeak::cancelRequested() && std::uncaught_exceptions() == 0)
+        if (!xpupeak::cancelRequested() && std::uncaught_exceptions() == 0)
             checkpoint->deviceFinished(log->curBackend, log->curDeviceIndex, log->doc);
     log->curDevice.clear();
     log->curDriver.clear();

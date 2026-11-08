@@ -1,5 +1,5 @@
-#ifndef CLPEAK_KEEP_AWAKE_H
-#define CLPEAK_KEEP_AWAKE_H
+#ifndef XPUPEAK_KEEP_AWAKE_H
+#define XPUPEAK_KEEP_AWAKE_H
 
 #include <memory>
 
@@ -35,7 +35,7 @@
 // or by the OS when the process dies, so a crashed run cannot leave the
 // machine unable to sleep.
 
-namespace clpeak {
+namespace xpupeak {
 
 class KeepAwake
 {
@@ -51,6 +51,6 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_KEEP_AWAKE_H
+#endif // XPUPEAK_KEEP_AWAKE_H

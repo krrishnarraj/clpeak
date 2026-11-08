@@ -10,7 +10,7 @@
 #include <memory>
 #include <thread>
 
-using namespace clpeak_tflite;
+using namespace xpupeak_tflite;
 
 // AArch64 converts fp32 <-> fp16 in one instruction (fcvt: round to nearest
 // even, subnormals kept), which the fills lean on: a phone rounds a
@@ -19,9 +19,9 @@ using namespace clpeak_tflite;
 // the same rounding spelt out -- and the bit-level one stays as the other
 // platforms' path and the definition.
 #if defined(__aarch64__) && defined(__ARM_FP16_FORMAT_IEEE)
-#define CLPEAK_LITERT_HW_HALF 1
+#define XPUPEAK_LITERT_HW_HALF 1
 #else
-#define CLPEAK_LITERT_HW_HALF 0
+#define XPUPEAK_LITERT_HW_HALF 0
 #endif
 
 // ---------------------------------------------------------------------------
@@ -270,7 +270,7 @@ float softHalfToFloat(uint16_t h)
 
 uint16_t litertFloatToHalf(float f)
 {
-#if CLPEAK_LITERT_HW_HALF
+#if XPUPEAK_LITERT_HW_HALF
   const __fp16 h = (__fp16)f;
   uint16_t u;
   std::memcpy(&u, &h, 2);
@@ -282,7 +282,7 @@ uint16_t litertFloatToHalf(float f)
 
 float litertHalfToFloat(uint16_t h)
 {
-#if CLPEAK_LITERT_HW_HALF
+#if XPUPEAK_LITERT_HW_HALF
   __fp16 v;
   std::memcpy(&v, &h, 2);
   return (float)v;
@@ -293,7 +293,7 @@ float litertHalfToFloat(uint16_t h)
 
 bool litertHalfConversionsAgree()
 {
-#if CLPEAK_LITERT_HW_HALF
+#if XPUPEAK_LITERT_HW_HALF
   // Every half-precision code back through both paths, and every float
   // with a half-precision rounding case: the subnormal band, the halfway
   // points, the overflow edge.
@@ -525,7 +525,7 @@ struct Fill
   bool halfRounded;     // fp32 values pre-rounded to fp16 (LitertPlan::halfRounded)
 };
 
-#if CLPEAK_LITERT_HW_HALF
+#if XPUPEAK_LITERT_HW_HALF
 float roundHalf(float v) { return (float)(__fp16)v; }
 #else
 float roundHalf(float v) { return litertHalfToFloat(litertFloatToHalf(v)); }
@@ -998,7 +998,7 @@ TfOptions conv1x1Options()
 
 std::string describe(const LitertPlan &p, const char *what)
 {
-  return std::string("clpeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
+  return std::string("xpupeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
          (litertIoType(p) != p.act ? " float I/O" : "");
 }
 

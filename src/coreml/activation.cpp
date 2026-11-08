@@ -42,7 +42,7 @@ const Size kSizes[] = {
     {128ull << 20, "128mb"},
 };
 
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+uint64_t maxTensorBytes() { return xpupeak::memoryBudget(1ull << 30); }
 constexpr uint64_t kCopiesAtPeak = 3;
 constexpr unsigned int kSizeBudgetUs = 1000000;
 
@@ -161,7 +161,7 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
   {
     for (size_t si = 0; si < sizeof(kSizes) / sizeof(kSizes[0]); si++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Size &sz = kSizes[si];
       const std::string metric = std::string(v.label) + "_" + sz.label;
@@ -180,8 +180,8 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       {
         ref.tried = true;
         ref.run = measure(dev, spec, rows, CoremlActivation::None, warmupCount, forceIters, specifiedIters);
-        CLPEAK_VLOG("coreml-activation[%s]: %s reference %.1f us (spread %.1f us)\n",
-                    dev.displayName.c_str(), sz.label, ref.run.us, ref.run.spreadUs);
+        XPUPEAK_VLOG("coreml-activation[%s]: %s reference %.1f us (spread %.1f us)\n",
+                     dev.displayName.c_str(), sz.label, ref.run.us, ref.run.spreadUs);
       }
       if (ref.run.us <= 0.0)
       {
@@ -201,9 +201,9 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       const double noiseUs = std::max(full.spreadUs, ref.run.spreadUs);
       if (opUs < kMinOpShare * full.us || opUs < kNoiseFactor * noiseUs)
       {
-        CLPEAK_VLOG("coreml-activation[%s]: %s %s: %.1f us against a %.1f us reference "
-                    "(spread %.1f us), too close to measure\n",
-                    dev.displayName.c_str(), v.label, sz.label, full.us, ref.run.us, noiseUs);
+        XPUPEAK_VLOG("coreml-activation[%s]: %s %s: %.1f us against a %.1f us reference "
+                     "(spread %.1f us), too close to measure\n",
+                     dev.displayName.c_str(), v.label, sz.label, full.us, ref.run.us, noiseUs);
         test.skip(metric, ResultStatus::Error,
                   opUs < kMinOpShare * full.us
                       ? "the operation costs less than a tenth of the reference graph around it, "
@@ -218,8 +218,8 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       }
       // Read once, written once.
       const double bps = 2.0 * (double)sz.bytes / (opUs * 1.0e-6);
-      CLPEAK_VLOG("coreml-activation[%s]: %s %s -> %.2f GB/s (%.1f us, ref %.1f us, spread %.1f us)\n",
-                  dev.displayName.c_str(), v.label, sz.label, bps / 1.0e9, full.us, ref.run.us, noiseUs);
+      XPUPEAK_VLOG("coreml-activation[%s]: %s %s -> %.2f GB/s (%.1f us, ref %.1f us, spread %.1f us)\n",
+                   dev.displayName.c_str(), v.label, sz.label, bps / 1.0e9, full.us, ref.run.us, noiseUs);
       // The reference reads, writes and reads the tensor again in refUs, so
       // three passes over it in that time is a rate this unit was actually
       // seen to stream at.  An operation reporting far above it did not

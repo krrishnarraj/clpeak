@@ -1,5 +1,5 @@
-#ifndef CLPEAK_HOST_INFO_H
-#define CLPEAK_HOST_INFO_H
+#ifndef XPUPEAK_HOST_INFO_H
+#define XPUPEAK_HOST_INFO_H
 
 #include <cstdint>
 #include <string>
@@ -33,4 +33,4 @@ struct HostInfo {
 // call it once per run rather than per device.
 HostInfo probeHost();
 
-#endif  // CLPEAK_HOST_INFO_H
+#endif  // XPUPEAK_HOST_INFO_H

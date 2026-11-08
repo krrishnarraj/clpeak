@@ -10,7 +10,7 @@ import 'process_exit.dart';
 
 /// Persists every run under `<base>/runs/`:
 ///   `<id>.clpeak.json`  the run document, written by the NATIVE side
-///                       (clpeak_launch -o) — also the export artifact
+///                       (xpupeak_launch -o) — also the export artifact
 ///   `<id>.clpeak.log`   the run's diagnostic stream, streamed line by line
 ///                       by the native side WHILE the run is in flight and
 ///                       removed once the document is written.  One that
@@ -446,7 +446,7 @@ class RunHistoryStore {
   }
 
   /// Parse one saved document, or null when it is unreadable, not JSON, or
-  /// written by a clpeak whose format this build does not know.
+  /// written by a xpupeak whose format this build does not know.
   Future<RunDocument?> _readDocument(File f) async {
     try {
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
@@ -582,7 +582,7 @@ class CrashLog {
     required this.id,
     required this.fileName,
     required this.startedAt,
-    required this.clpeakVersion,
+    required this.xpupeakVersion,
     required this.verbose,
     required this.entries,
     required this.backends,
@@ -600,7 +600,7 @@ class CrashLog {
   final String id;
   final String fileName;
   final DateTime startedAt;
-  final String clpeakVersion;
+  final String xpupeakVersion;
   final bool verbose;
 
   /// Lines after the header.
@@ -725,7 +725,7 @@ class CrashLog {
       startedAt: DateTime.tryParse(h['generated_at'] as String? ?? '')
               ?.toLocal() ??
           stat.modified,
-      clpeakVersion: h['clpeak_version'] as String? ?? '',
+      xpupeakVersion: h['clpeak_version'] as String? ?? '',
       verbose: (h['invocation'] as Map<String, dynamic>?)?['verbose']
               as bool? ??
           false,
@@ -753,7 +753,7 @@ class RunCheckpointInfo {
   const RunCheckpointInfo({
     required this.writtenAt,
     required this.tests,
-    required this.clpeakVersion,
+    required this.xpupeakVersion,
     required this.hostOs,
     required this.hostOsVersion,
     required this.argv,
@@ -764,7 +764,7 @@ class RunCheckpointInfo {
 
   /// Tests it holds, over every device.
   final int tests;
-  final String clpeakVersion;
+  final String xpupeakVersion;
   final String hostOs;
   final String hostOsVersion;
 
@@ -788,7 +788,7 @@ class RunCheckpointInfo {
       return RunCheckpointInfo(
         writtenAt: (await f.stat()).modified,
         tests: tests,
-        clpeakVersion: meta.clpeakVersion,
+        xpupeakVersion: meta.xpupeakVersion,
         hostOs: meta.host['os']?.toString() ?? '',
         hostOsVersion: meta.host['os_version']?.toString() ?? '',
         argv: meta.argv,

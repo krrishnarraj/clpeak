@@ -1,5 +1,5 @@
-#ifndef CLPEAK_COREML_CACHE_H
-#define CLPEAK_COREML_CACHE_H
+#ifndef XPUPEAK_COREML_CACHE_H
+#define XPUPEAK_COREML_CACHE_H
 
 // Core ML's runtime (E5RT) caches every model it specialises for the GPU or
 // the Neural Engine under the user's Caches directory, keyed by process
@@ -20,10 +20,10 @@
 // name and by bundle identifier), never the shared one at the Caches root.
 // A no-op off Apple platforms.
 
-namespace clpeak {
+namespace xpupeak {
 
 void purgeCoreMLCompileCache();
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_COREML_CACHE_H
+#endif // XPUPEAK_COREML_CACHE_H

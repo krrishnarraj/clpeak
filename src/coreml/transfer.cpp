@@ -47,7 +47,7 @@ namespace
 constexpr int64_t kK = 1024;
 constexpr int64_t kN = 1024;
 constexpr int64_t kMinRows = 8192;   // 16 MB of fp16
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(128ull << 20); }
+uint64_t maxTensorBytes() { return xpupeak::memoryBudget(128ull << 20); }
 constexpr unsigned int kSizeBudgetUs = 500000;
 
 // A resident graph whose time is less than this share of the input-fed one
@@ -158,7 +158,7 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
 
   for (int64_t rows = kMinRows;; rows *= 2)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const uint64_t bytes = (uint64_t)rows * kK * 2;
     if (bytes > maxTensorBytes())
@@ -169,18 +169,18 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
     if (res.us > 0.0 && in.us > 0.0 && res.us < kFoldShare * in.us)
     {
       // The reduced resident form was folded; the live-operand one cannot be.
-      CLPEAK_VLOG("coreml-transfer[%s]: resident %.0f us against %.0f us input-fed -- folded, "
-                  "retrying the operand-scaled form\n",
-                  dev.displayName.c_str(), res.us, in.us);
+      XPUPEAK_VLOG("coreml-transfer[%s]: resident %.0f us against %.0f us input-fed -- folded, "
+                   "retrying the operand-scaled form\n",
+                   dev.displayName.c_str(), res.us, in.us);
       res = measure(dev, spec, CoremlTransfer::Resident, rows, false, warmupCount, forceIters, specifiedIters);
     }
     if (res.us <= 0.0 || in.us <= 0.0)
     {
       const Run &bad = res.us <= 0.0 ? res : in;
-      CLPEAK_VLOG("coreml-transfer[%s/h2d]: %lld MB: %s form failed: %s\n",
-                  dev.displayName.c_str(), (long long)(bytes >> 20),
-                  res.us <= 0.0 ? "resident" : "input-fed",
-                  bad.error.empty() ? "run failed" : bad.error.c_str());
+      XPUPEAK_VLOG("coreml-transfer[%s/h2d]: %lld MB: %s form failed: %s\n",
+                   dev.displayName.c_str(), (long long)(bytes >> 20),
+                   res.us <= 0.0 ? "resident" : "input-fed",
+                   bad.error.empty() ? "run failed" : bad.error.c_str());
       if (firstErr.empty())
       {
         firstErr = bad.error.empty() ? "run failed" : bad.error;
@@ -189,8 +189,8 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
       break;
     }
     const double tripUs = in.us - res.us;
-    CLPEAK_VLOG("coreml-transfer[%s/h2d]: %lld MB: input-fed %.0f us, resident %.0f us\n",
-                dev.displayName.c_str(), (long long)(bytes >> 20), in.us, res.us);
+    XPUPEAK_VLOG("coreml-transfer[%s/h2d]: %lld MB: input-fed %.0f us, resident %.0f us\n",
+                 dev.displayName.c_str(), (long long)(bytes >> 20), in.us, res.us);
     if (firstRows == 0)
     {
       firstRows = rows;
@@ -226,13 +226,13 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   else
     test.skip("h2d", errStatus, firstErr.empty() ? "unsupported" : firstErr, h2dNote);
 
-  if (firstRows > 0 && !clpeak::cancelRequested())
+  if (firstRows > 0 && !xpupeak::cancelRequested())
   {
     Run rt = measure(dev, spec, CoremlTransfer::RoundTrip, firstRows, true, warmupCount, forceIters, specifiedIters);
     const uint64_t inBytes = (uint64_t)firstRows * kK * 2;
     const uint64_t outBytes = (uint64_t)firstRows * kN * 2;
-    CLPEAK_VLOG("coreml-transfer[%s/roundtrip]: %.0f us (input-fed %.0f, resident %.0f)\n",
-                dev.displayName.c_str(), rt.us, firstToDeviceUs, firstResidentUs);
+    XPUPEAK_VLOG("coreml-transfer[%s/roundtrip]: %.0f us (input-fed %.0f, resident %.0f)\n",
+                 dev.displayName.c_str(), rt.us, firstToDeviceUs, firstResidentUs);
     if (rt.us <= 0.0)
     {
       test.skip("roundtrip", rt.status, rt.error.empty() ? "run failed" : rt.error, rtNote);
@@ -262,14 +262,14 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
       double d2hFirst = rt.us - firstToDeviceUs;
       double d2hBps = d2hFirst > 0.0 ? (double)outBytes / (d2hFirst * 1.0e-6) : 0.0;
       bool copies = d2hFirst >= kMinReturnShare * (firstToDeviceUs - firstResidentUs);
-      if (lastRows > firstRows && !clpeak::cancelRequested())
+      if (lastRows > firstRows && !xpupeak::cancelRequested())
       {
         Run rtLast = measure(dev, spec, CoremlTransfer::RoundTrip, lastRows, true, warmupCount, forceIters,
                              specifiedIters);
         const double d2hLast = rtLast.us > 0.0 ? rtLast.us - lastToDeviceUs : -1.0;
-        CLPEAK_VLOG("coreml-transfer[%s/d2h]: %.0f us at %lld MB, %.0f us at %lld MB\n",
-                    dev.displayName.c_str(), d2hFirst, (long long)(outBytes >> 20), d2hLast,
-                    (long long)(((uint64_t)lastRows * kN * 2) >> 20));
+        XPUPEAK_VLOG("coreml-transfer[%s/d2h]: %.0f us at %lld MB, %.0f us at %lld MB\n",
+                     dev.displayName.c_str(), d2hFirst, (long long)(outBytes >> 20), d2hLast,
+                     (long long)(((uint64_t)lastRows * kN * 2) >> 20));
         copies = d2hLast > 0.0 && d2hFirst > 0.0 && d2hLast > d2hFirst * 2.0 &&
                  d2hLast >= kMinReturnShare * (lastToDeviceUs - lastResidentUs);
         if (copies)

@@ -177,13 +177,13 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                 {
                     float altValue = (float)((double)totalThreads * (double)d.workPerWI
                                              * 1e6 / altUs);
-                    CLPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
-                                d.resultTag, metricTag(v.label).c_str(), value,
-                                altValue, d.unit);
+                    XPUPEAK_VLOG("%s %s: squaring chain %.1f, alt chain %.1f %s\n",
+                                 d.resultTag, metricTag(v.label).c_str(), value,
+                                 altValue, d.unit);
                     if (altValue > value * MAX_ALT_CHAIN_RATIO)
-                        CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                                    "compiler fold\n", d.resultTag,
-                                    metricTag(v.label).c_str(), altValue / value);
+                        XPUPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                                     "compiler fold\n", d.resultTag,
+                                     metricTag(v.label).c_str(), altValue / value);
                     else if (altValue > value)
                         value = altValue;
                 }

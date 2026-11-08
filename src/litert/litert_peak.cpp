@@ -96,7 +96,7 @@ std::vector<const NpuVendor *> findNpuVendors(const std::string &dir)
   {
     const std::string name = std::string("libLiteRtDispatch_") + v.fileTag + ".so";
     const std::string full = dir + "/" + name;
-    if (clpeak::dynOpen({full.c_str(), name.c_str()}))
+    if (xpupeak::dynOpen({full.c_str(), name.c_str()}))
       found.push_back(&v);
   }
   return found;
@@ -215,15 +215,15 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
     return;
   if (!pick)
   {
-    CLPEAK_VLOG("litert: %zu vendors' NPU shims beside the runtime and no SoC vendor "
-                "to choose by (ro.soc.manufacturer); LiteRT loads the first it lists\n",
-                present.size());
+    XPUPEAK_VLOG("litert: %zu vendors' NPU shims beside the runtime and no SoC vendor "
+                 "to choose by (ro.soc.manufacturer); LiteRT loads the first it lists\n",
+                 present.size());
     return;
   }
   if (std::find(present.begin(), present.end(), pick) == present.end())
   {
-    CLPEAK_VLOG("litert: this SoC is %s's and no %s shim is beside the runtime\n",
-                pick->vendor, pick->vendor);
+    XPUPEAK_VLOG("litert: this SoC is %s's and no %s shim is beside the runtime\n",
+                 pick->vendor, pick->vendor);
     return;
   }
 
@@ -233,8 +233,8 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
   std::filesystem::create_directories(dir, ec);
   if (ec)
   {
-    CLPEAK_VLOG("litert: cannot stage %s's shims in %s: %s\n", pick->vendor,
-                dir.string().c_str(), ec.message().c_str());
+    XPUPEAK_VLOG("litert: cannot stage %s's shims in %s: %s\n", pick->vendor,
+                 dir.string().c_str(), ec.message().c_str());
     return;
   }
   int linked = 0;
@@ -249,8 +249,8 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
     std::error_code lec;
     std::filesystem::create_symlink(it->path(), dir / name, lec);
     if (lec)
-      CLPEAK_VLOG("litert: cannot link %s into %s: %s\n", name.c_str(),
-                  dir.string().c_str(), lec.message().c_str());
+      XPUPEAK_VLOG("litert: cannot link %s into %s: %s\n", name.c_str(),
+                   dir.string().c_str(), lec.message().c_str());
     else
       linked++;
   }
@@ -260,8 +260,8 @@ void litertStageNpuVendor(const LitertRuntime &rt, std::string *socModel)
   if (std::string(pick->vendor) == "Qualcomm")
     setenv("ADSP_LIBRARY_PATH", rt.libraryDir.c_str(), /*overwrite=*/0);
 #endif
-  CLPEAK_VLOG("litert: staged %d of %s's shims in %s for this SoC\n", linked,
-              pick->vendor, dir.string().c_str());
+  XPUPEAK_VLOG("litert: staged %d of %s's shims in %s for this SoC\n", linked,
+               pick->vendor, dir.string().c_str());
   litertSetNpuResolvedDir(dir.string());
 }
 
@@ -428,7 +428,7 @@ std::vector<litert_device_info_t> litertUsableDevices(
         dev.vendor = gpuBackendFrom(litertEnvironmentLog(dev.accel));
         if (dev.vendor == "OpenCL" && !rt.abi11)
         {
-          void *cl = clpeak::dynOpen({
+          void *cl = xpupeak::dynOpen({
 #if defined(__ANDROID__)
               "libOpenCL.so", "libOpenCL-pixel.so", "libOpenCL-car.so",
 #elif defined(_WIN32)
@@ -505,7 +505,7 @@ static std::string pendingNote()
   if (!litertPendingLibrary(path))
     return std::string();
   return (path.empty() ? std::string("the library the default search finds") : path) +
-         " takes effect the next time clpeak starts: one process keeps the "
+         " takes effect the next time xpupeak starts: one process keeps the "
          "LiteRT it loaded first";
 }
 
@@ -543,7 +543,7 @@ int LitertPeak::runAll()
   // Verbose only: an accelerator this machine has no library or silicon for
   // is the normal case, not a warning.
   for (const auto &sk : skipped)
-    CLPEAK_VLOG("LiteRT: skipping %s (%s)\n", sk.first.displayName.c_str(), sk.second.c_str());
+    XPUPEAK_VLOG("LiteRT: skipping %s (%s)\n", sk.first.displayName.c_str(), sk.second.c_str());
   if (devs.empty())
   {
     log->note("LiteRT: no accelerator could run a model\n");
@@ -555,12 +555,12 @@ int LitertPeak::runAll()
   // The fills round to half in hardware where there is hardware for it;
   // once per run, under --verbose, say so if it ever disagrees with the
   // routine it stands in for (it should not: both are IEEE round-to-nearest).
-  if (clpeak::verboseEnabled() && !litertHalfConversionsAgree())
-    CLPEAK_VLOG("LiteRT: the hardware fp16 conversion disagrees with the reference routine\n");
+  if (xpupeak::verboseEnabled() && !litertHalfConversionsAgree())
+    XPUPEAK_VLOG("LiteRT: the hardware fp16 conversion disagrees with the reference routine\n");
 
   for (int idx = 0; idx < (int)devs.size(); idx++)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;
@@ -613,8 +613,8 @@ int LitertPeak::runAll()
       // unmuted lets that spill through.  Only an accelerator's own scope
       // watches for the loss markers, though -- a marker that leaks into the
       // CPU's scope is the GPU's dying breath, not a CPU fault.
-      clpeak::ScopedConsoleMute devMute(
-          clpeak::ScopedConsoleMute::Capture::Verbose,
+      xpupeak::ScopedConsoleMute devMute(
+          xpupeak::ScopedConsoleMute::Capture::Verbose,
           dev.accel == LitertAccel::Cpu ? std::vector<std::string>{} : kLossMarkers,
           /*stderrOnly=*/true);
 
@@ -624,7 +624,7 @@ int LitertPeak::runAll()
       auto phase = [&](Benchmark b, int (LitertPeak::*fn)(const LitertRuntime &,
                                                           const litert_device_info_t &,
                                                           benchmark_config_t &)) {
-        if (deviceLost || clpeak::cancelRequested())
+        if (deviceLost || xpupeak::cancelRequested())
           return;
         if (auto run = admit(b))
         {
@@ -661,18 +661,18 @@ int LitertPeak::runAll()
     // a lost device and a healthy one alike, and the descriptor count says
     // how much came back.
     unsigned long fdsBefore = 0, fdsAfter = 0, fdLimit = 0;
-    const bool fdsKnown = clpeak::openFileDescriptors(fdsBefore, fdLimit);
+    const bool fdsKnown = xpupeak::openFileDescriptors(fdsBefore, fdLimit);
     {
-      clpeak::ScopedConsoleMute mute;
+      xpupeak::ScopedConsoleMute mute;
       litertResetEnvironment(*rt, dev.accel);
     }
     if (fdsKnown)
     {
-      (void)clpeak::openFileDescriptors(fdsAfter, fdLimit);
-      CLPEAK_VLOG("litert[%s]: environment released; %lu open file descriptors, %lu before"
-                  "%s\n",
-                  dev.displayName.c_str(), fdsAfter, fdsBefore,
-                  fdLimit ? (" (limit " + std::to_string(fdLimit) + ")").c_str() : "");
+      (void)xpupeak::openFileDescriptors(fdsAfter, fdLimit);
+      XPUPEAK_VLOG("litert[%s]: environment released; %lu open file descriptors, %lu before"
+                   "%s\n",
+                   dev.displayName.c_str(), fdsAfter, fdsBefore,
+                   fdLimit ? (" (limit " + std::to_string(fdLimit) + ")").c_str() : "");
     }
 
     // Emitted after the mute closes, so it reaches the console: a device lost
@@ -686,12 +686,12 @@ int LitertPeak::runAll()
               (fdLimit ? " of a limit of " + std::to_string(fdLimit) : std::string()) +
               " after releasing its environment (" + std::to_string(fdsBefore) +
               " before), which is what every later backend in this process has left";
-      CLPEAK_LOG(Warning,
-                 "LiteRT %s: the accelerator reported it was lost during the run "
-                 "(a Vulkan/WebGPU file-descriptor or host-memory exhaustion on "
-                 "this platform); any rates shown for it are unreliable and its "
-                 "remaining tests were skipped%s",
-                 dev.displayName.c_str(), fds.c_str());
+      XPUPEAK_LOG(Warning,
+                  "LiteRT %s: the accelerator reported it was lost during the run "
+                  "(a Vulkan/WebGPU file-descriptor or host-memory exhaustion on "
+                  "this platform); any rates shown for it are unreliable and its "
+                  "remaining tests were skipped%s",
+                  dev.displayName.c_str(), fds.c_str());
     }
 
     currentDeviceScope = nullptr;

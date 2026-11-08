@@ -7,7 +7,7 @@
 // SYCL lambda living in its own TU, so this file only defines small
 // utilities reused across compute_float.cpp / compute_int.cpp.
 
-namespace clpeak_oneapi {
+namespace xpupeak_oneapi {
 
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
@@ -31,6 +31,6 @@ float computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs)
                  (double)meanUs);
 }
 
-} // namespace clpeak_oneapi
+} // namespace xpupeak_oneapi
 
 #endif // ENABLE_ONEAPI

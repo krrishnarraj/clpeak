@@ -1,5 +1,5 @@
-#ifndef CLPEAK_FORM_RACE_H
-#define CLPEAK_FORM_RACE_H
+#ifndef XPUPEAK_FORM_RACE_H
+#define XPUPEAK_FORM_RACE_H
 
 // A race between two spellings of the same work: the same arithmetic built
 // two ways, one of which a runtime runs faster on a given unit -- by an
@@ -26,7 +26,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace clpeak
+namespace xpupeak
 {
 
 constexpr double kFormRaceTie = 1.03;
@@ -181,6 +181,6 @@ private:
   std::vector<bool> open_;
 };
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_FORM_RACE_H
+#endif // XPUPEAK_FORM_RACE_H

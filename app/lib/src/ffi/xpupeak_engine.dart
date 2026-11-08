@@ -4,34 +4,34 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../model/run_document.dart';
-import 'clpeak_bindings.dart';
-import 'clpeak_events.dart';
-import 'clpeak_library.dart';
-import 'clpeak_runner.dart';
+import 'xpupeak_bindings.dart';
+import 'xpupeak_events.dart';
+import 'xpupeak_library.dart';
+import 'xpupeak_runner.dart';
 
 /// [EngineRun.result] when the engine process ended without finishing the
-/// run: it crashed, or never started.  App-side only -- the CLPEAK_RUN_*
-/// codes clpeak_launch returns are in src/ffi/clpeak_ffi.h.
-const int clpeakRunEngineFailed = -4;
+/// run: it crashed, or never started.  App-side only -- the XPUPEAK_RUN_*
+/// codes xpupeak_launch returns are in src/ffi/xpupeak_ffi.h.
+const int xpupeakRunEngineFailed = -4;
 
 /// Where the device catalog is enumerated and runs execute.
 ///
-/// On desktop, in `clpeak-engine`: a process started for each catalog and
-/// each run (clpeak_engine_main, src/ffi/clpeak_ffi.h).  This process holds
+/// On desktop, in `xpupeak-engine`: a process started for each catalog and
+/// each run (xpupeak_engine_main, src/ffi/xpupeak_ffi.h).  This process holds
 /// the GUI toolkit and a GL driver, and a vendor runtime loaded beside them
 /// can break on what they bring: HIP did on a Radeon 890M, whose GL driver
 /// had loaded a second LLVM (src/ffi/engine.cpp).  The engine process also
 /// loads the runtime setup afresh every time, and a native crash there ends
 /// the run, not the app.  On Android and iOS -- and on a desktop build
 /// without the engine host -- everything runs in this process over FFI.
-abstract interface class ClpeakEngine {
+abstract interface class XpupeakEngine {
   /// The engine process on desktop when its host and the library are both
   /// found, this process otherwise.
-  static ClpeakEngine forPlatform(ClpeakBindings bindings) {
+  static XpupeakEngine forPlatform(XpupeakBindings bindings) {
     final desktop = Platform.isMacOS || Platform.isLinux || Platform.isWindows;
     if (desktop) {
-      final host = clpeakEngineHostPath();
-      final library = clpeakLibraryPath();
+      final host = xpupeakEngineHostPath();
+      final library = xpupeakLibraryPath();
       if (host != null && library != null) {
         return ChildProcessEngine(host: host, library: library);
       }
@@ -52,7 +52,7 @@ abstract interface class ClpeakEngine {
   OnnxStatus onnxStatus();
   LitertStatus litertStatus();
 
-  // The runtime setup, as ClpeakBindings documents each; between runs only.
+  // The runtime setup, as XpupeakBindings documents each; between runs only.
   void setOnnxLibrary(String path);
   void setOnnxEpLibraries(List<OnnxEpLibrary> libs);
   void setOnnxWinml({required bool enabled, required String path});
@@ -68,11 +68,11 @@ abstract interface class ClpeakEngine {
   void setOnScreen(bool onScreen);
 }
 
-/// Everything in this process, over the clpeak_ffi C ABI.
-class InProcessEngine implements ClpeakEngine {
+/// Everything in this process, over the xpupeak_ffi C ABI.
+class InProcessEngine implements XpupeakEngine {
   InProcessEngine(this._bindings);
 
-  final ClpeakBindings _bindings;
+  final XpupeakBindings _bindings;
 
   @override
   bool get runtimeFixedOnceLoaded => true;
@@ -86,7 +86,7 @@ class InProcessEngine implements ClpeakEngine {
   // Static so the Isolate.run closure captures only sendable values; the
   // worker reopens the library there (the same pattern as runs).
   static Map<String, dynamic> _fetchCatalog() =>
-      ClpeakBindings.open().backendCatalog();
+      XpupeakBindings.open().backendCatalog();
 
   @override
   OnnxStatus onnxStatus() => _bindings.onnxStatus();
@@ -112,20 +112,20 @@ class InProcessEngine implements ClpeakEngine {
   void setLitertNpuStageDir(String dir) => _bindings.setLitertNpuStageDir(dir);
 
   @override
-  EngineRun start(List<String> args) => ClpeakRunner(_bindings).start(args);
+  EngineRun start(List<String> args) => XpupeakRunner(_bindings).start(args);
 
   @override
   void setOnScreen(bool onScreen) => _bindings.setOnScreen(onScreen);
 }
 
-/// Everything in `clpeak-engine` processes.  The runtime setup is kept here
-/// and handed to each process as it starts, through the same clpeak_set_*
+/// Everything in `xpupeak-engine` processes.  The runtime setup is kept here
+/// and handed to each process as it starts, through the same xpupeak_set_*
 /// calls the in-process engine makes -- not as run flags, which the saved
 /// document would record.
-class ChildProcessEngine implements ClpeakEngine {
+class ChildProcessEngine implements XpupeakEngine {
   ChildProcessEngine({required this.host, required this.library});
 
-  /// The engine host executable, and the clpeak_ffi library it loads.
+  /// The engine host executable, and the xpupeak_ffi library it loads.
   final String host;
   final String library;
 
@@ -229,15 +229,15 @@ class ChildRun implements EngineRun {
       // Nothing of the above should throw; if it does, the run still ends.
       if (!_rc.isCompleted) {
         if (!_events.isClosed) {
-          _fail('clpeak-engine: $e', 'The benchmark engine stopped unexpectedly');
+          _fail('xpupeak-engine: $e', 'The benchmark engine stopped unexpectedly');
         }
-        _rc.complete(clpeakRunEngineFailed);
+        _rc.complete(xpupeakRunEngineFailed);
       }
       if (!_events.isClosed) unawaited(_events.close());
     }));
   }
 
-  final _events = StreamController<ClpeakEvent>();
+  final _events = StreamController<XpupeakEvent>();
   final _rc = Completer<int>();
   Process? _process;
   bool _cancelRequested = false;
@@ -246,7 +246,7 @@ class ChildRun implements EngineRun {
   String? _failure;
 
   @override
-  Stream<ClpeakEvent> get events => _events.stream;
+  Stream<XpupeakEvent> get events => _events.stream;
 
   @override
   Future<int> get result => _rc.future;
@@ -281,9 +281,9 @@ class ChildRun implements EngineRun {
     try {
       process = await Process.start(host, arguments);
     } catch (e) {
-      _fail('clpeak-engine did not start: $e',
+      _fail('xpupeak-engine did not start: $e',
           'The benchmark engine did not start');
-      _rc.complete(clpeakRunEngineFailed);
+      _rc.complete(xpupeakRunEngineFailed);
       await _events.close();
       return;
     }
@@ -314,19 +314,19 @@ class ChildRun implements EngineRun {
     if (_done == null) {
       final how = describeEngineExit(code);
       final detail = err.lastLine;
-      _fail('clpeak-engine $how${detail.isEmpty ? '' : ': $detail'}',
+      _fail('xpupeak-engine $how${detail.isEmpty ? '' : ': $detail'}',
           'The benchmark engine $how before the run finished');
     }
-    _rc.complete(_done?.status ?? clpeakRunEngineFailed);
+    _rc.complete(_done?.status ?? xpupeakRunEngineFailed);
     await _events.close();
   }
 
   void _onLine(String line) {
     // Nothing after `done` belongs to the run: a late relayed log line.
     if (line.isEmpty || _done != null) return;
-    ClpeakEvent event;
+    XpupeakEvent event;
     try {
-      event = ClpeakEvent.fromJson(jsonDecode(line) as Map<String, dynamic>);
+      event = XpupeakEvent.fromJson(jsonDecode(line) as Map<String, dynamic>);
     } catch (_) {
       event = LogEntryEvent(LogEntry(
           level: LogLevel.warning, message: 'undecodable event: $line'));
@@ -341,7 +341,7 @@ class ChildRun implements EngineRun {
     _failure = failure;
     _events.add(LogEntryEvent(LogEntry(level: LogLevel.error, message: log)));
     _events.add(
-        const DoneEvent(status: clpeakRunEngineFailed, cancelled: false));
+        const DoneEvent(status: xpupeakRunEngineFailed, cancelled: false));
   }
 }
 

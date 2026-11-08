@@ -99,7 +99,7 @@ static void searchBesideRuntime(const std::string &path)
   const size_t slash = path.find_last_of("/\\");
   if (slash == std::string::npos)
     return;
-  // Absolute, so a directory given relative to where clpeak was started
+  // Absolute, so a directory given relative to where xpupeak was started
   // still names the same place after the current directory changes.
   std::error_code ec;
   const std::filesystem::path dir =
@@ -180,7 +180,7 @@ static bool adoptApiBase(const OrtApiBase *base, OrtRuntime &out)
   return true;
 }
 
-#ifdef CLPEAK_ONNX_STATIC
+#ifdef XPUPEAK_ONNX_STATIC
 
 // Statically linked (iOS): the runtime is already in the binary, and there
 // is no library to name.
@@ -277,9 +277,9 @@ static void loadRuntime()
   // Absolute before the loader sees it: a relative module path finds the
   // file itself but not the sibling libraries beside it, so the same file
   // fails by relative path and loads by absolute one (see
-  // clpeak::absoluteModulePath).
+  // xpupeak::absoluteModulePath).
   const std::string absNamed =
-      named ? clpeak::absoluteModulePath(named) : std::string();
+      named ? xpupeak::absoluteModulePath(named) : std::string();
   // The default search names no file, except when the Windows ML catalog
   // steered it to the runtime beside itself: that one is recorded, so the
   // status can say which runtime a catalog-driven run measured.
@@ -291,7 +291,7 @@ static void loadRuntime()
 #ifdef _WIN32
     searchBesideRuntime(absNamed);
 #endif
-    lib = clpeak::dynOpen({absNamed.c_str()});
+    lib = xpupeak::dynOpen({absNamed.c_str()});
     if (!lib)
       g_loadError = std::string("could not load onnxruntime from '") +
                     absNamed + "'";
@@ -316,14 +316,14 @@ static void loadRuntime()
       // Absolute path: loads the file it names even when a DLL of the same
       // basename is already mapped.  A bare "onnxruntime.dll" here would
       // hand back that DLL instead.
-      lib = clpeak::dynOpen({absDefault.c_str()});
+      lib = xpupeak::dynOpen({absDefault.c_str()});
       if (!lib)
         g_loadError = std::string("could not load onnxruntime from '") +
                       absDefault + "'";
     }
     else
     {
-      lib = clpeak::dynOpen({"onnxruntime.dll"});
+      lib = xpupeak::dynOpen({"onnxruntime.dll"});
       if (!lib)
       {
         g_loadError = "onnxruntime library not found";
@@ -340,7 +340,7 @@ static void loadRuntime()
       }
     }
 #else
-    lib = clpeak::dynOpen({
+    lib = xpupeak::dynOpen({
 #if defined(__APPLE__)
         "libonnxruntime.dylib",
         "/opt/homebrew/lib/libonnxruntime.dylib",
@@ -362,7 +362,7 @@ static void loadRuntime()
   // A file that turns out not to be a usable ONNX Runtime stays mapped like
   // any other handle: unloading a library whose constructors have run is
   // what common/dynlib.h explains is never safe.
-  void *sym = clpeak::dynSym(lib, "OrtGetApiBase");
+  void *sym = xpupeak::dynSym(lib, "OrtGetApiBase");
   auto getBase = reinterpret_cast<const OrtApiBase *(ORT_API_CALL *)()>(sym);
   if (!getBase)
   {
@@ -409,7 +409,7 @@ void onnxSetLibraryOverride(const std::string &path)
   g_loadError.clear();
 }
 
-#endif // CLPEAK_ONNX_STATIC
+#endif // XPUPEAK_ONNX_STATIC
 
 bool onnxPendingSetup(OnnxPendingSetup &out)
 {
@@ -420,12 +420,12 @@ bool onnxPendingSetup(OnnxPendingSetup &out)
   // default search found it -- is no change.
   bool library = g_requested.library != g_active.library;
   if (library && !g_requested.library.empty() &&
-      clpeak::sameModulePath(g_requested.library, g_loaded.path))
+      xpupeak::sameModulePath(g_requested.library, g_loaded.path))
     library = false;
   // A catalog that is off has no folder that matters.
   const bool winml =
       g_requested.winml != g_active.winml ||
-      (g_requested.winml && !clpeak::sameModulePath(g_requested.winmlPath, g_active.winmlPath));
+      (g_requested.winml && !xpupeak::sameModulePath(g_requested.winmlPath, g_active.winmlPath));
   if (!library && !winml)
     return false;
   out.library   = g_requested.library;

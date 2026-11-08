@@ -1,5 +1,5 @@
-#ifndef CLPEAK_JSON_H
-#define CLPEAK_JSON_H
+#ifndef XPUPEAK_JSON_H
+#define XPUPEAK_JSON_H
 
 #include <map>
 #include <string>
@@ -7,8 +7,8 @@
 
 // ── Minimal JSON DOM ───────────────────────────────────────────────────────
 //
-// Just enough to read a clpeak result document back (run_document.cpp) and
-// nothing more.  Hand-rolled on purpose: it is the only parser clpeak needs,
+// Just enough to read a xpupeak result document back (run_document.cpp) and
+// nothing more.  Hand-rolled on purpose: it is the only parser xpupeak needs,
 // it is smaller than the XML/CSV line scanners it replaces, and it lets the
 // classic-locale rule for numbers live in one place -- the GUI hosts this
 // code inside toolkits that call setlocale(LC_ALL, "") (GTK's gtk_init does),
@@ -63,4 +63,4 @@ public:
 // is non-null, fills it with a human-readable message including the offset.
 JsonValue jsonParse(const std::string &text, std::string *error = nullptr);
 
-#endif  // CLPEAK_JSON_H
+#endif  // XPUPEAK_JSON_H

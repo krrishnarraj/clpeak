@@ -29,8 +29,8 @@ id<MTLLibrary> mtlGetLibrary(MetalDevice &dev, const char *src, const char *srcN
     {
         // The compiler's own output is in the error; on the run log it
         // reaches a file exported from a phone, where NSLog never would.
-        CLPEAK_LOG(Error, "Metal: compile of %s failed: %s", srcName,
-                   err.localizedDescription.UTF8String);
+        XPUPEAK_LOG(Error, "Metal: compile of %s failed: %s", srcName,
+                    err.localizedDescription.UTF8String);
         return nil;
     }
     dev.impl->libraryCache[key] = lib;
@@ -50,7 +50,7 @@ id<MTLComputePipelineState> mtlGetPipeline(MetalDevice &dev, const char *src,
     id<MTLFunction> fn = [lib newFunctionWithName:[NSString stringWithUTF8String:fnName]];
     if (!fn)
     {
-        CLPEAK_LOG(Error, "Metal: function %s not found in %s", fnName, srcName);
+        XPUPEAK_LOG(Error, "Metal: function %s not found in %s", fnName, srcName);
         return nil;
     }
 
@@ -58,8 +58,8 @@ id<MTLComputePipelineState> mtlGetPipeline(MetalDevice &dev, const char *src,
     pso = [dev.impl->device newComputePipelineStateWithFunction:fn error:&err];
     if (!pso)
     {
-        CLPEAK_LOG(Error, "Metal: pipeline create for %s failed: %s", fnName,
-                   err.localizedDescription.UTF8String);
+        XPUPEAK_LOG(Error, "Metal: pipeline create for %s failed: %s", fnName,
+                    err.localizedDescription.UTF8String);
         return nil;
     }
     dev.impl->pipelineCache[cacheKey] = pso;

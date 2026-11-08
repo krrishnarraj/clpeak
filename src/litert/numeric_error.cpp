@@ -72,8 +72,8 @@ const Variant kVariants[] = {
 };
 
 // How this backend's answer checks name things (include/common/answer_check.h).
-const clpeak::AnswerWords kWords = {"this accelerator's", "litert_numeric_error", "the host's reference",
-                                    "the host's double-precision reference"};
+const xpupeak::AnswerWords kWords = {"this accelerator's", "litert_numeric_error", "the host's reference",
+                                     "the host's double-precision reference"};
 
 // y[m][n] = sum_k x[m][k] * w[n][k], in double, across the host's threads.
 void referenceGemm(const std::vector<double> &x, const std::vector<float> &w, int64_t M, int64_t K,
@@ -135,10 +135,10 @@ double unwrittenShare(const std::vector<uint8_t> &out, size_t elemBytes)
 // An output's elements as the values they stand for: `io` is the type the
 // graph returns, `act` the plan's activation type -- an integer answer comes
 // back as codes at the output scale, or under floatIo already dequantized.
-bool decodeOutput(const std::vector<uint8_t> &out, clpeak_tflite::TfType io, clpeak_tflite::TfType act,
+bool decodeOutput(const std::vector<uint8_t> &out, xpupeak_tflite::TfType io, xpupeak_tflite::TfType act,
                   std::vector<float> &got)
 {
-  using clpeak_tflite::TfType;
+  using xpupeak_tflite::TfType;
   switch (io)
   {
   case TfType::F32:
@@ -193,7 +193,7 @@ Miss missOf(const LitertPeak::AnswerCheck &c)
 {
   if (c.unwritten >= kUnwrittenShare && c.unwrittenRerun >= kUnwrittenShare)
     return Miss::Never;
-  if (c.unwritten >= kUnwrittenShare && c.rerunPpm >= 0.0 && c.rerunPpm < clpeak::kWrongAnswerPpm)
+  if (c.unwritten >= kUnwrittenShare && c.rerunPpm >= 0.0 && c.rerunPpm < xpupeak::kWrongAnswerPpm)
     return Miss::Late;
   return Miss::Wrong;
 }
@@ -214,14 +214,14 @@ std::string wrongRowReason(const LitertPeak::AnswerCheck &c)
   {
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
     return "this accelerator never wrote its answer" + figure + ": after two runs, " + pct +
-           " of the output still held what clpeak wrote there before the first -- a runtime that does not "
+           " of the output still held what xpupeak wrote there before the first -- a runtime that does not "
            "return the result, not one that loses precision -- " + kRowConsequence;
   }
   if (missOf(c) == Miss::Late)
     return "this accelerator's answer landed only after the run that computed it had returned" + figure +
-           ": the output still held what clpeak wrote there before the run, and a second run's read was "
+           ": the output still held what xpupeak wrote there before the run, and a second run's read was "
            "right -- its timings would not cover the work, " + kRowConsequence;
-  return clpeak::wrongAnswerRowReason(c, kWords, kRowConsequence);
+  return xpupeak::wrongAnswerRowReason(c, kWords, kRowConsequence);
 }
 
 // A form, in the words a reason or a note gives it after the format's label.
@@ -244,7 +244,7 @@ std::string formWords(const LitertForm &form)
 const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, const litert_device_info_t &dev,
                                                        LitertFormat f, const LitertForm &form)
 {
-  using clpeak_tflite::TfType;
+  using xpupeak_tflite::TfType;
   const LitertPlan base = litertPlanFor(f, dev.accel);
   // A choice the plan does not have is the form it does have, so one graph
   // and one session is checked once whichever way it is asked for.
@@ -292,7 +292,7 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   const int64_t count = kDim * kDim;
   std::vector<double> a((size_t)count);
   std::string raw;
-  const int abits = (int)clpeak_tflite::tfliteElementBits(plan.act);
+  const int abits = (int)xpupeak_tflite::tfliteElementBits(plan.act);
   switch (plan.act)
   {
   case TfType::F32:
@@ -393,7 +393,7 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
   // pass 256, which overflows no width a kernel accumulates in.  It is a
   // wrong answer, not lost precision, and wrongAnswer() refuses the format's
   // rates for it as it does for one past the line.
-  clpeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
+  xpupeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
   if (c.status != ResultStatus::Ok && !c.nonFinite)
     return c;
 
@@ -409,16 +409,16 @@ const LitertPeak::AnswerCheck &LitertPeak::answerCheck(const LitertRuntime &rt, 
     {
       if (marked)
         c.unwrittenRerun = unwrittenShare(again, elemBytes);
-      const double p2 = clpeak::answerPpm(got2.data(), ref.data(), got2.size());
+      const double p2 = xpupeak::answerPpm(got2.data(), ref.data(), got2.size());
       c.rerunPpm = std::isfinite(p2) ? p2 : -1.0;
     }
-    CLPEAK_VLOG("litert-numeric-error[%s/%s]: wrong answer, %.0f ppm%s; %.1f%% of the output still held the "
-                "marker after the run, %.1f%% after a second run, which read %.0f ppm\n",
-                dev.displayName.c_str(), label.c_str(), c.ppm, c.nonFinite ? " (NaN or infinity)" : "",
-                100.0 * c.unwritten, 100.0 * c.unwrittenRerun, c.rerunPpm);
+    XPUPEAK_VLOG("litert-numeric-error[%s/%s]: wrong answer, %.0f ppm%s; %.1f%% of the output still held the "
+                 "marker after the run, %.1f%% after a second run, which read %.0f ppm\n",
+                 dev.displayName.c_str(), label.c_str(), c.ppm, c.nonFinite ? " (NaN or infinity)" : "",
+                 100.0 * c.unwritten, 100.0 * c.unwrittenRerun, c.rerunPpm);
   }
   else
-    CLPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label.c_str(), c.ppm);
+    XPUPEAK_VLOG("litert-numeric-error[%s/%s]: %.2f ppm\n", dev.displayName.c_str(), label.c_str(), c.ppm);
   return c;
 }
 
@@ -447,19 +447,19 @@ std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device
     return std::string();
   const std::string what = std::string(litertFormatLabel(f)) + formWords(form);
   char pct[32];
-  // The marker clpeak wrote before the run said where the answer went.
+  // The marker xpupeak wrote before the run said where the answer went.
   if (missOf(c) == Miss::Never)
   {
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
     return "this accelerator never wrote its answer for " + what + ": after two runs, " + pct +
-           " of the output still held what clpeak wrote there before the first -- a runtime that does "
+           " of the output still held what xpupeak wrote there before the first -- a runtime that does "
            "not return the result, not one that loses precision -- so its rate is not reported";
   }
   if (missOf(c) == Miss::Late)
     return "this accelerator's answer for " + what + " landed only after the run that computed it had "
-           "returned: the output still held what clpeak wrote there before the run, and a second run's "
+           "returned: the output still held what xpupeak wrote there before the run, and a second run's "
            "read was right -- its timings would not cover the work, so its rate is not reported";
-  return clpeak::wrongAnswerReason(c, kWords, what);
+  return xpupeak::wrongAnswerReason(c, kWords, what);
 }
 
 int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_info_t &dev,
@@ -494,7 +494,7 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
 
   for (const Variant &v : kVariants)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const char *label = litertFormatLabel(v.f);
     const LitertPlan plan = litertPlanFor(v.f, dev.accel);
@@ -519,7 +519,7 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
       LitertForm own = form;
       own.floatIo = false;
       extra = "Float inputs and outputs, as " +
-              std::string(plan.act == clpeak_tflite::TfType::I16 ? "int16" : "int8") + " ones gave " +
+              std::string(plan.act == xpupeak_tflite::TfType::I16 ? "int16" : "int8") + " ones gave " +
               reading(v.f, own);
     }
     const bool conv = v.f == LitertFormat::Int8Qdq;

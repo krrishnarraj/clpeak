@@ -28,7 +28,7 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments += "-DCLPEAK_NPU_STUB=clpeak_npu_${project.name}"
+                arguments += "-DXPUPEAK_NPU_STUB=xpupeak_npu_${project.name}"
             }
         }
     }

@@ -50,7 +50,7 @@ constexpr double kRaceWorkFactor = 8.0;
 // Everything a rung holds at once (litertHeldBytes), capped at a quarter of
 // physical memory and at 2 GB, which still admits the 1024-square int8 maps
 // XNNPACK is fastest at.
-uint64_t maxRungBytes() { return clpeak::memoryBudget(2ull << 30); }
+uint64_t maxRungBytes() { return xpupeak::memoryBudget(2ull << 30); }
 
 struct Format
 {
@@ -158,7 +158,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
     for (const Shape &v : kShapes)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const std::string row = std::string(fmt.label) + "_" + v.label;
       logger::EmitOptions o;
@@ -176,7 +176,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         continue;
       }
 
-      clpeak::MultiFormRace race(nf);
+      xpupeak::MultiFormRace race(nf);
       for (size_t f = 0; f < nf; f++)
         if (!wrong[f].empty())
           race.drop(f);
@@ -185,7 +185,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial && !race.done(); sp *= 2)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         // The feature map and the filter are constants (litertHeldBytes);
         // the scaled copy of the map and the result, a quarter of it at
@@ -200,9 +200,9 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
         const uint64_t budget = maxRungBytes();
         if (bytes > budget)
         {
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
-                      (unsigned long long)(budget >> 20));
+          XPUPEAK_VLOG("litert-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
+                       dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
+                       (unsigned long long)(budget >> 20));
           break;
         }
         std::vector<double> rate(nf, 0.0), createUsAt(nf, 0.0);
@@ -217,8 +217,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           const std::string form = what(f);
           if (ln.lastRate > 0.0 && convFlops(v, sp) / ln.lastRate > kMaxIterUs)
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s would take too long, stopping\n", dev.displayName.c_str(),
-                        row.c_str(), (long long)sp, form.c_str());
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s would take too long, stopping\n", dev.displayName.c_str(),
+                         row.c_str(), (long long)sp, form.c_str());
             race.drop(f);
             continue;
           }
@@ -226,10 +226,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           // busy (gpuRunCapUs): a driver resets a GPU held too long.
           if (ln.lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / ln.lastRate > runCapUs)
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s would keep the GPU busy ~%.2f s a pass, past "
-                        "--max-time-ml-gpu (%.2f s), stopping\n",
-                        dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(),
-                        convFlops(v, sp) / ln.lastRate / 1.0e6, runCapUs / 1.0e6);
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s would keep the GPU busy ~%.2f s a pass, past "
+                         "--max-time-ml-gpu (%.2f s), stopping\n",
+                         dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(),
+                         convFlops(v, sp) / ln.lastRate / 1.0e6, runCapUs / 1.0e6);
             race.drop(f);
             continue;
           }
@@ -243,9 +243,9 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             const double predictedUs = floorUs + (ln.prevCreateUs - floorUs) * 4.0;
             if (predictedUs > kLitertMaxCreateUs)
             {
-              CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s predicted create %.1f s > %.1f s, stopping\n",
-                          dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), predictedUs / 1.0e6,
-                          kLitertMaxCreateUs / 1.0e6);
+              XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s predicted create %.1f s > %.1f s, stopping\n",
+                           dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), predictedUs / 1.0e6,
+                           kLitertMaxCreateUs / 1.0e6);
               race.drop(f);
               continue;
             }
@@ -261,8 +261,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
                                          litertConfigFor(fp, forms[f]), err);
           if (!s)
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s create failed: %s\n", dev.displayName.c_str(), row.c_str(),
-                        (long long)sp, form.c_str(), err.c_str());
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s create failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                         (long long)sp, form.c_str(), err.c_str());
             ln.fail(err);
             race.drop(f);
             continue;
@@ -293,8 +293,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             // Logged whatever the row says: above a measured size it
             // publishes the sizes below, and this failure would leave no
             // trace.
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s run failed: %s\n", dev.displayName.c_str(), row.c_str(),
-                        (long long)sp, form.c_str(), m.error.c_str());
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s run failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                         (long long)sp, form.c_str(), m.error.c_str());
             ln.fail(m.error, m.status);
             race.drop(f);
             continue;
@@ -302,7 +302,7 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           // A wrong answer withholds the whole row, as in gemm.cpp.
           if (!nonFinite.empty())
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), nonFinite.c_str());
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), nonFinite.c_str());
             for (ConvLane &l : lanes)
             {
               l.best = 0.0;
@@ -320,8 +320,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
           const double flops = convFlops(v, sp);
           const double r = flops * 1.0e6 / m.meanUs;
           ln.lastRate = flops / m.meanUs;
-          CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
-                      (long long)sp, form.c_str(), r, m.meanUs);
+          XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
+                       (long long)sp, form.c_str(), r, m.meanUs);
           rate[f] = r;
           createUsAt[f] = readyUs;
 
@@ -340,10 +340,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             }
             if (ladderDropEnds(r, ln.best, 4.0 * m.meanUs))
             {
-              CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s fell to %.0f%% of the best, and the next size would "
-                          "take ~%.0f s a pass, stopping\n",
-                          dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), 100.0 * r / ln.best,
-                          4.0 * m.meanUs / 1.0e6);
+              XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s fell to %.0f%% of the best, and the next size would "
+                           "take ~%.0f s a pass, stopping\n",
+                           dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), 100.0 * r / ln.best,
+                           4.0 * m.meanUs / 1.0e6);
               race.drop(f);
             }
             else if (++ln.strikes >= kMaxStrikes)
@@ -353,10 +353,10 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
             race.drop(f);
           else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
           {
-            CLPEAK_VLOG("litert-conv[%s/%s]: %lld%s measured %.2f s a pass, past --max-time-ml-gpu (%.2f s), "
-                        "stopping\n",
-                        dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), m.probeUs / 1.0e6,
-                        runCapUs / 1.0e6);
+            XPUPEAK_VLOG("litert-conv[%s/%s]: %lld%s measured %.2f s a pass, past --max-time-ml-gpu (%.2f s), "
+                         "stopping\n",
+                         dev.displayName.c_str(), row.c_str(), (long long)sp, form.c_str(), m.probeUs / 1.0e6,
+                         runCapUs / 1.0e6);
             race.drop(f);
           }
           else if (race.runs(f) && ln.prevCreateUs > 0.0 && createUs > kLitertCreateGrowthFloor &&

@@ -230,7 +230,7 @@ class DeviceRun {
   }
 }
 
-/// Severity of one diagnostic line — the native clpeak::LogLevel.
+/// Severity of one diagnostic line — the native xpupeak::LogLevel.
 enum LogLevel {
   error,
   warning,
@@ -250,7 +250,7 @@ enum LogLevel {
 }
 
 /// One line of the run's diagnostic stream (the document's `log` array,
-/// docs/format-v3.md): what clpeak or a library it called had to say, at
+/// docs/format-v3.md): what xpupeak or a library it called had to say, at
 /// what moment, inside which scope.  The whole stream in order is what a
 /// maintainer reads when a number from a device they cannot reach looks
 /// wrong; the warnings and errors in it are the only record of *why*
@@ -273,7 +273,7 @@ class LogEntry {
 
   /// The library a message was relayed from ("onnxruntime", "vulkan",
   /// "opencl", "console"), or "android" for how the OS says the process
-  /// ended (ProcessExit); empty for clpeak's own.
+  /// ended (ProcessExit); empty for xpupeak's own.
   final String source;
 
   /// The scope the line fired in; empty where no such scope was open.
@@ -375,7 +375,7 @@ class ResumedPart {
 /// filled in only at the end of a live one, so null while it is in flight.
 class RunMeta {
   const RunMeta({
-    this.clpeakVersion = '',
+    this.xpupeakVersion = '',
     this.generatedAt = '',
     this.durationSeconds = 0,
     this.cancelled = false,
@@ -386,7 +386,7 @@ class RunMeta {
     this.resumed = const [],
   });
 
-  final String clpeakVersion;
+  final String xpupeakVersion;
   final String generatedAt;
 
   /// Seconds spent running; for a resumed run, its parts summed.
@@ -416,7 +416,7 @@ class RunMeta {
   final List<ResumedPart> resumed;
 
   factory RunMeta.fromJson(Map<String, dynamic> m) => RunMeta(
-        clpeakVersion: m['clpeak_version'] as String? ?? '',
+        xpupeakVersion: m['clpeak_version'] as String? ?? '',
         generatedAt: m['generated_at'] as String? ?? '',
         durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
         cancelled: m['cancelled'] as bool? ?? false,
@@ -477,7 +477,7 @@ class RunDocument {
     return r;
   }
 
-  /// Build from a saved clpeak run document (docs/format-v3.md).  A direct
+  /// Build from a saved xpupeak run document (docs/format-v3.md).  A direct
   /// structural read: the file is already the shape the UI renders, so nothing
   /// is regrouped and no test-level field has to be recovered from its rows.
   factory RunDocument.fromJson(Map<String, dynamic> doc) {

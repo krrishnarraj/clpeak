@@ -51,7 +51,7 @@ int main(int argc, char **argv)
         if (!resume.after.empty()) std::cout << " (" << resume.after << ")";
         std::cout << "\n";
     }
-    clpeak::setVerbose(opts.verbose);
+    xpupeak::setVerbose(opts.verbose);
 #ifdef ENABLE_ONNX
     // Before any enumeration: --onnx-lib decides which runtime gets loaded,
     // and enumerate() is what loads it.
@@ -83,15 +83,15 @@ int main(int argc, char **argv)
     if (opts.listDevices)
     {
         for (Backend b : opts.requestedButNotBuilt())
-            std::cout << "clpeak: the " << backendInfo(b).name
+            std::cout << "xpupeak: the " << backendInfo(b).name
                       << " backend is not in this build\n";
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
             {
                 // Mute vendor stderr during enumeration; the table is on stdout.
-                clpeak::ScopedConsoleMute mute(
-                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                xpupeak::ScopedConsoleMute mute(
+                    xpupeak::ScopedConsoleMute::Capture::Verbose, {},
                     /*stderrOnly=*/true);
                 invs.push_back(be.enumerate());
             }
@@ -102,18 +102,18 @@ int main(int argc, char **argv)
     RunDocument combined;
     if (!resuming)
     {
-        combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
+        combined.meta.xpupeakVersion = XPUPEAK_VERSION_STR;
         combined.meta.generatedAt   = isoTimestampUtc();
         for (const auto &be : backends)
             combined.meta.build.backends.push_back(backendInfo(be.id).name);
-#ifdef CLPEAK_BUILD_CONFIG
-        combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+#ifdef XPUPEAK_BUILD_CONFIG
+        combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
         combined.meta.host          = probeHost();
         combined.meta.invocation    = invocationFrom(opts, argc, argv);
     }
 
-    // The run's diagnostic stream: every note, CLPEAK_LOG line and relayed
+    // The run's diagnostic stream: every note, XPUPEAK_LOG line and relayed
     // library message from here on lands on combined.log -- and, with -o,
     // on the sidecar as it happens, so a crash inside a driver still leaves
     // a record.  Between backends no logger is open to print for it, so it
@@ -123,10 +123,10 @@ int main(int argc, char **argv)
     // (include/common/run_checkpoint.h).
     RunCheckpoint checkpoint(combined);
     runLog.setFallbackRenderer([&](const LogEntry &e) {
-        if (!e.source.empty() || e.level == clpeak::LogLevel::Debug ||
-            e.level == clpeak::LogLevel::Info)
+        if (!e.source.empty() || e.level == xpupeak::LogLevel::Debug ||
+            e.level == xpupeak::LogLevel::Info)
         {
-            if (opts.verbose) clpeak::stderrWrite(e.message + "\n");
+            if (opts.verbose) xpupeak::stderrWrite(e.message + "\n");
             return;
         }
         std::cout << e.message << "\n";
@@ -142,8 +142,8 @@ int main(int argc, char **argv)
     // A backend asked for by name that this binary does not carry: say so,
     // or the run reads as "no devices".
     for (Backend b : opts.requestedButNotBuilt())
-        CLPEAK_LOG(Warning, "clpeak: the %s backend is not in this build",
-                   backendInfo(b).name);
+        XPUPEAK_LOG(Warning, "xpupeak: the %s backend is not in this build",
+                    backendInfo(b).name);
 
     // --verbose: the file also carries what --list-devices would have shown
     // -- every device each backend saw, and why a backend had none -- since
@@ -153,17 +153,17 @@ int main(int argc, char **argv)
         for (const auto &be : backends)
             if (opts.backendEnabled(be.id))
             {
-                clpeak::ScopedConsoleMute mute(
-                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                xpupeak::ScopedConsoleMute mute(
+                    xpupeak::ScopedConsoleMute::Capture::Verbose, {},
                     /*stderrOnly=*/true);
                 combined.inventory.push_back(be.enumerate());
             }
 
     // Held until main returns: the run is compute with no user input, which
     // every OS idle timer counts as idle (include/common/keep_awake.h).
-    clpeak::KeepAwake keepAwake;
+    xpupeak::KeepAwake keepAwake;
     // And paused while the OS says the device is too hot (thermal.h).
-    clpeak::ThermalWatch thermalWatch;
+    xpupeak::ThermalWatch thermalWatch;
 
     // Run every enabled backend in order.  No devices is not an error
     // (normal in VM/CI environments).  Only real failures (driver init,
@@ -194,7 +194,7 @@ int main(int argc, char **argv)
         // backends that use Core ML clean up after themselves as they go,
         // and this is the backstop for one that does not yet (see
         // include/common/coreml_cache.h).  A no-op off Apple platforms.
-        clpeak::purgeCoreMLCompileCache();
+        xpupeak::purgeCoreMLCompileCache();
 
         if (status != 0)
             lastError |= status;

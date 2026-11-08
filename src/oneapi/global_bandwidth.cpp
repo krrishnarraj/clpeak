@@ -73,9 +73,9 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
   // globalBWMaxSize to clear it; print both so an implausible reading can be
   // checked against them without a rebuild.
-  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
-              (unsigned long long)(numItems * sizeof(float) >> 20),
-              (unsigned long long)(dev.info.globalMemCacheSize >> 20));
+  XPUPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
+               (unsigned long long)(numItems * sizeof(float) >> 20),
+               (unsigned long long)(dev.info.globalMemCacheSize >> 20));
 
   float *inBuf  = sycl::malloc_device<float>(numItems, dev.stream);
   float *outBuf = sycl::malloc_device<float>(numItems, dev.stream);

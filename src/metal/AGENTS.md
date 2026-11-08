@@ -24,7 +24,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 | File | Purpose |
 |------|---------|
 | `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()` |
-| `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyClpeakMetalDevices()` helper |
+| `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyXpupeakMetalDevices()` helper |
 | `mtl_utils.mm` | `mtlGetLibrary()`, `mtlGetPipeline()` — Metal library/pipeline caching |
 | `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
 | `mtl_internal.h` | Internal header: ObjC imports, pimpl definitions, helper declarations — included by all `.mm` files |
@@ -75,7 +75,7 @@ the same.  Why two shapes: the MAD chain block in `include/common/common.h`.
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
-- If you add a new `.metal` kernel → add to `CLPEAK_MTL_KERNELS` in `CMakeLists.txt`
+- If you add a new `.metal` kernel → add to `XPUPEAK_MTL_KERNELS` in `CMakeLists.txt`
   and declare its externs in the `mtl_kernels` namespace (`include/metal/mtl_peak.h`).
 - If you change `MetalPeak` interface → update `include/metal/mtl_peak.h`.
 - If you add a new helper → declare in `mtl_internal.h`, define in the appropriate `.mm` file (`mtl_device.mm`, `mtl_utils.mm`, `compute_kernel.mm`, or a new file).

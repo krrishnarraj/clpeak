@@ -1,4 +1,4 @@
-# clpeak — "compute latency peak"
+# xpupeak — "compute latency peak"
 
 Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
 across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —
@@ -26,8 +26,8 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 Shared code lives in `src/common/` and `include/common/`. Each backend has its
 own `CMakeLists.txt` that builds a static library (`peak_opencl`, etc.).
 The CLI entry point is `src/cli/main.cpp`. The Flutter GUI (`app/`) drives the
-same backends through the `clpeak_ffi` C-ABI bridge (`src/ffi/`) -- on
-desktop from a `clpeak-engine` process per catalog and run, never inside the
+same backends through the `xpupeak_ffi` C-ABI bridge (`src/ffi/`) -- on
+desktop from a `xpupeak-engine` process per catalog and run, never inside the
 GUI's own process. Both iterate
 the one backend registry (`src/registry/`), which is sorted by the `Backend`
 enum -- the single order that `--help`, `--list-devices`, the GUI catalog, a
@@ -59,12 +59,12 @@ run and the result document all share.
 | `src/onnx/` | ONNX Runtime backend: `OnnxPeak` class + per-benchmark `.cpp`. Each execution provider (QNN / OpenVINO / VitisAI / CoreML / NNAPI / GPU / CPU) is one device; the runtime is dlopen'd and models are emitted as protobuf bytes in memory |
 | `src/coreml/` | Core ML backend (ObjC++ session + plain C++ tests): `CoreMLPeak` class + per-benchmark `.cpp`. Each Core ML compute device (Neural Engine / GPU / CPU) is one device; ML Program models are emitted as protobuf bytes + a weight blob and compiled at run time, and the compute plan proves per operation where they ran |
 | `src/litert/` | LiteRT backend: `LitertPeak` class + per-benchmark `.cpp`. Each accelerator (NPU via a vendor dispatch library / GPU / CPU) is one device; `.tflite` models are emitted as FlatBuffer bytes in memory, the runtime is dlopen'd, and `IsFullyAccelerated` plus the profiler prove what ran where |
-| `src/registry/` | `backend_registry.cpp` — the one list of backends in this build (`backendRegistry()`, `include/common/backend_registry.h`), sorted by the `Backend` enum; compiled into both `clpeak` and `clpeak_ffi` by `src/common/cmake/backends.cmake`, which also links the backend libraries and sets `ENABLE_*` for both |
+| `src/registry/` | `backend_registry.cpp` — the one list of backends in this build (`backendRegistry()`, `include/common/backend_registry.h`), sorted by the `Backend` enum; compiled into both `xpupeak` and `xpupeak_ffi` by `src/common/cmake/backends.cmake`, which also links the backend libraries and sets `ENABLE_*` for both |
 | `src/cli/` | Desktop CLI: `main.cpp` |
-| `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); the desktop engine process (`clpeak-engine`); `clpeak-gui` CMake target; Android/iOS build superprojects |
+| `src/ffi/` | `xpupeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); the desktop engine process (`xpupeak-engine`); `xpupeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` and `litert/` (C APIs — no library needed to build) |
-| `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_android_npu.sh` — stage the NPU libraries the Android app packages: LiteRT's vendor shims and, for Qualcomm, the QNN runtime and ONNX Runtime's QNN plugin; `screenshots.sh` — regenerate the README/site screenshots from `results/`, via `app/integration_test/screenshots_test.dart` and `screenshots/frame.py`) |
+| `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_android_npu.sh` — stage the NPU libraries the Android app packages: LiteRT's vendor shims and, for Qualcomm, the QNN runtime and ONNX Runtime's QNN plugin; `screenshots.sh` — regenerate the README/site screenshots from `results/`, via `app/integration_test/screenshots_test.dart` and `screenshots/frame.py`; `rename_xpupeak.py` — the 4.0 rename sweep, idempotent, re-run after merging a 3.x fix into `4.0.x`, and deleted once 4.0.0 ships) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `NOTES.md` | Every gate that exists because a runtime crashes rather than declines — the fault, where the gate lives, and the command that proves it can go.  Nothing else belongs there, and each entry is deleted when that release is fixed |
@@ -77,16 +77,18 @@ run and the result document all share.
 ## Build
 
 - Desktop: `cmake -B build && cmake --build build`
-- Each backend: `-DCLPEAK_ENABLE_VULKAN=OFF`, etc.
-- GUI: built automatically as `clpeak-gui` when the Flutter SDK is detected
-  (disable with `-DCLPEAK_ENABLE_GUI=OFF`); bundle lands in `build/clpeak-gui/`.
+- Each backend: `-DXPUPEAK_ENABLE_VULKAN=OFF`, etc.  Every option's 3.x name
+  still works in 4.x, with a deprecation warning: the block at the top of
+  `CMakeLists.txt` maps it, and goes in 5.0.
+- GUI: built automatically as `xpupeak-gui` when the Flutter SDK is detected
+  (disable with `-DXPUPEAK_ENABLE_GUI=OFF`); bundle lands in `build/xpupeak-gui/`.
   Mobile builds: see `app/AGENTS.md`.
 - All backend static libs are built PIC (`CMAKE_POSITION_INDEPENDENT_CODE`):
-  they link into both `clpeak` and the `clpeak_ffi` shared library.
-- Packaging: `cpack -G ZIP` ships CLI + GUI in one archive — `bin/clpeak`,
-  `bin/clpeak-gui` (wrapper) and the Flutter bundle under `gui/`; macOS puts
-  `clpeak-gui.app` at the archive root instead. macOS also has
-  `--target clpeak-gui-dmg` (`tools/make_dmg.sh`) for the drag-to-Applications
+  they link into both `xpupeak` and the `xpupeak_ffi` shared library.
+- Packaging: `cpack -G ZIP` ships CLI + GUI in one archive — `bin/xpupeak`,
+  `bin/xpupeak-gui` (wrapper) and the Flutter bundle under `gui/`; macOS puts
+  `xpupeak-gui.app` at the archive root instead. macOS also has
+  `--target xpupeak-gui-dmg` (`tools/make_dmg.sh`) for the drag-to-Applications
   disk image shipped next to the zip.
 
 ## Quick Lookups
@@ -96,11 +98,11 @@ run and the result document all share.
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v3.md` (the schema) + `include/common/run_document.h`
-- **Emitting a diagnostic, or reading one back?** → `CLPEAK_LOG` / `CLPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
+- **Emitting a diagnostic, or reading one back?** → `XPUPEAK_LOG` / `XPUPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`
 - **A run that died part-way, or was cancelled?** → it left `<output>.partial.json` beside its sidecar or its saved document (`include/common/run_checkpoint.h`); `--resume <output>` (or the checkpoint's path) continues it into the same document (`include/common/run_resume.h`), and the app offers that from History and, for one it died in, on its next launch (`app/AGENTS.md`).  A backend's gate is `admit()` (`include/common/peak.h`), whose guard is what marks a Benchmark finished
-- **Gating a test's sizes on memory?** → `clpeak::memoryBudget()` (`include/common/common.h`) for the budget, and the backend's count of what a session holds (`litertHeldBytes()`, `coremlHeldBytes()`, `onnxHeldBytes()`): every copy of the constants and every intermediate tensor, not the tensor
+- **Gating a test's sizes on memory?** → `xpupeak::memoryBudget()` (`include/common/common.h`) for the budget, and the backend's count of what a session holds (`litertHeldBytes()`, `coremlHeldBytes()`, `onnxHeldBytes()`): every copy of the constants and every intermediate tensor, not the tensor
 - **Withholding a graph a runtime crashes on rather than declines?** → the narrowest existing fence that covers it (a format everywhere: `onnxProviderFenceReason()`, `litertPlanFor()`; one test's graph: `variantFence` / `decodeFence` in that test), the fault in the row's reason, and an entry in `NOTES.md` saying what lifting it takes
 
 ## AGENTS.md System

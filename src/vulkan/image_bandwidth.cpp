@@ -331,7 +331,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
     float bps = us > 0.0f ? (float)bytes / us * 1e6f : 0.0f;
     best = std::max(best, bps);
-    CLPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, bps);
+    XPUPEAK_VLOG("image_memory_bandwidth: %-16s %.1f B/s\n", s.label, bps);
   }
 
   if (best <= 0.0f)

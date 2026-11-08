@@ -5,8 +5,8 @@
 #include "cpu_kernels.h"
 #include "compute_common.h"
 
-using clpeak_cpu::kernelMenu;
-using clpeak_cpu::kernels;
+using xpupeak_cpu::kernelMenu;
+using xpupeak_cpu::kernels;
 
 int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 {
@@ -36,7 +36,7 @@ std::vector<FamilyRow> intDotRows()
         "Four 8-bit products summed in one instruction -- the workhorse of "
         "quantized (compressed) neural networks running on the CPU.",
         "no int8 dot instruction on this CPU",
-        &clpeak_cpu::kernelMenu().int8dp },
+        &xpupeak_cpu::kernelMenu().int8dp },
   };
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
   // VPDPWSSD is in every VNNI CPU since Cascade Lake; AVX-VNNI-INT16 adds the
@@ -46,7 +46,7 @@ std::vector<FamilyRow> intDotRows()
         "Two 16-bit products summed in one instruction -- the wider cousin, "
         "for work where 8 bits loses too much accuracy.",
         "no int16 dot instruction on this CPU",
-        &clpeak_cpu::kernelMenu().int16dp });
+        &xpupeak_cpu::kernelMenu().int16dp });
 #endif
   return rows;
 }

@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONNX_PROBE_H
-#define CLPEAK_ONNX_PROBE_H
+#ifndef XPUPEAK_ONNX_PROBE_H
+#define XPUPEAK_ONNX_PROBE_H
 
 #ifdef ENABLE_ONNX
 
@@ -162,4 +162,4 @@ bool onnxGemmFolded(const onnx_ep_info_t &ep, const std::string &label);
 void onnxClearGemmFolded(const onnx_ep_info_t &ep);
 
 #endif // ENABLE_ONNX
-#endif // CLPEAK_ONNX_PROBE_H
+#endif // XPUPEAK_ONNX_PROBE_H

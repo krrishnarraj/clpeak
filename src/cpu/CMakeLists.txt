@@ -1,4 +1,4 @@
-if(NOT CLPEAK_ENABLE_CPU)
+if(NOT XPUPEAK_ENABLE_CPU)
     return()
 endif()
 
@@ -25,7 +25,7 @@ if(MSVC)
         string(STRIP "${_v}" _v)
         set(${_cfgflag} "${_v} /O2 /Ob2")   # directory-scoped override
     endforeach()
-    message(STATUS "clpeak CPU: forcing optimized Debug build -> CMAKE_CXX_FLAGS_DEBUG = [${CMAKE_CXX_FLAGS_DEBUG}]")
+    message(STATUS "xpupeak CPU: forcing optimized Debug build -> CMAKE_CXX_FLAGS_DEBUG = [${CMAKE_CXX_FLAGS_DEBUG}]")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -73,17 +73,17 @@ endif()
 # and flag style) but is a real clang: CMAKE_CXX_COMPILER_ID is "Clang" with
 # SIMULATE_ID "MSVC".  Only genuine cl.exe lacks the GNU -m/-march ISA flags
 # and the __ARM_FEATURE_* / AVX-512 sub-feature macros, so the restricted
-# "MSVC" paths below gate on _clpeak_real_msvc, not the MSVC variable.  GNU-
+# "MSVC" paths below gate on _xpupeak_real_msvc, not the MSVC variable.  GNU-
 # style ISA flags reach clang-cl through its /clang: passthrough prefix.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(_clpeak_real_msvc ON)
+    set(_xpupeak_real_msvc ON)
 else()
-    set(_clpeak_real_msvc OFF)
+    set(_xpupeak_real_msvc OFF)
 endif()
-if(MSVC AND NOT _clpeak_real_msvc)
-    set(_clpeak_gnuflag "/clang:")
+if(MSVC AND NOT _xpupeak_real_msvc)
+    set(_xpupeak_gnuflag "/clang:")
 else()
-    set(_clpeak_gnuflag "")
+    set(_xpupeak_gnuflag "")
 endif()
 
 # ISA-neutral optimization (FMA contraction etc.) for everything in the backend.
@@ -94,65 +94,65 @@ endif()
 # CMake never sets it on its own.  GCC/clang keep -O3 (a step above the default
 # -O2) plus -ffast-math.
 if(MSVC)
-    set(CLPEAK_CPU_OPT /fp:fast)
-    if(NOT _clpeak_real_msvc)
+    set(XPUPEAK_CPU_OPT /fp:fast)
+    if(NOT _xpupeak_real_msvc)
         # clang-cl: lift CMake's /O2 (-O2) to -O3 like the GNU-driver builds.
-        list(APPEND CLPEAK_CPU_OPT /clang:-O3)
+        list(APPEND XPUPEAK_CPU_OPT /clang:-O3)
     endif()
 else()
-    set(CLPEAK_CPU_OPT -O3 -ffast-math)
+    set(XPUPEAK_CPU_OPT -O3 -ffast-math)
 endif()
-target_compile_options(peak_cpu PRIVATE ${CLPEAK_CPU_OPT})
+target_compile_options(peak_cpu PRIVATE ${XPUPEAK_CPU_OPT})
 
 # Keep the per-ISA feature TUs out of LTO (distros put -flto in the global
 # CXXFLAGS).  A TU's -m/-march flags don't survive GCC's LTRANS re-compile, so
 # the assembler stops accepting its instructions at link time even though the TU
 # assembled cleanly (#193) -- and LTO could inline ISA code into the baseline
 # dispatcher (SIGILL on older CPUs).
-set(CLPEAK_CPU_NO_LTO "")
-if(_clpeak_real_msvc)
-    set(CLPEAK_CPU_NO_LTO /GL-)
+set(XPUPEAK_CPU_NO_LTO "")
+if(_xpupeak_real_msvc)
+    set(XPUPEAK_CPU_NO_LTO /GL-)
 else()
-    check_cxx_compiler_flag("${_clpeak_gnuflag}-fno-lto" _clpeak_f_no_lto)
-    if(_clpeak_f_no_lto)
-        set(CLPEAK_CPU_NO_LTO ${_clpeak_gnuflag}-fno-lto)
+    check_cxx_compiler_flag("${_xpupeak_gnuflag}-fno-lto" _xpupeak_f_no_lto)
+    if(_xpupeak_f_no_lto)
+        set(XPUPEAK_CPU_NO_LTO ${_xpupeak_gnuflag}-fno-lto)
     endif()
 endif()
 
 # Target arch.
-set(_clpeak_x86 OFF)
-set(_clpeak_arm OFF)
-set(_clpeak_arm64 OFF)
+set(_xpupeak_x86 OFF)
+set(_xpupeak_arm OFF)
+set(_xpupeak_arm64 OFF)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86|x86")
-    set(_clpeak_x86 ON)
+    set(_xpupeak_x86 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM64")
-    set(_clpeak_arm ON)
+    set(_xpupeak_arm ON)
     # The NEON kernels are AArch64-only (fused FMA + horizontal reduce); 32-bit
     # ARMv7 (armeabi-v7a) lacks those, so it gets the scalar generic TU only and
     # none of the armv8.x feature TUs (whose -march=armv8.x flags are invalid in
     # AArch32 mode anyway).
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(_clpeak_arm64 ON)
+        set(_xpupeak_arm64 ON)
     endif()
 endif()
 
 # Add one feature TU: compiles cpu_kernels_tu.cpp with `tag` + extra flags into
-# an OBJECT lib, links it into peak_cpu, and registers CLPEAK_TU_<tag> so the
+# an OBJECT lib, links it into peak_cpu, and registers XPUPEAK_TU_<tag> so the
 # dispatcher knows it exists.  ARGN = extra compile options (and defs prefixed
 # with -D handled by caller via a separate list is overkill; we only need flags).
-function(clpeak_add_isa_tu tag)
+function(xpupeak_add_isa_tu tag)
     set(_t peak_cpu_tu_${tag})
     add_library(${_t} OBJECT ${CMAKE_CURRENT_LIST_DIR}/cpu_kernels_tu.cpp)
     target_include_directories(${_t} PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/../../include ${CMAKE_CURRENT_LIST_DIR})
-    target_compile_definitions(${_t} PRIVATE ENABLE_CPU CLPEAK_ISA_TAG=${tag} ${CLPEAK_CPU_TU_DEFS})
-    target_compile_options(${_t} PRIVATE ${CLPEAK_CPU_OPT} ${CLPEAK_CPU_NO_LTO} ${ARGN})
+    target_compile_definitions(${_t} PRIVATE ENABLE_CPU XPUPEAK_ISA_TAG=${tag} ${XPUPEAK_CPU_TU_DEFS})
+    target_compile_options(${_t} PRIVATE ${XPUPEAK_CPU_OPT} ${XPUPEAK_CPU_NO_LTO} ${ARGN})
     set_target_properties(${_t} PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
     target_link_libraries(peak_cpu PRIVATE ${_t})
-    target_compile_definitions(peak_cpu PRIVATE CLPEAK_TU_${tag}=1)
+    target_compile_definitions(peak_cpu PRIVATE XPUPEAK_TU_${tag}=1)
 endfunction()
 
-set(CLPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. CLPEAK_CORE_ONLY for MSVC)
+set(XPUPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. XPUPEAK_CORE_ONLY for MSVC)
 
 # A -march/-m flag check alone doesn't prove a bleeding-edge TU can build: SME
 # also needs <arm_sme.h> + the ACLE streaming/ZA keywords (clang >= ~18), FP8 the
@@ -167,11 +167,11 @@ set(CLPEAK_CPU_TU_DEFS "")   # extra per-TU defs (e.g. CLPEAK_CORE_ONLY for MSVC
 # When adding one, mind what goes into CMAKE_REQUIRED_FLAGS.  It is a space-
 # separated *string*: assigning a ;-list drops everything after the first
 # element and the probe then fails on every compiler.  The helpers also append
-# CLPEAK_CPU_NO_LTO, so a distro -flto in CMAKE_CXX_FLAGS can't fail a probe for
+# XPUPEAK_CPU_NO_LTO, so a distro -flto in CMAKE_CXX_FLAGS can't fail a probe for
 # the LTRANS reason in #193 that the TU's own -fno-lto build doesn't have.
-function(clpeak_check_sme outvar)
+function(xpupeak_check_sme outvar)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    list(JOIN XPUPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
@@ -191,10 +191,10 @@ endfunction()
 # The fp64 outer product needs its own check: it proves the za64 FMOPA
 # intrinsic itself compiles.  (AppleClang 21 enables the +sme-f64f64 feature
 # without defining the ACLE __ARM_FEATURE_SME_F64F64 macro, so the TU is gated
-# by a CMake-passed CLPEAK_SME_F64F64 define instead -- see sme_compute.h.)
-function(clpeak_check_sme_f64 outvar)
+# by a CMake-passed XPUPEAK_SME_F64F64 define instead -- see sme_compute.h.)
+function(xpupeak_check_sme_f64 outvar)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    list(JOIN XPUPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sme.h>
@@ -214,13 +214,13 @@ endfunction()
 # The fp8 probes also demand the ACLE macro each kernel is #if-gated on, so they
 # never pass for a TU that would compile empty.  Clang 20 and the NDK r30 clang
 # (an LLVM 21 snapshot) ship the intrinsics without __ARM_FEATURE_FP8DOT4, and a
-# CLPEAK_SME_F64F64-style define would not rescue them: both predate LLVM
+# XPUPEAK_SME_F64F64-style define would not rescue them: both predate LLVM
 # dropping repeated FPMR writes (r30 issues msr FPMR before every fdot), so the
 # row would measure FPMR writes, not FDOT.  Upstream clang 21 has the macro and
 # the FPMR fix.
-function(clpeak_check_neon_fp8 outvar)
+function(xpupeak_check_neon_fp8 outvar)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    list(JOIN XPUPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_neon.h>
@@ -239,9 +239,9 @@ function(clpeak_check_neon_fp8 outvar)
     set(${outvar} ${${outvar}} PARENT_SCOPE)
 endfunction()
 
-function(clpeak_check_sve_fp8 outvar)
+function(xpupeak_check_sve_fp8 outvar)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    list(JOIN XPUPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <arm_sve.h>
@@ -264,9 +264,9 @@ endfunction()
 # Emits the exact tile op the kernel issues.  Deliberately unguarded by any
 # __x86_64__ #if: callers are already inside the x86 + 64-bit gate, and a probe
 # that compiled vacuously elsewhere would report a false positive.
-function(clpeak_check_amx_tile_op outvar op)
+function(xpupeak_check_amx_tile_op outvar op)
     list(JOIN ARGN " " _reqflags)               # string, NOT a ;-list -- see above
-    list(JOIN CLPEAK_CPU_NO_LTO " " _reqnolto)
+    list(JOIN XPUPEAK_CPU_NO_LTO " " _reqnolto)
     set(CMAKE_REQUIRED_FLAGS "${_reqflags} ${_reqnolto}")
     check_cxx_source_compiles("
         #include <immintrin.h>
@@ -296,21 +296,21 @@ endfunction()
 # bf16/i8mm) into this ungated floor and SIGILL on an older Mac, so pin it to the
 # oldest Apple Silicon (apple-m1: NEON+fp16+dotprod+fp16fml, common to every
 # Apple Silicon Mac).
-if(APPLE AND _clpeak_arm)
-    check_cxx_compiler_flag("-mcpu=apple-m1" _clpeak_apple_m1)
-    if(_clpeak_apple_m1)
-        clpeak_add_isa_tu(generic -mcpu=apple-m1)
+if(APPLE AND _xpupeak_arm)
+    check_cxx_compiler_flag("-mcpu=apple-m1" _xpupeak_apple_m1)
+    if(_xpupeak_apple_m1)
+        xpupeak_add_isa_tu(generic -mcpu=apple-m1)
     else()
-        clpeak_add_isa_tu(generic)
+        xpupeak_add_isa_tu(generic)
     endif()
 else()
-    clpeak_add_isa_tu(generic)
+    xpupeak_add_isa_tu(generic)
 endif()
 
 # ---------------------------------------------------------------------------
 # Feature TUs disabled on Windows today, gathered behind one toggle so a future
 # toolchain/OS fix can re-enable them from a single place (flip the option or
-# pass -DCLPEAK_CPU_ENABLE_WIN_SVE=ON).
+# pass -DXPUPEAK_CPU_ENABLE_WIN_SVE=ON).
 #
 # SVE/SME: clang's Windows/MSVC C++ ABI can't yet mangle the SVE/SME sizeless
 # types (`__SVBool_t`, `__SVFloat32_t`, ...), so merely #including <arm_sve.h> /
@@ -321,111 +321,111 @@ endif()
 # in cpu_dispatch.cpp (registry ID_AA64ZFR0/SMFR0 reads) so detection matches
 # the build.
 # ---------------------------------------------------------------------------
-option(CLPEAK_CPU_ENABLE_WIN_SVE
+option(XPUPEAK_CPU_ENABLE_WIN_SVE
        "Build the ARM SVE/SME TUs on Windows (needs a clang-cl that can mangle SVE types)" OFF)
-set(_clpeak_sve_ok ON)
-if(WIN32 AND NOT CLPEAK_CPU_ENABLE_WIN_SVE)
-    set(_clpeak_sve_ok OFF)
+set(_xpupeak_sve_ok ON)
+if(WIN32 AND NOT XPUPEAK_CPU_ENABLE_WIN_SVE)
+    set(_xpupeak_sve_ok OFF)
 endif()
 
-if(_clpeak_x86)
-    if(_clpeak_real_msvc)
+if(_xpupeak_x86)
+    if(_xpupeak_real_msvc)
         # cl.exe can't isolate AVX-512 sub-features, so its TUs are core-only
         # (fp32/fp64/int32 + read); advanced dtypes need clang(-cl)/GCC.
-        set(CLPEAK_CPU_TU_DEFS CLPEAK_CORE_ONLY)
-        clpeak_add_isa_tu(sse42)                       # x64 baseline (SSE2/SSE4.2 intrinsics)
-        check_cxx_compiler_flag("/arch:AVX"    _clpeak_msvc_avx)
-        check_cxx_compiler_flag("/arch:AVX2"   _clpeak_msvc_avx2)
-        check_cxx_compiler_flag("/arch:AVX512" _clpeak_msvc_avx512)
-        if(_clpeak_msvc_avx)
-            clpeak_add_isa_tu(avx /arch:AVX)
+        set(XPUPEAK_CPU_TU_DEFS XPUPEAK_CORE_ONLY)
+        xpupeak_add_isa_tu(sse42)                       # x64 baseline (SSE2/SSE4.2 intrinsics)
+        check_cxx_compiler_flag("/arch:AVX"    _xpupeak_msvc_avx)
+        check_cxx_compiler_flag("/arch:AVX2"   _xpupeak_msvc_avx2)
+        check_cxx_compiler_flag("/arch:AVX512" _xpupeak_msvc_avx512)
+        if(_xpupeak_msvc_avx)
+            xpupeak_add_isa_tu(avx /arch:AVX)
         endif()
-        if(_clpeak_msvc_avx2)
-            clpeak_add_isa_tu(avx2 /arch:AVX2)
+        if(_xpupeak_msvc_avx2)
+            xpupeak_add_isa_tu(avx2 /arch:AVX2)
         endif()
-        if(_clpeak_msvc_avx512)
-            clpeak_add_isa_tu(avx512 /arch:AVX512)
+        if(_xpupeak_msvc_avx512)
+            xpupeak_add_isa_tu(avx512 /arch:AVX512)
         endif()
-        set(CLPEAK_CPU_TU_DEFS "")
+        set(XPUPEAK_CPU_TU_DEFS "")
     else()
-        # GCC / clang / clang-cl (the ${_clpeak_gnuflag} /clang: prefix
+        # GCC / clang / clang-cl (the ${_xpupeak_gnuflag} /clang: prefix
         # routes the GNU -m flags through clang-cl's passthrough).
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-msse4.2" _clpeak_f_sse42)
-        if(_clpeak_f_sse42)
-            clpeak_add_isa_tu(sse42 ${_clpeak_gnuflag}-msse4.2)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-msse4.2" _xpupeak_f_sse42)
+        if(_xpupeak_f_sse42)
+            xpupeak_add_isa_tu(sse42 ${_xpupeak_gnuflag}-msse4.2)
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-mavx" _clpeak_f_avx)
-        if(_clpeak_f_avx)
-            clpeak_add_isa_tu(avx ${_clpeak_gnuflag}-mavx)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-mavx" _xpupeak_f_avx)
+        if(_xpupeak_f_avx)
+            xpupeak_add_isa_tu(avx ${_xpupeak_gnuflag}-mavx)
         endif()
-        set(_avx2 ${_clpeak_gnuflag}-mavx2 ${_clpeak_gnuflag}-mfma ${_clpeak_gnuflag}-mf16c)
-        check_cxx_compiler_flag("${_avx2}" _clpeak_f_avx2)
-        if(_clpeak_f_avx2)
-            clpeak_add_isa_tu(avx2 ${_avx2})
+        set(_avx2 ${_xpupeak_gnuflag}-mavx2 ${_xpupeak_gnuflag}-mfma ${_xpupeak_gnuflag}-mf16c)
+        check_cxx_compiler_flag("${_avx2}" _xpupeak_f_avx2)
+        if(_xpupeak_f_avx2)
+            xpupeak_add_isa_tu(avx2 ${_avx2})
         endif()
         # Crypto TUs.  SHA-NI needs SSSE3 for the message-schedule alignr.
         # Both are SSE-class: no OS XSTATE dependency.
-        set(_aes ${_clpeak_gnuflag}-maes)
-        check_cxx_compiler_flag("${_aes}" _clpeak_f_aes)
-        if(_clpeak_f_aes)
-            clpeak_add_isa_tu(aes ${_aes})
+        set(_aes ${_xpupeak_gnuflag}-maes)
+        check_cxx_compiler_flag("${_aes}" _xpupeak_f_aes)
+        if(_xpupeak_f_aes)
+            xpupeak_add_isa_tu(aes ${_aes})
         endif()
-        set(_sha ${_clpeak_gnuflag}-mssse3 ${_clpeak_gnuflag}-msha)
-        check_cxx_compiler_flag("${_sha}" _clpeak_f_sha)
-        if(_clpeak_f_sha)
-            clpeak_add_isa_tu(sha ${_sha})
+        set(_sha ${_xpupeak_gnuflag}-mssse3 ${_xpupeak_gnuflag}-msha)
+        check_cxx_compiler_flag("${_sha}" _xpupeak_f_sha)
+        if(_xpupeak_f_sha)
+            xpupeak_add_isa_tu(sha ${_sha})
         endif()
         # 256-bit AVX-VNNI: int8 dot for the huge installed base of client
         # x86 without AVX-512 (Alder Lake -> Arrow Lake, Sierra Forest, Zen 5).
         # Implies AVX2; the TU's int8dp comes in via the __AVXVNNI__ path.
-        set(_avxvnni ${_avx2} ${_clpeak_gnuflag}-mavxvnni)
-        check_cxx_compiler_flag("${_avxvnni}" _clpeak_f_avxvnni)
-        if(_clpeak_f_avxvnni)
-            clpeak_add_isa_tu(avxvnni ${_avxvnni})
+        set(_avxvnni ${_avx2} ${_xpupeak_gnuflag}-mavxvnni)
+        check_cxx_compiler_flag("${_avxvnni}" _xpupeak_f_avxvnni)
+        if(_xpupeak_f_avxvnni)
+            xpupeak_add_isa_tu(avxvnni ${_avxvnni})
         endif()
         # AVX-VNNI-INT8 (256-bit signed×signed int8 dot): Zen 6, Lunar/Arrow Lake.
-        set(_avxvnniint8 ${_avx2} ${_clpeak_gnuflag}-mavxvnniint8)
-        check_cxx_compiler_flag("${_avxvnniint8}" _clpeak_f_avxvnniint8)
-        if(_clpeak_f_avxvnniint8)
-            clpeak_add_isa_tu(avxvnniint8 ${_avxvnniint8})
+        set(_avxvnniint8 ${_avx2} ${_xpupeak_gnuflag}-mavxvnniint8)
+        check_cxx_compiler_flag("${_avxvnniint8}" _xpupeak_f_avxvnniint8)
+        if(_xpupeak_f_avxvnniint8)
+            xpupeak_add_isa_tu(avxvnniint8 ${_avxvnniint8})
         endif()
         # AVX-VNNI-INT16 (256-bit mixed-sign int16 dot, VPDPWSUD): Diamond
         # Rapids, Nova Lake.  The classic signed VPDPWSSD int16 dot rides in
         # the avxvnni / avx512vnni TUs above (it's been part of VNNI all along).
-        set(_avxvnniint16 ${_avx2} ${_clpeak_gnuflag}-mavxvnniint16)
-        check_cxx_compiler_flag("${_avxvnniint16}" _clpeak_f_avxvnniint16)
-        if(_clpeak_f_avxvnniint16)
-            clpeak_add_isa_tu(avxvnniint16 ${_avxvnniint16})
+        set(_avxvnniint16 ${_avx2} ${_xpupeak_gnuflag}-mavxvnniint16)
+        check_cxx_compiler_flag("${_avxvnniint16}" _xpupeak_f_avxvnniint16)
+        if(_xpupeak_f_avxvnniint16)
+            xpupeak_add_isa_tu(avxvnniint16 ${_avxvnniint16})
         endif()
         # AVX10.2 (512-bit): native full-rate bf16 vector FMA (Diamond Rapids).
-        set(_avx10bf16 ${_clpeak_gnuflag}-mavx10.2)
-        check_cxx_compiler_flag("${_avx10bf16}" _clpeak_f_avx10bf16)
-        if(_clpeak_f_avx10bf16)
-            clpeak_add_isa_tu(avx10bf16 ${_avx10bf16})
+        set(_avx10bf16 ${_xpupeak_gnuflag}-mavx10.2)
+        check_cxx_compiler_flag("${_avx10bf16}" _xpupeak_f_avx10bf16)
+        if(_xpupeak_f_avx10bf16)
+            xpupeak_add_isa_tu(avx10bf16 ${_avx10bf16})
         endif()
-        set(_avx512_core ${_clpeak_gnuflag}-mavx512f ${_clpeak_gnuflag}-mavx512bw
-                         ${_clpeak_gnuflag}-mavx512vl ${_clpeak_gnuflag}-mavx512dq)
-        check_cxx_compiler_flag("${_avx512_core}" _clpeak_f_avx512)
-        if(_clpeak_f_avx512)
-            clpeak_add_isa_tu(avx512 ${_avx512_core})
+        set(_avx512_core ${_xpupeak_gnuflag}-mavx512f ${_xpupeak_gnuflag}-mavx512bw
+                         ${_xpupeak_gnuflag}-mavx512vl ${_xpupeak_gnuflag}-mavx512dq)
+        check_cxx_compiler_flag("${_avx512_core}" _xpupeak_f_avx512)
+        if(_xpupeak_f_avx512)
+            xpupeak_add_isa_tu(avx512 ${_avx512_core})
         endif()
         # 512-bit EVEX crypto (Ice Lake+): VAES on the AVX-512 core.
-        set(_vaes ${_avx512_core} ${_clpeak_gnuflag}-mvaes)
-        check_cxx_compiler_flag("${_vaes}" _clpeak_f_vaes)
-        if(_clpeak_f_vaes)
-            clpeak_add_isa_tu(vaes ${_vaes})
+        set(_vaes ${_avx512_core} ${_xpupeak_gnuflag}-mvaes)
+        check_cxx_compiler_flag("${_vaes}" _xpupeak_f_vaes)
+        if(_xpupeak_f_vaes)
+            xpupeak_add_isa_tu(vaes ${_vaes})
         endif()
-        check_cxx_compiler_flag("${_avx512_core} ${_clpeak_gnuflag}-mavx512vnni" _clpeak_f_vnni)
-        if(_clpeak_f_vnni)
-            clpeak_add_isa_tu(avx512vnni ${_avx512_core} ${_clpeak_gnuflag}-mavx512vnni)
+        check_cxx_compiler_flag("${_avx512_core} ${_xpupeak_gnuflag}-mavx512vnni" _xpupeak_f_vnni)
+        if(_xpupeak_f_vnni)
+            xpupeak_add_isa_tu(avx512vnni ${_avx512_core} ${_xpupeak_gnuflag}-mavx512vnni)
         endif()
-        check_cxx_compiler_flag("${_avx512_core} ${_clpeak_gnuflag}-mavx512bf16" _clpeak_f_bf16x)
-        if(_clpeak_f_bf16x)
-            clpeak_add_isa_tu(avx512bf16 ${_avx512_core} ${_clpeak_gnuflag}-mavx512bf16)
+        check_cxx_compiler_flag("${_avx512_core} ${_xpupeak_gnuflag}-mavx512bf16" _xpupeak_f_bf16x)
+        if(_xpupeak_f_bf16x)
+            xpupeak_add_isa_tu(avx512bf16 ${_avx512_core} ${_xpupeak_gnuflag}-mavx512bf16)
         endif()
-        check_cxx_compiler_flag("${_avx512_core} ${_clpeak_gnuflag}-mavx512fp16" _clpeak_f_fp16x)
-        if(_clpeak_f_fp16x)
-            clpeak_add_isa_tu(avx512fp16 ${_avx512_core} ${_clpeak_gnuflag}-mavx512fp16)
+        check_cxx_compiler_flag("${_avx512_core} ${_xpupeak_gnuflag}-mavx512fp16" _xpupeak_f_fp16x)
+        if(_xpupeak_f_fp16x)
+            xpupeak_add_isa_tu(avx512fp16 ${_avx512_core} ${_xpupeak_gnuflag}-mavx512fp16)
         endif()
         # AMX is a 64-bit-only ISA: GCC/clang accept the -mamx-* flags in
         # 32-bit mode, but <immintrin.h> only declares the _tile_* intrinsics
@@ -433,37 +433,37 @@ if(_clpeak_x86)
         # then fail with "_tile_loadd was not declared".  The probes below would
         # catch that too; the explicit gate keeps it obvious.  This is in the non-
         # real-MSVC branch, so it covers Linux clang/gcc AND Windows clang-cl
-        # (the -mamx-* flags route through ${_clpeak_gnuflag}'s /clang: prefix);
+        # (the -mamx-* flags route through ${_xpupeak_gnuflag}'s /clang: prefix);
         # the AMX XSTATE grant is arch_prctl on Linux / EnableProcessOptional-
         # XStateFeatures on Windows (cpu_dispatch.cpp).  Real cl.exe is core-
         # only and never reaches here.
         if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(_amx ${_avx512_core} ${_clpeak_gnuflag}-mamx-tile
-                     ${_clpeak_gnuflag}-mamx-int8 ${_clpeak_gnuflag}-mamx-bf16)
+            set(_amx ${_avx512_core} ${_xpupeak_gnuflag}-mamx-tile
+                     ${_xpupeak_gnuflag}-mamx-int8 ${_xpupeak_gnuflag}-mamx-bf16)
             # int8 + bf16 share one TU, so both ops have to assemble for it to
             # build -- probe each rather than trusting the flags.
-            clpeak_check_amx_tile_op(_clpeak_f_amx_i8   _tile_dpbssd   ${_amx})
-            clpeak_check_amx_tile_op(_clpeak_f_amx_bf16 _tile_dpbf16ps ${_amx})
-            if(_clpeak_f_amx_i8 AND _clpeak_f_amx_bf16)
-                clpeak_add_isa_tu(amx ${_amx})
+            xpupeak_check_amx_tile_op(_xpupeak_f_amx_i8   _tile_dpbssd   ${_amx})
+            xpupeak_check_amx_tile_op(_xpupeak_f_amx_bf16 _tile_dpbf16ps ${_amx})
+            if(_xpupeak_f_amx_i8 AND _xpupeak_f_amx_bf16)
+                xpupeak_add_isa_tu(amx ${_amx})
             endif()
             # Newer AMX dtypes as their own TUs (each is a separate CPUID
             # feature + a newer compiler; runtime-gated so an older CPU never
             # issues them).  amx-tile is the common base.
-            set(_amxfp16 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp16)
-            clpeak_check_amx_tile_op(_clpeak_f_amxfp16 _tile_dpfp16ps ${_amxfp16})
-            if(_clpeak_f_amxfp16)
-                clpeak_add_isa_tu(amxfp16 ${_amxfp16})
+            set(_amxfp16 ${_xpupeak_gnuflag}-mamx-tile ${_xpupeak_gnuflag}-mamx-fp16)
+            xpupeak_check_amx_tile_op(_xpupeak_f_amxfp16 _tile_dpfp16ps ${_amxfp16})
+            if(_xpupeak_f_amxfp16)
+                xpupeak_add_isa_tu(amxfp16 ${_amxfp16})
             endif()
-            set(_amxfp8 ${_clpeak_gnuflag}-mamx-tile ${_clpeak_gnuflag}-mamx-fp8)
-            clpeak_check_amx_tile_op(_clpeak_f_amxfp8 _tile_dphf8ps ${_amxfp8})
-            if(_clpeak_f_amxfp8)
-                clpeak_add_isa_tu(amxfp8 ${_amxfp8})
+            set(_amxfp8 ${_xpupeak_gnuflag}-mamx-tile ${_xpupeak_gnuflag}-mamx-fp8)
+            xpupeak_check_amx_tile_op(_xpupeak_f_amxfp8 _tile_dphf8ps ${_amxfp8})
+            if(_xpupeak_f_amxfp8)
+                xpupeak_add_isa_tu(amxfp8 ${_amxfp8})
             endif()
         endif()
     endif()
 
-elseif(_clpeak_arm64 AND NOT APPLE)
+elseif(_xpupeak_arm64 AND NOT APPLE)
     # Linux / Android / Windows-clang aarch64: NEON baseline from the
     # generic TU; advanced features via -march=armv8.x-a+<feat> TUs,
     # runtime-gated (HWCAP on Linux, registry ID registers on Windows).
@@ -471,26 +471,26 @@ elseif(_clpeak_arm64 AND NOT APPLE)
     # so it gets the generic (NEON-floor) TU only.
     # (Apple takes the separate elseif(APPLE) branch below: the apple-m1 floor
     # plus a bf16/i8mm feature-TU pair.)
-    if(NOT _clpeak_real_msvc)
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+fp16"    _clpeak_f_a_fp16)
-        if(_clpeak_f_a_fp16)
-            clpeak_add_isa_tu(fp16 ${_clpeak_gnuflag}-march=armv8.2-a+fp16)
+    if(NOT _xpupeak_real_msvc)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.2-a+fp16"    _xpupeak_f_a_fp16)
+        if(_xpupeak_f_a_fp16)
+            xpupeak_add_isa_tu(fp16 ${_xpupeak_gnuflag}-march=armv8.2-a+fp16)
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+fp16fml" _clpeak_f_a_fhm)
-        if(_clpeak_f_a_fhm)
-            clpeak_add_isa_tu(fp16fml ${_clpeak_gnuflag}-march=armv8.2-a+fp16fml)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.2-a+fp16fml" _xpupeak_f_a_fhm)
+        if(_xpupeak_f_a_fhm)
+            xpupeak_add_isa_tu(fp16fml ${_xpupeak_gnuflag}-march=armv8.2-a+fp16fml)
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+dotprod" _clpeak_f_a_dp)
-        if(_clpeak_f_a_dp)
-            clpeak_add_isa_tu(dotprod ${_clpeak_gnuflag}-march=armv8.2-a+dotprod)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.2-a+dotprod" _xpupeak_f_a_dp)
+        if(_xpupeak_f_a_dp)
+            xpupeak_add_isa_tu(dotprod ${_xpupeak_gnuflag}-march=armv8.2-a+dotprod)
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+bf16"    _clpeak_f_a_bf16)
-        if(_clpeak_f_a_bf16)
-            clpeak_add_isa_tu(bf16 ${_clpeak_gnuflag}-march=armv8.6-a+bf16)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.6-a+bf16"    _xpupeak_f_a_bf16)
+        if(_xpupeak_f_a_bf16)
+            xpupeak_add_isa_tu(bf16 ${_xpupeak_gnuflag}-march=armv8.6-a+bf16)
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+i8mm"    _clpeak_f_a_i8mm)
-        if(_clpeak_f_a_i8mm)
-            clpeak_add_isa_tu(i8mm ${_clpeak_gnuflag}-march=armv8.6-a+i8mm)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.6-a+i8mm"    _xpupeak_f_a_i8mm)
+        if(_xpupeak_f_a_i8mm)
+            xpupeak_add_isa_tu(i8mm ${_xpupeak_gnuflag}-march=armv8.6-a+i8mm)
         endif()
         # Crypto TUs: +aes = the AES instructions, +sha2 = SHA-256, +sha3 = the
         # SHA-512 (and SHA-3) instructions, +crc = CRC32/CRC32C.  All fixed-
@@ -516,112 +516,112 @@ elseif(_clpeak_arm64 AND NOT APPLE)
             set(_sha2_ext "+sha2")
             set(_sha3_ext "+sha3")
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a${_aes_ext}"    _clpeak_f_a_aes)
-        if(_clpeak_f_a_aes)
-            clpeak_add_isa_tu(aes ${_clpeak_gnuflag}-march=armv8-a${_aes_ext})
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8-a${_aes_ext}"    _xpupeak_f_a_aes)
+        if(_xpupeak_f_a_aes)
+            xpupeak_add_isa_tu(aes ${_xpupeak_gnuflag}-march=armv8-a${_aes_ext})
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a${_sha2_ext}"   _clpeak_f_a_sha2)
-        if(_clpeak_f_a_sha2)
-            clpeak_add_isa_tu(sha ${_clpeak_gnuflag}-march=armv8-a${_sha2_ext})
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8-a${_sha2_ext}"   _xpupeak_f_a_sha2)
+        if(_xpupeak_f_a_sha2)
+            xpupeak_add_isa_tu(sha ${_xpupeak_gnuflag}-march=armv8-a${_sha2_ext})
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a${_sha3_ext}" _clpeak_f_a_sha3)
-        if(_clpeak_f_a_sha3)
-            clpeak_add_isa_tu(sha512 ${_clpeak_gnuflag}-march=armv8.2-a${_sha3_ext})
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.2-a${_sha3_ext}" _xpupeak_f_a_sha3)
+        if(_xpupeak_f_a_sha3)
+            xpupeak_add_isa_tu(sha512 ${_xpupeak_gnuflag}-march=armv8.2-a${_sha3_ext})
         endif()
-        check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8-a+crc"       _clpeak_f_a_crc)
-        if(_clpeak_f_a_crc)
-            clpeak_add_isa_tu(crc ${_clpeak_gnuflag}-march=armv8-a+crc)
+        check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8-a+crc"       _xpupeak_f_a_crc)
+        if(_xpupeak_f_a_crc)
+            xpupeak_add_isa_tu(crc ${_xpupeak_gnuflag}-march=armv8-a+crc)
         endif()
         # NEON fp8 4-way dot (FEAT_FP8DOT4; NVIDIA Vera first).  mfloat8x16_t /
         # fpm_t are fixed-width types (no sizeless-mangling issue), so this TU
         # is fine on Windows clang-cl too -- though Windows detection leaves
         # fp8dot4 false today, so it only lights up on Linux hosts.
-        clpeak_check_neon_fp8(_clpeak_f_fp8dot "${_clpeak_gnuflag}-march=armv8.6-a+fp8dot4")
-        if(_clpeak_f_fp8dot)
-            clpeak_add_isa_tu(fp8dot ${_clpeak_gnuflag}-march=armv8.6-a+fp8dot4)
+        xpupeak_check_neon_fp8(_xpupeak_f_fp8dot "${_xpupeak_gnuflag}-march=armv8.6-a+fp8dot4")
+        if(_xpupeak_f_fp8dot)
+            xpupeak_add_isa_tu(fp8dot ${_xpupeak_gnuflag}-march=armv8.6-a+fp8dot4)
         endif()
         # SVE (vector-length-agnostic): base compute + int8 SDOT from a plain
         # +sve TU (covers Graviton3/Neoverse V1 without SVE2, and every SVE2
         # core: Neoverse V2, Grace/Vera, Cortex-X925, Oryon Gen3).  BFDOT/
         # BFMMLA and SMMLA ride in separate feature TUs (present on V1 too),
         # runtime-gated by HWCAP2_SVEBF16 / HWCAP2_SVEI8MM.  Apple Silicon has
-        # no non-streaming SVE, so this whole block is NOT APPLE.  _clpeak_sve_ok
+        # no non-streaming SVE, so this whole block is NOT APPLE.  _xpupeak_sve_ok
         # is OFF on Windows by default (clang-cl SVE-mangling gap -- see the
         # toggle above).
-        if(_clpeak_sve_ok)
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.2-a+sve"      _clpeak_f_sve)
-            if(_clpeak_f_sve)
-                clpeak_add_isa_tu(sve ${_clpeak_gnuflag}-march=armv8.2-a+sve)
+        if(_xpupeak_sve_ok)
+            check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.2-a+sve"      _xpupeak_f_sve)
+            if(_xpupeak_f_sve)
+                xpupeak_add_isa_tu(sve ${_xpupeak_gnuflag}-march=armv8.2-a+sve)
             endif()
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16" _clpeak_f_svebf16)
-            if(_clpeak_f_svebf16)
-                clpeak_add_isa_tu(svebf16 ${_clpeak_gnuflag}-march=armv8.6-a+sve+bf16)
+            check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.6-a+sve+bf16" _xpupeak_f_svebf16)
+            if(_xpupeak_f_svebf16)
+                xpupeak_add_isa_tu(svebf16 ${_xpupeak_gnuflag}-march=armv8.6-a+sve+bf16)
             endif()
-            check_cxx_compiler_flag("${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm" _clpeak_f_svei8mm)
-            if(_clpeak_f_svei8mm)
-                clpeak_add_isa_tu(svei8mm ${_clpeak_gnuflag}-march=armv8.6-a+sve+i8mm)
+            check_cxx_compiler_flag("${_xpupeak_gnuflag}-march=armv8.6-a+sve+i8mm" _xpupeak_f_svei8mm)
+            if(_xpupeak_f_svei8mm)
+                xpupeak_add_isa_tu(svei8mm ${_xpupeak_gnuflag}-march=armv8.6-a+sve+i8mm)
             endif()
             # SVE2 form of the fp8 4-way dot (Vera's headline path: 6x128-bit
             # SVE2 pipes with native FDOT).
-            clpeak_check_sve_fp8(_clpeak_f_svefp8dot "${_clpeak_gnuflag}-march=armv8.6-a+sve2+fp8dot4")
-            if(_clpeak_f_svefp8dot)
-                clpeak_add_isa_tu(svefp8dot ${_clpeak_gnuflag}-march=armv8.6-a+sve2+fp8dot4)
+            xpupeak_check_sve_fp8(_xpupeak_f_svefp8dot "${_xpupeak_gnuflag}-march=armv8.6-a+sve2+fp8dot4")
+            if(_xpupeak_f_svefp8dot)
+                xpupeak_add_isa_tu(svefp8dot ${_xpupeak_gnuflag}-march=armv8.6-a+sve2+fp8dot4)
             endif()
             # SME (streaming matrix engine): Snapdragon X2 Elite / 8 Elite Gen 5
             # (Linux/Android), Grace/Vera successors.  +sme deliberately does NOT
             # imply +sve, so this TU's non-streaming code stays NEON-only (its
             # SVE kernels are excluded via !__ARM_FEATURE_SME) -- required for
-            # any SME-without-SVE core.  Behind _clpeak_sve_ok: same clang-cl
+            # any SME-without-SVE core.  Behind _xpupeak_sve_ok: same clang-cl
             # sizeless-type mangling gap as SVE on Windows.
-            clpeak_check_sme(_clpeak_f_sme "${_clpeak_gnuflag}-march=armv8.6-a+sme")
-            if(_clpeak_f_sme)
-                clpeak_add_isa_tu(sme ${_clpeak_gnuflag}-march=armv8.6-a+sme)
+            xpupeak_check_sme(_xpupeak_f_sme "${_xpupeak_gnuflag}-march=armv8.6-a+sme")
+            if(_xpupeak_f_sme)
+                xpupeak_add_isa_tu(sme ${_xpupeak_gnuflag}-march=armv8.6-a+sme)
             endif()
-            clpeak_check_sme_f64(_clpeak_f_smef64 "${_clpeak_gnuflag}-march=armv8.6-a+sme-f64f64")
-            if(_clpeak_f_smef64)
-                set(CLPEAK_CPU_TU_DEFS CLPEAK_SME_F64F64)
-                clpeak_add_isa_tu(smef64 ${_clpeak_gnuflag}-march=armv8.6-a+sme-f64f64)
-                set(CLPEAK_CPU_TU_DEFS "")
+            xpupeak_check_sme_f64(_xpupeak_f_smef64 "${_xpupeak_gnuflag}-march=armv8.6-a+sme-f64f64")
+            if(_xpupeak_f_smef64)
+                set(XPUPEAK_CPU_TU_DEFS XPUPEAK_SME_F64F64)
+                xpupeak_add_isa_tu(smef64 ${_xpupeak_gnuflag}-march=armv8.6-a+sme-f64f64)
+                set(XPUPEAK_CPU_TU_DEFS "")
             endif()
         endif()
     endif()
 
-elseif(_clpeak_arm64 AND APPLE)
+elseif(_xpupeak_arm64 AND APPLE)
     # Apple Silicon: fp16 / dotprod / fp16fml already ride in the apple-m1 generic
     # floor above (and are pushed to the menu from there), so building them again
     # as feature TUs would only duplicate those rows.  Add ONLY the bf16 (BF16 dot
     # + BFMMLA) and i8mm (SMMLA) TUs, which the M1 floor lacks, so M2+ gets those
     # rows via the portable path -- runtime-gated by sysctlbyname(FEAT_BF16/I8MM),
     # so they stay Unsupported on an M1.  AppleClang accepts the same -march
-    # feature flags as the Linux arm64 path (no ${_clpeak_gnuflag} prefix needed --
+    # feature flags as the Linux arm64 path (no ${_xpupeak_gnuflag} prefix needed --
     # Apple is never real-MSVC).  These flags don't enable FullFP16, so the TUs
     # don't re-emit the floor's fp16 kernel.  No SVE (Apple has no non-streaming
     # SVE -- that's a future SME backend).
-    check_cxx_compiler_flag("-march=armv8.6-a+bf16" _clpeak_f_apple_bf16)
-    if(_clpeak_f_apple_bf16)
-        clpeak_add_isa_tu(bf16 -march=armv8.6-a+bf16)
+    check_cxx_compiler_flag("-march=armv8.6-a+bf16" _xpupeak_f_apple_bf16)
+    if(_xpupeak_f_apple_bf16)
+        xpupeak_add_isa_tu(bf16 -march=armv8.6-a+bf16)
     endif()
-    check_cxx_compiler_flag("-march=armv8.6-a+i8mm" _clpeak_f_apple_i8mm)
-    if(_clpeak_f_apple_i8mm)
-        clpeak_add_isa_tu(i8mm -march=armv8.6-a+i8mm)
+    check_cxx_compiler_flag("-march=armv8.6-a+i8mm" _xpupeak_f_apple_i8mm)
+    if(_xpupeak_f_apple_i8mm)
+        xpupeak_add_isa_tu(i8mm -march=armv8.6-a+i8mm)
     endif()
     # Crypto TUs (every Apple Silicon part has AES/SHA256/SHA512/CRC32;
     # runtime-gated by the sysctl FEAT_* keys anyway).  Same flags as Linux.
-    check_cxx_compiler_flag("-march=armv8-a+aes" _clpeak_f_apple_aes)
-    if(_clpeak_f_apple_aes)
-        clpeak_add_isa_tu(aes -march=armv8-a+aes)
+    check_cxx_compiler_flag("-march=armv8-a+aes" _xpupeak_f_apple_aes)
+    if(_xpupeak_f_apple_aes)
+        xpupeak_add_isa_tu(aes -march=armv8-a+aes)
     endif()
-    check_cxx_compiler_flag("-march=armv8-a+sha2" _clpeak_f_apple_sha2)
-    if(_clpeak_f_apple_sha2)
-        clpeak_add_isa_tu(sha -march=armv8-a+sha2)
+    check_cxx_compiler_flag("-march=armv8-a+sha2" _xpupeak_f_apple_sha2)
+    if(_xpupeak_f_apple_sha2)
+        xpupeak_add_isa_tu(sha -march=armv8-a+sha2)
     endif()
-    check_cxx_compiler_flag("-march=armv8.2-a+sha3" _clpeak_f_apple_sha3)
-    if(_clpeak_f_apple_sha3)
-        clpeak_add_isa_tu(sha512 -march=armv8.2-a+sha3)
+    check_cxx_compiler_flag("-march=armv8.2-a+sha3" _xpupeak_f_apple_sha3)
+    if(_xpupeak_f_apple_sha3)
+        xpupeak_add_isa_tu(sha512 -march=armv8.2-a+sha3)
     endif()
-    check_cxx_compiler_flag("-march=armv8-a+crc" _clpeak_f_apple_crc)
-    if(_clpeak_f_apple_crc)
-        clpeak_add_isa_tu(crc -march=armv8-a+crc)
+    check_cxx_compiler_flag("-march=armv8-a+crc" _xpupeak_f_apple_crc)
+    if(_xpupeak_f_apple_crc)
+        xpupeak_add_isa_tu(crc -march=armv8-a+crc)
     endif()
     # SME (M4+; SVL=512b, replaced Apple's private AMX).  Apple Silicon has NO
     # non-streaming SVE, so SME's streaming mode is its only scalable-vector
@@ -629,21 +629,21 @@ elseif(_clpeak_arm64 AND APPLE)
     # kernels are the only Z-register code it contributes.  Runtime-gated by
     # sysctl FEAT_SME, so M1-M3 just show Unsupported rows.  The fp64 outer
     # product (FEAT_SME_F64F64, present on M4) is its own TU + runtime gate.
-    clpeak_check_sme(_clpeak_f_apple_sme "-march=armv8.6-a+sme")
-    if(_clpeak_f_apple_sme)
-        clpeak_add_isa_tu(sme -march=armv8.6-a+sme)
+    xpupeak_check_sme(_xpupeak_f_apple_sme "-march=armv8.6-a+sme")
+    if(_xpupeak_f_apple_sme)
+        xpupeak_add_isa_tu(sme -march=armv8.6-a+sme)
     endif()
-    clpeak_check_sme_f64(_clpeak_f_apple_smef64 "-march=armv8.6-a+sme-f64f64")
-    if(_clpeak_f_apple_smef64)
-        set(CLPEAK_CPU_TU_DEFS CLPEAK_SME_F64F64)
-        clpeak_add_isa_tu(smef64 -march=armv8.6-a+sme-f64f64)
-        set(CLPEAK_CPU_TU_DEFS "")
+    xpupeak_check_sme_f64(_xpupeak_f_apple_smef64 "-march=armv8.6-a+sme-f64f64")
+    if(_xpupeak_f_apple_smef64)
+        set(XPUPEAK_CPU_TU_DEFS XPUPEAK_SME_F64F64)
+        xpupeak_add_isa_tu(smef64 -march=armv8.6-a+sme-f64f64)
+        set(XPUPEAK_CPU_TU_DEFS "")
     endif()
     # NEON fp8 dot: no Apple core ships FEAT_FP8DOT4 yet; built (when the
     # toolchain can) + runtime-gated so a future core lights it up.
-    clpeak_check_neon_fp8(_clpeak_f_apple_fp8dot "-march=armv8.6-a+fp8dot4")
-    if(_clpeak_f_apple_fp8dot)
-        clpeak_add_isa_tu(fp8dot -march=armv8.6-a+fp8dot4)
+    xpupeak_check_neon_fp8(_xpupeak_f_apple_fp8dot "-march=armv8.6-a+fp8dot4")
+    if(_xpupeak_f_apple_fp8dot)
+        xpupeak_add_isa_tu(fp8dot -march=armv8.6-a+fp8dot4)
     endif()
 endif()
 # (unknown arch: the generic TU above is the scalar baseline)

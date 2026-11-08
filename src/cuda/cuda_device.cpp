@@ -24,7 +24,7 @@ static const char *cuErrStr(CUresult r)
     CUresult _r = (call);                                                             \
     if (_r != CUDA_SUCCESS)                                                           \
     {                                                                                 \
-      CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r));      \
+      XPUPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStr(_r));     \
       return false;                                                                   \
     }                                                                                 \
   } while (0)
@@ -164,11 +164,11 @@ CudaKernel CudaDevice::getKernel(const cuda_kernels::Blob &blob,
   else
   {
     // A stub: nvcc never ran for this kernel, because the build targeted none
-    // of its arch group (the toolkit supports none of it, or CLPEAK_CUDA_ARCHS
+    // of its arch group (the toolkit supports none of it, or XPUPEAK_CUDA_ARCHS
     // leaves it out).
     if (blob.len == 0 || blob.data == nullptr)
     {
-      CLPEAK_VLOG("%s is an empty stub: no fatbin was built for it\n", blob.name);
+      XPUPEAK_VLOG("%s is an empty stub: no fatbin was built for it\n", blob.name);
       k.reason = std::string(blob.name) + " was not built: CUDA " +
                  info.runtimeVersion + " targeted none of its architectures";
       return k;
@@ -179,7 +179,7 @@ CudaKernel CudaDevice::getKernel(const cuda_kernels::Blob &blob,
     CUresult lr = cuModuleLoadData(&mod, blob.data);
     if (lr != CUDA_SUCCESS)
     {
-      CLPEAK_VLOG("cuModuleLoadData(%s) failed: %s\n", blob.name, cuErrStr(lr));
+      XPUPEAK_VLOG("cuModuleLoadData(%s) failed: %s\n", blob.name, cuErrStr(lr));
       if (lr == CUDA_ERROR_NO_BINARY_FOR_GPU)
         k.reason = std::string(blob.name) + " was not built for " + info.archName;
       else
@@ -192,8 +192,8 @@ CudaKernel CudaDevice::getKernel(const cuda_kernels::Blob &blob,
   CUresult r = cuModuleGetFunction(&k.fn, mod, kernelName);
   if (r != CUDA_SUCCESS)
   {
-    CLPEAK_VLOG("cuModuleGetFunction(%s in %s) failed: %s\n",
-                kernelName, blob.name, cuErrStr(r));
+    XPUPEAK_VLOG("cuModuleGetFunction(%s in %s) failed: %s\n",
+                 kernelName, blob.name, cuErrStr(r));
     k.fn = nullptr;
     k.reason = std::string("kernel missing from its fatbin: ") + cuErrStr(r);
     return k;

@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../ffi/clpeak_bindings.dart' show OnnxEpLibrary;
+import '../ffi/xpupeak_bindings.dart' show OnnxEpLibrary;
 
 /// App settings: the theme mode, which ONNX Runtime and LiteRT libraries the
 /// two backends load, and whether runs record verbose diagnostics.

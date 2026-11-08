@@ -21,10 +21,10 @@ function(compile_shaders)
   # fp8); the glslc bundled with the NDK is frozen at an old shaderc/glslang
   # (v2022.x as of NDK r30) that rejects them.
   #
-  # An explicit -DCLPEAK_GLSLC=/path/to/glslc override wins over everything.
+  # An explicit -DXPUPEAK_GLSLC=/path/to/glslc override wins over everything.
   set(_shader_tool_hints "$ENV{VULKAN_SDK}/bin" /usr/local/bin /opt/homebrew/bin)
-  if(DEFINED CLPEAK_GLSLC)
-    set(GLSLC "${CLPEAK_GLSLC}")
+  if(DEFINED XPUPEAK_GLSLC)
+    set(GLSLC "${XPUPEAK_GLSLC}")
   else()
     find_program(GLSLC glslc HINTS ${_shader_tool_hints})
   endif()

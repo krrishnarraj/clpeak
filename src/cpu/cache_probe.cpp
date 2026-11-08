@@ -630,7 +630,7 @@ void probeCacheSizes(cpu_device_info_t &info, CpuThreadPool &pool)
   // Far enough for the largest last-level caches there are -- a Grace's
   // 114 MB, a 3D V-Cache die's 96 MB -- before the sweep stops on its own,
   // which on a phone it does near 64 MB.
-  const uint64_t cap = std::max<uint64_t>(clpeak::memoryBudget(1ull << 30, 8), 64ull << 20);
+  const uint64_t cap = std::max<uint64_t>(xpupeak::memoryBudget(1ull << 30, 8), 64ull << 20);
   const auto deadline = Clock::now() + std::chrono::seconds(60);
 
   for (ProbeClass &pc : classes)
@@ -662,8 +662,8 @@ void probeCacheSizes(cpu_device_info_t &info, CpuThreadPool &pool)
           there = there && sched_getcpu() == pc.cpu;
 #endif
         });
-        const bool held = clpeak::holdGate();
-        if (clpeak::cancelRequested() || !ok)
+        const bool held = xpupeak::holdGate();
+        if (xpupeak::cancelRequested() || !ok)
           return false;
         if (there && !held)
         {
@@ -841,12 +841,12 @@ void probeCacheSizes(cpu_device_info_t &info, CpuThreadPool &pool)
         part += std::string(" ") + name[lvl] + " " +
                 (pc.found[lvl] ? sizeText((double)pc.size[lvl]) : std::string("not found"));
     said += (said.empty() ? "" : "; ") + part;
-    CLPEAK_VLOG("[cpu] cache sweep on cpu%d, ns per load:%s\n", pc.cpu, pc.curve.c_str());
+    XPUPEAK_VLOG("[cpu] cache sweep on cpu%d, ns per load:%s\n", pc.cpu, pc.curve.c_str());
     if (!pc.why.empty())
-      CLPEAK_VLOG("[cpu] cache sweep on cpu%d stopped short: %s\n", pc.cpu, pc.why.c_str());
+      XPUPEAK_VLOG("[cpu] cache sweep on cpu%d stopped short: %s\n", pc.cpu, pc.why.c_str());
   }
-  CLPEAK_LOG(Info, "[cpu] the OS gives no size for some caches; measured where a dependent-load "
-             "walk slows down: %s", said.c_str());
+  XPUPEAK_LOG(Info, "[cpu] the OS gives no size for some caches; measured where a dependent-load "
+              "walk slows down: %s", said.c_str());
 }
 
 #endif // ENABLE_CPU

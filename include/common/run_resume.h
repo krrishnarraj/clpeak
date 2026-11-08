@@ -1,5 +1,5 @@
-#ifndef CLPEAK_RUN_RESUME_H
-#define CLPEAK_RUN_RESUME_H
+#ifndef XPUPEAK_RUN_RESUME_H
+#define XPUPEAK_RUN_RESUME_H
 
 #include <string>
 #include <vector>
@@ -31,7 +31,7 @@ class RunCheckpoint;
 // Only the build that started a run continues it, on the OS release it
 // started on: another build can run other tests in another order, and the
 // parts would not be one run.  Both hosts (src/cli/main.cpp,
-// src/ffi/clpeak_ffi.cpp) go through these three calls in this order, and
+// src/ffi/xpupeak_ffi.cpp) go through these three calls in this order, and
 // take this part's `resumed` record from the checkpoint once it is over
 // (RunCheckpoint::partRecord).
 
@@ -64,4 +64,4 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
 void seedResume(const ResumePlan &plan, const CliOptions &opts, RunDocument &doc,
                 RunLog &log, RunCheckpoint &checkpoint);
 
-#endif  // CLPEAK_RUN_RESUME_H
+#endif  // XPUPEAK_RUN_RESUME_H

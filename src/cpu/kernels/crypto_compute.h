@@ -22,7 +22,7 @@
 //     data-independent, and we are measuring the pipes, not implementing
 //     verified crypto.  The SHA kernels derive the message block from the
 //     running state so the schedule instructions can't be hoisted either.
-// Guarded by CLPEAK_CORE_ONLY like lowp_compute.h (cl.exe TUs are core-only;
+// Guarded by XPUPEAK_CORE_ONLY like lowp_compute.h (cl.exe TUs are core-only;
 // the crypto TUs are only built by clang/gcc/clang-cl anyway).
 // ===========================================================================
 
@@ -35,9 +35,9 @@
 #include <arm_acle.h>
 #endif
 
-#ifndef CLPEAK_CORE_ONLY
+#ifndef XPUPEAK_CORE_ONLY
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 // ---- AES-128 encrypt --------------------------------------------------------
@@ -363,9 +363,9 @@ static double runCrc32cChain(uint64_t outer)
 #endif
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // CLPEAK_CORE_ONLY
+#endif // XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_CRYPTO_COMPUTE_H

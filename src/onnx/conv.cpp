@@ -48,7 +48,7 @@ namespace
   // Everything a rung holds at once (onnxHeldBytes), capped at a quarter of
   // physical memory and at 4 GB: three copies of a 1024-square fp32 map,
   // the largest a provider with memory of its own is given.
-  static uint64_t maxRungBytes() { return clpeak::memoryBudget(4ull << 30); }
+  static uint64_t maxRungBytes() { return xpupeak::memoryBudget(4ull << 30); }
 
   constexpr double kMaxIterUs = 2.0e6;
   constexpr unsigned int kSizeBudgetUs = 2000000;
@@ -285,7 +285,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     for (const Shape &v : kShapes)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       const std::string row = std::string(dt.label) + "_" + v.label;
@@ -311,7 +311,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (const std::string wrong = wrongAnswer(rt, ep, std::string(dt.label) + "_conv1x1");
           !wrong.empty())
       {
-        CLPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(), row.c_str(), wrong.c_str());
+        XPUPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(), row.c_str(), wrong.c_str());
         test.skip(row, ResultStatus::Error, wrong, desc);
         continue;
       }
@@ -333,15 +333,15 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // A failed size is logged whatever the row ends up saying: above a
       // measured one, the row publishes the sizes below it (as in gemm.cpp).
       auto logFailure = [&](int64_t sp, const char *what, const std::string &why) {
-        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s: %s\n",
-                    ep.providerKey.c_str(), row.c_str(), (long long)sp,
-                    (long long)sp, what,
-                    why.empty() ? "no reason given" : why.c_str());
+        XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s: %s\n",
+                     ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                     (long long)sp, what,
+                     why.empty() ? "no reason given" : why.c_str());
       };
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         // The feature map and the filter are constants (onnxHeldBytes); the
         // scaled copy of the map and the result, a quarter of it at stride
@@ -357,20 +357,20 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const uint64_t budget = maxRungBytes();
         if (bytes > budget)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB of a %llu MB "
-                      "budget, stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp,
-                      (unsigned long long)(bytes >> 20),
-                      (unsigned long long)(budget >> 20));
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld needs %llu MB of a %llu MB "
+                       "budget, stopping\n",
+                       ep.providerKey.c_str(), row.c_str(),
+                       (long long)sp, (long long)sp,
+                       (unsigned long long)(bytes >> 20),
+                       (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would take too long, "
-                      "stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would take too long, "
+                       "stopping\n",
+                       ep.providerKey.c_str(), row.c_str(),
+                       (long long)sp, (long long)sp);
           break;
         }
         // On a GPU a pass is also held to what one run may keep the device
@@ -378,12 +378,12 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (lastRate > 0.0 && runCapUs > 0.0 &&
             convFlops(v, sp) / lastRate > runCapUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would keep the GPU busy "
-                      "~%.2f s a pass, past --max-time-ml-gpu (%.2f s), "
-                      "stopping\n",
-                      ep.providerKey.c_str(), row.c_str(), (long long)sp,
-                      (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
-                      runCapUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld would keep the GPU busy "
+                       "~%.2f s a pass, past --max-time-ml-gpu (%.2f s), "
+                       "stopping\n",
+                       ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                       (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
+                       runCapUs / 1.0e6);
           break;
         }
         // The compile cap, checked before paying for the build
@@ -393,12 +393,12 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (sp > kMinSpatial && prevCreateUs > 0.0 &&
             predictedCreateUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s%s > "
-                      "%.1f s, stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp, predictedCreateUs / 1.0e6,
-                      strikes > 0 ? " (after a size that did not gain)" : "",
-                      kOnnxMaxCreateUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld predicted create %.1f s%s > "
+                       "%.1f s, stopping\n",
+                       ep.providerKey.c_str(), row.c_str(),
+                       (long long)sp, (long long)sp, predictedCreateUs / 1.0e6,
+                       strikes > 0 ? " (after a size that did not gain)" : "",
+                       kOnnxMaxCreateUs / 1.0e6);
           break;
         }
 
@@ -414,17 +414,17 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         auto createEnd = std::chrono::steady_clock::now();
         double createUs = std::chrono::duration<double, std::micro>(
                               createEnd - createStart).count();
-        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld session create %.1f s\n",
-                    ep.providerKey.c_str(), row.c_str(),
-                    (long long)sp, (long long)sp, createUs / 1.0e6);
+        XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld session create %.1f s\n",
+                     ep.providerKey.c_str(), row.c_str(),
+                     (long long)sp, (long long)sp, createUs / 1.0e6);
         if (!c.session)
         {
           if (firstErr.empty())
             firstErr = c.error;
           if (c.offDevice)
           {
-            CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s\n", ep.providerKey.c_str(),
-                        row.c_str(), (long long)sp, (long long)sp, c.error.c_str());
+            XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld %s\n", ep.providerKey.c_str(),
+                         row.c_str(), (long long)sp, (long long)sp, c.error.c_str());
             if (rungs > 0)
             {
               offDeviceAbove = sp;
@@ -449,8 +449,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           const char *want = onnxProfileTypeName(dt.dtype);
           if (want[0] && !ranIn.empty() && ranIn != want)
           {
-            CLPEAK_VLOG("onnx-conv[%s/%s]: ran in %s, not %s\n",
-                        ep.providerKey.c_str(), row.c_str(), ranIn.c_str(), want);
+            XPUPEAK_VLOG("onnx-conv[%s/%s]: ran in %s, not %s\n",
+                         ep.providerKey.c_str(), row.c_str(), ranIn.c_str(), want);
             ranWider = ranIn;
           }
         }
@@ -501,8 +501,8 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           break;
         if (!wrong.empty())
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(),
-                      row.c_str(), wrong.c_str());
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(),
+                       row.c_str(), wrong.c_str());
           best = 0.0;
           firstErr = wrong;
           errStatus = ResultStatus::Error;
@@ -515,9 +515,9 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const double flops = convFlops(v, sp);
         const double rate = flops * 1.0e6 / mean_us;
         lastRate = flops / mean_us;
-        CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld -> %.3f\n",
-                    ep.providerKey.c_str(), row.c_str(),
-                    (long long)sp, (long long)sp, rate);
+        XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld -> %.3f\n",
+                     ep.providerKey.c_str(), row.c_str(),
+                     (long long)sp, (long long)sp, rate);
 
         // Climb to the plateau (kOnnxPlateauGain, one grace size).
         if (rate > best * kOnnxPlateauGain)
@@ -535,17 +535,17 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           }
           if (ladderDropEnds(rate, best, 4.0 * mean_us))
           {
-            CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld fell to %.0f%% of the best, and the next "
-                        "size would take ~%.0f s a pass, stopping\n",
-                        ep.providerKey.c_str(), row.c_str(), (long long)sp, (long long)sp,
-                        100.0 * rate / best, 4.0 * mean_us / 1.0e6);
+            XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld fell to %.0f%% of the best, and the next "
+                         "size would take ~%.0f s a pass, stopping\n",
+                         ep.providerKey.c_str(), row.c_str(), (long long)sp, (long long)sp,
+                         100.0 * rate / best, 4.0 * mean_us / 1.0e6);
             break;
           }
           if (++strikes >= kOnnxPlateauStrikes)
           {
-            CLPEAK_VLOG("onnx-conv[%s/%s]: plateau past %lldx%lld\n",
-                        ep.providerKey.c_str(), row.c_str(),
-                        (long long)bestSpatial, (long long)bestSpatial);
+            XPUPEAK_VLOG("onnx-conv[%s/%s]: plateau past %lldx%lld\n",
+                         ep.providerKey.c_str(), row.c_str(),
+                         (long long)bestSpatial, (long long)bestSpatial);
             break;
           }
         }
@@ -557,18 +557,18 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         // allowed to, and the next feature map is four times the work.
         if (per_iter_us > kMaxIterUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.1f s per pass, "
-                      "stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp, per_iter_us / 1.0e6);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.1f s per pass, "
+                       "stopping\n",
+                       ep.providerKey.c_str(), row.c_str(),
+                       (long long)sp, (long long)sp, per_iter_us / 1.0e6);
           break;
         }
         if (runCapUs > 0.0 && per_iter_us > runCapUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.2f s a pass, "
-                      "past --max-time-ml-gpu (%.2f s), stopping\n",
-                      ep.providerKey.c_str(), row.c_str(), (long long)sp,
-                      (long long)sp, per_iter_us / 1.0e6, runCapUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld measured %.2f s a pass, "
+                       "past --max-time-ml-gpu (%.2f s), stopping\n",
+                       ep.providerKey.c_str(), row.c_str(), (long long)sp,
+                       (long long)sp, per_iter_us / 1.0e6, runCapUs / 1.0e6);
           break;
         }
 
@@ -576,10 +576,10 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         // ladder.
         if (sp != kMinSpatial && createUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create %.1f s > %.1f s, stopping\n",
-                      ep.providerKey.c_str(), row.c_str(),
-                      (long long)sp, (long long)sp,
-                      createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-conv[%s/%s]: %lldx%lld create %.1f s > %.1f s, stopping\n",
+                       ep.providerKey.c_str(), row.c_str(),
+                       (long long)sp, (long long)sp,
+                       createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
           break;
         }
         prevPrevCreateUs = prevCreateUs;

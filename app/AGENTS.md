@@ -5,21 +5,21 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 
 ## Building / running
 
-- Desktop (canonical): `cmake -B build && cmake --build build --target clpeak-gui`
-  → complete bundle at `build/clpeak-gui/` (macOS: `clpeak-gui.app` with
-  `clpeak_ffi.framework` embedded + re-signed; Linux: bundle with
-  `lib/libclpeak_ffi.so`; Windows: flat dir with `clpeak_ffi.dll`).
-  GUI is skipped when the Flutter SDK isn't detectable or `-DCLPEAK_ENABLE_GUI=OFF`.
-- The runner executable/bundle is named **clpeak-gui**, never `clpeak` — the
+- Desktop (canonical): `cmake -B build && cmake --build build --target xpupeak-gui`
+  → complete bundle at `build/xpupeak-gui/` (macOS: `xpupeak-gui.app` with
+  `xpupeak_ffi.framework` embedded + re-signed; Linux: bundle with
+  `lib/libxpupeak_ffi.so`; Windows: flat dir with `xpupeak_ffi.dll`).
+  GUI is skipped when the Flutter SDK isn't detectable or `-DXPUPEAK_ENABLE_GUI=OFF`.
+- The runner executable/bundle is named **xpupeak-gui**, never `xpupeak` — the
   release zip puts it next to the CLI binary of that name. macOS keeps the
-  user-visible name "clpeak" via `CFBundleName`/`CFBundleDisplayName`.
-- macOS disk image: `cmake --build build --target clpeak-gui-dmg`
+  user-visible name "xpupeak" via `CFBundleName`/`CFBundleDisplayName`.
+- macOS disk image: `cmake --build build --target xpupeak-gui-dmg`
   (`tools/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
-- Desktop dev loop: build `clpeak_ffi` and `clpeak-engine` once, then
-  `CLPEAK_FFI_PATH=<build>/clpeak_ffi.framework/clpeak_ffi flutter run -d macos`
+- Desktop dev loop: build `xpupeak_ffi` and `xpupeak-engine` once, then
+  `XPUPEAK_FFI_PATH=<build>/xpupeak_ffi.framework/xpupeak_ffi flutter run -d macos`
   (a plain `flutter build macos` does NOT embed the framework — the
-  clpeak-gui target owns final assembly).  The engine host is found beside
-  that library at the build root; `CLPEAK_ENGINE_PATH` names one outright.
+  xpupeak-gui target owns final assembly).  The engine host is found beside
+  that library at the build root; `XPUPEAK_ENGINE_PATH` names one outright.
 - Android: `flutter build apk --release` / `flutter build appbundle --release`
   (Gradle drives `src/ffi/android/CMakeLists.txt`; needs
   `git submodule update --init`). The bundle includes ONNX Runtime and
@@ -78,19 +78,19 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   built from the bundle (bundletool `--mode=universal`) fuses every module;
   `flutter build apk` carries none.
 - iOS: `tools/build_ios_native.sh` first (stages
-  `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
+  `ios/xpupeak_native/xpupeak_ffi.xcframework` + optional Vulkan pieces), then
   `flutter build ios` / `flutter run`.  That script also fetches the ONNX
   Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
-  `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
+  `--no-onnx` skips it, `XPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
   own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
   and its Metal accelerator, device and simulator slices, ~42 MB, from its
-  litert bucket -- and stages them under `ios/clpeak_native/embed-{device,
+  litert bucket -- and stages them under `ios/xpupeak_native/embed-{device,
   simulator}/`, from where the Runner's embed phase copies and signs them
   into `Frameworks/` to be dlopen'd; `--no-litert` leaves the backend out,
-  `CLPEAK_IOS_LITERT_DIR` points at your own slices.  See
+  `XPUPEAK_IOS_LITERT_DIR` points at your own slices.  See
   `src/litert/AGENTS.md`, Packaging.
 - Tests: `flutter test` (pure Dart) or
-  `CLPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
+  `XPUPEAK_FFI_PATH=… flutter test` to include the native-bridge tests.
 - Screenshots: `integration_test/screenshots_test.dart` is not a test but the
   renderer behind `tools/screenshots.sh` -- the real shell over stub bindings,
   fed `results/` runs.  It runs on the desktop engine because flutter_tester's
@@ -99,11 +99,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 
 ## Quick Lookups
 
-- Native bindings / event decoding? → `lib/src/ffi/` (`clpeak_bindings.dart`,
-  `clpeak_events.dart`; threading contract in `clpeak_runner.dart` —
+- Native bindings / event decoding? → `lib/src/ffi/` (`xpupeak_bindings.dart`,
+  `xpupeak_events.dart`; threading contract in `xpupeak_runner.dart` —
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
-- Where do the catalog and runs execute? → `ClpeakEngine`
-  (`lib/src/ffi/clpeak_engine.dart`).  Desktop: a `clpeak-engine` process
+- Where do the catalog and runs execute? → `XpupeakEngine`
+  (`lib/src/ffi/xpupeak_engine.dart`).  Desktop: a `xpupeak-engine` process
   per catalog and per run (`ChildProcessEngine` / `ChildRun`; one JSON event
   per stdout line, a "cancel" line on stdin, the runtime setup passed as the
   host's `--set-*` options).  The app's own process holds the GUI toolkit and
@@ -152,7 +152,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   continued that died in turn is listed as one that did not finish
   (`RunHistoryStore.listCrashLogs`).  `ResumeOffer`
   (`lib/src/services/resume_offer.dart`) says whether a run can be
-  continued -- same clpeak, OS release, devices and runtimes -- and how to
+  continued -- same xpupeak, OS release, devices and runtimes -- and how to
   word what happened; a run that died on screen, unless the user ended it,
   is continued with `--skip-crashed`.  History offers Continue on every run
   that can be, the dead ones' tiles with "View what's saved"
@@ -163,7 +163,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   once and launches `--resume`, which saves every part as one document under
   the same id
 - Pausing a run? → Pause in the live view (`BenchmarkService.setPaused` →
-  `EngineRun.setPaused`: `clpeak_set_paused` in process, a "pause" line to
+  `EngineRun.setPaused`: `xpupeak_set_paused` in process, a "pause" line to
   the engine process on desktop).  The run finishes the reading in flight
   and holds at its next boundary between readings
   (`include/common/screen_hold.h`), whose `held until the run is resumed`
@@ -220,7 +220,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   the shape the UI renders, so there is no native loader in the path and
   history stays readable when the native library cannot be loaded at all.
   `<base>` is `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a
-  macOS TCC consent prompt — and `<app documents>/clpeak` on Android/iOS,
+  macOS TCC consent prompt — and `<app documents>/xpupeak` on Android/iOS,
   where that directory is inside the sandbox and is what the Files app shows.
   Files from an older `format_version` are skipped, not half-parsed.
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
@@ -237,8 +237,8 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   next one (`BenchmarkService.runtimeFixedOnceLoaded` is false, and the
   settings hints say so).  In-process (mobile), since the saved one loads at
   startup, a change is normally saved for the next launch.  It always
-  reaches `clpeak_set_onnx_library()` /
-  `clpeak_set_onnx_winml()`: while no runtime has loaded it takes effect and
+  reaches `xpupeak_set_onnx_library()` /
+  `xpupeak_set_onnx_winml()`: while no runtime has loaded it takes effect and
   `BenchmarkService` re-enumerates; otherwise the native side keeps it and
   reports it as `OnnxStatus.pendingRuntime`, and the panel shows the active
   setup and, dimmed beneath it, the inactive "Next launch" one with the
@@ -272,7 +272,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   follows its `thermal status` log lines
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
   history, about; adaptive shell in `app.dart`)
-- Colours / type / geometry? → `lib/src/theme/clpeak_theme.dart` (`CP.of(context)`
+- Colours / type / geometry? → `lib/src/theme/xpupeak_theme.dart` (`CP.of(context)`
   tokens + category tints; the `ThemeData` there is glue only)
 - Buttons, panels, chips, switches, table rows? → `lib/src/ui/common/kit.dart`
 
@@ -309,12 +309,12 @@ Build screens from `ui/common/kit.dart` (`CPanel`, `CSection`, `CRow`,
 `flutter create` regeneration can clobber these — re-apply if you recreate
 the platform dirs:
 
-- `linux/CMakeLists.txt`, `windows/CMakeLists.txt` — `BINARY_NAME clpeak-gui`
+- `linux/CMakeLists.txt`, `windows/CMakeLists.txt` — `BINARY_NAME xpupeak-gui`
   (+ `windows/runner/Runner.rc` InternalName/OriginalFilename);
-  `macos/Runner/Configs/AppInfo.xcconfig` — `PRODUCT_NAME = clpeak-gui`;
+  `macos/Runner/Configs/AppInfo.xcconfig` — `PRODUCT_NAME = xpupeak-gui`;
   `macos/Runner/Info.plist` — `CFBundleName`/`CFBundleDisplayName` pinned to the
-  literal "clpeak" (not `$(PRODUCT_NAME)`), so the app is `clpeak-gui.app` on
-  disk but still reads "clpeak" in the menu bar and Dock
+  literal "xpupeak" (not `$(PRODUCT_NAME)`), so the app is `xpupeak-gui.app` on
+  disk but still reads "xpupeak" in the menu bar and Dock
 - `macos/Runner/{DebugProfile,Release}.entitlements` — App Sandbox disabled
   (device probing, dlopen, real ~/.clpeak)
 - `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,
@@ -326,15 +326,15 @@ the platform dirs:
   runner CMake installs it there. X11 only — Wayland ignores window icons and
   matches an installed `.desktop` file by application ID instead.
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.clpeak.ios` +
-  "Embed clpeak native frameworks" script phase (consumes
-  `ios/clpeak_native/`, staged by `tools/build_ios_native.sh`)
+  "Embed xpupeak native frameworks" script phase (consumes
+  `ios/xpupeak_native/`, staged by `tools/build_ios_native.sh`)
 - `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters, the
   NDK pin (`ndkVersion`), `externalNativeBuild` → `src/ffi/android/CMakeLists.txt`
 - `android/app/src/main/AndroidManifest.xml` — `uses-native-library
   libOpenCL.so`, POST_NOTIFICATIONS
 - `ios/Runner/AppDelegate.swift` — the `RunNotice` channel
 - every platform's app icon — all generated by
-  `tools/icons/generate_icons.py` (needs Pillow) from the original clpeak
+  `tools/icons/generate_icons.py` (needs Pillow) from the original xpupeak
   wordmark in `tools/icons/clpeak_master_1024.png` (both repo-root `tools/`,
   alongside `build_ios_native.sh`). Never hand-edit an icon
   PNG; change the script and re-run it. It also writes the iOS

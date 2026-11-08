@@ -26,17 +26,17 @@
 //    1/cluster; X2 Elite: 3; 8 Elite Gen 5: 2).  Expect MT ~= #clusters x unit
 //    peak, NOT #cores x ST -- that is real hardware behaviour, not a bug.
 //
-// Gated on __ARM_FEATURE_SME + CLPEAK_CORE_ONLY-excluded; owns the one
+// Gated on __ARM_FEATURE_SME + XPUPEAK_CORE_ONLY-excluded; owns the one
 // #include <arm_sme.h> (which provides the streaming-compatible SVE ops too).
 // ===========================================================================
 
 #include "cpu_kernels.h"
 #include "cpu_simd.h"
 
-#if defined(__ARM_FEATURE_SME) && !defined(CLPEAK_CORE_ONLY)
+#if defined(__ARM_FEATURE_SME) && !defined(XPUPEAK_CORE_ONLY)
 #include <arm_sme.h>
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 #define CPU_HAS_SME_KERNELS 1
@@ -145,10 +145,10 @@ static double runSmeMatInt8Chain(uint64_t outer)
 
 // fp64: za64 FMOPA (FEAT_SME_F64F64; Apple M4+).  8 fp64 tiles (za0-7.d) --
 // the first native fp64 matrix engine on any CPU we benchmark.  Gated on the
-// ACLE macro OR the CMake-passed CLPEAK_SME_F64F64: AppleClang 21 enables the
+// ACLE macro OR the CMake-passed XPUPEAK_SME_F64F64: AppleClang 21 enables the
 // +sme-f64f64 *feature* (the intrinsic compiles) without defining the macro,
 // so CMake proves the intrinsic builds and passes the define itself.
-#if defined(__ARM_FEATURE_SME_F64F64) || defined(CLPEAK_SME_F64F64)
+#if defined(__ARM_FEATURE_SME_F64F64) || defined(XPUPEAK_SME_F64F64)
 #define CPU_MAT_F64_KERNEL 1
 __arm_locally_streaming __arm_new("za")
 static double runSmeMatFp64Chain(uint64_t outer)
@@ -179,7 +179,7 @@ static double runSmeMatFp64Chain(uint64_t outer)
   r = svadd_f64_x(pg, r, svread_hor_za64_f64_m(svdup_f64(0.0), pg, 7, 0));
   return (double)svaddv_f64(pg, r);
 }
-#endif // __ARM_FEATURE_SME_F64F64 || CLPEAK_SME_F64F64
+#endif // __ARM_FEATURE_SME_F64F64 || XPUPEAK_SME_F64F64
 
 // ---- Streaming-SVE vector chains --------------------------------------------
 // Same acc = acc*b + c MAD chains as the SVE kernels, but locally streaming, so
@@ -235,9 +235,9 @@ static double runSsveFp64Chain(uint64_t outer)
 }
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // __ARM_FEATURE_SME && !CLPEAK_CORE_ONLY
+#endif // __ARM_FEATURE_SME && !XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_SME_COMPUTE_H

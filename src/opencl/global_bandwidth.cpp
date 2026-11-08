@@ -29,9 +29,9 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   // the last-level cache reports the cache.  benchmark_config_t::forDevice
   // sizes globalBWMaxSize to clear the cache the device reported; print both so
   // an implausible reading can be checked against them without a rebuild.
-  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
-              (unsigned long long)(numItems * sizeof(float) >> 20),
-              (unsigned long long)(devInfo.globalMemCacheSize >> 20));
+  XPUPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device cache %llu MB\n",
+               (unsigned long long)(numItems * sizeof(float) >> 20),
+               (unsigned long long)(devInfo.globalMemCacheSize >> 20));
 
   try
   {
@@ -113,10 +113,10 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
       // both: if it never does by more than noise, the second family can go and
       // every backend measures the same thing; if it does, the shape has to be
       // ported to the other five instead.
-      CLPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f B/s\n",
-                  labels[w],
-                  ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
-                  ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
+      XPUPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f B/s\n",
+                   labels[w],
+                   ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
+                   ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
 
       test.emit(labels[w], bps, clWidthNote(widths[w]));
      }

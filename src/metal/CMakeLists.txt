@@ -1,4 +1,4 @@
-if(NOT APPLE OR NOT CLPEAK_ENABLE_METAL)
+if(NOT APPLE OR NOT XPUPEAK_ENABLE_METAL)
   return()
 endif()
 
@@ -52,7 +52,7 @@ set_source_files_properties(mtl_peak.mm mtl_device.mm mtl_utils.mm compute_kerne
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 
 # Embed .metal kernel sources as C++ raw-string literals
-set(CLPEAK_MTL_KERNELS
+set(XPUPEAK_MTL_KERNELS
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_sp.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_hp.metal
     ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/compute_mp.metal
@@ -68,5 +68,5 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMetalKernels.cmake)
 embed_metal_kernels(
     TARGET peak_metal
     PRELUDE ${CMAKE_CURRENT_SOURCE_DIR}/mtl_kernels/mad_chain.metal
-    KERNELS ${CLPEAK_MTL_KERNELS}
+    KERNELS ${XPUPEAK_MTL_KERNELS}
 )

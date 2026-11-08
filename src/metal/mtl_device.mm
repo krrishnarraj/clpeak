@@ -2,7 +2,7 @@
 
 #include "mtl_internal.h"
 
-NSArray<id<MTLDevice>> *copyClpeakMetalDevices()
+NSArray<id<MTLDevice>> *copyXpupeakMetalDevices()
 {
 #if TARGET_OS_IPHONE
     id<MTLDevice> def = MTLCreateSystemDefaultDevice();
@@ -29,7 +29,7 @@ MetalDevice::~MetalDevice() { cleanup(); }
 
 bool MetalDevice::init(int devIndex)
 {
-    NSArray<id<MTLDevice>> *devs = copyClpeakMetalDevices();
+    NSArray<id<MTLDevice>> *devs = copyXpupeakMetalDevices();
     if ((NSUInteger)devIndex >= devs.count) return false;
 
     impl = new MetalDeviceImpl();

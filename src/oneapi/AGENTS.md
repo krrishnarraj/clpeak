@@ -32,10 +32,10 @@ build time and the SYCL runtime JITs it on first launch.
 | `compute_kernel.cpp` | Shared helpers (`pickComputeBlocks`, `computeFlops`) reused by `compute_float.cpp` / `compute_int.cpp` |
 | `compute_float.cpp` | `runComputeSP`/`HP`/`DP` (vector-width sweep `{1,2,4,8,16}` via `sycl::vec<T,W>`+`fma`, e.g. `float/float2/.../float16`), `runComputeMP`/`runComputeBF16` (scalar) |
 | `compute_int.cpp` | `runComputeInt32` (width sweep `int/int2/.../int16`). No int8 dot-product test — see Gotchas |
-| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `CLPEAK_ONEAPI_HAS_JOINT_MATRIX`). The row list is **derived from the device's `matrix_combinations` table**, not hardcoded: one row per advertised (A, B, accumulator) type triple and tile shape. `CLPEAK_JM_SHAPES` is the compiled (M,N) set — joint_matrix needs the tile at compile time — and an advertised shape outside it records an `Unsupported` row naming the shape. Row names come from `jmBaseName()`: bare dtype (`joint_matrix_bf16`, `_fp16`, `_tf32`, `_int8`) for the first tile of each dtype, `_MxNxK` suffix for any further tile of the same dtype. Each tile is timed as its one-mad-a-trip chain on filled tiles and on spread ones (`runJmVariant`'s `SPREAD`), and as sixteen-product blocks (`joint_matrix_block.cpp`) on one accumulator and, where four fit `JM_FOUR_ACC_BYTES_PER_LANE`, on four; the fastest is reported and named in the note |
+| `joint_matrix.cpp` | `runJointMatrix` — XMX matrix engine via `sycl::ext::oneapi::matrix` (gated by `XPUPEAK_ONEAPI_HAS_JOINT_MATRIX`). The row list is **derived from the device's `matrix_combinations` table**, not hardcoded: one row per advertised (A, B, accumulator) type triple and tile shape. `XPUPEAK_JM_SHAPES` is the compiled (M,N) set — joint_matrix needs the tile at compile time — and an advertised shape outside it records an `Unsupported` row naming the shape. Row names come from `jmBaseName()`: bare dtype (`joint_matrix_bf16`, `_fp16`, `_tf32`, `_int8`) for the first tile of each dtype, `_MxNxK` suffix for any further tile of the same dtype. Each tile is timed as its one-mad-a-trip chain on filled tiles and on spread ones (`runJmVariant`'s `SPREAD`), and as sixteen-product blocks (`joint_matrix_block.cpp`) on one accumulator and, where four fit `JM_FOUR_ACC_BYTES_PER_LANE`, on four; the fastest is reported and named in the note |
 | `joint_matrix_block.cpp` | `runJmBlock` — one tile as Vulkan coopmat's sixteen-product block (four A × four B tiles a trip) on one accumulator or four, the shapes `runJointMatrix` races against its chain. A file of its own so its kernels build as a device image apart from the chain's, and a driver that cannot build them cannot take the chain's reading down too — see its header comment |
 | `joint_matrix_spread.h` | `jmSpread()` — the per-lane refill every joint_matrix kernel runs its A/B tiles through, behind a `spread` kernel argument the host leaves 0, so IGC cannot hold a tile as one value and re-copy it before every DPAS — see its header comment |
-| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; fp32/fp64/fp16/bf16/int8 (fp32/fp64/fp16/bf16 flops, int8 ops). Gated by `CLPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail. fp16, bf16 and int8 race **forms** — overload × layout (NN, NT, TN, TT): fp16 out vs fp32 out, `gemm_bias` s8×u8 vs `gemm` s8×s8 — on a short probe each, after an untimed warm-up that builds the kernel, and time the fastest over the 5 s budget, naming it in the reading's note |
+| `onemkl.cpp` | `runOnemkl` — oneMKL GEMM peak; fp32/fp64/fp16/bf16/int8 (fp32/fp64/fp16/bf16 flops, int8 ops). Gated by `XPUPEAK_ONEAPI_HAS_ONEMKL`. Each dtype runs in its **own private context + queue + buffers** so one that faults the driver (fp64 → sticky `CL_OUT_OF_RESOURCES`) can't poison the others or the shared `dev.stream`; each reports its own pass/fail. fp16, bf16 and int8 race **forms** — overload × layout (NN, NT, TN, TT): fp16 out vs fp32 out, `gemm_bias` s8×u8 vs `gemm` s8×s8 — on a short probe each, after an untimed warm-up that builds the kernel, and time the fastest over the 5 s budget, naming it in the reading's note |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` (float/float2/float4) |
 | `local_bandwidth.cpp` | `runLocalBandwidth` (float/float2/float4 via `local_accessor`) |
 | `image_bandwidth.cpp` | `runImageBandwidth` (float4 via `sycl::image<2>`) |
@@ -47,14 +47,14 @@ build time and the SYCL runtime JITs it on first launch.
 Needs the Intel oneAPI Base Toolkit; source `setvars.sh` first, then:
 
 ```console
-cmake -S . -B build -DCLPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
+cmake -S . -B build -DXPUPEAK_ENABLE_ONEAPI=ON -DCMAKE_CXX_COMPILER=icpx
 ```
 
 Gates:
 
-- `CLPEAK_ENABLE_ONEAPI` — top-level CMake option (default ON). Backend silently no-ops if `IntelSYCL` package is not found.
-- `CLPEAK_ONEAPI_HAS_ONEMKL` — defined when `MKL::MKL_SYCL` target was found. `onemkl.cpp` records skip rows otherwise.
-- `CLPEAK_ONEAPI_HAS_JOINT_MATRIX` — defined when `<sycl/ext/oneapi/matrix/matrix.hpp>` is available. `joint_matrix.cpp` records skip rows otherwise. The benchmark additionally skips at runtime on devices without XMX (detected via vendor/name heuristic in `oneapi_device.cpp`).
+- `XPUPEAK_ENABLE_ONEAPI` — top-level CMake option (default ON). Backend silently no-ops if `IntelSYCL` package is not found.
+- `XPUPEAK_ONEAPI_HAS_ONEMKL` — defined when `MKL::MKL_SYCL` target was found. `onemkl.cpp` records skip rows otherwise.
+- `XPUPEAK_ONEAPI_HAS_JOINT_MATRIX` — defined when `<sycl/ext/oneapi/matrix/matrix.hpp>` is available. `joint_matrix.cpp` records skip rows otherwise. The benchmark additionally skips at runtime on devices without XMX (detected via vendor/name heuristic in `oneapi_device.cpp`).
 
 ## Gotchas
 
@@ -148,7 +148,7 @@ at widths 2-4 -- so it races instead of replacing it.  Where the device offers
 a sub-group of 16 they race a fourth: the affine chain with a per-lane `b`,
 pinned to 16 (`reqd_sub_group_size`), as Vulkan and OpenCL time theirs at two
 sub-group widths; across a family's vector widths that race is a
-`clpeak::FormRace` that drops only a clear loser (`compute_float.cpp`).  This
+`xpupeak::FormRace` that drops only a clear loser (`compute_float.cpp`).  This
 backend runs on Intel GPUs, where the squaring chain alone reports half rate
 on Alchemist.
 Each shape needs its own SYCL kernel-name type.  Why: the MAD chain block in

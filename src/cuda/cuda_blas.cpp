@@ -68,29 +68,29 @@ namespace
     {
         if (lib)
             return true;
-        lib = clpeak::dynOpen({"libcublasLt.so", "libcublasLt.so.13",
-                               "libcublasLt.so.12", "libcublasLt.so.11",
-                               "cublasLt64_13.dll", "cublasLt64_12.dll",
-                               "cublasLt64_11.dll"});
+        lib = xpupeak::dynOpen({"libcublasLt.so", "libcublasLt.so.13",
+                                "libcublasLt.so.12", "libcublasLt.so.11",
+                                "cublasLt64_13.dll", "cublasLt64_12.dll",
+                                "cublasLt64_11.dll"});
         if (!lib)
             return false;
         bool ok = true;
-#define CLPEAK_LT_SYM(member, name)                                         \
-    member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+#define XPUPEAK_LT_SYM(member, name)                                        \
+    member = reinterpret_cast<decltype(member)>(xpupeak::dynSym(lib, name)); \
     ok = ok && (member != nullptr)
-        CLPEAK_LT_SYM(Create, "cublasLtCreate");
-        CLPEAK_LT_SYM(Destroy, "cublasLtDestroy");
-        CLPEAK_LT_SYM(Matmul, "cublasLtMatmul");
-        CLPEAK_LT_SYM(AlgoGetHeuristic, "cublasLtMatmulAlgoGetHeuristic");
-        CLPEAK_LT_SYM(DescCreate, "cublasLtMatmulDescCreate");
-        CLPEAK_LT_SYM(DescDestroy, "cublasLtMatmulDescDestroy");
-        CLPEAK_LT_SYM(DescSetAttribute, "cublasLtMatmulDescSetAttribute");
-        CLPEAK_LT_SYM(PrefCreate, "cublasLtMatmulPreferenceCreate");
-        CLPEAK_LT_SYM(PrefDestroy, "cublasLtMatmulPreferenceDestroy");
-        CLPEAK_LT_SYM(PrefSetAttribute, "cublasLtMatmulPreferenceSetAttribute");
-        CLPEAK_LT_SYM(LayoutCreate, "cublasLtMatrixLayoutCreate");
-        CLPEAK_LT_SYM(LayoutDestroy, "cublasLtMatrixLayoutDestroy");
-#undef CLPEAK_LT_SYM
+        XPUPEAK_LT_SYM(Create, "cublasLtCreate");
+        XPUPEAK_LT_SYM(Destroy, "cublasLtDestroy");
+        XPUPEAK_LT_SYM(Matmul, "cublasLtMatmul");
+        XPUPEAK_LT_SYM(AlgoGetHeuristic, "cublasLtMatmulAlgoGetHeuristic");
+        XPUPEAK_LT_SYM(DescCreate, "cublasLtMatmulDescCreate");
+        XPUPEAK_LT_SYM(DescDestroy, "cublasLtMatmulDescDestroy");
+        XPUPEAK_LT_SYM(DescSetAttribute, "cublasLtMatmulDescSetAttribute");
+        XPUPEAK_LT_SYM(PrefCreate, "cublasLtMatmulPreferenceCreate");
+        XPUPEAK_LT_SYM(PrefDestroy, "cublasLtMatmulPreferenceDestroy");
+        XPUPEAK_LT_SYM(PrefSetAttribute, "cublasLtMatmulPreferenceSetAttribute");
+        XPUPEAK_LT_SYM(LayoutCreate, "cublasLtMatrixLayoutCreate");
+        XPUPEAK_LT_SYM(LayoutDestroy, "cublasLtMatrixLayoutDestroy");
+#undef XPUPEAK_LT_SYM
         if (!ok)
         {
             // Forgotten, not unloaded: common/dynlib.h explains why no handle is
@@ -134,7 +134,7 @@ namespace
         CUresult _r = (call);                                                                \
         if (_r != CUDA_SUCCESS)                                                              \
         {                                                                                    \
-            CLPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
+            XPUPEAK_VLOG("CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cuErrStrLocal(_r)); \
             return -1;                                                                       \
         }                                                                                    \
     } while (0)
@@ -145,7 +145,7 @@ namespace
         cublasStatus_t _s = (call);                                                           \
         if (_s != CUBLAS_STATUS_SUCCESS)                                                      \
         {                                                                                     \
-            CLPEAK_VLOG("cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
+            XPUPEAK_VLOG("cuBLASLt error at %s:%d: status=%d\n", __FILE__, __LINE__, (int)_s); \
             return -1;                                                                        \
         }                                                                                     \
     } while (0)
@@ -200,7 +200,7 @@ namespace
             {
                 cuEventDestroy(start);
                 cuEventDestroy(stop);
-                CLPEAK_VLOG("cublasLtMatmul failed: status=%d\n", (int)s);
+                XPUPEAK_VLOG("cublasLtMatmul failed: status=%d\n", (int)s);
                 return -1.0;
             }
         }
@@ -484,7 +484,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     const uint16_t alpha16 = 0x3c00, beta16 = 0x0000;
     const int32_t alpha32i = 1, beta32i = 0;
 
-#if defined(CLPEAK_CUBLASLT_HAS_FP4)
+#if defined(XPUPEAK_CUBLASLT_HAS_FP4)
     // Block-scaled FP4 GEMM (Blackwell, CUDA 12.8+).  Both operands are
     // CUDA_R_4F_E2M1 (4-bit e2m1) and carry a companion per-block scale tensor:
     //   * mxfp4 -> 1 UE8M0 scale per 32 elements (OCP MX)
@@ -624,7 +624,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         cleanup();
         return 0;
     };
-#endif // CLPEAK_CUBLASLT_HAS_FP4
+#endif // XPUPEAK_CUBLASLT_HAS_FP4
 
     // One test for all data types -- integer readings carry their own unit.
     auto test = currentDeviceScope->beginTest(
@@ -711,7 +711,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                "(OCP MX).";
         const char *nvf4Note = "fp4 E2M1 inputs, one shared scale per 16 values "
                                "(NVFP4).";
-#if defined(CLPEAK_CUBLASLT_HAS_FP4)
+#if defined(XPUPEAK_CUBLASLT_HAS_FP4)
         if (dev.info.fp4GemmSupported)
         {
             // 0x7F = 1.0 in UE8M0 (exponent-only, bias 127);

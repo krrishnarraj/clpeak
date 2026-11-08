@@ -70,8 +70,8 @@ Result measure(const LitertRuntime &rt, const litert_device_info_t &dev, const L
     r.status = ResultStatus::Unsupported;
     return r;
   }
-  CLPEAK_VLOG("litert-tensor-bw[%s]: %lld dim create %.3f s\n", dev.displayName.c_str(), (long long)d,
-              s->createUs / 1.0e6);
+  XPUPEAK_VLOG("litert-tensor-bw[%s]: %lld dim create %.3f s\n", dev.displayName.c_str(), (long long)d,
+               s->createUs / 1.0e6);
   if (enforcePlacement && !s->onDevice())
   {
     r.error = s->offDevice();
@@ -125,14 +125,14 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
   // The floor is the smallest graph's whole time.
   Result floor = measure(rt, dev, plan, kFloorDim, warmupCount, forceIters, specifiedIters, 200000, 200, false);
   const double floorUs = floor.us > 0.0 ? floor.us : 0.0;
-  CLPEAK_VLOG("litert-tensor-bw[%s]: per-dispatch floor %.1f us\n", dev.displayName.c_str(), floorUs);
+  XPUPEAK_VLOG("litert-tensor-bw[%s]: per-dispatch floor %.1f us\n", dev.displayName.c_str(), floorUs);
 
   double prevBps = 0.0;
   bool stillFalling = true;
   size_t index = 0;
   for (const Size &s : kSizes)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const size_t rung = index++;
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
@@ -144,7 +144,7 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
     // The weights are held as any constant is (litertHeldBytes); the
     // vector they multiply is nothing beside them.
     const uint64_t peak = litertHeldBytes(litertWeightBytes(plan, s.dim, s.dim), 0);
-    if (peak > clpeak::memoryBudget(3ull << 30))
+    if (peak > xpupeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
         test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note);
@@ -165,8 +165,8 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
       break;
     }
     const double bps = (double)bytes / (netUs * 1.0e-6);
-    CLPEAK_VLOG("litert-tensor-bw[%s]: %s -> %.2f GB/s (%.1f us net of %.1f)\n", dev.displayName.c_str(),
-                s.label, bps / 1.0e9, netUs, floorUs);
+    XPUPEAK_VLOG("litert-tensor-bw[%s]: %s -> %.2f GB/s (%.1f us net of %.1f)\n", dev.displayName.c_str(),
+                 s.label, bps / 1.0e9, netUs, floorUs);
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;
     test.emit(s.label, (float)bps, s.note);

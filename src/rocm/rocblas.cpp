@@ -5,7 +5,7 @@
 #include <cstring>
 #include <string>
 
-#ifdef CLPEAK_ROCM_HAS_ROCBLAS
+#ifdef XPUPEAK_ROCM_HAS_ROCBLAS
 #include <rocblas/rocblas.h>
 #include <hip/hip_fp16.h>
 #include <common/dynlib.h>
@@ -31,21 +31,21 @@ bool RocblasApi::load()
 {
   if (lib)
     return true;
-  lib = clpeak::dynOpen({"librocblas.so", "librocblas.so.4", "librocblas.so.3",
-                         "rocblas.dll"});
+  lib = xpupeak::dynOpen({"librocblas.so", "librocblas.so.4", "librocblas.so.3",
+                          "rocblas.dll"});
   if (!lib)
     return false;
   bool ok = true;
-#define CLPEAK_RB_SYM(member, name)                                       \
-  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+#define XPUPEAK_RB_SYM(member, name)                                      \
+  member = reinterpret_cast<decltype(member)>(xpupeak::dynSym(lib, name)); \
   ok = ok && (member != nullptr)
-  CLPEAK_RB_SYM(create_handle,  "rocblas_create_handle");
-  CLPEAK_RB_SYM(destroy_handle, "rocblas_destroy_handle");
-  CLPEAK_RB_SYM(set_stream,     "rocblas_set_stream");
-  CLPEAK_RB_SYM(sgemm,          "rocblas_sgemm");
-  CLPEAK_RB_SYM(dgemm,          "rocblas_dgemm");
-  CLPEAK_RB_SYM(gemm_ex,        "rocblas_gemm_ex");
-#undef CLPEAK_RB_SYM
+  XPUPEAK_RB_SYM(create_handle,  "rocblas_create_handle");
+  XPUPEAK_RB_SYM(destroy_handle, "rocblas_destroy_handle");
+  XPUPEAK_RB_SYM(set_stream,     "rocblas_set_stream");
+  XPUPEAK_RB_SYM(sgemm,          "rocblas_sgemm");
+  XPUPEAK_RB_SYM(dgemm,          "rocblas_dgemm");
+  XPUPEAK_RB_SYM(gemm_ex,        "rocblas_gemm_ex");
+#undef XPUPEAK_RB_SYM
   if (!ok)
   {
     // Forgotten, not unloaded: common/dynlib.h explains why no handle is
@@ -83,7 +83,7 @@ uint32_t pickRocblasGemmDim(const rocm_device_info_t &info)
   return (uint32_t)D;
 }
 
-#ifdef CLPEAK_ROCM_HAS_ROCBLAS
+#ifdef XPUPEAK_ROCM_HAS_ROCBLAS
 template <typename Fn>
 double timeRocblas(hipStream_t stream, Fn fn, unsigned int n)
 {
@@ -150,7 +150,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     return o;
   };
 
-#ifndef CLPEAK_ROCM_HAS_ROCBLAS
+#ifndef XPUPEAK_ROCM_HAS_ROCBLAS
   test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp32Note));
   test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp64Note));
   test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp16Note));

@@ -16,7 +16,7 @@
 // function is safe at baseline; it is only ever *called* once guarded.
 // ===========================================================================
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 
 // Runtime CPU feature flags (filled by detectFeatures() in cpu_dispatch.cpp).
 struct CpuFeatures {
@@ -142,7 +142,7 @@ struct MissingKernel {
   enum Why {
     NotBuilt,          // CMake skipped the TU, or the TU compiled without it
     TileStateRefused,  // AMX: the OS did not grant the tile state
-    NotWritten,        // clpeak has no kernel for it on this architecture
+    NotWritten,        // xpupeak has no kernel for it on this architecture
   } why;
   const char *feature;   // "FEAT_SME", "AMX-FP16", "SHA512"
 };
@@ -178,7 +178,7 @@ struct CpuKernelMenu {
 // Assembled once on first call.
 const CpuKernelMenu &kernelMenu();
 
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
 #endif // ENABLE_CPU
 #endif // CPU_KERNELS_H

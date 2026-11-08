@@ -78,7 +78,7 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
-- If you add a new `.comp` shader → add to `CLPEAK_VK_SHADERS` in `CMakeLists.txt`
+- If you add a new `.comp` shader → add to `XPUPEAK_VK_SHADERS` in `CMakeLists.txt`
   and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
 - Shaders compile to **SPIR-V 1.5** (`--target-env=vulkan1.2`), not 1.6.  At 1.6
   a specialized work-group size becomes `OpExecutionModeId LocalSizeId`, gated on

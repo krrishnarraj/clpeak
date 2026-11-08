@@ -80,19 +80,19 @@ jobs:
       - name: Download Windows zips
         uses: actions/download-artifact@v4
         with:
-          pattern: clpeak-windows-*
+          pattern: xpupeak-windows-*
           path: unsigned
           merge-multiple: true
 
       - name: List Windows zips
-        run: ls -l unsigned && ls unsigned/clpeak-*-windows-*.zip
+        run: ls -l unsigned && ls unsigned/xpupeak-*-windows-*.zip
 
       - name: Upload unsigned bundle
         id: unsigned
         uses: actions/upload-artifact@v4
         with:
           name: windows-unsigned
-          path: unsigned/clpeak-*-windows-*.zip
+          path: unsigned/xpupeak-*-windows-*.zip
           if-no-files-found: error
 
       - name: Submit signing request
@@ -113,8 +113,8 @@ jobs:
       - name: Check every zip came back
         run: |
           ls -l signed
-          sent=$(ls unsigned/clpeak-*-windows-*.zip | wc -l)
-          got=$(ls signed/clpeak-*-windows-*.zip | wc -l)
+          sent=$(ls unsigned/xpupeak-*-windows-*.zip | wc -l)
+          got=$(ls signed/xpupeak-*-windows-*.zip | wc -l)
           echo "sent $sent, got $got"
           test "$sent" -eq "$got"
 
@@ -122,7 +122,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-signed
-          path: signed/clpeak-*-windows-*.zip
+          path: signed/xpupeak-*-windows-*.zip
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
@@ -147,10 +147,10 @@ jobs:
         run: |
           mkdir -p release
           # Each desktop job already produced a CPack zip (macOS also a .dmg
-          # holding clpeak-gui.app); just gather them.  Windows zips are
+          # holding xpupeak-gui.app); just gather them.  Windows zips are
           # unsigned while sign-windows is disabled.
-          find artifacts -name 'clpeak-*.zip' -exec cp {} release/ \;
-          find artifacts -name 'clpeak-*.dmg' -exec cp {} release/ \;
+          find artifacts -name 'xpupeak-*.zip' -exec cp {} release/ \;
+          find artifacts -name 'xpupeak-*.dmg' -exec cp {} release/ \;
           ls -l release
 
       - name: Create GitHub Release

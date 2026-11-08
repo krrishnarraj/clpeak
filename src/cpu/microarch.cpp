@@ -383,8 +383,8 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   // Widest non-streaming fp32 chain (skip the SSVE row: the SME unit is a
   // shared per-cluster resource, which would measure the wrong thing here),
   // and its one-accumulator twin from the same TU, paired by ISA label.
-  const auto &menu = clpeak_cpu::kernelMenu();
-  const clpeak_cpu::IsaVariant *chain = nullptr;
+  const auto &menu = xpupeak_cpu::kernelMenu();
+  const xpupeak_cpu::IsaVariant *chain = nullptr;
   for (auto it = menu.fp32.vars.rbegin(); it != menu.fp32.vars.rend(); ++it)
     if (std::string(it->isa).rfind("SSVE", 0) != 0) { chain = &*it; break; }
   if (!chain)
@@ -392,14 +392,14 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
     test.skip("1T/core", ResultStatus::Error, "no fp32 kernel available");
     return 0;
   }
-  const clpeak_cpu::IsaVariant *lat = nullptr;
+  const xpupeak_cpu::IsaVariant *lat = nullptr;
   for (const auto &v : menu.fp32lat.vars)
     if (std::string(v.isa) == chain->isa) lat = &v;
 
   const int nPhys = info.physicalCores;
   const int nAll  = pool->maxThreads();
   std::vector<double> sink((size_t)std::max(nPhys, nAll), 0.0);
-  auto bodyOf = [&sink](clpeak_cpu::ChainFn fn) -> Workload {
+  auto bodyOf = [&sink](xpupeak_cpu::ChainFn fn) -> Workload {
     return [&sink, fn](int tid, uint64_t iters) { sink[(size_t)tid] += fn(iters); };
   };
   const Workload body = bodyOf(chain->v.fn);
@@ -424,7 +424,7 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   for (double s : sink) keep += s;
   (void)keep;
 
-  auto emitRow = [&](const char *id, const clpeak_cpu::ChainVariant &v,
+  auto emitRow = [&](const char *id, const xpupeak_cpu::ChainVariant &v,
                      double ips, const char *note) {
     if (ips > 0) test.emit(id, (float)(v.opsPerIter * ips), note);
     else         test.skip(id, ResultStatus::Error, "workload failed", note);

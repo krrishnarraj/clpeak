@@ -37,11 +37,11 @@
 #include "kernels/sve_compute.h"
 #include "kernels/sme_compute.h"
 
-#ifndef CLPEAK_ISA_NAME_STR
-#define CLPEAK_ISA_NAME_STR "scalar"
+#ifndef XPUPEAK_ISA_NAME_STR
+#define XPUPEAK_ISA_NAME_STR "scalar"
 #endif
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 using namespace cpu_simd;
@@ -188,13 +188,13 @@ static const CpuKernelTable *tuTable()
 #endif
     }
 #endif
-    t.isaName = CLPEAK_ISA_NAME_STR;
+    t.isaName = XPUPEAK_ISA_NAME_STR;
     return t;
   }();
   return &t;
 }
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
 #endif // CPU_KERNELS_IMPL_H

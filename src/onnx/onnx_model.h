@@ -1,7 +1,7 @@
-#ifndef CLPEAK_ONNX_MODEL_H
-#define CLPEAK_ONNX_MODEL_H
+#ifndef XPUPEAK_ONNX_MODEL_H
+#define XPUPEAK_ONNX_MODEL_H
 
-// In-memory ONNX model construction.  The graphs clpeak benchmarks are a
+// In-memory ONNX model construction.  The graphs xpupeak benchmarks are a
 // handful of nodes, so it emits the protobuf wire format directly -- no
 // protobuf library, no .onnx files on disk, and byte-identical models on
 // every platform, which is what makes the cross-vendor comparison mean
@@ -59,7 +59,7 @@ uint32_t onnxMinOrtApiForOpset(int opset);
 
 using OnnxDims = std::vector<int64_t>;   // empty = scalar
 
-// One node attribute.  Only the two forms clpeak's graphs need: a single
+// One node attribute.  Only the two forms xpupeak's graphs need: a single
 // int (Softmax axis) and a list of ints (Transpose perm).
 struct OnnxAttr
 {
@@ -661,4 +661,4 @@ void onnxFillNvfp4(std::string &packed, std::string &blockScales,
 // included -- dtypeSize()-style helpers cannot express a half.
 uint64_t onnxElemBytes(int dtype, int64_t count);
 
-#endif // CLPEAK_ONNX_MODEL_H
+#endif // XPUPEAK_ONNX_MODEL_H

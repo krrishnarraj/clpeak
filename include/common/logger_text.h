@@ -47,7 +47,7 @@ protected:
 
     // --verbose: print skipped/unsupported/error readings (hidden by
     // default), and the debug / library diagnostics, which go to stderr so
-    // the results table stays pipeable.  Warnings and errors of clpeak's own
+    // the results table stays pipeable.  Warnings and errors of xpupeak's own
     // print inline whatever the mode.
     bool verbose = false;
 

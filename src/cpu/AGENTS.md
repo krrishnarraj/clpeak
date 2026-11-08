@@ -50,10 +50,10 @@ local memory, DRAM ↔ global memory.
 | `kernels/string_compute.h` | memchr-style byte scan (incl. the historical SSE4.2 PCMPISTRI row) + Keiser-Lemire UTF-8 validation, over L1-resident buffers. `opsPerIter` counts BYTES |
 | `kernels/sve_compute.h` | SVE/SVE2 compute, bf16/i8mm matrix, fp8 dot, and the SVE `strscan`. Gated on `__ARM_FEATURE_SVE && !__ARM_FEATURE_SME`; owns the one `#include <arm_sve.h>` |
 | `kernels/sme_compute.h` | SME ZA outer products (fp32/fp64/bf16/fp16/int8) + streaming-SVE vector chains. Gated on `__ARM_FEATURE_SME`; owns the one `#include <arm_sme.h>` |
-| `cpu_tu_registry.h` | `CLPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
-| `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `clpeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
+| `cpu_tu_registry.h` | `XPUPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
+| `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `xpupeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
 | `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels, reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or clpeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or xpupeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -66,13 +66,13 @@ local memory, DRAM ↔ global memory.
 
 ## Build
 
-- Built by default (`CLPEAK_ENABLE_CPU=ON`); the one backend with no external
+- Built by default (`XPUPEAK_ENABLE_CPU=ON`); the one backend with no external
   dependency, so it is always enabled.
 - Optimization flags are scoped to `peak_cpu` only (see `CMakeLists.txt`).
 - `peak_common` is compiled with `ENABLE_CPU` too: `options.cpp` reads the
   `ENABLE_*` macros to know which backends this binary carries (every flag
   parses everywhere; the macro only feeds `BackendInfo::builtIn`).
-- **The ISA feature TUs never take part in LTO** (`clpeak_add_isa_tu` appends
+- **The ISA feature TUs never take part in LTO** (`xpupeak_add_isa_tu` appends
   `-fno-lto` / `/GL-`). A TU's `-m`/`-march` flags don't survive GCC's LTRANS
   re-compile, so the assembler stops accepting its instructions: gcc 16.2 +
   binutils 2.47 + Arch's `-flto=auto` failed an AMX TU at link time (#193) while
@@ -133,10 +133,10 @@ TU tags (`cpu_tu_registry.h`):
   only scalable-vector path, runtime-gated so M1–M3 show Unsupported) as well
   as on Linux/Android.
 - Both families are **disabled on Windows** behind the single
-  `CLPEAK_CPU_ENABLE_WIN_SVE` toggle (clang-cl cannot yet mangle the sizeless
+  `XPUPEAK_CPU_ENABLE_WIN_SVE` toggle (clang-cl cannot yet mangle the sizeless
   types). Windows SVE *detection* is disabled to match, so it never claims an
   ISA it can't run.
-- Real cl.exe gets core tiers only (`CLPEAK_CORE_ONLY`) on x86 and the `generic`
+- Real cl.exe gets core tiers only (`XPUPEAK_CORE_ONLY`) on x86 and the `generic`
   TU alone on ARM64; clang-cl takes the GNU-flag path via `/clang:` and has full
   dtype parity with Linux.
 
@@ -145,10 +145,10 @@ TU tags (`cpu_tu_registry.h`):
 1. **Kernel body** — into the matching `kernels/` sub-header, `#if`-gated on the
    TU's compile-feature macro, plus a `CPU_HAS_<X>` / `CPU_MAT_<X>` define and a
    table slot in `cpu_kernels_impl.h`'s `tuTable()`.
-2. **Registry** — add `CLPEAK_TU(<tag>)` to `cpu_tu_registry.h`.
-3. **CMake** — add a `clpeak_add_isa_tu(<tag> <flags>)` call, guarded by
+2. **Registry** — add `XPUPEAK_TU(<tag>)` to `cpu_tu_registry.h`.
+3. **CMake** — add a `xpupeak_add_isa_tu(<tag> <flags>)` call, guarded by
    `check_cxx_compiler_flag`.
-4. **Dispatch** — a `#if CLPEAK_TU_<tag>` merge in `kernels()` (bandwidth) *and*
+4. **Dispatch** — a `#if XPUPEAK_TU_<tag>` merge in `kernels()` (bandwidth) *and*
    a push in `kernelMenu()` so the ISA shows up as its own compute test:
    `if (<predicate>) add(m.<slot>, TU(<tag>)-><slot>, "<label>", "<feature>")`,
    **not** `#if`-guarded. The predicate has to run in every build, so a build
@@ -302,7 +302,7 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
   to be ≥ `pipes × latency`. NACC=16 left M1 Pro fp32 at ~62% of peak. Re-sweep
   when validating on a new x86 host or on real SVE silicon.
 - Expect write MT to scale far worse than read MT on Apple (~3–4× vs ~8× on
-  an M1 Pro): the store path has a shared ceiling, reproduced outside clpeak.
+  an M1 Pro): the store path has a shared ceiling, reproduced outside xpupeak.
 - **DRAM `read` above the memory's rated peak is always a sizing bug**, never a
   win — the arrays are partly cache-resident. `--verbose` prints the array size
   and the total cache it has to clear. `copy`/`triad` landing well *below*

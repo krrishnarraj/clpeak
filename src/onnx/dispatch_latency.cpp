@@ -173,7 +173,7 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                             forceIters, specifiedIters);
   const int mmDtype = onnxStreamDtype(rt, ep);
   Timed matmul;
-  if (!clpeak::cancelRequested())
+  if (!xpupeak::cancelRequested())
     matmul = timeGraph(rt, ep, smallMatMulModel(kSmallMatMul, mmDtype), "A", "C",
                        kSmallMatMul, kSmallMatMul, mmDtype, warmupCount,
                        forceIters, specifiedIters);

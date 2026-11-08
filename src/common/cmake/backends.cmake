@@ -1,7 +1,7 @@
-# clpeak_link_backends(<target>)
+# xpupeak_link_backends(<target>)
 #
-# Wires a binary that runs benchmarks -- the clpeak executable, the
-# clpeak_ffi library behind the GUI -- to every backend in this build: it
+# Wires a binary that runs benchmarks -- the xpupeak executable, the
+# xpupeak_ffi library behind the GUI -- to every backend in this build: it
 # adds the backend registry (src/registry/backend_registry.cpp) to the
 # target's sources, links each backend library whose target exists, and
 # defines the matching ENABLE_* macro so the registry and the binary's own
@@ -12,11 +12,11 @@
 # at the final link, and the registry includes <sycl/sycl.hpp> through
 # oneapi_peak.h, so both that source's compile and the target's link need
 # the SYCL toolchain flags.
-set(CLPEAK_BACKEND_REGISTRY_SOURCE
+set(XPUPEAK_BACKEND_REGISTRY_SOURCE
     "${CMAKE_CURRENT_LIST_DIR}/../../registry/backend_registry.cpp")
 
-function(clpeak_link_backends target)
-    target_sources(${target} PRIVATE "${CLPEAK_BACKEND_REGISTRY_SOURCE}")
+function(xpupeak_link_backends target)
+    target_sources(${target} PRIVATE "${XPUPEAK_BACKEND_REGISTRY_SOURCE}")
 
     foreach(_backend OPENCL VULKAN CUDA ROCM METAL ONEAPI CPU ONNX COREML LITERT)
         string(TOLOWER "${_backend}" _lower)
@@ -27,6 +27,6 @@ function(clpeak_link_backends target)
     endforeach()
 
     if(TARGET peak_oneapi)
-        add_sycl_to_target(TARGET ${target} SOURCES "${CLPEAK_BACKEND_REGISTRY_SOURCE}")
+        add_sycl_to_target(TARGET ${target} SOURCES "${XPUPEAK_BACKEND_REGISTRY_SOURCE}")
     endif()
 endfunction()

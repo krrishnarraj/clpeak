@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
-#define CLPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
+#ifndef XPUPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
+#define XPUPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
 
 // The per-lane refill the joint_matrix kernels in this backend run their A
 // and B tiles through: the blocks in joint_matrix_block.cpp always, the
@@ -37,7 +37,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace clpeak_oneapi {
+namespace xpupeak_oneapi {
 
 // Element `n` of a tile spread from its fill value `v`: `v` itself at n = 0
 // and a value of its own at every other n, as CM_VAL(i, n) is in Vulkan.  A
@@ -73,6 +73,6 @@ inline void jmSpread(sycl::sub_group sg, Tile &tile)
   });
 }
 
-} // namespace clpeak_oneapi
+} // namespace xpupeak_oneapi
 
-#endif // CLPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H
+#endif // XPUPEAK_ONEAPI_JOINT_MATRIX_SPREAD_H

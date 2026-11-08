@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONNX_SESSION_H
-#define CLPEAK_ONNX_SESSION_H
+#ifndef XPUPEAK_ONNX_SESSION_H
+#define XPUPEAK_ONNX_SESSION_H
 
 // Session construction shared by every ONNX benchmark: one OrtEnv per
 // process, per-EP registration options, and the honesty guard -- sessions
@@ -32,7 +32,7 @@ struct OnnxSessionResult
 };
 
 // Build a session for `ep` from in-memory model bytes.  For non-CPU EPs the
-// EP is appended with clpeak's default options for that provider and CPU
+// EP is appended with xpupeak's default options for that provider and CPU
 // fallback is disabled.  On failure `error` carries a one-line reason
 // suitable for a skip row.
 // `keepConstantsUnfolded` stops ORT evaluating a subgraph of constants at
@@ -120,7 +120,7 @@ std::string onnxJoinOps(const std::vector<std::string> &ops);
 // something like QLinearMatMul.  A provider that compiles whole subgraphs --
 // TensorRT, Core ML, QNN -- reports one opaque kernel of its own instead,
 // whose name says nothing at all: TensorRT builds a perfectly good int8
-// engine and calls it `TRTKernel_graph_clpeak_7216741020808563463_0`.
+// engine and calls it `TRTKernel_graph_xpupeak_7216741020808563463_0`.
 //
 // So the test looks for the *failure* rather than the success: a bare
 // floating-point MatMul (or Conv, for the row spelled as convolutions)
@@ -188,7 +188,7 @@ bool onnxProviderHasOwnMemory(const onnx_ep_info_t &ep);
 
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
-// provider accepts clpeak's options for this target (an OpenVINO target
+// provider accepts xpupeak's options for this target (an OpenVINO target
 // with no hardware behind it fails here, fast, with nothing compiled);
 // otherwise the one-line refusal.  The viability probe tries this before
 // building any graph.
@@ -278,4 +278,4 @@ ResultStatus onnxFailureStatus(const std::string &reason,
 std::string onnxNonFiniteReason(const void *data, int64_t count, int dtype,
                                 const std::string &where);
 
-#endif // CLPEAK_ONNX_SESSION_H
+#endif // XPUPEAK_ONNX_SESSION_H

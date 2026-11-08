@@ -12,7 +12,7 @@ first-party API with on-device compilation for all of them, LiteRT's
 `CompiledModel`.  The same runtime carries a GPU accelerator on every OS
 (OpenCL on Android, Metal on Apple, WebGPU on Linux and Windows) and XNNPACK
 on the CPU, so it also answers what the mainstream mobile ML runtime gets
-out of silicon clpeak already measures raw.  Each accelerator slot -- NPU,
+out of silicon xpupeak already measures raw.  Each accelerator slot -- NPU,
 GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 
 ## Quick Lookups
@@ -39,7 +39,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
 | `litert_model.{h,cpp}` | `LitertFormat` / `LitertPlan` (what a format is on each accelerator), scalar conversions, the operand generator and quantization scales, and every recipe: matmul, matmul chain, plain matmul, GEMV, activations, transfer, trivial, conv, transformer block |
 | `litert_bench.h` | `litertMeasure()` (warmup / probe / timed), `litertBindScalar()`, `litertConfigFor()`, `litertFailureStatus()`, `litertNonFiniteReason()` (the timed graph's readback), `litertHeldBytes()` (what a session holds: every memory gate's count), `litertRateUnit()` (a rate row's unit) |
-| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels and every row its two graph pipelines (`clpeak::MultiFormRace`) |
+| `gemm.cpp` | `runGemm` (`--gemm`) — `litert_gemm`: FULLY_CONNECTED peak per format, the ONNX backend's chain (sixteen distinct square layers per dispatch from a 64-wide live seed) over a doubling width ladder, in flops or ops, naming the kernel that ran; `int8_qdq` races it against the same chain of 1x1 CONV_2Ds, and on a GPU the int8 rows race the accelerator's 8-bit kernels and every row its two graph pipelines (`xpupeak::MultiFormRace`) |
 | `numeric_error.cpp` | `runNumericError` (`--numeric-error`) — relative RMS error per format vs a double-precision host reference, in ppm; and the answer checks behind every rate row (`answerCheck`, per form, with the never-written marker; `resolveIo`; `wrongAnswer`) |
 | `conv.cpp` | `runConv` (`--convolution`) — 3×3 at stride 2 / 1×1 / depthwise 3×3 at 256 channels in fp32, fp16 and full-integer int8, swept over feature-map size; a GPU's int8 rows race its 8-bit kernels, and every row its two graph pipelines |
 | `block.cpp` | `runBlock` (`--transformer-block`) — the ONNX backend's decoder block: `litert_block_prefill` (flops, `ops` for int8_qdq and where the projections multiplied int8), `litert_block_decode` (bps), `litert_block_latency` (s); a GPU's int8 variants race its 8-bit kernels, and every variant its two graph pipelines, point by point |
@@ -227,14 +227,14 @@ kernel name from one profiled run says which kernel it was.
   come back.**  The accuracy measurement is memoised per device, format and
   form (`LitertPeak::answerCheck`, `LitertForm`) and every rate test asks
   `wrongAnswer()` of each form it would time: at or past
-  `clpeak::kWrongAnswerPpm` (50% RMS, the three ML backends' line --
+  `xpupeak::kWrongAnswerPpm` (50% RMS, the three ML backends' line --
   `include/common/answer_check.h` says why it sits there), or with NaN or
   infinity anywhere in the answer, the gemm, conv and block rows leave that
   form out -- and are refused, with the figure or the non-finite answer in
   the reason, when no form answers right -- and the accuracy row is an
   `Error` carrying the figure.  A figure near 2.5 million ppm
   says little by itself: any full-range int8 output uncorrelated with the
-  product reads that against clpeak's operands (a right one reads 9,300 to
+  product reads that against xpupeak's operands (a right one reads 9,300 to
   10,500).  What says more is the marker: the check fills the output with
   0x80 bytes before the run, an answer still holding it after two runs was
   never written, and one that holds it only after the first landed after
@@ -261,7 +261,7 @@ kernel name from one profiled run says which kernel it was.
   that answers right with int8 is left byte for byte as it was.  On Metal
   the float form reads 10526 ppm against 10430, the boundary's conversions
   done by the GPU in fp16 rather than by the delegate on the host.
-- **`int8_qdq` races its forms** (`clpeak::MultiFormRace`,
+- **`int8_qdq` races its forms** (`xpupeak::MultiFormRace`,
   `include/common/form_race.h`): its chain is timed with the layers written
   as FULLY_CONNECTED and as 1x1 CONV_2Ds over a grid of as many positions as
   a layer is wide (`litertMatMulChainModel(..., conv1x1)`) -- an NPU
@@ -609,7 +609,7 @@ budgets.
   `com.google.ai.edge.litert` AARs, `litert` (arm64: `libLiteRt.so`, 5.6 MB)
   and `litert-gpu` (`libLiteRtClGlAccelerator.so`, 3.3 MB), without the
   `litert-api` both depend on -- its Kotlin surface, a JNI library, Guava
-  and Play's AI delivery client, none of which clpeak calls.  That AAR also
+  and Play's AI delivery client, none of which xpupeak calls.  That AAR also
   carries LiteRT's `uses-native-library` list (OpenCL, FastRPC, the Tensor
   and MediaTek NPU system libraries), so the app's manifest repeats it,
   plus `libneuronusdk_adapter.10.mtk.so`, which LiteRT opens on a
@@ -629,7 +629,7 @@ budgets.
   (`litert_peak.cpp`) reads `ro.soc.manufacturer` ("Google", "QTI",
   "Mediatek", "Samsung"), links the
   matching vendor's shims into `<support dir>/litert-npu/<Vendor>/` (the
-  app passes the directory through `clpeak_set_litert_npu_stage_dir`; links,
+  app passes the directory through `xpupeak_set_litert_npu_stage_dir`; links,
   remade at every launch, because the lib dir moves with every install) and
   that directory answers `litertNpuDir()`.  The shim names are not
   consistent (`libLiteRtDispatch_GoogleTensor.so` beside
@@ -656,7 +656,7 @@ budgets.
   Maven package has no `libQnnIr.so` / `libQnnSaver.so`, and none is
   needed: `QnnManager` opens libQnnIr only for the IR backend
   (`qnn_backend`, or a `dlc_dir`) and libQnnSaver only for
-  `saver_output_dir`, none of which clpeak sets.  (2.2.0's Android compiler
+  `saver_output_dir`, none of which xpupeak sets.  (2.2.0's Android compiler
   plugin was linked against both, and bionic refuses a library one of whose
   DT_NEEDED entries is missing; 2.3.0's links no QNN library, and on an
   arm64 emulator it loads without them.)
@@ -710,7 +710,7 @@ budgets.
   kernel, and the bucket's stay.
   `tools/build_ios_native.sh` fetches the version named by the vendored
   headers' tag (`third_party/litert/README.md`), caches them under
-  `build-ios/litert/<version>/`, stages them in `app/ios/clpeak_native/
+  `build-ios/litert/<version>/`, stages them in `app/ios/xpupeak_native/
   embed-{device,simulator}/`, and the Runner's embed phase copies the
   slice's two into `Frameworks/` and signs them with the app's identity
   (Google's device slice is unsigned).  The loader's iOS list is the one
@@ -730,7 +730,7 @@ budgets.
   `libLiteRtWebGpuAccelerator`, each joined to `RuntimeLibraryDir`.  The settings
   picker is fixed on iOS, as for ONNX Runtime: `--litert-lib` could only
   name a file the platform refuses to load.  `--no-litert` leaves the
-  backend out of the framework; `CLPEAK_IOS_LITERT_DIR` points at a local
+  backend out of the framework; `XPUPEAK_IOS_LITERT_DIR` points at a local
   directory holding both slices.  No NPU device: Core ML is the route to
   the Neural Engine.  Verified on the iOS 27 simulator (iPhone 18 Pro):
   both devices probe and the full run completes on each, the CPU rows the

@@ -1,14 +1,14 @@
-#ifndef CLPEAK_ONNX_RUNTIME_H
-#define CLPEAK_ONNX_RUNTIME_H
+#ifndef XPUPEAK_ONNX_RUNTIME_H
+#define XPUPEAK_ONNX_RUNTIME_H
 
-// Load-on-demand ONNX Runtime.  The library is dlopen'd so clpeak ships with
+// Load-on-demand ONNX Runtime.  The library is dlopen'd so xpupeak ships with
 // no hard dependency: only one symbol (OrtGetApiBase) is ever resolved by
 // name -- every other entry point comes through the OrtApi function-pointer
 // table that call returns.  When no usable runtime is found the backend
 // reports itself unavailable, matching how the GPU backends behave on a
 // machine without their driver.
 //
-// CLPEAK_ONNX_STATIC builds are the exception, and iOS is why: Apple's
+// XPUPEAK_ONNX_STATIC builds are the exception, and iOS is why: Apple's
 // official pod ships onnxruntime.xcframework as *static* libraries, and iOS
 // will not dlopen anything that was not linked into the app bundle to begin
 // with.  There the runtime is linked in and OrtGetApiBase is called directly;
@@ -42,7 +42,7 @@ struct OrtRuntime
 //
 // Point the loader at a specific library, ahead of the platform's
 // conventional names.  Backs `--onnx-lib` and the FFI's
-// clpeak_set_onnx_library(), which is how the GUI's settings screen chooses
+// xpupeak_set_onnx_library(), which is how the GUI's settings screen chooses
 // between installed runtimes.  An empty path clears the override.  A handle
 // is never dlclosed -- ONNX Runtime keeps worker threads alive past the last
 // session, and unloading a file that turned out not to be an ONNX Runtime
@@ -91,4 +91,4 @@ bool onnxPendingSetup(OnnxPendingSetup &out);
 // the real answer is that the named file is not an ONNX Runtime.
 std::string onnxLoadDiagnostic();
 
-#endif // CLPEAK_ONNX_RUNTIME_H
+#endif // XPUPEAK_ONNX_RUNTIME_H

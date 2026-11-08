@@ -179,7 +179,7 @@ since the rate tests run before the accuracy one.
   convolution** (`coremlPlainConv1x1Model`, x[1, K, 32, 32]): the conv1x1
   row's operator and the nearest there is to the other shapes'.
 - **Wrong is at or past 50% RMS, or NaN or infinity anywhere**
-  (`clpeak::kWrongAnswerPpm`; the header says why the line sits there).  A
+  (`xpupeak::kWrongAnswerPpm`; the header says why the line sits there).  A
   withheld rate row is an `Error` naming the figure, and the accuracy row an
   `Error` carrying it, so the pair stands together.  A check that could not
   be measured -- a format the OS lacks, a session refused or sent to another
@@ -198,7 +198,7 @@ in opposite layouts), and the accuracy matmul times both and reads the
 faster one's answer, because a layout can change the kernel and with it
 the arithmetic.  Each row reports the faster and names its layout.
 `CoremlLayoutRace` (`coreml_bench.h`) has
-the M1 Pro's cases, and `clpeak::FormRace` (`include/common/form_race.h`)
+the M1 Pro's cases, and `xpupeak::FormRace` (`include/common/form_race.h`)
 the rule that closes a race once its readings settle it, so most rows pay
 for one extra model; on the Neural Engine, which runs
 the two at one rate and compiles `[in, out]` ten times slower, the tie
@@ -220,7 +220,7 @@ on device`, which nothing can catch.
 So (`include/common/coreml_cache.h`, shared with the ONNX backend, whose
 `runAll` purges too):
 
-- `clpeak::purgeCoreMLCompileCache()` removes this process's own E5RT cache
+- `xpupeak::purgeCoreMLCompileCache()` removes this process's own E5RT cache
   directory, and every `CoremlSession` calls it from its destructor -- every
   session here is a different model, so the cache never repays keeping.  It
   is also called before the first session, which clears what a crashed run

@@ -31,7 +31,7 @@ namespace
 {
 
 constexpr int64_t kMinElems = 8ll << 20;    // 16 MB of fp16
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(128ull << 20); }
+uint64_t maxTensorBytes() { return xpupeak::memoryBudget(128ull << 20); }
 constexpr unsigned int kSizeBudgetUs = 300000;
 
 struct Run
@@ -138,7 +138,7 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
   int64_t smallElems = 0;
   for (int64_t elems = kMinElems;; elems *= 2)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const uint64_t bytes = (uint64_t)elems * elem;
     if (bytes > maxTensorBytes())
@@ -154,8 +154,8 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
       break;
     }
     const double bps = (double)bytes / (r.us * 1.0e-6);
-    CLPEAK_VLOG("litert-transfer[%s]: h2d %llu MB -> %.2f GB/s (%.1f us)\n", dev.displayName.c_str(),
-                (unsigned long long)(bytes >> 20), bps / 1.0e9, r.us);
+    XPUPEAK_VLOG("litert-transfer[%s]: h2d %llu MB -> %.2f GB/s (%.1f us)\n", dev.displayName.c_str(),
+                 (unsigned long long)(bytes >> 20), bps / 1.0e9, r.us);
     if (smallElems == 0)
     {
       smallElems = elems;
@@ -178,8 +178,8 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
     if (r.us > 0.0)
     {
       const double bps = 2.0 * (double)bytes / (r.us * 1.0e-6);
-      CLPEAK_VLOG("litert-transfer[%s]: roundtrip %llu MB -> %.2f GB/s (%.1f us)\n", dev.displayName.c_str(),
-                  (unsigned long long)(bytes >> 20), bps / 1.0e9, r.us);
+      XPUPEAK_VLOG("litert-transfer[%s]: roundtrip %llu MB -> %.2f GB/s (%.1f us)\n", dev.displayName.c_str(),
+                   (unsigned long long)(bytes >> 20), bps / 1.0e9, r.us);
       test.emit("roundtrip", (float)bps, rtNote);
       const double backUs = r.us - h2dSmallUs;
       if (backUs > 0.05 * r.us)

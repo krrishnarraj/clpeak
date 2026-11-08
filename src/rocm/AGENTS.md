@@ -40,7 +40,7 @@ ROCm headers. Built as `peak_rocm` static library.
 | `mfma.cpp` | `runMfma` — raw MFMA matrix-core peak (CDNA, fp16/bf16/int8/fp8/mxfp4) via `__builtin_amdgcn_mfma_*` |
 | `sparse_mfma.cpp` | `runSparseMfma` — 2:4 structured-sparse MFMA peak (fp16/bf16/int8/fp8) via `__builtin_amdgcn_smfmac_*` |
 | `rocblas.cpp` | `runRocblas` — rocBLAS GEMM peak; FP category fp32/fp64/fp16/bf16 (flops), INT category int8 (ops) |
-| `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt GEMM peak: fp8 e4m3/e5m2 fnuz + mxfp4 (block-scaled, gated by `CLPEAK_HIPBLASLT_HAS_FP4`) |
+| `hipblaslt_gemm.cpp` | `runHipblasLt` — hipBLASLt GEMM peak: fp8 e4m3/e5m2 fnuz + mxfp4 (block-scaled, gated by `XPUPEAK_HIPBLASLT_HAS_FP4`) |
 | `global_bandwidth.cpp` | `runGlobalBandwidth` |
 | `local_bandwidth.cpp` | `runLocalBandwidth` |
 | `image_bandwidth.cpp` | `runImageBandwidth` via HIP texture object |
@@ -83,5 +83,5 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.
 - If you add a new `.hip` kernel → add it to the appropriate `embed_rocm_kernels()` gfx group in `CMakeLists.txt`, and declare its `Blob` extern in `include/rocm/rocm_peak.h`.
 - If a kernel uses a builtin valid only on certain gfx families → put it in (or create) the matching `ARCHS` group so hipcc never targets an unsupported arch (the genco compile would fail the build), and pass `getKernel()` the reason a GPU the group leaves out reads Unsupported.
-- A new GPU → add it to its family list (`CLPEAK_ROCM_GCN5` … `CLPEAK_ROCM_RDNA4`) in `CMakeLists.txt`; that list is the build's coverage, which the runtime reads back out of the bundles.  gfx11 kernels select by clang's `__GFX11__` family macro, so a new gfx11 part needs nothing else; gfx12 kernels name their parts (gfx1250 is `__GFX12__` too, with a different matrix ISA).
+- A new GPU → add it to its family list (`XPUPEAK_ROCM_GCN5` … `XPUPEAK_ROCM_RDNA4`) in `CMakeLists.txt`; that list is the build's coverage, which the runtime reads back out of the bundles.  gfx11 kernels select by clang's `__GFX11__` family macro, so a new gfx11 part needs nothing else; gfx12 kernels name their parts (gfx1250 is `__GFX12__` too, with a different matrix ISA).
 - If you change `RocmPeak` interface → update `include/rocm/rocm_peak.h`.

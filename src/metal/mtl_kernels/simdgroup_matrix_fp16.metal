@@ -89,29 +89,29 @@ kernel void simdgroup_matrix_fp16(
     threadgroup float tg_out[64];
     float acc0 = 0.0f;
     float acc1 = 0.0f;
-#define CLPEAK_FOLD_CHAIN(c)                                \
+#define XPUPEAK_FOLD_CHAIN(c)                               \
     simdgroup_store(c, tg_out, 8);                          \
     threadgroup_barrier(mem_flags::mem_threadgroup);        \
     acc0 += tg_out[lid * 2 + 0];                            \
     acc1 += tg_out[lid * 2 + 1];                            \
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    CLPEAK_FOLD_CHAIN(c0)
-    CLPEAK_FOLD_CHAIN(c1)
-    CLPEAK_FOLD_CHAIN(c2)
-    CLPEAK_FOLD_CHAIN(c3)
-    CLPEAK_FOLD_CHAIN(c4)
-    CLPEAK_FOLD_CHAIN(c5)
-    CLPEAK_FOLD_CHAIN(c6)
-    CLPEAK_FOLD_CHAIN(c7)
-    CLPEAK_FOLD_CHAIN(c8)
-    CLPEAK_FOLD_CHAIN(c9)
-    CLPEAK_FOLD_CHAIN(c10)
-    CLPEAK_FOLD_CHAIN(c11)
-    CLPEAK_FOLD_CHAIN(c12)
-    CLPEAK_FOLD_CHAIN(c13)
-    CLPEAK_FOLD_CHAIN(c14)
-    CLPEAK_FOLD_CHAIN(c15)
-#undef CLPEAK_FOLD_CHAIN
+    XPUPEAK_FOLD_CHAIN(c0)
+    XPUPEAK_FOLD_CHAIN(c1)
+    XPUPEAK_FOLD_CHAIN(c2)
+    XPUPEAK_FOLD_CHAIN(c3)
+    XPUPEAK_FOLD_CHAIN(c4)
+    XPUPEAK_FOLD_CHAIN(c5)
+    XPUPEAK_FOLD_CHAIN(c6)
+    XPUPEAK_FOLD_CHAIN(c7)
+    XPUPEAK_FOLD_CHAIN(c8)
+    XPUPEAK_FOLD_CHAIN(c9)
+    XPUPEAK_FOLD_CHAIN(c10)
+    XPUPEAK_FOLD_CHAIN(c11)
+    XPUPEAK_FOLD_CHAIN(c12)
+    XPUPEAK_FOLD_CHAIN(c13)
+    XPUPEAK_FOLD_CHAIN(c14)
+    XPUPEAK_FOLD_CHAIN(c15)
+#undef XPUPEAK_FOLD_CHAIN
 
     out[tg_id * 64 + lid * 2 + 0] = acc0;
     out[tg_id * 64 + lid * 2 + 1] = acc1;

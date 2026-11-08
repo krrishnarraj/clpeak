@@ -1,5 +1,5 @@
-#ifndef CLPEAK_OPTIONS_H
-#define CLPEAK_OPTIONS_H
+#ifndef XPUPEAK_OPTIONS_H
+#define XPUPEAK_OPTIONS_H
 
 #include <bitset>
 #include <string>
@@ -176,7 +176,7 @@ struct CliOptions {
   std::vector<Backend> requestedButNotBuilt() const;
 };
 
-// Describe how clpeak was asked to run, for the result document's `invocation`
+// Describe how xpupeak was asked to run, for the result document's `invocation`
 // block.  Every number in a run is sensitive to this -- a shorter --max-time-gpu
 // measures a different thing, and a selective run is not a full one even though
 // the file looks the same shape -- so it is recorded rather than inferred.
@@ -190,8 +190,8 @@ int parseCliOptions(int argc, char **argv, CliOptions &out);
 // Embedding-safe variant: never calls exit().  Returns true on success;
 // on failure (parse error, or --help/--version which have no meaning when
 // embedded) returns false with a human-readable message in errorMsg.
-// Used by clpeak_ffi so a bad argv can't kill the host GUI process.
+// Used by xpupeak_ffi so a bad argv can't kill the host GUI process.
 bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
                            std::string &errorMsg);
 
-#endif // CLPEAK_OPTIONS_H
+#endif // XPUPEAK_OPTIONS_H

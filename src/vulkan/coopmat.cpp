@@ -174,10 +174,10 @@ namespace
     // multiple of the subgroup width for every advertised tile, and the MulAdd
     // count is the trip count the shader was handed times the trip size.
     d.workPerWI = (uint32_t)((volume * 2 * mmas) / wgSize);
-    CLPEAK_VLOG("%s %s: %ux%ux%u at subgroup %u, %llu trips x %u MulAdds, "
-                "%u ops/WI\n",
-                d.resultTag, d.metricLabel, t.M, t.N, t.K, wgSize,
-                (unsigned long long)trips, COOPMAT_MMA_PER_TRIP, d.workPerWI);
+    XPUPEAK_VLOG("%s %s: %ux%ux%u at subgroup %u, %llu trips x %u MulAdds, "
+                 "%u ops/WI\n",
+                 d.resultTag, d.metricLabel, t.M, t.N, t.K, wgSize,
+                 (unsigned long long)trips, COOPMAT_MMA_PER_TRIP, d.workPerWI);
   }
 
 #ifdef VK_HAS_COOPMAT_FP16_F16ACC
@@ -291,14 +291,14 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         if (widthRefused && i == 0)
           refused = true;
         else if (widthRefused)
-          CLPEAK_VLOG("%s %s: the driver refused %s pinned to subgroup %u\n",
-                      base.resultTag, base.metricLabel, coopmatTileName(t).c_str(),
-                      widths[i]);
+          XPUPEAK_VLOG("%s %s: the driver refused %s pinned to subgroup %u\n",
+                       base.resultTag, base.metricLabel, coopmatTileName(t).c_str(),
+                       widths[i]);
       }
       if (refused)
       {
-        CLPEAK_VLOG("%s %s: the driver refused to build %s\n", base.resultTag,
-                    base.metricLabel, coopmatTileName(t).c_str());
+        XPUPEAK_VLOG("%s %s: the driver refused to build %s\n", base.resultTag,
+                     base.metricLabel, coopmatTileName(t).c_str());
         refusedTiles += (refusedTiles.empty() ? "" : ", ") + coopmatTileName(t);
         refusedCount++;
         continue;
@@ -336,8 +336,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         test.skip(base.metricLabel, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed", o);
         return;
       }
-      CLPEAK_VLOG("%s %s: %s %s\n", base.resultTag, base.metricLabel, timed.c_str(),
-                  base.unit);
+      XPUPEAK_VLOG("%s %s: %s %s\n", base.resultTag, base.metricLabel, timed.c_str(),
+                   base.unit);
       test.emit(base.metricLabel, readings[best], o);
       return;
     }

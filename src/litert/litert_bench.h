@@ -1,5 +1,5 @@
-#ifndef CLPEAK_LITERT_BENCH_H
-#define CLPEAK_LITERT_BENCH_H
+#ifndef XPUPEAK_LITERT_BENCH_H
+#define XPUPEAK_LITERT_BENCH_H
 
 // The measurement shape every timed test in this backend follows -- the one
 // the GPU backends use and the ONNX backend documents (src/onnx/AGENTS.md,
@@ -106,7 +106,7 @@ inline bool litertBindScalar(LitertSession &s, const LitertPlan &p, std::string 
 {
   // Under floatIo an integer plan's scalar goes in as a float32 one and is
   // quantized at the same scale, so the same one lands on the top code.
-  const bool integer = (p.act == clpeak_tflite::TfType::I8 || p.act == clpeak_tflite::TfType::I16);
+  const bool integer = (p.act == xpupeak_tflite::TfType::I8 || p.act == xpupeak_tflite::TfType::I16);
   const std::string v = litertScalarBytes(litertIoType(p), integer ? 1.0f : 1.0009765625f);
   return s.writeInput(0, v.data(), v.size(), error);
 }
@@ -122,10 +122,10 @@ inline bool litertBindScalar(LitertSession &s, const LitertPlan &p, std::string 
 // stand in.  Only the reduced row is read, so a wrong but finite answer
 // passes: a tripwire, not an accuracy test.  Integer rows hold no NaN and
 // are not read.  Empty when the row is finite or cannot be read.
-inline std::string litertNonFiniteReason(LitertSession &s, clpeak_tflite::TfType t,
+inline std::string litertNonFiniteReason(LitertSession &s, xpupeak_tflite::TfType t,
                                          const std::string &where)
 {
-  using clpeak_tflite::TfType;
+  using xpupeak_tflite::TfType;
   if (t != TfType::F32 && t != TfType::F16 && t != TfType::BF16)
     return std::string();
   std::vector<uint8_t> raw;
@@ -205,7 +205,7 @@ template <typename BuildModel>
 std::string litertProfiledKernel(const LitertRuntime &rt, const litert_device_info_t &dev, BuildModel &&model,
                                  const LitertSessionConfig &cfg, const LitertPlan &bind)
 {
-  if (!litertProfilesNameKernels(dev.accel) || clpeak::cancelRequested())
+  if (!litertProfilesNameKernels(dev.accel) || xpupeak::cancelRequested())
     return std::string();
   std::string err;
   auto ps = LitertSession::create(rt, dev, model(), cfg, err);
@@ -215,8 +215,8 @@ std::string litertProfiledKernel(const LitertRuntime &rt, const litert_device_in
   const std::string kernel = litertMatMulKernel(ps->profileOps(err, &runFailed));
   if (kernel.empty() && !runFailed)
   {
-    CLPEAK_VLOG("litert[%s]: a profiled run named no kernel%s%s, so no more are taken on this device\n",
-                dev.displayName.c_str(), err.empty() ? "" : ": ", err.c_str());
+    XPUPEAK_VLOG("litert[%s]: a profiled run named no kernel%s%s, so no more are taken on this device\n",
+                 dev.displayName.c_str(), err.empty() ? "" : ": ", err.c_str());
     litertNoteUnnamedProfile(dev.accel);
   }
   return kernel;
@@ -268,7 +268,7 @@ inline LitertArithmetic litertKernelArithmetic(const std::string &kernel, Litert
 // integers or unpack to float: the formats whose kernel a row has to name.
 inline bool litertIntegerWeights(const LitertPlan &p)
 {
-  using clpeak_tflite::TfType;
+  using xpupeak_tflite::TfType;
   return p.weight == TfType::I8 || p.weight == TfType::I4 || p.weight == TfType::I2 || p.weight == TfType::U8 ||
          p.weight == TfType::U4;
 }
@@ -355,4 +355,4 @@ inline LitertSessionConfig litertConfigFor(const LitertPlan &p, bool profile = f
   return litertConfigFor(p, LitertForm(), profile);
 }
 
-#endif // CLPEAK_LITERT_BENCH_H
+#endif // XPUPEAK_LITERT_BENCH_H

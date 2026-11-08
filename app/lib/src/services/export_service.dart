@@ -10,7 +10,7 @@ class ExportService {
       _export(file,
           suggestedName: suggestedName,
           mimeType: 'application/json',
-          label: 'clpeak results',
+          label: 'xpupeak results',
           extensions: const ['json']);
 
   /// The NDJSON run log left behind when the app stopped mid-run.
@@ -18,7 +18,7 @@ class ExportService {
       _export(file,
           suggestedName: suggestedName,
           mimeType: 'text/plain',
-          label: 'clpeak run log',
+          label: 'xpupeak run log',
           extensions: const ['log']);
 
   Future<void> _export(

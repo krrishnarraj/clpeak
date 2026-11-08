@@ -36,7 +36,7 @@
 #endif
 
 #if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
-#define CLPEAK_CPU_X86 1
+#define XPUPEAK_CPU_X86 1
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
@@ -140,7 +140,7 @@ static std::string firstLineValue(const std::string &cpuinfo, const char *key)
 }
 #endif
 
-#if defined(CLPEAK_CPU_X86)
+#if defined(XPUPEAK_CPU_X86)
 static inline void cpuid(uint32_t leaf, uint32_t sub, uint32_t regs[4])
 {
 #if defined(_MSC_VER)
@@ -445,7 +445,7 @@ static std::vector<uint64_t> collectMidrs()
 // ---------------------------------------------------------------------------
 // Per-CPU topology: which CPU is fastest, and which cache instance every CPU
 // reads at each level.  The OS ranks the cores -- Linux `cpu_capacity`, else
-// the highest maximum clock; Windows `EfficiencyClass` -- and clpeak only
+// the highest maximum clock; Windows `EfficiencyClass` -- and xpupeak only
 // orders them.  Ties keep the lowest id, so a homogeneous machine still runs
 // its single-thread rows on cpu0.  macOS has no hard affinity to pin with and
 // describes its cores by performance level instead (detectCpuInfo).
@@ -847,7 +847,7 @@ static void windowsTopology(cpu_device_info_t &info, const std::vector<WinCache>
 // ---------------------------------------------------------------------------
 static void detectIsa(cpu_device_info_t &info)
 {
-  const clpeak_cpu::CpuFeatures &f = clpeak_cpu::cpuFeatures();
+  const xpupeak_cpu::CpuFeatures &f = xpupeak_cpu::cpuFeatures();
   info.hasAVX2    = f.avx2;
   info.hasFMA     = f.fma;
   info.hasAVX512  = f.avx512f;
@@ -860,12 +860,12 @@ static void detectIsa(cpu_device_info_t &info)
   info.hasAMX     = f.amx_int8 || f.amx_bf16 || f.amx_fp16 || f.amx_fp8;
   info.hasSVE     = f.sve;
   info.hasSVE2    = f.sve2;
-  info.sveVLBytes = clpeak_cpu::sveVLBytes();
+  info.sveVLBytes = xpupeak_cpu::sveVLBytes();
   info.hasSME     = f.sme;
   info.hasSME2    = f.sme2;
-  info.smeSVLBytes = clpeak_cpu::smeSVLBytes();
+  info.smeSVLBytes = xpupeak_cpu::smeSVLBytes();
   info.emulatedX86OnArm = f.emulatedX86OnArm;
-  info.isaName    = clpeak_cpu::isaName();
+  info.isaName    = xpupeak_cpu::isaName();
   // Report the active SVE vector length alongside the ISA name, e.g.
   // "SVE2 (VL=256b)" -- it's the defining knob for SVE peak throughput.
   if (info.sveVLBytes > 0)
@@ -1035,7 +1035,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   if (info.name.empty())
     info.name = firstLineValue(cpuinfo, "Hardware");
   info.vendor = firstLineValue(cpuinfo, "vendor_id");
-#if defined(CLPEAK_CPU_X86)
+#if defined(XPUPEAK_CPU_X86)
   if (info.name.empty())
     info.name = x86Brand();
   if (info.vendor.empty())
@@ -1095,7 +1095,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   // name.empty() fallback below dead code on ARM64 -- clear it so the registry
   // and MIDR paths actually run.
   info.name.clear();
-#if defined(CLPEAK_CPU_X86)
+#if defined(XPUPEAK_CPU_X86)
   info.name = x86Brand();
   info.vendor = x86Vendor();
 #endif

@@ -81,7 +81,7 @@ uint64_t tempFreeBytes()
   return (uint64_t)st.f_bavail * (uint64_t)st.f_frsize;
 }
 
-// Remove packages and compiled models left by clpeak processes that are no
+// Remove packages and compiled models left by xpupeak processes that are no
 // longer running.  A session cleans up after itself, but a process that
 // died mid-session -- a compiler abort, a kill -- leaves up to two
 // gigabytes behind, and enough of those fill a volume.  Runs once per
@@ -109,7 +109,7 @@ void sweepStalePackages()
         if (kill(pid, 0) == 0 || errno != ESRCH)
           continue;   // still running (or not ours to judge)
         [fm removeItemAtPath:[tmp stringByAppendingPathComponent:name] error:nil];
-        CLPEAK_VLOG("coreml: removed stale %s left by process %d\n", name.UTF8String, pid);
+        XPUPEAK_VLOG("coreml: removed stale %s left by process %d\n", name.UTF8String, pid);
       }
     }
   });
@@ -291,7 +291,7 @@ std::unique_ptr<CoremlSession> CoremlSession::create(const coreml_device_info_t 
     // any log level, and a failure there is not an error here: it is how a
     // shape the ANE cannot take ends up on the CPU, which the plan reports.
     // Muted for the compile, load and plan; a no-op under --verbose.
-    clpeak::ScopedConsoleMute mute;
+    xpupeak::ScopedConsoleMute mute;
 
     // ---- Compile -----------------------------------------------------------
     // Produces the .mlmodelc the runtime loads.  This is the generic
@@ -433,7 +433,7 @@ CoremlSession::~CoremlSession()
   // include/common/coreml_cache.h).  Every session is a different model
   // here, so the cache never repays keeping and would otherwise grow by
   // gigabytes a run.
-  clpeak::purgeCoreMLCompileCache();
+  xpupeak::purgeCoreMLCompileCache();
 }
 
 namespace

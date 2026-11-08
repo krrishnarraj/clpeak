@@ -6,7 +6,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace clpeak_tflite
+namespace xpupeak_tflite
 {
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ public:
   }
 
   // ---- vectors ----------------------------------------------------------
-  // Scalars are little-endian on every target clpeak builds for, so a
+  // Scalars are little-endian on every target xpupeak builds for, so a
   // vector of them is one block copy.
   template <class T> uint32_t createVector(const T *data, size_t n, size_t forceAlign = 0)
   {
@@ -768,6 +768,6 @@ TfliteBytes TfliteModel::build(const std::string &description) const
   return out;
 }
 
-} // namespace clpeak_tflite
+} // namespace xpupeak_tflite
 
 #endif // ENABLE_LITERT

@@ -44,7 +44,7 @@ struct Run
 };
 
 Run measure(const LitertRuntime &rt, const litert_device_info_t &dev, const LitertPlan &plan,
-            clpeak_tflite::TfliteBytes &&model, const std::string &input, unsigned warmup,
+            xpupeak_tflite::TfliteBytes &&model, const std::string &input, unsigned warmup,
             bool forceIters, unsigned forced)
 {
   Run r;

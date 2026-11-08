@@ -7,7 +7,7 @@ import '../../services/benchmark_service.dart';
 import '../../services/export_service.dart';
 import '../../services/resume_offer.dart';
 import '../../services/run_history_store.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
 import 'results_body.dart';

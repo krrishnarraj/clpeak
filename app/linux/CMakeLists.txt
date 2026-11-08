@@ -3,8 +3,8 @@ cmake_minimum_required(VERSION 3.13)
 project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application.  Deliberately NOT
-# "clpeak": release zips place this bundle next to the CLI binary of that name.
-set(BINARY_NAME "clpeak-gui")
+# "xpupeak": release zips place this bundle next to the CLI binary of that name.
+set(BINARY_NAME "xpupeak-gui")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "kr.clpeak")

@@ -49,7 +49,7 @@ const Size kSizes[] = {
     {128ull << 20, "128mb"},
 };
 
-uint64_t maxTensorBytes() { return clpeak::memoryBudget(1ull << 30); }
+uint64_t maxTensorBytes() { return xpupeak::memoryBudget(1ull << 30); }
 constexpr uint64_t kCopiesAtPeak = 4;   // the constant, its scaled copy, the result, the runtime's own
 constexpr unsigned int kSizeBudgetUs = 1000000;
 
@@ -154,7 +154,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
   {
     for (size_t si = 0; si < sizeof(kSizes) / sizeof(kSizes[0]); si++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Size &sz = kSizes[si];
       const std::string metric = std::string(v.label) + "_" + sz.label;
@@ -178,8 +178,8 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       {
         ref.tried = true;
         ref.run = measure(rt, dev, plan, rows, LitertActivation::None, warmupCount, forceIters, specifiedIters);
-        CLPEAK_VLOG("litert-activation[%s]: %s reference %.1f us (spread %.1f us)\n",
-                    dev.displayName.c_str(), sz.label, ref.run.us, ref.run.spreadUs);
+        XPUPEAK_VLOG("litert-activation[%s]: %s reference %.1f us (spread %.1f us)\n",
+                     dev.displayName.c_str(), sz.label, ref.run.us, ref.run.spreadUs);
       }
       if (ref.run.us <= 0.0)
       {
@@ -199,9 +199,9 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       const double noiseUs = std::max(full.spreadUs, ref.run.spreadUs);
       if (opUs < kMinOpShare * full.us || opUs < kNoiseFactor * noiseUs)
       {
-        CLPEAK_VLOG("litert-activation[%s]: %s %s: %.1f us against a %.1f us reference "
-                    "(spread %.1f us), too close to measure\n",
-                    dev.displayName.c_str(), v.label, sz.label, full.us, ref.run.us, noiseUs);
+        XPUPEAK_VLOG("litert-activation[%s]: %s %s: %.1f us against a %.1f us reference "
+                     "(spread %.1f us), too close to measure\n",
+                     dev.displayName.c_str(), v.label, sz.label, full.us, ref.run.us, noiseUs);
         test.skip(metric, ResultStatus::Error,
                   opUs < kMinOpShare * full.us
                       ? "the operation costs less than a tenth of the reference graph around it, "
@@ -216,8 +216,8 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       }
       // Read once, written once.
       const double bps = 2.0 * (double)sz.bytes / (opUs * 1.0e-6);
-      CLPEAK_VLOG("litert-activation[%s]: %s %s -> %.2f GB/s (%.1f us, ref %.1f us, spread %.1f us)\n",
-                  dev.displayName.c_str(), v.label, sz.label, bps / 1.0e9, full.us, ref.run.us, noiseUs);
+      XPUPEAK_VLOG("litert-activation[%s]: %s %s -> %.2f GB/s (%.1f us, ref %.1f us, spread %.1f us)\n",
+                   dev.displayName.c_str(), v.label, sz.label, bps / 1.0e9, full.us, ref.run.us, noiseUs);
       // The reference reads, writes and reads the tensor again in refUs; an
       // operation far above that rate was fused into the passes around it
       // or stayed in cache -- see src/coreml/activation.cpp.

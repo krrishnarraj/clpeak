@@ -11,7 +11,7 @@ class RunSummary {
     required this.cancelled,
     required this.fileName,
     this.name = '',
-    this.clpeakVersion = '',
+    this.xpupeakVersion = '',
     this.hostOs = '',
     this.hostOsVersion = '',
     this.hostArch = '',
@@ -30,7 +30,7 @@ class RunSummary {
 
   /// Where the run was produced — persisted for history list preview so an
   /// imported run from another machine is distinguishable without opening it.
-  final String clpeakVersion;
+  final String xpupeakVersion;
   final String hostOs;
   final String hostOsVersion;
   final String hostArch;
@@ -50,7 +50,7 @@ class RunSummary {
         cancelled: cancelled,
         fileName: fileName,
         name: newName,
-        clpeakVersion: clpeakVersion,
+        xpupeakVersion: xpupeakVersion,
         hostOs: hostOs,
         hostOsVersion: hostOsVersion,
         hostArch: hostArch,
@@ -65,7 +65,7 @@ class RunSummary {
         'cancelled': cancelled,
         'fileName': fileName,
         if (name.isNotEmpty) 'name': name,
-        if (clpeakVersion.isNotEmpty) 'clpeakVersion': clpeakVersion,
+        if (xpupeakVersion.isNotEmpty) 'clpeakVersion': xpupeakVersion,
         if (hostOs.isNotEmpty) 'hostOs': hostOs,
         if (hostOsVersion.isNotEmpty) 'hostOsVersion': hostOsVersion,
         if (hostArch.isNotEmpty) 'hostArch': hostArch,
@@ -81,7 +81,7 @@ class RunSummary {
         cancelled: m['cancelled'] as bool? ?? false,
         fileName: m['fileName'] as String? ?? '',
         name: m['name'] as String? ?? '',
-        clpeakVersion: m['clpeakVersion'] as String? ?? '',
+        xpupeakVersion: m['clpeakVersion'] as String? ?? '',
         hostOs: m['hostOs'] as String? ?? '',
         hostOsVersion: m['hostOsVersion'] as String? ?? '',
         hostArch: m['hostArch'] as String? ?? '',
@@ -111,7 +111,7 @@ class RunSummary {
       backends: backends.toList(),
       cancelled: cancelled,
       fileName: fileName,
-      clpeakVersion: meta?.clpeakVersion ?? '',
+      xpupeakVersion: meta?.xpupeakVersion ?? '',
       hostOs: (meta?.host['os']?.toString() ?? '').trim(),
       hostOsVersion: (meta?.host['os_version']?.toString() ?? '').trim(),
       hostArch: (meta?.host['arch']?.toString() ?? '').trim(),

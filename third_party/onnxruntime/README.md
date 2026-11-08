@@ -14,7 +14,7 @@ Copied verbatim from the ONNX Runtime source tree, MIT licensed
 | `onnxruntime_ep_c_api.h` | included by the above |
 
 Headers only — the ONNX backend dlopens the runtime at run time
-(`src/onnx/onnx_runtime.cpp`), so building clpeak needs no ONNX Runtime
+(`src/onnx/onnx_runtime.cpp`), so building xpupeak needs no ONNX Runtime
 installation, and the shipped binary has no link-time dependency on it.
 
 ## Why these are checked in, not a submodule

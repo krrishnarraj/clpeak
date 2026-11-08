@@ -258,7 +258,7 @@ public:
   // that returns a wrong answer is not a capability -- and run before the
   // accuracy test, so the first to ask measures.  `note` is what the
   // accuracy row adds to its description.
-  struct AnswerCheck : clpeak::AnswerCheck
+  struct AnswerCheck : xpupeak::AnswerCheck
   {
     std::string note;
   };
@@ -292,7 +292,7 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
 
 // Choose which onnxruntime library to load, ahead of the platform's
 // conventional names; empty clears the choice.  Backs
-// `--onnx-lib` and the FFI's clpeak_set_onnx_library().  Re-declared here so
+// `--onnx-lib` and the FFI's xpupeak_set_onnx_library().  Re-declared here so
 // the CLI and the FFI can set it without reaching into the backend's private
 // loader header (and its ONNX Runtime include).  Details, including why a
 // choice made after a runtime has loaded waits for the next start:

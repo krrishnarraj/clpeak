@@ -1,6 +1,6 @@
 # Crash gates
 
-Every place clpeak withholds work, or does it differently, because a runtime
+Every place xpupeak withholds work, or does it differently, because a runtime
 **crashes the process** (or corrupts its heap) instead of declining -- and
 nothing else.  A refusal the runtime speaks is learned by asking and needs no
 list here; so does a format a runtime is too old to have.  These are the
@@ -36,7 +36,7 @@ stay measured.  Lifting either is deleting its `if`.
 - **Seen**: NvTensorRTRTX EP 0.3.0 from the Windows ML package 2.30.43, ONNX
   Runtime 1.27.1, RTX 5060, 2026-09-18.  fp32, fp16, bf16 and fp8_e4m3 had
   built and run on the same provider first.
-- **To lift**: delete the branch and run `clpeak --onnx --onnx-winml --gemm
+- **To lift**: delete the branch and run `xpupeak --onnx --onnx-winml --gemm
   --verbose`.  The 32-cube probe is the graph that died; a build, or a
   refusal carrying a message, is a fixed runtime.
 
@@ -73,7 +73,7 @@ stay measured.  Lifting either is deleting its `if`.
   int8 matmul (int8 `[128,128]` weights, fp16 `[4,128]` scales,
   `block_size=32`, `axis=0`, fp16 activations) through `trtexec
   --exportOutput` must come back finite and agree with the CPU provider;
-  11.2.1 returns 128 NaNs.  Then run `clpeak --onnx --gemm --verbose` on the
+  11.2.1 returns 128 NaNs.  Then run `xpupeak --onnx --gemm --verbose` on the
   TensorRT device: a release that still returns NaN fails the row as an
   error there instead of publishing a rate, but only the comparison above
   catches an answer that is finite and wrong.
@@ -104,14 +104,14 @@ stay measured.  Lifting either is deleting its `if`.
 - **Wider than the fault, and why**: it needs this provider *and* this graph
   *and* that GPU -- the `int8_weight` matmul ladder runs on the same A380,
   and an RTX 4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run
-  this block.  clpeak cannot key on the third: DirectML is registered with no
+  this block.  xpupeak cannot key on the third: DirectML is registered with no
   device id, ORT picks the adapter, and a built-in provider's
   `onnx_ep_info_t` carries no hardware identity.  Keying on a guess that is
   wrong on a two-GPU box would take the run down, so the row is withheld on
   every DirectML device and says so.  (Narrowing it needs a DirectML device
   per adapter, which ORT 1.22+ makes possible through `GetEpDevices`; vendor
   alone would not do -- the UHD 630 is Intel and runs the graph.)
-- **To lift**: delete the `if` and run `clpeak --onnx --transformer-block
+- **To lift**: delete the `if` and run `xpupeak --onnx --transformer-block
   --verbose` on an Arc.  The `int8_weight` fusion probe is the reproducer,
   about 30 s in, after the int4_weight rows.  A newer DirectML may arrive as
   a Windows ML plugin (`--onnx-winml`) rather than another `onnxruntime.dll`;
@@ -136,7 +136,7 @@ stay measured.  Lifting either is deleting its `if`.
   kv2048 point compiled on 27.0, its next did not).  The gate is on the OS
   major version, so iOS 27 gets it too, untested there.
 - **To lift**: on a later release, drop the gate (or narrow it to the range
-  of releases known to crash) and run `clpeak --coreml --transformer-block`
+  of releases known to crash) and run `xpupeak --coreml --transformer-block`
   on the CPU and GPU compute units (`--devices coreml:1,coreml:2`).
 
 ## LiteRT backend, GPU accelerator (LiteRT 2.2.0 and 2.3.0)
@@ -147,7 +147,7 @@ Metal residency leak and the crash without OpenCL; those gates now stand
 only for an older runtime handed in with `--litert-lib`
 (`LitertRuntime::abi11` false: no
 `LiteRtCompiledModelIsNonCpuFullyAccelerated`, ABI 1.0.0), and go when
-clpeak stops running those.
+xpupeak stops running those.
 
 ### int16x8 is never sent to the GPU
 
@@ -164,7 +164,7 @@ clpeak stops running those.
   on the QUANTIZE that writes int16 in the float-boundary form ("Type
   invalid for quantized tensor", `ir_model_builder_helper.cc`).
 - **Seen**: 2.2.0 and 2.3.0 (M1 Pro, 2026-10-11).
-- **To lift**: delete the branch's GPU clause and run `clpeak --litert
+- **To lift**: delete the branch's GPU clause and run `xpupeak --litert
   --gemm --numeric-error` on the GPU device: the chain, not the single
   matmul, is the graph that found it.
 
@@ -209,7 +209,7 @@ clpeak stops running those.
   tensor, which decode's K/V cache is.
 - **Seen**: 2.2.0 and 2.3.0.  2.3.0's IrModel pipeline does not abort, but
   its answer is NaN, which the non-finite guard would withhold anyway.
-- **To lift**: delete `decodeFence` and run `clpeak --litert
+- **To lift**: delete `decodeFence` and run `xpupeak --litert
   --transformer-block` on the GPU device.
 
 ### Constant tensor sharing is never sent to the WebGPU accelerator
@@ -234,7 +234,7 @@ clpeak stops running those.
 - **Seen**: the ai-edge-litert 2.3.0 and 2.2.0 Linux x86_64 wheels, RTX
   5060 (NVIDIA 610.57.04, Dawn on Vulkan), 2026-10-17.  The Metal (M1 Pro)
   and OpenCL (Mali-G710) accelerators take the option.
-- **To lift**: delete the `!webGpu` and run `clpeak --litert
+- **To lift**: delete the `!webGpu` and run `xpupeak --litert
   --numeric-error --verbose` on the WebGPU device.  `int8_weight` with
   the 8-bit kernels is the first model compiled with sharing; a reading or
   a refusal is a fixed accelerator, a run that ends there is not.
@@ -259,7 +259,7 @@ clpeak stops running those.
 - **Seen**: the ai-edge-litert 2.3.0 Linux x86_64 wheel, RTX 5060 (NVIDIA
   610.57.04, Dawn on Vulkan), 2026-10-17; 2.2.0's dies on the same graph.
   The Metal accelerator (M1 Pro) runs the prefill rows.
-- **To lift**: delete the `variantFence` call and run `clpeak --litert
+- **To lift**: delete the `variantFence` call and run `xpupeak --litert
   --transformer-block` on the WebGPU device: the composite's 64-token
   prefill is the first graph after the fp16 rows.  Prefill rows that run,
   or a refusal, are a fixed accelerator; the decode rows still answer to
@@ -308,7 +308,7 @@ clpeak stops running those.
 - **Fault**: `vkCreateComputePipelines` ends the process with a SIGSEGV
   (SEGV_MAPERR at 0x8, a null pointer) in the driver's shader compiler,
   `libllvm-qgl.so` +0xcbc240, under `runCoopMatrix`.  The backtrace does
-  not name the row; isolating it outside clpeak does.  fp16 x fp16 + fp16
+  not name the row; isolating it outside xpupeak does.  fp16 x fp16 + fp16
   at the 64x64x16 tile the device advertises crashes the compiler only
   when the accumulator reaches `OpCooperativeMatrixMulAddKHR` through an
   `OpPhi`, which is how the loop carries it once `glslc -O`
@@ -327,7 +327,7 @@ clpeak stops running those.
   be fixed, and a version bound guessed wrong takes the run down.  Keyed on
   the driver rather than the vendor ID because Mesa's Turnip drives the
   same GPUs with its own compiler.
-- **To lift**: delete the `if` and run `clpeak --vulkan --matrix-compute
+- **To lift**: delete the `if` and run `xpupeak --vulkan --matrix-compute
   --verbose` on an Adreno (in the app, the same selection with verbose
   logging on).  The dump names the driver build and its compiler version,
   and the line before each pipeline names the row and its tile.  A measured

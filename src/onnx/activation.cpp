@@ -85,7 +85,7 @@ namespace
   // tensor of its size the graph computes from it (Variant::intermediates).
   // The reference computes one, the scaled input, and every operation computes
   // that and more, so a reference fits wherever an operation of its size does.
-  static uint64_t maxHeldBytes() { return clpeak::memoryBudget(1ull << 30); }
+  static uint64_t maxHeldBytes() { return xpupeak::memoryBudget(1ull << 30); }
 
   constexpr unsigned int kSizeBudgetUs = 1000000;
 
@@ -186,9 +186,9 @@ namespace
         createUs = std::chrono::duration<double, std::micro>(
                        std::chrono::steady_clock::now() - createStart)
                        .count();
-        CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s%s\n",
-                    ep.providerKey.c_str(), (long long)rows, createUs / 1.0e6,
-                    view == OnnxReduceView::Rank4 ? " (rank-4 reduction)" : "");
+        XPUPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s%s\n",
+                     ep.providerKey.c_str(), (long long)rows, createUs / 1.0e6,
+                     view == OnnxReduceView::Rank4 ? " (rank-4 reduction)" : "");
         return ses;
       };
 
@@ -206,11 +206,11 @@ namespace
       if (!ses.session && !ses.offDevice && act == OnnxActivation::None &&
           view == OnnxReduceView::Rows &&
           onnxFailureStatus(ses.error) == ResultStatus::Unsupported &&
-          !onnxReasonIsOutOfMemory(ses.error) && !clpeak::cancelRequested())
+          !onnxReasonIsOutOfMemory(ses.error) && !xpupeak::cancelRequested())
       {
-        CLPEAK_VLOG("onnx-activation[%s]: refused (%s); retrying the reduction "
-                    "through a rank-4 view\n",
-                    ep.providerKey.c_str(), ses.error.c_str());
+        XPUPEAK_VLOG("onnx-activation[%s]: refused (%s); retrying the reduction "
+                     "through a rank-4 view\n",
+                     ep.providerKey.c_str(), ses.error.c_str());
         auto r4 = create(OnnxReduceView::Rank4, createUs);
         if (r4.session)
         {
@@ -229,9 +229,9 @@ namespace
       r.createUs = createUs;
       if (createUs > kOnnxMaxCreateUs)
       {
-        CLPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s > %.1f s, skipping\n",
-                    ep.providerKey.c_str(), (long long)rows,
-                    createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+        XPUPEAK_VLOG("onnx-activation[%s]: %lld rows create %.1f s > %.1f s, skipping\n",
+                     ep.providerKey.c_str(), (long long)rows,
+                     createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
         r.error = "session creation took " +
                   std::to_string((long long)(createUs / 1.0e6)) +
                   " s, exceeds " +
@@ -405,8 +405,8 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const Run dispatch = measure(rt, ep, dtype, OnnxActivation::None, 1,
                                warmupCount, forceIters, specifiedIters);
   const double dispatchUs = (dispatch.us > 0.0) ? dispatch.us : 0.0;
-  CLPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
-              ep.providerKey.c_str(), dispatchUs);
+  XPUPEAK_VLOG("onnx-activation[%s]: submission floor %.0f us\n",
+               ep.providerKey.c_str(), dispatchUs);
 
   // The reference: same tensor, same read and reduction, no operation.  It
   // depends only on the size, so it is measured once per size and reused by
@@ -457,9 +457,9 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const std::string error =
         ref.run.error.empty() ? std::string("run failed") : ref.run.error;
     ref.reason = "reference graph failed: " + error;
-    CLPEAK_VLOG("onnx-activation[%s]: %s reference failed (%s)%s\n",
-                ep.providerKey.c_str(), kSizes[si].label, error.c_str(),
-                ref.run.endsLadder ? "; no larger size is attempted" : "");
+    XPUPEAK_VLOG("onnx-activation[%s]: %s reference failed (%s)%s\n",
+                 ep.providerKey.c_str(), kSizes[si].label, error.c_str(),
+                 ref.run.endsLadder ? "; no larger size is attempted" : "");
     if (ref.run.endsLadder)
     {
       refLadder.ended = "reference graph failed at " +
@@ -472,13 +472,13 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   for (const Variant &v : kVariants)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
 
     Ladder ladder;
     for (size_t si = 0; si < kNumSizes; si++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       const Size &sz = kSizes[si];
@@ -506,9 +506,9 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const std::string pastCap = ladder.pastCompileCap(si);
       if (!pastCap.empty())
       {
-        CLPEAK_VLOG("onnx-activation[%s/%s]: %s not built: %s\n",
-                    ep.providerKey.c_str(), v.label, sz.label,
-                    pastCap.c_str());
+        XPUPEAK_VLOG("onnx-activation[%s/%s]: %s not built: %s\n",
+                     ep.providerKey.c_str(), v.label, sz.label,
+                     pastCap.c_str());
         test.skip(metric, ResultStatus::Unsupported, pastCap, note);
         continue;
       }
@@ -552,11 +552,11 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const double workUs = full.us - dispatchUs;
       if (netUs <= 0.0 || workUs <= 0.0 || netUs <= kMinOpShare * workUs)
       {
-        CLPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
-                    "(%.0f us against a %.0f us reference, %.0f us of "
-                    "submission)\n",
-                    ep.providerKey.c_str(), v.label, sz.label,
-                    full.us, floorUs, dispatchUs);
+        XPUPEAK_VLOG("onnx-activation[%s/%s]: %s lost in the noise "
+                     "(%.0f us against a %.0f us reference, %.0f us of "
+                     "submission)\n",
+                     ep.providerKey.c_str(), v.label, sz.label,
+                     full.us, floorUs, dispatchUs);
         test.skip(metric, ResultStatus::Error,
                   "too close to the reference graph it is measured against",
                   note);
@@ -566,10 +566,10 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // One pass in, one pass out.
       const double bps = 2.0 * (double)bytes / (netUs * 1.0e-6);
 
-      CLPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
-                  "floor %.0f us)\n",
-                  ep.providerKey.c_str(), v.label,
-                  sz.label, bps / 1.0e9, full.us, floorUs);
+      XPUPEAK_VLOG("onnx-activation[%s/%s]: %s -> %.1f GB/s (%.0f us, "
+                   "floor %.0f us)\n",
+                   ep.providerKey.c_str(), v.label,
+                   sz.label, bps / 1.0e9, full.us, floorUs);
       test.emit(metric, (float)bps, note.c_str());
     }
   }

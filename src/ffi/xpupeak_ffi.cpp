@@ -1,4 +1,4 @@
-#include "clpeak_ffi.h"
+#include "xpupeak_ffi.h"
 #include "launch.h"
 #include "logger_ffi.h"
 
@@ -49,7 +49,7 @@ char *copyString(const std::string &value)
 
 // A log entry recorded outside any backend's logger (the RunLog's fallback):
 // forwarded as the same `log` event a logger would have sent.
-void emitLogEntry(ClpeakEventCallback cb, void *userData, const LogEntry &entry)
+void emitLogEntry(XpupeakEventCallback cb, void *userData, const LogEntry &entry)
 {
     LogEvent e;
     e.kind        = LogEvent::Kind::Log;
@@ -62,7 +62,7 @@ void emitLogEntry(ClpeakEventCallback cb, void *userData, const LogEntry &entry)
 
 // `durationS` is the saved document's `duration_s`, negative when there is
 // none: for a resumed run only the native side knows the parts' time.
-void emitDone(ClpeakEventCallback cb, void *userData, int status, bool cancelled,
+void emitDone(XpupeakEventCallback cb, void *userData, int status, bool cancelled,
               double durationS = -1.0)
 {
     std::string json = "{\"t\":\"done\",\"status\":" + std::to_string(status) +
@@ -76,30 +76,30 @@ std::atomic<bool> g_running{false};
 
 } // namespace
 
-const char *clpeak_version(void)
+const char *xpupeak_version(void)
 {
-    return CLPEAK_VERSION_STR;
+    return XPUPEAK_VERSION_STR;
 }
 
-char *clpeak_copy_backend_catalog_json(void)
+char *xpupeak_copy_backend_catalog_json(void)
 {
     std::vector<BackendInventory> inv;
     for (const auto &be : backendRegistry())
     {
-        clpeak::ScopedConsoleMute mute(
-            clpeak::ScopedConsoleMute::Capture::Verbose, {},
+        xpupeak::ScopedConsoleMute mute(
+            xpupeak::ScopedConsoleMute::Capture::Verbose, {},
             /*stderrOnly=*/true);
         inv.push_back(be.enumerate());
     }
     return copyString(inventoryToJson(inv));
 }
 
-void clpeak_free_string(char *s)
+void xpupeak_free_string(char *s)
 {
     std::free(s);
 }
 
-char *clpeak_copy_onnx_status_json(void)
+char *xpupeak_copy_onnx_status_json(void)
 {
 #ifdef ENABLE_ONNX
     const OnnxRuntimeStatus st = onnxRuntimeStatus();
@@ -150,7 +150,7 @@ char *clpeak_copy_onnx_status_json(void)
 #endif
 }
 
-void clpeak_set_onnx_library(const char *path)
+void xpupeak_set_onnx_library(const char *path)
 {
 #ifdef ENABLE_ONNX
     onnxSetLibraryOverride(path ? path : "");
@@ -159,7 +159,7 @@ void clpeak_set_onnx_library(const char *path)
 #endif
 }
 
-void clpeak_set_onnx_ep_libraries(const char *spec)
+void xpupeak_set_onnx_ep_libraries(const char *spec)
 {
 #ifdef ENABLE_ONNX
     std::vector<OnnxEpLibrary> libs;
@@ -194,7 +194,7 @@ void clpeak_set_onnx_ep_libraries(const char *spec)
 #endif
 }
 
-void clpeak_set_onnx_winml(int enabled, const char *path)
+void xpupeak_set_onnx_winml(int enabled, const char *path)
 {
 #ifdef ENABLE_ONNX
     onnxSetWinml(enabled != 0, path ? path : "");
@@ -204,7 +204,7 @@ void clpeak_set_onnx_winml(int enabled, const char *path)
 #endif
 }
 
-char *clpeak_copy_litert_status_json(void)
+char *xpupeak_copy_litert_status_json(void)
 {
 #ifdef ENABLE_LITERT
     const LitertRuntimeStatus st = litertRuntimeStatus();
@@ -224,7 +224,7 @@ char *clpeak_copy_litert_status_json(void)
 #endif
 }
 
-void clpeak_set_litert_library(const char *path)
+void xpupeak_set_litert_library(const char *path)
 {
 #ifdef ENABLE_LITERT
     litertSetLibraryOverride(path ? path : "");
@@ -233,7 +233,7 @@ void clpeak_set_litert_library(const char *path)
 #endif
 }
 
-void clpeak_set_litert_npu_dir(const char *dir)
+void xpupeak_set_litert_npu_dir(const char *dir)
 {
 #ifdef ENABLE_LITERT
     litertSetNpuDirOverride(dir ? dir : "");
@@ -242,7 +242,7 @@ void clpeak_set_litert_npu_dir(const char *dir)
 #endif
 }
 
-void clpeak_set_litert_npu_stage_dir(const char *dir)
+void xpupeak_set_litert_npu_stage_dir(const char *dir)
 {
 #ifdef ENABLE_LITERT
     litertSetNpuStageDir(dir ? dir : "");
@@ -251,38 +251,38 @@ void clpeak_set_litert_npu_stage_dir(const char *dir)
 #endif
 }
 
-void clpeak_request_cancel(void)
+void xpupeak_request_cancel(void)
 {
-    clpeak::requestCancel();
+    xpupeak::requestCancel();
 }
 
-void clpeak_set_on_screen(int on_screen)
+void xpupeak_set_on_screen(int on_screen)
 {
-    clpeak::setHostOnScreen(on_screen != 0);
+    xpupeak::setHostOnScreen(on_screen != 0);
 }
 
-void clpeak_set_paused(int paused)
+void xpupeak_set_paused(int paused)
 {
-    clpeak::setRunPaused(paused != 0);
+    xpupeak::setRunPaused(paused != 0);
 }
 
-int clpeak_launch(int argc, const char **argv,
-                  ClpeakEventCallback on_event, void *user_data)
+int xpupeak_launch(int argc, const char **argv,
+                   XpupeakEventCallback on_event, void *user_data)
 {
-    return clpeakLaunch(argc, argv, on_event, user_data, /*resetControls=*/true);
+    return xpupeakLaunch(argc, argv, on_event, user_data, /*resetControls=*/true);
 }
 
-int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
-                 void *user_data, bool resetControls)
+int xpupeakLaunch(int argc, const char **argv, XpupeakEventCallback on_event,
+                  void *user_data, bool resetControls)
 {
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true))
-        return CLPEAK_RUN_BUSY;  // no done event: the in-flight run owns the stream
+        return XPUPEAK_RUN_BUSY;  // no done event: the in-flight run owns the stream
 
     if (resetControls)
     {
-        clpeak::resetCancel();
-        clpeak::setRunPaused(false);
+        xpupeak::resetCancel();
+        xpupeak::setRunPaused(false);
     }
 
     std::vector<char *> mutableArgv;
@@ -305,10 +305,10 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     std::string parseError;
     if (!parseCliOptionsNoExit(argc, mutableArgv.data(), opts, parseError))
     {
-        clpeak::logMessage(clpeak::LogLevel::Error, "", parseError);
-        emitDone(on_event, user_data, CLPEAK_RUN_BAD_ARGS, false);
+        xpupeak::logMessage(xpupeak::LogLevel::Error, "", parseError);
+        emitDone(on_event, user_data, XPUPEAK_RUN_BAD_ARGS, false);
         g_running.store(false);
-        return CLPEAK_RUN_BAD_ARGS;
+        return XPUPEAK_RUN_BAD_ARGS;
     }
 
     // --resume: the interrupted run's own options, from its checkpoint, less
@@ -322,15 +322,15 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         if (!loadResumePlan(opts.resumeFile, resume, error) ||
             !resumeOptions(resume, opts, resumed, error))
         {
-            clpeak::logMessage(clpeak::LogLevel::Error, "", error);
-            emitDone(on_event, user_data, CLPEAK_RUN_BAD_ARGS, false);
+            xpupeak::logMessage(xpupeak::LogLevel::Error, "", error);
+            emitDone(on_event, user_data, XPUPEAK_RUN_BAD_ARGS, false);
             g_running.store(false);
-            return CLPEAK_RUN_BAD_ARGS;
+            return XPUPEAK_RUN_BAD_ARGS;
         }
         opts = std::move(resumed);
     }
 
-    clpeak::setVerbose(opts.verbose);
+    xpupeak::setVerbose(opts.verbose);
 #ifdef ENABLE_ONNX
     if (!opts.onnxLibPath.empty())
         onnxSetLibraryOverride(opts.onnxLibPath);
@@ -360,12 +360,12 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     }
     else
     {
-        combined.meta.clpeakVersion = CLPEAK_VERSION_STR;
+        combined.meta.xpupeakVersion = XPUPEAK_VERSION_STR;
         combined.meta.generatedAt   = isoTimestampUtc();
         for (const auto &be : backendRegistry())
             combined.meta.build.backends.push_back(backendInfo(be.id).name);
-#ifdef CLPEAK_BUILD_CONFIG
-        combined.meta.build.config = CLPEAK_BUILD_CONFIG;
+#ifdef XPUPEAK_BUILD_CONFIG
+        combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
         combined.meta.host          = probeHost();
         combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
@@ -383,8 +383,8 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     int status = 0;
 
     for (Backend b : opts.requestedButNotBuilt())
-        CLPEAK_LOG(Warning, "clpeak: the %s backend is not in this build",
-                   backendInfo(b).name);
+        XPUPEAK_LOG(Warning, "xpupeak: the %s backend is not in this build",
+                    backendInfo(b).name);
 
     // --verbose: the catalog as the run saw it, in the file.  Already
     // enumerated once for the run screen, so the memoised probes make this
@@ -393,8 +393,8 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         for (const auto &be : backendRegistry())
             if (opts.backendEnabled(be.id))
             {
-                clpeak::ScopedConsoleMute mute(
-                    clpeak::ScopedConsoleMute::Capture::Verbose, {},
+                xpupeak::ScopedConsoleMute mute(
+                    xpupeak::ScopedConsoleMute::Capture::Verbose, {},
                     /*stderrOnly=*/true);
                 combined.inventory.push_back(be.enumerate());
             }
@@ -403,14 +403,14 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
     // nothing else, and a window being open does not count as activity to
     // any OS idle timer; on Android and iOS it is a no-op and the app keeps
     // the screen on itself (include/common/keep_awake.h).
-    clpeak::KeepAwake keepAwake;
+    xpupeak::KeepAwake keepAwake;
     // And paused while the OS says the device is too hot (thermal.h) --
     // on a phone, where it matters.
-    clpeak::ThermalWatch thermalWatch;
+    xpupeak::ThermalWatch thermalWatch;
 
     for (const auto &be : backendRegistry())
     {
-        if (!opts.backendEnabled(be.id) || clpeak::cancelRequested())
+        if (!opts.backendEnabled(be.id) || xpupeak::cancelRequested())
             continue;
         // Finished by the part of the run this one resumes.
         if (opts.resume.backendsDone.test(static_cast<size_t>(be.id)))
@@ -429,10 +429,10 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         // Backstop for Core ML's compile cache, as in the CLI (see
         // include/common/coreml_cache.h); the app's own cache directory on
         // iOS and macOS is where it lands.
-        clpeak::purgeCoreMLCompileCache();
+        xpupeak::purgeCoreMLCompileCache();
     }
 
-    bool cancelled = clpeak::cancelRequested();
+    bool cancelled = xpupeak::cancelRequested();
 
     combined.meta.cancelled = cancelled;
     combined.meta.durationS = checkpoint.runningS();
@@ -457,7 +457,7 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
             status |= 1;
     }
 
-    int result = cancelled ? CLPEAK_RUN_CANCELLED : status;
+    int result = cancelled ? XPUPEAK_RUN_CANCELLED : status;
 
     emitDone(on_event, user_data, result, cancelled, combined.meta.durationS);
     g_running.store(false);

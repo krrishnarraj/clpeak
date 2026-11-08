@@ -7,11 +7,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../ffi/clpeak_bindings.dart';
+import '../../ffi/xpupeak_bindings.dart';
 import '../../model/result_model.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/settings_service.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/kit.dart';
 
 /// Appearance, which ONNX Runtime and LiteRT libraries the two backends
@@ -548,7 +548,7 @@ class _RuntimeView {
   static String _onnxRuntimeHint(bool perLaunch) {
     final once = perLaunch
         ? 'Set once per launch: after a runtime has loaded, a change takes '
-            'effect the next time clpeak starts.'
+            'effect the next time xpupeak starts.'
         : 'A change applies from the next device scan and run.';
     if (Platform.isAndroid) {
       return 'The engine ONNX runs on. A vendor NPU plugin (Qualcomm\'s QNN) '
@@ -630,7 +630,7 @@ class _RuntimePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final s = view;
-    final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
+    final tint = XpupeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     final fixed = s.fixed;
     final next = s.next;
@@ -710,7 +710,7 @@ class _RuntimePanel extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                            'Takes effect the next time clpeak starts.',
+                            'Takes effect the next time xpupeak starts.',
                             style: t.monoSmallDim),
                       ),
                     ],
@@ -782,7 +782,7 @@ class _EpLibrariesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final tint = ClpeakTheme.categoryColor(BenchCategory.ai,
+    final tint = XpupeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -958,7 +958,7 @@ class _WinmlPanel extends StatelessWidget {
           'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
           'the Microsoft Store on first use — a download — instead of you '
           'naming the library yourself. The catalog DLL comes with the '
-          'Microsoft.Windows.AI.MachineLearning package, not with clpeak.'
+          'Microsoft.Windows.AI.MachineLearning package, not with xpupeak.'
           '${perLaunch ? ' Part of the runtime setup above, so it too is set '
               'once per launch.' : ''}',
           style: t.micro.copyWith(color: t.dim),

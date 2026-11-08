@@ -1,4 +1,4 @@
-if(NOT APPLE OR NOT CLPEAK_ENABLE_COREML)
+if(NOT APPLE OR NOT XPUPEAK_ENABLE_COREML)
   return()
 endif()
 
@@ -14,12 +14,12 @@ endif()
 # The Objective-C++ files are the session (compile / load / compute plan /
 # predict) and the device enumeration; everything else is plain C++ against
 # the C++ surface in coreml_session.h.
-set(CLPEAK_COREML_OBJC
+set(XPUPEAK_COREML_OBJC
     coreml_peak.mm
     coreml_session.mm
 )
 add_library(peak_coreml STATIC
-    ${CLPEAK_COREML_OBJC}
+    ${XPUPEAK_COREML_OBJC}
     coreml_model.cpp
     gemm.cpp
     numeric_error.cpp
@@ -44,4 +44,4 @@ target_compile_definitions(peak_coreml PRIVATE ENABLE_COREML)
 target_compile_definitions(peak_common PRIVATE ENABLE_COREML)
 
 # ARC for the Objective-C++ files, as in src/metal.
-set_source_files_properties(${CLPEAK_COREML_OBJC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+set_source_files_properties(${XPUPEAK_COREML_OBJC} PROPERTIES COMPILE_FLAGS "-fobjc-arc")

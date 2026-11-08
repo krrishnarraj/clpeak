@@ -116,7 +116,7 @@ RunCheckpoint::Crash crashSite(const ResumePlan &plan)
         crash.variant = at == std::string::npos ? "" : key.substr(at + 1);
         for (auto it = plan.priorLog.rbegin(); it != plan.priorLog.rend(); ++it)
         {
-            if (it->test != key || it->level != clpeak::LogLevel::Info ||
+            if (it->test != key || it->level != xpupeak::LogLevel::Info ||
                 it->message.compare(0, 4, "    ") != 0 || it->message.size() <= 4 ||
                 it->message[4] == ' ')
                 continue;
@@ -129,7 +129,7 @@ RunCheckpoint::Crash crashSite(const ResumePlan &plan)
             break;
         }
     }
-    crash.reason = "clpeak ended here before the run was resumed";
+    crash.reason = "xpupeak ended here before the run was resumed";
     if (!plan.after.empty()) crash.reason += " (" + plan.after + ")";
     crash.reason += ", so this was not run again";
     return crash;
@@ -169,41 +169,41 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
     std::error_code ec;
     if (!std::filesystem::exists(partial, ec))
     {
-        error = byCheckpoint ? "clpeak: nothing to resume at " + path + ": there is no such file"
+        error = byCheckpoint ? "xpupeak: nothing to resume at " + path + ": there is no such file"
                 : std::filesystem::exists(path, ec)
-                    ? "clpeak: " + path + " is a finished run; there is nothing to resume"
-                    : "clpeak: nothing to resume at " + path + ": a run that did not "
+                    ? "xpupeak: " + path + " is a finished run; there is nothing to resume"
+                    : "xpupeak: nothing to resume at " + path + ": a run that did not "
                       "finish leaves " + partial + " beside it, and there is none";
         return false;
     }
     std::string why;
     if (!loadPartialJson(partial, plan.seed, plan.progress, why))
     {
-        error = "clpeak: cannot resume " + path + ": " + why;
+        error = "xpupeak: cannot resume " + path + ": " + why;
         return false;
     }
     plan.outputFile = byCheckpoint ? resultPathOf(path, plan.seed.meta) : path;
     const std::string &outputFile = plan.outputFile;
 
     const RunMeta &meta = plan.seed.meta;
-    if (meta.clpeakVersion != CLPEAK_VERSION_STR)
+    if (meta.xpupeakVersion != XPUPEAK_VERSION_STR)
     {
-        error = "clpeak: " + outputFile + " was started by clpeak " + meta.clpeakVersion +
+        error = "xpupeak: " + outputFile + " was started by xpupeak " + meta.xpupeakVersion +
                 ", and a run is continued only by the build that started it; this is " +
-                CLPEAK_VERSION_STR;
+                XPUPEAK_VERSION_STR;
         return false;
     }
     const HostInfo host = probeHost();
     if (meta.host.os != host.os || meta.host.osVersion != host.osVersion)
     {
-        error = "clpeak: " + outputFile + " was started on " + meta.host.os + " " +
+        error = "xpupeak: " + outputFile + " was started on " + meta.host.os + " " +
                 meta.host.osVersion + ", and a run is continued only on the release it "
                 "started on; this is " + host.os + " " + host.osVersion;
         return false;
     }
     if (meta.invocation.argv.empty())
     {
-        error = "clpeak: cannot resume " + outputFile + ": its checkpoint records no options";
+        error = "xpupeak: cannot resume " + outputFile + ": its checkpoint records no options";
         return false;
     }
 
@@ -237,7 +237,7 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
     if (!parseCliOptionsNoExit(static_cast<int>(argv.size()), argv.data(), opts, why))
     {
         while (!why.empty() && why.back() == '\n') why.pop_back();
-        error = "clpeak: cannot resume " + plan.outputFile + ": its options do not parse (" +
+        error = "xpupeak: cannot resume " + plan.outputFile + ": its options do not parse (" +
                 why + ")";
         return false;
     }
@@ -250,7 +250,7 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
     opts.skipCrashed  = given.skipCrashed;
     if (opts.skipCrashed && plan.cancelled)
     {
-        error = "clpeak: " + plan.outputFile + " was cancelled, not ended by a crash; "
+        error = "xpupeak: " + plan.outputFile + " was cancelled, not ended by a crash; "
                 "resume it without --skip-crashed";
         return false;
     }
@@ -311,13 +311,13 @@ void seedResume(const ResumePlan &plan, const CliOptions &opts, RunDocument &doc
 
     size_t tests = 0;
     for (const DeviceResult &d : plan.seed.devices) tests += d.tests.size();
-    CLPEAK_LOG(Info, "%s%s, which had measured %zu tests when it stopped%s%s", kResumedLine,
-               plan.seed.meta.generatedAt.c_str(), tests, plan.after.empty() ? "" : ": ",
-               plan.after.c_str());
+    XPUPEAK_LOG(Info, "%s%s, which had measured %zu tests when it stopped%s%s", kResumedLine,
+                plan.seed.meta.generatedAt.c_str(), tests, plan.after.empty() ? "" : ": ",
+                plan.after.c_str());
     // Where it stopped while held: what it measures again keeps those readings.
     for (const RunProgress::Device &d : plan.progress.devices)
         for (const std::string &t : d.held)
-            CLPEAK_LOG(Info, "it stopped while held in %s (%s device %d): that test runs again, "
-                       "and the readings it had are kept",
-                       t.c_str(), d.backend.c_str(), d.deviceIndex);
+            XPUPEAK_LOG(Info, "it stopped while held in %s (%s device %d): that test runs again, "
+                        "and the readings it had are kept",
+                        t.c_str(), d.backend.c_str(), d.deviceIndex);
 }

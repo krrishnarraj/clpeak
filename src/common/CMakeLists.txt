@@ -72,4 +72,4 @@ endif()
 
 # version.h is generated once, at configure time
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/version.cmake)
-clpeak_setup_version(peak_common)
+xpupeak_setup_version(peak_common)

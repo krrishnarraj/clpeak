@@ -1,4 +1,4 @@
-# Android — sanity build of the Flutter app + its native clpeak_ffi .so.
+# Android — sanity build of the Flutter app + its native xpupeak_ffi .so.
 # Not shipped: `release` does not depend on this job.
 name: Android
 
@@ -70,5 +70,5 @@ jobs:
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: clpeak-android-release
+          name: xpupeak-android-release
           path: app/build/app/outputs/flutter-apk/app-release.apk

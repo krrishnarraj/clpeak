@@ -3,17 +3,17 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import 'clpeak_library.dart';
+import 'xpupeak_library.dart';
 
-/// Return codes of clpeak_launch (see src/ffi/clpeak_ffi.h).
-const int clpeakRunOk = 0;
-const int clpeakRunBadArgs = -1;
-const int clpeakRunCancelled = -2;
-const int clpeakRunBusy = -3;
+/// Return codes of xpupeak_launch (see src/ffi/xpupeak_ffi.h).
+const int xpupeakRunOk = 0;
+const int xpupeakRunBadArgs = -1;
+const int xpupeakRunCancelled = -2;
+const int xpupeakRunBusy = -3;
 
 /// The native event callback signature:
-///   void (*ClpeakEventCallback)(void *user_data, char *event_json)
-typedef ClpeakEventCallbackNative = Void Function(
+///   void (*XpupeakEventCallback)(void *user_data, char *event_json)
+typedef XpupeakEventCallbackNative = Void Function(
     Pointer<Void> userData, Pointer<Utf8> eventJson);
 
 typedef _VersionNative = Pointer<Utf8> Function();
@@ -21,13 +21,13 @@ typedef _CatalogNative = Pointer<Utf8> Function();
 typedef _FreeStringNative = Void Function(Pointer<Utf8>);
 typedef _FreeString = void Function(Pointer<Utf8>);
 typedef _LaunchNative = Int32 Function(Int32 argc, Pointer<Pointer<Utf8>> argv,
-    Pointer<NativeFunction<ClpeakEventCallbackNative>> onEvent,
+    Pointer<NativeFunction<XpupeakEventCallbackNative>> onEvent,
     Pointer<Void> userData);
-typedef ClpeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
-    Pointer<NativeFunction<ClpeakEventCallbackNative>> onEvent,
+typedef XpupeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
+    Pointer<NativeFunction<XpupeakEventCallbackNative>> onEvent,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
-typedef ClpeakRequestCancel = void Function();
+typedef XpupeakRequestCancel = void Function();
 typedef _SetOnScreenNative = Void Function(Int32 onScreen);
 typedef _SetOnScreen = void Function(int onScreen);
 typedef _SetPausedNative = Void Function(Int32 paused);
@@ -45,50 +45,50 @@ typedef _SetLitertStageNative = Void Function(Pointer<Utf8> dir);
 typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
 typedef _LitertStatusNative = Pointer<Utf8> Function();
 
-/// Thin, manual dart:ffi bindings over the 14 clpeak_* symbols.
-class ClpeakBindings {
-  ClpeakBindings._(DynamicLibrary lib)
+/// Thin, manual dart:ffi bindings over the 14 xpupeak_* symbols.
+class XpupeakBindings {
+  XpupeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
-            'clpeak_version'),
+            'xpupeak_version'),
         _catalog = lib.lookupFunction<_CatalogNative, _CatalogNative>(
-            'clpeak_copy_backend_catalog_json'),
+            'xpupeak_copy_backend_catalog_json'),
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeString>(
-            'clpeak_free_string'),
+            'xpupeak_free_string'),
         launch =
-            lib.lookupFunction<_LaunchNative, ClpeakLaunch>('clpeak_launch'),
+            lib.lookupFunction<_LaunchNative, XpupeakLaunch>('xpupeak_launch'),
         requestCancel =
-            lib.lookupFunction<_RequestCancelNative, ClpeakRequestCancel>(
-                'clpeak_request_cancel'),
+            lib.lookupFunction<_RequestCancelNative, XpupeakRequestCancel>(
+                'xpupeak_request_cancel'),
         _setOnScreen = lib.lookupFunction<_SetOnScreenNative, _SetOnScreen>(
-            'clpeak_set_on_screen'),
+            'xpupeak_set_on_screen'),
         _setPaused = lib.lookupFunction<_SetPausedNative, _SetPaused>(
-            'clpeak_set_paused'),
+            'xpupeak_set_paused'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
-            'clpeak_set_onnx_library'),
+            'xpupeak_set_onnx_library'),
         _setOnnxEpLibraries =
             lib.lookupFunction<_SetOnnxEpLibsNative, _SetOnnxEpLibs>(
-                'clpeak_set_onnx_ep_libraries'),
+                'xpupeak_set_onnx_ep_libraries'),
         _setOnnxWinml = lib.lookupFunction<_SetOnnxWinmlNative, _SetOnnxWinml>(
-            'clpeak_set_onnx_winml'),
+            'xpupeak_set_onnx_winml'),
         _onnxStatus = lib.lookupFunction<_OnnxStatusNative, _OnnxStatusNative>(
-            'clpeak_copy_onnx_status_json'),
+            'xpupeak_copy_onnx_status_json'),
         _setLitertLibrary =
             lib.lookupFunction<_SetLitertLibNative, _SetLitertLib>(
-                'clpeak_set_litert_library'),
+                'xpupeak_set_litert_library'),
         _setLitertNpuStageDir =
             lib.lookupFunction<_SetLitertStageNative, _SetLitertStage>(
-                'clpeak_set_litert_npu_stage_dir'),
+                'xpupeak_set_litert_npu_stage_dir'),
         _litertStatus =
             lib.lookupFunction<_LitertStatusNative, _LitertStatusNative>(
-                'clpeak_copy_litert_status_json');
+                'xpupeak_copy_litert_status_json');
 
-  factory ClpeakBindings.open() => ClpeakBindings._(openClpeakLibrary());
+  factory XpupeakBindings.open() => XpupeakBindings._(openXpupeakLibrary());
 
   final _VersionNative _version;
   final _CatalogNative _catalog;
   final _FreeString _freeString;
-  final ClpeakLaunch launch;
-  final ClpeakRequestCancel requestCancel;
+  final XpupeakLaunch launch;
+  final XpupeakRequestCancel requestCancel;
   final _SetOnScreen _setOnScreen;
   final _SetPaused _setPaused;
   final _SetOnnxLib _setOnnxLibrary;
@@ -99,16 +99,16 @@ class ClpeakBindings {
   final _SetLitertStage _setLitertNpuStageDir;
   final _LitertStatusNative _litertStatus;
 
-  /// Whether the app is on screen (clpeak_set_on_screen): while it is not,
+  /// Whether the app is on screen (xpupeak_set_on_screen): while it is not,
   /// a run in this process waits at its next boundary between readings,
   /// and each change during a run is recorded on its log.  Any time.
   void setOnScreen(bool onScreen) => _setOnScreen(onScreen ? 1 : 0);
 
   /// Pause the in-flight run at its next boundary between readings, or let
-  /// it go on (clpeak_set_paused).  Each change is recorded on its log.
+  /// it go on (xpupeak_set_paused).  Each change is recorded on its log.
   void setPaused(bool paused) => _setPaused(paused ? 1 : 0);
 
-  /// clpeak version string, e.g. "2.1.0-3-gabc1234".
+  /// xpupeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();
 
   /// Consume a malloc'd native string: decode then free.
@@ -222,7 +222,7 @@ class ClpeakBindings {
 
 }
 
-/// One plugin execution-provider library, as [ClpeakBindings.setOnnxEpLibraries]
+/// One plugin execution-provider library, as [XpupeakBindings.setOnnxEpLibraries]
 /// takes it: the registration name the provider expects and the library.
 class OnnxEpLibrary {
   const OnnxEpLibrary(
@@ -278,7 +278,7 @@ class OnnxEpLibraryStatus {
 }
 
 /// A runtime setup chosen after the runtime loaded: it loads the next time
-/// clpeak starts (see [OnnxStatus.pendingRuntime]).
+/// xpupeak starts (see [OnnxStatus.pendingRuntime]).
 class OnnxPendingRuntime {
   const OnnxPendingRuntime(
       {required this.path, required this.winml, required this.winmlPath});
@@ -297,7 +297,7 @@ class OnnxPendingRuntime {
   }
 }
 
-/// State of the ONNX Runtime, as clpeak_copy_onnx_status_json() reports it.
+/// State of the ONNX Runtime, as xpupeak_copy_onnx_status_json() reports it.
 class OnnxStatus {
   const OnnxStatus({
     required this.available,
@@ -349,7 +349,7 @@ class OnnxStatus {
 
   /// The runtime setup -- library and Windows ML -- chosen since this
   /// runtime loaded.  One process keeps the runtime it loaded first
-  /// (src/onnx/onnx_runtime.h), so the choice loads the next time clpeak
+  /// (src/onnx/onnx_runtime.h), so the choice loads the next time xpupeak
   /// starts.  Null when nothing waits.
   final OnnxPendingRuntime? pendingRuntime;
 
@@ -375,7 +375,7 @@ class OnnxStatus {
   }
 }
 
-/// State of the LiteRT runtime, as clpeak_copy_litert_status_json() reports
+/// State of the LiteRT runtime, as xpupeak_copy_litert_status_json() reports
 /// it.  LiteRT has no runtime version string; `version` is the ABI version
 /// the app was built against.
 class LitertStatus {
@@ -399,7 +399,7 @@ class LitertStatus {
   final String error; // populated only when !available
 
   /// A library chosen since this one loaded, which loads the next time
-  /// clpeak starts ('' = the default search); null when nothing waits.
+  /// xpupeak starts ('' = the default search); null when nothing waits.
   final String? pendingPath;
 
   factory LitertStatus.fromJson(Map<String, dynamic> m) {

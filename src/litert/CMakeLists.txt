@@ -1,4 +1,4 @@
-if(NOT CLPEAK_ENABLE_LITERT)
+if(NOT XPUPEAK_ENABLE_LITERT)
     return()
 endif()
 

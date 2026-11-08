@@ -1,5 +1,5 @@
-#ifndef CLPEAK_COREML_SESSION_H
-#define CLPEAK_COREML_SESSION_H
+#ifndef XPUPEAK_COREML_SESSION_H
+#define XPUPEAK_COREML_SESSION_H
 
 // One compiled, loaded Core ML model on one compute device, plus what the
 // compute plan says about where its operations will run.  Pure C++ surface
@@ -103,4 +103,4 @@ private:
   Impl *impl = nullptr;
 };
 
-#endif // CLPEAK_COREML_SESSION_H
+#endif // XPUPEAK_COREML_SESSION_H

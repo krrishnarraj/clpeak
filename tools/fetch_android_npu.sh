@@ -51,7 +51,7 @@
 #    onnxruntime-android it packages (SettingsService.effectiveOnnxEpLibraries).
 # LiteRT opens the QNN libraries at run time, and only those of the backend
 # it is asked for: libQnnIr.so for its IR backend and libQnnSaver.so for
-# saver_output_dir, neither of which clpeak sets, so the Maven package's
+# saver_output_dir, neither of which xpupeak sets, so the Maven package's
 # lack of both costs nothing.  (2.2.0's Android compiler plugin was linked
 # against them, and Android's linker refuses a library one of whose
 # DT_NEEDED entries it cannot find; 2.3.0's links no QNN library.)
@@ -106,7 +106,7 @@ qnn=2.50.0
 ort_qnn=2.6.0
 maven=https://repo1.maven.org/maven2/com/qualcomm/qti
 
-staging=$(mktemp -d "${TMPDIR:-/tmp}/clpeak-android-npu.XXXXXX")
+staging=$(mktemp -d "${TMPDIR:-/tmp}/xpupeak-android-npu.XXXXXX")
 trap 'rm -rf "$staging"' EXIT INT TERM
 
 # fetch_aar <artifact> <version> <dir>: the arm64 libraries of one of

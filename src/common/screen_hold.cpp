@@ -6,7 +6,7 @@
 #include <chrono>
 #include <thread>
 
-namespace clpeak {
+namespace xpupeak {
 namespace {
 
 std::atomic<bool> onScreen{true};
@@ -70,4 +70,4 @@ bool holdGate(const std::function<void()> &beforeWaiting)
   return said != nullptr;
 }
 
-} // namespace clpeak
+} // namespace xpupeak

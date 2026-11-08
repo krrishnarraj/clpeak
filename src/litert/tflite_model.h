@@ -1,5 +1,5 @@
-#ifndef CLPEAK_TFLITE_MODEL_H
-#define CLPEAK_TFLITE_MODEL_H
+#ifndef XPUPEAK_TFLITE_MODEL_H
+#define XPUPEAK_TFLITE_MODEL_H
 
 // .tflite models emitted as FlatBuffer bytes, without flatc, the FlatBuffers
 // library or the 1.1 MB schema_generated.h -- the same choice the ONNX and
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-namespace clpeak_tflite
+namespace xpupeak_tflite
 {
 
 // schema.fbs `enum TensorType : byte`.
@@ -246,6 +246,6 @@ private:
   std::vector<Buffer> buffers_;
 };
 
-} // namespace clpeak_tflite
+} // namespace xpupeak_tflite
 
-#endif // CLPEAK_TFLITE_MODEL_H
+#endif // XPUPEAK_TFLITE_MODEL_H

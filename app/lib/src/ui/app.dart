@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/benchmark_service.dart';
 import '../services/settings_service.dart';
-import '../theme/clpeak_theme.dart';
+import '../theme/xpupeak_theme.dart';
 import 'about/about_screen.dart';
 import 'common/kit.dart';
 import 'dashboard/dashboard_screen.dart';
@@ -12,19 +12,19 @@ import 'live_run/live_run_screen.dart';
 import 'results/results_screen.dart';
 import 'settings/settings_screen.dart';
 
-class ClpeakApp extends StatelessWidget {
-  const ClpeakApp({super.key});
+class XpupeakApp extends StatelessWidget {
+  const XpupeakApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
     return MaterialApp(
-      title: 'clpeak',
+      title: 'xpupeak',
       debugShowCheckedModeBanner: false,
-      theme: ClpeakTheme.light(),
-      darkTheme: ClpeakTheme.dark(),
+      theme: XpupeakTheme.light(),
+      darkTheme: XpupeakTheme.dark(),
       themeMode: settings.themeMode,
-      home: const ClpeakShell(),
+      home: const XpupeakShell(),
     );
   }
 }
@@ -32,14 +32,14 @@ class ClpeakApp extends StatelessWidget {
 /// Adaptive navigation shell: a console sidebar on wide layouts, a hairline
 /// tab strip on phones.  The first tab hosts the whole run lifecycle
 /// (dashboard → live run → results) so a run survives tab switches.
-class ClpeakShell extends StatefulWidget {
-  const ClpeakShell({super.key});
+class XpupeakShell extends StatefulWidget {
+  const XpupeakShell({super.key});
 
   @override
-  State<ClpeakShell> createState() => _ClpeakShellState();
+  State<XpupeakShell> createState() => _XpupeakShellState();
 }
 
-class _ClpeakShellState extends State<ClpeakShell> {
+class _XpupeakShellState extends State<XpupeakShell> {
   int _tab = 0;
 
   /// A run was in flight at the last build: a run that starts while another
@@ -138,7 +138,7 @@ class _Sidebar extends StatelessWidget {
               children: [
                 const CAppMark(size: 22),
                 const SizedBox(width: 9),
-                Text('clpeak',
+                Text('xpupeak',
                     style: t.title.copyWith(fontSize: 15, letterSpacing: -0.6)),
               ],
             ),

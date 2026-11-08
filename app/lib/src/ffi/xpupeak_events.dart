@@ -2,11 +2,11 @@ import '../model/result_model.dart';
 import '../model/run_document.dart';
 
 /// Decoded native run events — a 1:1 mirror of the JSON documents emitted by
-/// LoggerFfi / clpeak_launch (see src/ffi/clpeak_ffi.h for the schema).
-sealed class ClpeakEvent {
-  const ClpeakEvent();
+/// LoggerFfi / xpupeak_launch (see src/ffi/xpupeak_ffi.h for the schema).
+sealed class XpupeakEvent {
+  const XpupeakEvent();
 
-  static ClpeakEvent fromJson(Map<String, dynamic> m) {
+  static XpupeakEvent fromJson(Map<String, dynamic> m) {
     String s(String key) => m[key] as String? ?? '';
     int deviceIndex() => (m['device_index'] as num?)?.toInt() ?? -1;
     switch (m['t'] as String? ?? '') {
@@ -94,12 +94,12 @@ sealed class ClpeakEvent {
   }
 }
 
-class BackendBeginEvent extends ClpeakEvent {
+class BackendBeginEvent extends XpupeakEvent {
   const BackendBeginEvent(this.backend);
   final String backend;
 }
 
-class DeviceEvent extends ClpeakEvent {
+class DeviceEvent extends XpupeakEvent {
   const DeviceEvent({
     required this.backend,
     required this.platform,
@@ -124,7 +124,7 @@ class DeviceEvent extends ClpeakEvent {
 /// A test opened.  Carries the whole resolved header — title, shape,
 /// direction, unit — so the test's row exists before its first reading
 /// and nothing has to be back-filled off the readings later.
-class TestBeginEvent extends ClpeakEvent {
+class TestBeginEvent extends XpupeakEvent {
   const TestBeginEvent({
     required this.backend,
     required this.platform,
@@ -142,7 +142,7 @@ class TestBeginEvent extends ClpeakEvent {
   final TestHeader header;
 }
 
-class MetricEvent extends ClpeakEvent {
+class MetricEvent extends XpupeakEvent {
   const MetricEvent({
     required this.backend,
     required this.platform,
@@ -169,7 +169,7 @@ class MetricEvent extends ClpeakEvent {
 /// A whole test that could not run.  Unlike a per-reading skip it names every
 /// reading that would have been taken, so the unavailable section can list
 /// them instead of showing one nameless placeholder.
-class TestSkippedEvent extends ClpeakEvent {
+class TestSkippedEvent extends XpupeakEvent {
   const TestSkippedEvent({
     required this.backend,
     required this.platform,
@@ -201,27 +201,27 @@ class TestSkippedEvent extends ClpeakEvent {
       ];
 }
 
-class TestEndEvent extends ClpeakEvent {
+class TestEndEvent extends XpupeakEvent {
   const TestEndEvent();
 }
 
-class DeviceEndEvent extends ClpeakEvent {
+class DeviceEndEvent extends XpupeakEvent {
   const DeviceEndEvent();
 }
 
-class BackendEndEvent extends ClpeakEvent {
+class BackendEndEvent extends XpupeakEvent {
   const BackendEndEvent();
 }
 
 /// One line of the run's diagnostic stream — the same entry the saved
 /// document holds in `log`, so a live run and a reopened file show the same
 /// lines.
-class LogEntryEvent extends ClpeakEvent {
+class LogEntryEvent extends XpupeakEvent {
   const LogEntryEvent(this.entry);
   final LogEntry entry;
 }
 
-class DoneEvent extends ClpeakEvent {
+class DoneEvent extends XpupeakEvent {
   const DoneEvent(
       {required this.status, required this.cancelled, this.durationS});
   final int status;

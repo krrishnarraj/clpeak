@@ -17,7 +17,7 @@
 // reports the faster.  Both spell 16 chain instructions per _16, so the
 // per-thread op budget is identical and the two readings are comparable.
 //
-// Why two shapes, and why the integer families elsewhere in clpeak use a third
+// Why two shapes, and why the integer families elsewhere in xpupeak use a third
 // one instead: the MAD chain block in include/common/common.h.  Apple GPUs are
 // not the reason this exists -- they run the squaring chain at full rate -- but
 // racing costs nothing here and keeps every backend on the same footing.

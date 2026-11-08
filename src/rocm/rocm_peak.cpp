@@ -33,7 +33,7 @@ bool RocmPeak::initRuntime()
   if (r != hipSuccess)
   {
     m_initResult = r;
-    CLPEAK_LOG(Error, "ROCm: hipGetDeviceCount failed: %s", hipErrStr(r));
+    XPUPEAK_LOG(Error, "ROCm: hipGetDeviceCount failed: %s", hipErrStr(r));
     return false;
   }
   for (int i = 0; i < n; i++)
@@ -63,14 +63,14 @@ float RocmPeak::runKernel(RocmDevice &dev, hipFunction_t fn,
     }
     if (status != hipSuccess)
     {
-      CLPEAK_VLOG("hipModuleLaunchKernel failed: %s\n", hipErrStr(status));
+      XPUPEAK_VLOG("hipModuleLaunchKernel failed: %s\n", hipErrStr(status));
       return -1.0f;
     }
     (void)hipEventRecord(stop, dev.stream);
     status = hipEventSynchronize(stop);
     if (status != hipSuccess)
     {
-      CLPEAK_VLOG("hipEventSynchronize failed: %s\n", hipErrStr(status));
+      XPUPEAK_VLOG("hipEventSynchronize failed: %s\n", hipErrStr(status));
       return -1.0f;
     }
     float ms = 0.0f;
@@ -130,7 +130,7 @@ int RocmPeak::runAll()
 
   for (int idx : devIndices)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;
@@ -169,14 +169,14 @@ int RocmPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // Said once here, since every test of clpeak's own kernels below will skip
+    // Said once here, since every test of xpupeak's own kernels below will skip
     // with the same reason.
     if (!dev.archCovered)
-      CLPEAK_LOG(Warning,
-                 "ROCm %s: this clpeak build has no %s code, so its own kernels "
-                 "cannot run on this GPU; the rocBLAS and hipBLASLt tests still can",
-                 dev.info.deviceName.c_str(),
-                 dev.info.archName.substr(0, dev.info.archName.find(':')).c_str());
+      XPUPEAK_LOG(Warning,
+                  "ROCm %s: this xpupeak build has no %s code, so its own kernels "
+                  "cannot run on this GPU; the rocBLAS and hipBLASLt tests still can",
+                  dev.info.deviceName.c_str(),
+                  dev.info.archName.substr(0, dev.info.archName.find(':')).c_str());
 
     // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
     if (auto run = admit(Benchmark::ComputeSP))

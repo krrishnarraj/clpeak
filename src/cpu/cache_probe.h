@@ -1,5 +1,5 @@
-#ifndef CLPEAK_CPU_CACHE_PROBE_H
-#define CLPEAK_CPU_CACHE_PROBE_H
+#ifndef XPUPEAK_CPU_CACHE_PROBE_H
+#define XPUPEAK_CPU_CACHE_PROBE_H
 
 // The latency sweep behind probeCacheSizes() (include/cpu/cpu_peak.h): a
 // dependent-load walk timed over working sets from 4 KB up, and the steps in
@@ -94,4 +94,4 @@ std::vector<CacheStep> findCacheSteps(const std::vector<CacheSweepPoint> &pts);
 uint64_t levelSize(const std::vector<CacheSweepPoint> &pts, const CacheStep &st, bool even,
                    const std::function<bool(uint64_t, CacheSweepPoint &)> &measure);
 
-#endif // CLPEAK_CPU_CACHE_PROBE_H
+#endif // XPUPEAK_CPU_CACHE_PROBE_H

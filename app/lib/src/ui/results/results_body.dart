@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/result_model.dart';
 import '../../model/run_document.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
 
@@ -134,7 +134,7 @@ class _ResultsBodyState extends State<ResultsBody> {
     final rows = <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
       if (meta != null &&
-          (meta.clpeakVersion.isNotEmpty ||
+          (meta.xpupeakVersion.isNotEmpty ||
               meta.generatedAt.isNotEmpty ||
               meta.host.isNotEmpty))
         _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
@@ -226,7 +226,7 @@ class _SectionRow extends _Row {
         padding: const EdgeInsets.only(top: 22, bottom: 9),
         child: _CategoryCSection(
           label: group.category.label,
-          color: ClpeakTheme.categoryColor(group.category,
+          color: XpupeakTheme.categoryColor(group.category,
               brightness: brightness),
           count: group.supported.length,
           expanded: expanded,
@@ -330,7 +330,7 @@ class _TestRow extends _Row {
         // the index and land on the wrong test.
         key: ValueKey(test.key),
         test: test,
-        color: ClpeakTheme.categoryColor(group.category,
+        color: XpupeakTheme.categoryColor(group.category,
             brightness: brightness),
         first: identical(test, group.supported.first),
         last: last,
@@ -462,8 +462,8 @@ class _RunMetaPanel extends StatelessWidget {
     final t = CP.of(context);
     final entries = <({String key, String value})>[];
 
-    if (meta.clpeakVersion.isNotEmpty) {
-      entries.add((key: 'CLPEAK VERSION', value: meta.clpeakVersion));
+    if (meta.xpupeakVersion.isNotEmpty) {
+      entries.add((key: 'XPUPEAK VERSION', value: meta.xpupeakVersion));
     }
     if (meta.durationSeconds > 0) {
       entries.add((

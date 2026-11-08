@@ -1,6 +1,6 @@
 // UI smoke test with the real native bridge: verifies the app boots against
 // the actual catalog and that all three tabs render.  Requires
-// CLPEAK_FFI_PATH (see ffi_integration_test.dart); skipped otherwise.
+// XPUPEAK_FFI_PATH (see ffi_integration_test.dart); skipped otherwise.
 //
 // The full native run round-trip (events, XML, cancel) is covered by
 // ffi_integration_test.dart — NativeCallable.listener events are not
@@ -8,28 +8,28 @@
 // itself is exercised there and manually via the app.
 import 'dart:io';
 
-import 'package:clpeak/src/ffi/clpeak_bindings.dart';
-import 'package:clpeak/src/services/benchmark_service.dart';
-import 'package:clpeak/src/services/export_service.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
-import 'package:clpeak/src/services/settings_service.dart';
-import 'package:clpeak/src/ui/app.dart';
+import 'package:xpupeak/src/ffi/xpupeak_bindings.dart';
+import 'package:xpupeak/src/services/benchmark_service.dart';
+import 'package:xpupeak/src/services/export_service.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/settings_service.dart';
+import 'package:xpupeak/src/ui/app.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  final ffiPath = Platform.environment['CLPEAK_FFI_PATH'];
-  // Skipped when CLPEAK_FFI_PATH is unset (pure-Dart CI).
+  final ffiPath = Platform.environment['XPUPEAK_FFI_PATH'];
+  // Skipped when XPUPEAK_FFI_PATH is unset (pure-Dart CI).
   final skip = ffiPath == null || ffiPath.isEmpty;
 
   testWidgets('app boots against the real catalog; tabs render',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsService.load();
-    final bindings = ClpeakBindings.open();
-    final tmp = Directory.systemTemp.createTempSync('clpeak_smoke');
+    final bindings = XpupeakBindings.open();
+    final tmp = Directory.systemTemp.createTempSync('xpupeak_smoke');
     addTearDown(() => tmp.deleteSync(recursive: true));
     final history = RunHistoryStore(directoryOverride: tmp);
     final service = BenchmarkService(bindings, history);
@@ -41,7 +41,7 @@ void main() {
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider.value(value: service),
       ],
-      child: const ClpeakApp(),
+      child: const XpupeakApp(),
     ));
     // Catalog loads on a worker isolate: spawn it inside runAsync, since
     // testWidgets runs in fake async and an isolate spawned outside it

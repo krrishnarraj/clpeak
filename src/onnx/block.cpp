@@ -238,7 +238,7 @@ namespace
   // DirectML devices (an RTX 4060, a UHD 630, an Adreno X1-45, the DirectML
   // CPU) run this block, so the fault wants that provider *and* this graph
   // *and* -- as far as anyone has seen -- that GPU.  Only the first two can
-  // be keyed on: clpeak registers DirectML with no device id and ORT picks
+  // be keyed on: xpupeak registers DirectML with no device id and ORT picks
   // the adapter, so which GPU is behind this device is not something the
   // backend can ask.  Naming one would be a guess, and a guess that is
   // wrong on a two-GPU box takes the run down.  So the row is withheld on
@@ -483,11 +483,11 @@ namespace
     if (!ses.session && !ses.offDevice && &v == &kVariants[0] &&
         sh.reduceView == OnnxReduceView::Rows &&
         onnxFailureStatus(ses.error) == ResultStatus::Unsupported &&
-        !onnxReasonIsOutOfMemory(ses.error) && !clpeak::cancelRequested())
+        !onnxReasonIsOutOfMemory(ses.error) && !xpupeak::cancelRequested())
     {
-      CLPEAK_VLOG("onnx-block[%s/%s]: refused (%s); retrying the reduction "
-                  "through a rank-4 view\n",
-                  ep.providerKey.c_str(), v.label, ses.error.c_str());
+      XPUPEAK_VLOG("onnx-block[%s/%s]: refused (%s); retrying the reduction "
+                   "through a rank-4 view\n",
+                   ep.providerKey.c_str(), v.label, ses.error.c_str());
       sh.reduceView = OnnxReduceView::Rank4;
       OnnxSessionResult r4 = create();
       if (r4.session)
@@ -496,8 +496,8 @@ namespace
         ses = r4;
       }
       else
-        CLPEAK_VLOG("onnx-block[%s/%s]: refused with the rank-4 view too (%s)\n",
-                    ep.providerKey.c_str(), v.label, r4.error.c_str());
+        XPUPEAK_VLOG("onnx-block[%s/%s]: refused with the rank-4 view too (%s)\n",
+                     ep.providerKey.c_str(), v.label, r4.error.c_str());
     }
     if (!ses.session)
     {
@@ -619,16 +619,16 @@ namespace
     auto createEnd = std::chrono::steady_clock::now();
     double createUs = std::chrono::duration<double, std::micro>(
                           createEnd - createStart).count();
-    CLPEAK_VLOG("onnx-block[%s/%s]: %s create %.1f s\n",
-                ep.providerKey.c_str(), v.label,
-                decode ? ("decode_kv" + std::to_string(kvLen)).c_str()
-                       : ("prefill_s" + std::to_string(prefillSeq)).c_str(),
-                createUs / 1.0e6);
+    XPUPEAK_VLOG("onnx-block[%s/%s]: %s create %.1f s\n",
+                 ep.providerKey.c_str(), v.label,
+                 decode ? ("decode_kv" + std::to_string(kvLen)).c_str()
+                        : ("prefill_s" + std::to_string(prefillSeq)).c_str(),
+                 createUs / 1.0e6);
     if (r.session && createUs > kOnnxMaxBlockCreateUs)
     {
-      CLPEAK_VLOG("onnx-block[%s/%s]: create %.1f s > %.1f s, skipping\n",
-                  ep.providerKey.c_str(), v.label,
-                  createUs / 1.0e6, kOnnxMaxBlockCreateUs / 1.0e6);
+      XPUPEAK_VLOG("onnx-block[%s/%s]: create %.1f s > %.1f s, skipping\n",
+                   ep.providerKey.c_str(), v.label,
+                   createUs / 1.0e6, kOnnxMaxBlockCreateUs / 1.0e6);
       error = "session creation took " +
               std::to_string((long long)(createUs / 1.0e6)) +
               " s, exceeds " +
@@ -683,8 +683,8 @@ namespace
                  : "for a " + std::to_string(prefillSeq) + "-token prompt");
       if (!wrong.empty())
       {
-        CLPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(),
-                    v.label, wrong.c_str());
+        XPUPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(),
+                     v.label, wrong.c_str());
         error = wrong;
         status = ResultStatus::Error;
         mean_us = -1.0;
@@ -775,7 +775,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   double refDecodeUs = 0.0, refDecodeBytes = 0.0;
 
   // What this provider demonstrably streams, measured (see onnxStreamBps).
-  // The decode rows count the bytes the model *declares*, which is all clpeak
+  // The decode rows count the bytes the model *declares*, which is all xpupeak
   // can know: a provider is free to store them narrower than asked, and no
   // vendor publishes which do.  A row implying more traffic than the device
   // has been seen to move is that happening, and it is caught by measurement
@@ -824,7 +824,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     const std::vector<int64_t> prompts = promptsFor(v);
     if (runCapUs <= 0.0 || prompts.empty() || prompts.front() <= kPromptLadder[0] ||
-        clpeak::cancelRequested())
+        xpupeak::cancelRequested())
       return refPrefillRate;
     const double flops = blockFlops(prompts.front(), prompts.front());
     if (refPrefillRate > 0.0 && flops / refPrefillRate * kBorrowedRateMargin <= runCapUs)
@@ -837,17 +837,17 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     destroyRun(rt, s);
     if (us <= 0.0)
     {
-      CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout failed, the first "
-                  "prompt predicted from the last variant's rate: %s\n",
-                  ep.providerKey.c_str(), v.label,
-                  (long long)kPromptLadder[0], s.error.c_str());
+      XPUPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout failed, the first "
+                   "prompt predicted from the last variant's rate: %s\n",
+                   ep.providerKey.c_str(), v.label,
+                   (long long)kPromptLadder[0], s.error.c_str());
       return refPrefillRate;
     }
     const double rate = blockFlops(kPromptLadder[0], kPromptLadder[0]) / us;
-    CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout %.1f ms, predicting "
-                "%.2f s for prefill_s%lld\n",
-                ep.providerKey.c_str(), v.label, (long long)kPromptLadder[0],
-                us / 1.0e3, flops / rate / 1.0e6, (long long)prompts.front());
+    XPUPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld scout %.1f ms, predicting "
+                 "%.2f s for prefill_s%lld\n",
+                 ep.providerKey.c_str(), v.label, (long long)kPromptLadder[0],
+                 us / 1.0e3, flops / rate / 1.0e6, (long long)prompts.front());
     return rate;
   };
 
@@ -907,8 +907,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // because the fusion probe below is the session that dies.
     if (std::string why = variantFence(v, ep); !why.empty())
     {
-      CLPEAK_VLOG("onnx-block[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
-                  v.label, why.c_str());
+      XPUPEAK_VLOG("onnx-block[%s/%s]: not built: %s\n", ep.providerKey.c_str(),
+                   v.label, why.c_str());
       vr.skipReason = why;
       return false;
     }
@@ -954,13 +954,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     {
       const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) +
                               (64ull << 20) * onnxElemBytes(v.actDtype, 1) / 2;
-      const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+      const uint64_t budget = xpupeak::memoryBudget(~0ull, 8);
       if (budget && budget < needed)
       {
-        CLPEAK_VLOG("onnx-block[%s/%s]: needs %llu MB, budget %llu MB\n",
-                    ep.providerKey.c_str(), v.label,
-                    (unsigned long long)(needed >> 20),
-                    (unsigned long long)(budget >> 20));
+        XPUPEAK_VLOG("onnx-block[%s/%s]: needs %llu MB, budget %llu MB\n",
+                     ep.providerKey.c_str(), v.label,
+                     (unsigned long long)(needed >> 20),
+                     (unsigned long long)(budget >> 20));
         vr.skipReason = "not enough memory for the canonical block; its "
                         "geometry is fixed so the numbers stay comparable, and "
                         "a smaller layer would not be the same test";
@@ -975,8 +975,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (const std::string wrong = wrongAnswer(rt, ep, v.kvDtype ? "fp16" : v.label);
         !wrong.empty())
     {
-      CLPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(), v.label,
-                  wrong.c_str());
+      XPUPEAK_VLOG("onnx-block[%s/%s]: %s\n", ep.providerKey.c_str(), v.label,
+                   wrong.c_str());
       vr.skipReason = wrong;
       vr.skipStatus = ResultStatus::Error;
       return false;
@@ -991,7 +991,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const size_t nSchemes = v.qdq ? qdqSchemesFor(v, schemes) : 1;
       for (size_t si = 0; si < nSchemes; si++)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         const int qAct = v.qdq ? schemes[si].actDtype : ONNX_DT_INT8;
         const char *what = v.qdq ? schemes[si].name
@@ -1003,21 +1003,21 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         {
           if (firstErr.empty())
             firstErr = probe.error;
-          CLPEAK_VLOG("onnx-block[%s/%s]: %s rejected: %s\n",
-                      ep.providerKey.c_str(), v.label, what, probe.error.c_str());
+          XPUPEAK_VLOG("onnx-block[%s/%s]: %s rejected: %s\n",
+                       ep.providerKey.c_str(), v.label, what, probe.error.c_str());
           continue;
         }
         timeRuns(rt, probe, 1);
         auto ops = onnxCollectExecutedOps(rt, probe.session);
         destroyRun(rt, probe);
         const std::string joined = onnxJoinOps(ops);
-        CLPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n",
-                    ep.providerKey.c_str(), v.label, what, joined.c_str());
+        XPUPEAK_VLOG("onnx-block[%s/%s]: %s executed %s\n",
+                     ep.providerKey.c_str(), v.label, what, joined.c_str());
         const size_t fused = quantizedMatmulsFused(ops, expected);
         if (fused < expected)
-          CLPEAK_VLOG("onnx-block[%s/%s]: %s fused %zu of %zu quantized "
-                      "matmuls\n", ep.providerKey.c_str(), v.label, what,
-                      fused, expected);
+          XPUPEAK_VLOG("onnx-block[%s/%s]: %s fused %zu of %zu quantized "
+                       "matmuls\n", ep.providerKey.c_str(), v.label, what,
+                       fused, expected);
         if (fused == expected)
         {
           vr.qActDtype = qAct;
@@ -1099,7 +1099,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto testFlops = currentDeviceScope->beginTest(prefillFlopsSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested()) break;
+      if (xpupeak::cancelRequested()) break;
       const Variant &v = kVariants[vi];
       if (isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
@@ -1114,12 +1114,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       double prefillRate = firstPromptRate(v, vr);
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested()) break;
+        if (xpupeak::cancelRequested()) break;
         Point pt; const double flops = blockFlops(seq, seq);
         if (std::string slow = tooSlow(flops, prefillRate, runCapUs, "one pass"); !slow.empty())
         {
           pt.status = ResultStatus::Error; pt.error = slow;
-          CLPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
+          XPUPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
         }
         else
         {
@@ -1147,7 +1147,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto testOps = currentDeviceScope->beginTest(prefillOpsSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested()) break;
+      if (xpupeak::cancelRequested()) break;
       const Variant &v = kVariants[vi];
       if (!isIntVariant(v)) continue;
       VariantResult &vr = results[vi];
@@ -1159,12 +1159,12 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       double prefillRate = firstPromptRate(v, vr);
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested()) break;
+        if (xpupeak::cancelRequested()) break;
         Point pt; const double flops = blockFlops(seq, seq);
         if (std::string slow = tooSlow(flops, prefillRate, runCapUs, "one pass"); !slow.empty())
         {
           pt.status = ResultStatus::Error; pt.error = slow;
-          CLPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
+          XPUPEAK_VLOG("onnx-block[%s/%s]: skipping prefill %lld, %s\n", ep.providerKey.c_str(), v.label, (long long)seq, pt.error.c_str());
         }
         else
         {
@@ -1190,18 +1190,18 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // provider runs faster than its fused int8 and would win the race
       // under the int8 label.
       if (v.qdq && v.wDtype == ONNX_DT_INT8 && v.actDtype != ONNX_DT_FLOAT &&
-          !clpeak::cancelRequested())
+          !xpupeak::cancelRequested())
       {
         auto it = vr.prefill.find(kPrefillSeq);
         // The fp32 form does the fp16 form's arithmetic, so the time just
         // measured is its prediction, and on a GPU it has to fit one run.
         if (it != vr.prefill.end() && it->second.us > 0.0 && runCapUs > 0.0 &&
             it->second.us > runCapUs)
-          CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: the "
-                      "fp16 form held the GPU %.2f s a run, past --max-time-ml-gpu "
-                      "(%.2f s)\n",
-                      ep.providerKey.c_str(), v.label, it->second.us / 1.0e6,
-                      runCapUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: the "
+                       "fp16 form held the GPU %.2f s a run, past --max-time-ml-gpu "
+                       "(%.2f s)\n",
+                       ep.providerKey.c_str(), v.label, it->second.us / 1.0e6,
+                       runCapUs / 1.0e6);
         else if (it != vr.prefill.end() && it->second.us > 0.0)
         {
           Variant v32 = v;
@@ -1213,10 +1213,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             pt32.us = measure(rt, ep, v32, false, vr32.qActDtype, warmupCount,
                               forceIters, specifiedIters, pt32.error,
                               pt32.status, kDecodeKv, kPrefillSeq);
-            CLPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld %.1f us with fp16 "
-                        "float parts, %.1f us with fp32\n",
-                        ep.providerKey.c_str(), v.label,
-                        (long long)kPrefillSeq, it->second.us, pt32.us);
+            XPUPEAK_VLOG("onnx-block[%s/%s]: prefill_s%lld %.1f us with fp16 "
+                         "float parts, %.1f us with fp32\n",
+                         ep.providerKey.c_str(), v.label,
+                         (long long)kPrefillSeq, it->second.us, pt32.us);
             if (pt32.us > 0.0 && pt32.us < it->second.us)
             {
               vr.prefillFp32 = true;
@@ -1225,10 +1225,10 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             }
           }
           else
-            CLPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: "
-                        "%s\n",
-                        ep.providerKey.c_str(), v.label,
-                        vr32.skipReason.c_str());
+            XPUPEAK_VLOG("onnx-block[%s/%s]: fp32 float parts not measured: "
+                         "%s\n",
+                         ep.providerKey.c_str(), v.label,
+                         vr32.skipReason.c_str());
         }
       }
       emitPrefillTo(testOps, v, vr);
@@ -1241,7 +1241,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto test = currentDeviceScope->beginTest(decodeSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested()) break;
+      if (xpupeak::cancelRequested()) break;
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string metric = std::string(v.label) + "_kv" + std::to_string(kDecodeKv);
@@ -1292,7 +1292,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (std::string slow = tooSlow(flops, decodeRate, runCapUs, "one token"); !slow.empty())
         {
           pt.status = ResultStatus::Error; pt.error = slow;
-          CLPEAK_VLOG("onnx-block[%s/%s]: skipping decode kv%lld, %s\n", ep.providerKey.c_str(), v.label, (long long)kDecodeKv, pt.error.c_str());
+          XPUPEAK_VLOG("onnx-block[%s/%s]: skipping decode kv%lld, %s\n", ep.providerKey.c_str(), v.label, (long long)kDecodeKv, pt.error.c_str());
         }
         else
         {
@@ -1363,7 +1363,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     auto test = currentDeviceScope->beginTest(latencySpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested()) break;
+      if (xpupeak::cancelRequested()) break;
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
       const std::string prov = provenance(v, vr);

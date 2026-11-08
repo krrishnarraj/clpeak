@@ -24,7 +24,7 @@ OneapiPeak::~OneapiPeak() {}
 static std::vector<cl_platform_id> openclPlatformIds()
 {
   static const auto getPlatformIds = [] {
-    void *icd = clpeak::dynOpen({
+    void *icd = xpupeak::dynOpen({
 #if defined(_WIN32)
         "OpenCL.dll",
 #else
@@ -32,7 +32,7 @@ static std::vector<cl_platform_id> openclPlatformIds()
 #endif
     });
     return reinterpret_cast<decltype(&::clGetPlatformIDs)>(
-        clpeak::dynSym(icd, "clGetPlatformIDs"));
+        xpupeak::dynSym(icd, "clGetPlatformIDs"));
   }();
 
   cl_uint count = 0;
@@ -62,8 +62,8 @@ static std::vector<sycl::platform> syclPlatforms()
   }
   catch (const sycl::exception &e)
   {
-    CLPEAK_LOG(Warning, "oneAPI: sycl::platform::get_platforms failed: %s; "
-               "listing the OpenCL platforms instead", e.what());
+    XPUPEAK_LOG(Warning, "oneAPI: sycl::platform::get_platforms failed: %s; "
+                "listing the OpenCL platforms instead", e.what());
   }
 
   std::vector<sycl::platform> out;
@@ -75,14 +75,14 @@ static std::vector<sycl::platform> syclPlatforms()
     }
     catch (const sycl::exception &e)
     {
-      CLPEAK_VLOG("oneAPI: an OpenCL platform SYCL does not drive was skipped: %s\n",
-                  e.what());
+      XPUPEAK_VLOG("oneAPI: an OpenCL platform SYCL does not drive was skipped: %s\n",
+                   e.what());
     }
   }
   return out;
 }
 
-// Pick the SYCL devices to benchmark.  clpeak is primarily a GPU tool, so we
+// Pick the SYCL devices to benchmark.  xpupeak is primarily a GPU tool, so we
 // prefer GPUs and (on a typical machine) leave the SYCL CPU device out so it
 // doesn't clutter the matrix alongside the iGPU.  But SYCL kernels also run
 // fine on the CPU/accelerator runtime, so if there is NO GPU visible (e.g.
@@ -101,7 +101,7 @@ static std::vector<sycl::device> enumerateDevices()
       }
       catch (const sycl::exception &e)
       {
-        CLPEAK_LOG(Error, "oneAPI: sycl::platform::get_devices failed: %s", e.what());
+        XPUPEAK_LOG(Error, "oneAPI: sycl::platform::get_devices failed: %s", e.what());
       }
     }
   };
@@ -154,7 +154,7 @@ float OneapiPeak::runKernel(OneapiDevice &dev,
     }
     catch (const std::exception &e)
     {
-      CLPEAK_VLOG("SYCL submit failed: %s\n", e.what());
+      XPUPEAK_VLOG("SYCL submit failed: %s\n", e.what());
       // A failed submission can leave the in-order queue in a permanent error
       // state; recreate it so the next benchmark isn't a false-failure cascade.
       dev.resetQueue();
@@ -170,7 +170,7 @@ float OneapiPeak::runKernel(OneapiDevice &dev,
   }
   catch (const std::exception &e)
   {
-    CLPEAK_VLOG("SYCL warmup failed: %s\n", e.what());
+    XPUPEAK_VLOG("SYCL warmup failed: %s\n", e.what());
     dev.resetQueue();
     return -1.0f;
   }
@@ -202,7 +202,7 @@ int OneapiPeak::runAll()
 
   for (int idx = 0; idx < (int)devices.size(); idx++)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;

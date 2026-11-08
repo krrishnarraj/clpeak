@@ -1,5 +1,5 @@
-#ifndef CLPEAK_BACKEND_REGISTRY_H
-#define CLPEAK_BACKEND_REGISTRY_H
+#ifndef XPUPEAK_BACKEND_REGISTRY_H
+#define XPUPEAK_BACKEND_REGISTRY_H
 
 #include <memory>
 #include <vector>
@@ -24,4 +24,4 @@ struct BackendEntry
 // out of place.  The CLI and the GUI bridge iterate this and nothing else.
 const std::vector<BackendEntry> &backendRegistry();
 
-#endif // CLPEAK_BACKEND_REGISTRY_H
+#endif // XPUPEAK_BACKEND_REGISTRY_H

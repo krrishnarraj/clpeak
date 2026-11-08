@@ -1,5 +1,35 @@
 cmake_minimum_required(VERSION 3.20)
 
+# ---- 3.x option names (kept until 5.0) --------------------------------------
+# 4.x still takes every -DCLPEAK_* knob 3.x took (CLPEAK_ENABLE_*,
+# CLPEAK_PACKAGE_SUFFIX, CLPEAK_VERSION_OVERRIDE, CLPEAK_CUDA_ARCHS,
+# CLPEAK_CPU_ENABLE_WIN_SVE and the rest), so distribution build scripts keep
+# building.  Each one given sets its XPUPEAK_* name, with a deprecation
+# warning, and leaves the cache: it applies once, and a stale entry never
+# overrides a later -DXPUPEAK_*.  The type goes across as given (UNINITIALIZED
+# for a plain -D), so the option() or set(CACHE) that declares the new name
+# still types it and keeps the value.  A 3.x build dir's INTERNAL probe results
+# and NOTFOUND searches are dropped, to be probed again under the new name.
+# Runs first: the compiler pick below reads knobs too.
+get_cmake_property(_xpupeak_cache_vars CACHE_VARIABLES)
+foreach(_xpupeak_old IN LISTS _xpupeak_cache_vars)
+    if(NOT _xpupeak_old MATCHES "^CLPEAK_(.+)$")
+        continue()
+    endif()
+    set(_xpupeak_new "XPUPEAK_${CMAKE_MATCH_1}")
+    get_property(_xpupeak_type CACHE "${_xpupeak_old}" PROPERTY TYPE)
+    set(_xpupeak_value "${${_xpupeak_old}}")
+    if(NOT _xpupeak_type MATCHES "^(INTERNAL|STATIC)$"
+       AND NOT _xpupeak_value MATCHES "-NOTFOUND$")
+        message(DEPRECATION "-D${_xpupeak_old} is the 3.x spelling of "
+            "-D${_xpupeak_new} (here \"${_xpupeak_value}\"); it still works "
+            "in 4.x and goes away in 5.0.")
+        set(${_xpupeak_new} "${_xpupeak_value}" CACHE ${_xpupeak_type} "" FORCE)
+    endif()
+    unset(${_xpupeak_old} CACHE)
+endforeach()
+# ---- end of 3.x option names ------------------------------------------------
+
 # Prefer clang over the platform-default compiler when the user has not pinned
 # one.  Two reasons, both from the CPU backend:
 #  - codegen: the kernels keep 24 independent FMA accumulator chains in flight;
@@ -16,12 +46,12 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
    AND NOT DEFINED ENV{CXX} AND NOT DEFINED ENV{CC}
    AND NOT CMAKE_TOOLCHAIN_FILE)
     if(CMAKE_HOST_UNIX AND NOT CMAKE_HOST_APPLE)
-        find_program(CLPEAK_CLANG_C   NAMES clang)
-        find_program(CLPEAK_CLANG_CXX NAMES clang++)
-        if(CLPEAK_CLANG_C AND CLPEAK_CLANG_CXX)
-            set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
-            set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
-            message(STATUS "clpeak: preferring clang (${CLPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
+        find_program(XPUPEAK_CLANG_C   NAMES clang)
+        find_program(XPUPEAK_CLANG_CXX NAMES clang++)
+        if(XPUPEAK_CLANG_C AND XPUPEAK_CLANG_CXX)
+            set(CMAKE_C_COMPILER   "${XPUPEAK_CLANG_C}"   CACHE FILEPATH "C compiler")
+            set(CMAKE_CXX_COMPILER "${XPUPEAK_CLANG_CXX}" CACHE FILEPATH "C++ compiler")
+            message(STATUS "xpupeak: preferring clang (${XPUPEAK_CLANG_CXX}) for CPU-backend codegen; pass -DCMAKE_CXX_COMPILER=g++ to override")
         endif()
     elseif(CMAKE_HOST_WIN32)
         if(CMAKE_GENERATOR MATCHES "Visual Studio")
@@ -32,38 +62,38 @@ if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER
             # CMAKE_GENERATOR_TOOLSET is cached after the first configure, so
             # this runs once per build dir and stays consistent on reconfigure.
             if(NOT CMAKE_GENERATOR_TOOLSET)
-                set(_clpeak_pf86 "ProgramFiles(x86)")  # indirection: () in $ENV{} confuses the parser
-                set(_clpeak_vswhere "$ENV{${_clpeak_pf86}}/Microsoft Visual Studio/Installer/vswhere.exe")
-                if(NOT EXISTS "${_clpeak_vswhere}")
-                    set(_clpeak_vswhere "$ENV{ProgramFiles}/Microsoft Visual Studio/Installer/vswhere.exe")
+                set(_xpupeak_pf86 "ProgramFiles(x86)")  # indirection: () in $ENV{} confuses the parser
+                set(_xpupeak_vswhere "$ENV{${_xpupeak_pf86}}/Microsoft Visual Studio/Installer/vswhere.exe")
+                if(NOT EXISTS "${_xpupeak_vswhere}")
+                    set(_xpupeak_vswhere "$ENV{ProgramFiles}/Microsoft Visual Studio/Installer/vswhere.exe")
                 endif()
-                if(EXISTS "${_clpeak_vswhere}")
+                if(EXISTS "${_xpupeak_vswhere}")
                     execute_process(
-                        COMMAND "${_clpeak_vswhere}" -latest -products * -find "VC/Tools/Llvm/**/bin/clang-cl.exe"
-                        OUTPUT_VARIABLE _clpeak_vs_clang
+                        COMMAND "${_xpupeak_vswhere}" -latest -products * -find "VC/Tools/Llvm/**/bin/clang-cl.exe"
+                        OUTPUT_VARIABLE _xpupeak_vs_clang
                         OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-                    if(_clpeak_vs_clang)
+                    if(_xpupeak_vs_clang)
                         set(CMAKE_GENERATOR_TOOLSET "ClangCL")
-                        message(STATUS "clpeak: preferring clang-cl (-T ClangCL) for CPU-backend dtype coverage; pass -T v143 to keep MSVC")
+                        message(STATUS "xpupeak: preferring clang-cl (-T ClangCL) for CPU-backend dtype coverage; pass -T v143 to keep MSVC")
                     endif()
                 endif()
             endif()
         else()
             # Ninja / Makefiles on Windows: pick clang-cl from PATH (LLVM install).
-            find_program(CLPEAK_CLANG_CL NAMES clang-cl)
-            if(CLPEAK_CLANG_CL)
-                set(CMAKE_C_COMPILER   "${CLPEAK_CLANG_CL}" CACHE FILEPATH "C compiler")
-                set(CMAKE_CXX_COMPILER "${CLPEAK_CLANG_CL}" CACHE FILEPATH "C++ compiler")
-                message(STATUS "clpeak: preferring clang-cl (${CLPEAK_CLANG_CL}) for CPU-backend dtype coverage; pass -DCMAKE_CXX_COMPILER=cl to override")
+            find_program(XPUPEAK_CLANG_CL NAMES clang-cl)
+            if(XPUPEAK_CLANG_CL)
+                set(CMAKE_C_COMPILER   "${XPUPEAK_CLANG_CL}" CACHE FILEPATH "C compiler")
+                set(CMAKE_CXX_COMPILER "${XPUPEAK_CLANG_CL}" CACHE FILEPATH "C++ compiler")
+                message(STATUS "xpupeak: preferring clang-cl (${XPUPEAK_CLANG_CL}) for CPU-backend dtype coverage; pass -DCMAKE_CXX_COMPILER=cl to override")
             endif()
         endif()
     endif()
 endif()
 
-project(clpeak)
+project(xpupeak)
 
-set(CLPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-include(${CLPEAK_ROOT}/src/common/cmake/version.cmake)
+set(XPUPEAK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+include(${XPUPEAK_ROOT}/src/common/cmake/version.cmake)
 include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -77,7 +107,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # MSVC's CRT marks POSIX names (fileno) and "insecure" C functions (fopen,
 # sscanf, getenv, ...) as deprecated. The code uses the portable names
 # intentionally (and maps the few truly non-portable ones like dup -> _dup via
-# CLPEAK_* macros in console_mute.cpp). Define the standard opt-outs so the
+# XPUPEAK_* macros in console_mute.cpp). Define the standard opt-outs so the
 # build stays warning-clean on both cl.exe and clang-cl without per-call
 # pragmas.
 if(MSVC)
@@ -85,34 +115,34 @@ if(MSVC)
 endif()
 
 # Backend options
-option(CLPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
-option(CLPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
-option(CLPEAK_ENABLE_CUDA   "Build CUDA backend"   ON)
-option(CLPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
-option(CLPEAK_ENABLE_METAL  "Build Metal backend"  ON)
-option(CLPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
-option(CLPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
-option(CLPEAK_ENABLE_ONNX   "Build ONNX Runtime backend (NPU/ GPU / CPU via execution providers; library dlopen'd at run time)" ON)
-option(CLPEAK_ENABLE_COREML "Build Core ML backend (Apple Neural Engine / GPU / CPU through Core ML; Apple only)" ON)
-option(CLPEAK_ENABLE_LITERT "Build LiteRT backend (NPU / GPU / CPU accelerators; library dlopen'd at run time)" ON)
-option(CLPEAK_ENABLE_GUI    "Build the Flutter GUI app (clpeak-gui target) and its native bridge" ON)
+option(XPUPEAK_ENABLE_OPENCL "Build OpenCL backend" ON)
+option(XPUPEAK_ENABLE_VULKAN "Build Vulkan backend" ON)
+option(XPUPEAK_ENABLE_CUDA   "Build CUDA backend"   ON)
+option(XPUPEAK_ENABLE_ROCM   "Build ROCm/HIP backend" ON)
+option(XPUPEAK_ENABLE_METAL  "Build Metal backend"  ON)
+option(XPUPEAK_ENABLE_ONEAPI "Build oneAPI/SYCL backend (requires icpx/icx or clang++ -fsycl)" ON)
+option(XPUPEAK_ENABLE_CPU    "Build native CPU backend (plain C++ / std::thread)" ON)
+option(XPUPEAK_ENABLE_ONNX   "Build ONNX Runtime backend (NPU/ GPU / CPU via execution providers; library dlopen'd at run time)" ON)
+option(XPUPEAK_ENABLE_COREML "Build Core ML backend (Apple Neural Engine / GPU / CPU through Core ML; Apple only)" ON)
+option(XPUPEAK_ENABLE_LITERT "Build LiteRT backend (NPU / GPU / CPU accelerators; library dlopen'd at run time)" ON)
+option(XPUPEAK_ENABLE_GUI    "Build the Flutter GUI app (xpupeak-gui target) and its native bridge" ON)
 
 # The native CPU backend needs a threading library (always available).
-if(CLPEAK_ENABLE_CPU)
+if(XPUPEAK_ENABLE_CPU)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads QUIET)
 endif()
 
 # Find Vulkan (needed by src/vulkan/CMakeLists.txt)
-if(CLPEAK_ENABLE_VULKAN)
+if(XPUPEAK_ENABLE_VULKAN)
     find_package(Vulkan QUIET)
 endif()
 # Find CUDA (needed by src/cuda/CMakeLists.txt)
-if(CLPEAK_ENABLE_CUDA)
+if(XPUPEAK_ENABLE_CUDA)
     find_package(CUDAToolkit QUIET)
 endif()
 # Find ROCm/HIP (needed by src/rocm/CMakeLists.txt)
-if(CLPEAK_ENABLE_ROCM)
+if(XPUPEAK_ENABLE_ROCM)
     # Install roots to search.  Only Linux has a well-known default prefix; the
     # Windows HIP SDK installs under Program Files and advertises itself via
     # HIP_PATH, and a relocated Linux install sets ROCM_PATH -- so both env vars
@@ -121,25 +151,25 @@ if(CLPEAK_ENABLE_ROCM)
     # the *host's* path-list separator, which shreds "C:\..." into "C;/..." when
     # the configure host is Unix.  The regex then drops the trailing separator
     # the SDK appends, so "C:/.../6.2/" can't yield "C:/.../6.2//bin".
-    set(CLPEAK_ROCM_ROOTS "")
-    foreach(_clpeak_rocm_env HIP_PATH ROCM_PATH)
-        if(DEFINED ENV{${_clpeak_rocm_env}})
-            string(REPLACE "\\" "/" _clpeak_rocm_root "$ENV{${_clpeak_rocm_env}}")
-            string(REGEX REPLACE "/+$" "" _clpeak_rocm_root "${_clpeak_rocm_root}")
-            list(APPEND CLPEAK_ROCM_ROOTS "${_clpeak_rocm_root}")
+    set(XPUPEAK_ROCM_ROOTS "")
+    foreach(_xpupeak_rocm_env HIP_PATH ROCM_PATH)
+        if(DEFINED ENV{${_xpupeak_rocm_env}})
+            string(REPLACE "\\" "/" _xpupeak_rocm_root "$ENV{${_xpupeak_rocm_env}}")
+            string(REGEX REPLACE "/+$" "" _xpupeak_rocm_root "${_xpupeak_rocm_root}")
+            list(APPEND XPUPEAK_ROCM_ROOTS "${_xpupeak_rocm_root}")
         endif()
     endforeach()
-    list(APPEND CLPEAK_ROCM_ROOTS /opt/rocm)
-    list(REMOVE_DUPLICATES CLPEAK_ROCM_ROOTS)
+    list(APPEND XPUPEAK_ROCM_ROOTS /opt/rocm)
+    list(REMOVE_DUPLICATES XPUPEAK_ROCM_ROOTS)
 
-    # CLPEAK_ROCM_INCLUDE_HINTS is also read by src/rocm/CMakeLists.txt (child
+    # XPUPEAK_ROCM_INCLUDE_HINTS is also read by src/rocm/CMakeLists.txt (child
     # scopes inherit it) for the configure-time hipBLASLt header probe.
-    set(CLPEAK_ROCM_BIN_HINTS "")
-    set(CLPEAK_ROCM_INCLUDE_HINTS "")
-    foreach(_clpeak_rocm_root IN LISTS CLPEAK_ROCM_ROOTS)
-        list(APPEND CMAKE_PREFIX_PATH "${_clpeak_rocm_root}/hip" "${_clpeak_rocm_root}")
-        list(APPEND CLPEAK_ROCM_BIN_HINTS "${_clpeak_rocm_root}/bin")
-        list(APPEND CLPEAK_ROCM_INCLUDE_HINTS "${_clpeak_rocm_root}/include")
+    set(XPUPEAK_ROCM_BIN_HINTS "")
+    set(XPUPEAK_ROCM_INCLUDE_HINTS "")
+    foreach(_xpupeak_rocm_root IN LISTS XPUPEAK_ROCM_ROOTS)
+        list(APPEND CMAKE_PREFIX_PATH "${_xpupeak_rocm_root}/hip" "${_xpupeak_rocm_root}")
+        list(APPEND XPUPEAK_ROCM_BIN_HINTS "${_xpupeak_rocm_root}/bin")
+        list(APPEND XPUPEAK_ROCM_INCLUDE_HINTS "${_xpupeak_rocm_root}/include")
     endforeach()
 
     find_package(hip QUIET CONFIG)
@@ -151,24 +181,24 @@ if(CLPEAK_ENABLE_ROCM)
     # hipcc.bat is named explicitly because find_program only auto-appends the
     # .exe/.com suffixes: the Windows HIP SDK has shipped hipcc as a batch
     # wrapper in some releases and as a real executable in others.
-    find_program(CLPEAK_HIPCC NAMES hipcc hipcc.bat HINTS ${CLPEAK_ROCM_BIN_HINTS})
-    if(CLPEAK_HIPCC)
-        set(CLPEAK_HIPCC_FOUND TRUE)
+    find_program(XPUPEAK_HIPCC NAMES hipcc hipcc.bat HINTS ${XPUPEAK_ROCM_BIN_HINTS})
+    if(XPUPEAK_HIPCC)
+        set(XPUPEAK_HIPCC_FOUND TRUE)
     else()
-        set(CLPEAK_HIPCC_FOUND FALSE)
+        set(XPUPEAK_HIPCC_FOUND FALSE)
     endif()
 
-    find_path(CLPEAK_ROCWMMA_INCLUDE_DIR
+    find_path(XPUPEAK_ROCWMMA_INCLUDE_DIR
         NAMES rocwmma/rocwmma.hpp
-        HINTS ${CLPEAK_ROCM_INCLUDE_HINTS})
-    if(CLPEAK_ROCWMMA_INCLUDE_DIR)
-        set(CLPEAK_ROCWMMA_FOUND TRUE)
+        HINTS ${XPUPEAK_ROCM_INCLUDE_HINTS})
+    if(XPUPEAK_ROCWMMA_INCLUDE_DIR)
+        set(XPUPEAK_ROCWMMA_FOUND TRUE)
     else()
-        set(CLPEAK_ROCWMMA_FOUND FALSE)
+        set(XPUPEAK_ROCWMMA_FOUND FALSE)
     endif()
 endif()
 # Find Metal frameworks (needed by src/metal/CMakeLists.txt and summary)
-if(APPLE AND CLPEAK_ENABLE_METAL)
+if(APPLE AND XPUPEAK_ENABLE_METAL)
     find_library(METAL_FRAMEWORK Metal)
     find_library(FOUNDATION_FRAMEWORK Foundation)
     find_library(IOKIT_FRAMEWORK IOKit)
@@ -176,7 +206,7 @@ if(APPLE AND CLPEAK_ENABLE_METAL)
     find_library(MPSGRAPH_FRAMEWORK MetalPerformanceShadersGraph)
 endif()
 # Find Intel oneAPI / SYCL (needed by src/oneapi/CMakeLists.txt)
-if(CLPEAK_ENABLE_ONEAPI)
+if(XPUPEAK_ENABLE_ONEAPI)
     # IntelSYCL ships with the Intel oneAPI Base Toolkit.  When compiling with
     # icpx (or clang++ -fsycl), it exposes add_sycl_to_target() and the
     # IntelSYCL::SYCL_CXX imported target.
@@ -187,22 +217,22 @@ if(CLPEAK_ENABLE_ONEAPI)
 
     # SYCL device code must be compiled AND linked by a SYCL-aware compiler
     # (CMAKE_CXX_COMPILER_ID == "IntelLLVM").  The kernels live in a static
-    # lib that is link-resolved into the clpeak executable, so the *whole*
+    # lib that is link-resolved into the xpupeak executable, so the *whole*
     # binary must be built with icpx/icx -- MSVC and GCC cannot embed device
     # images.
     #   Linux:   cmake -B build -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
     #   Windows: cmake -G Ninja -B build -DCMAKE_CXX_COMPILER=icx -DCMAKE_C_COMPILER=icx
     if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
-        set(CLPEAK_ONEAPI_COMPILER_OK TRUE)
+        set(XPUPEAK_ONEAPI_COMPILER_OK TRUE)
     else()
-        set(CLPEAK_ONEAPI_COMPILER_OK FALSE)
+        set(XPUPEAK_ONEAPI_COMPILER_OK FALSE)
     endif()
 endif()
 
-# Find the Flutter SDK (needed by src/ffi/CMakeLists.txt for clpeak-gui).
+# Find the Flutter SDK (needed by src/ffi/CMakeLists.txt for xpupeak-gui).
 # Like the backend dependencies above: GUI is skipped (not an error) when the
 # SDK isn't detectable.
-if(CLPEAK_ENABLE_GUI)
+if(XPUPEAK_ENABLE_GUI)
     find_program(FLUTTER_EXECUTABLE flutter
         HINTS $ENV{FLUTTER_HOME}/bin $ENV{FLUTTER_ROOT}/bin $ENV{HOME}/flutter/bin)
 endif()
@@ -225,125 +255,125 @@ add_subdirectory(src/litert)
 # CLI executable
 add_subdirectory(src/cli)
 
-# GUI native bridge (clpeak_ffi) + clpeak-gui Flutter build target
+# GUI native bridge (xpupeak_ffi) + xpupeak-gui Flutter build target
 add_subdirectory(src/ffi)
 
 # ---- Backend status summary ------------------------------------------------
 # Print a single block at the end of configure so the user can see at a
-# glance which backends will be built into the resulting clpeak binary.
-set(_clpeak_summary "")
-if(CLPEAK_ENABLE_OPENCL)
-    string(APPEND _clpeak_summary "  OpenCL : ENABLED\n")
+# glance which backends will be built into the resulting xpupeak binary.
+set(_xpupeak_summary "")
+if(XPUPEAK_ENABLE_OPENCL)
+    string(APPEND _xpupeak_summary "  OpenCL : ENABLED\n")
 else()
-    string(APPEND _clpeak_summary "  OpenCL : disabled (CLPEAK_ENABLE_OPENCL=OFF)\n")
+    string(APPEND _xpupeak_summary "  OpenCL : disabled (XPUPEAK_ENABLE_OPENCL=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
-    string(APPEND _clpeak_summary "  Vulkan : ENABLED  (${Vulkan_VERSION})\n")
-elseif(CLPEAK_ENABLE_VULKAN)
-    string(APPEND _clpeak_summary "  Vulkan : disabled (Vulkan SDK / loader not found)\n")
+if(XPUPEAK_ENABLE_VULKAN AND Vulkan_FOUND)
+    string(APPEND _xpupeak_summary "  Vulkan : ENABLED  (${Vulkan_VERSION})\n")
+elseif(XPUPEAK_ENABLE_VULKAN)
+    string(APPEND _xpupeak_summary "  Vulkan : disabled (Vulkan SDK / loader not found)\n")
 else()
-    string(APPEND _clpeak_summary "  Vulkan : disabled (CLPEAK_ENABLE_VULKAN=OFF)\n")
+    string(APPEND _xpupeak_summary "  Vulkan : disabled (XPUPEAK_ENABLE_VULKAN=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
-    string(APPEND _clpeak_summary "  CUDA   : ENABLED  (Toolkit ${CUDAToolkit_VERSION})\n")
-elseif(CLPEAK_ENABLE_CUDA)
-    string(APPEND _clpeak_summary "  CUDA   : disabled (CUDA Toolkit not found)\n")
+if(XPUPEAK_ENABLE_CUDA AND CUDAToolkit_FOUND)
+    string(APPEND _xpupeak_summary "  CUDA   : ENABLED  (Toolkit ${CUDAToolkit_VERSION})\n")
+elseif(XPUPEAK_ENABLE_CUDA)
+    string(APPEND _xpupeak_summary "  CUDA   : disabled (CUDA Toolkit not found)\n")
 else()
-    string(APPEND _clpeak_summary "  CUDA   : disabled (CLPEAK_ENABLE_CUDA=OFF)\n")
+    string(APPEND _xpupeak_summary "  CUDA   : disabled (XPUPEAK_ENABLE_CUDA=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_ROCM AND hip_FOUND AND CLPEAK_HIPCC_FOUND)
-    set(_clpeak_rocm_features "HIP")
+if(XPUPEAK_ENABLE_ROCM AND hip_FOUND AND XPUPEAK_HIPCC_FOUND)
+    set(_xpupeak_rocm_features "HIP")
     if(rocblas_FOUND AND TARGET roc::rocblas)
-        string(APPEND _clpeak_rocm_features ", rocBLAS")
+        string(APPEND _xpupeak_rocm_features ", rocBLAS")
     endif()
     if(hipblaslt_FOUND AND TARGET roc::hipblaslt)
-        string(APPEND _clpeak_rocm_features ", hipBLASLt")
+        string(APPEND _xpupeak_rocm_features ", hipBLASLt")
     endif()
-    if(CLPEAK_ROCWMMA_FOUND)
-        string(APPEND _clpeak_rocm_features ", rocWMMA")
+    if(XPUPEAK_ROCWMMA_FOUND)
+        string(APPEND _xpupeak_rocm_features ", rocWMMA")
     endif()
-    string(APPEND _clpeak_summary "  ROCm   : ENABLED  (${_clpeak_rocm_features})\n")
-elseif(CLPEAK_ENABLE_ROCM AND NOT hip_FOUND)
-    string(APPEND _clpeak_summary "  ROCm   : disabled (ROCm/HIP package not found)\n")
-elseif(CLPEAK_ENABLE_ROCM)
-    string(APPEND _clpeak_summary "  ROCm   : disabled (hipcc not found)\n")
+    string(APPEND _xpupeak_summary "  ROCm   : ENABLED  (${_xpupeak_rocm_features})\n")
+elseif(XPUPEAK_ENABLE_ROCM AND NOT hip_FOUND)
+    string(APPEND _xpupeak_summary "  ROCm   : disabled (ROCm/HIP package not found)\n")
+elseif(XPUPEAK_ENABLE_ROCM)
+    string(APPEND _xpupeak_summary "  ROCm   : disabled (hipcc not found)\n")
 else()
-    string(APPEND _clpeak_summary "  ROCm   : disabled (CLPEAK_ENABLE_ROCM=OFF)\n")
+    string(APPEND _xpupeak_summary "  ROCm   : disabled (XPUPEAK_ENABLE_ROCM=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_METAL AND APPLE AND METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK AND MPS_FRAMEWORK AND MPSGRAPH_FRAMEWORK)
-    string(APPEND _clpeak_summary "  Metal  : ENABLED  (Apple silicon target, MPSGraph linked)\n")
-elseif(CLPEAK_ENABLE_METAL AND APPLE)
-    string(APPEND _clpeak_summary "  Metal  : disabled (Metal/Foundation/MPSGraph framework not found)\n")
-elseif(CLPEAK_ENABLE_METAL)
-    string(APPEND _clpeak_summary "  Metal  : disabled (non-Apple host)\n")
+if(XPUPEAK_ENABLE_METAL AND APPLE AND METAL_FRAMEWORK AND FOUNDATION_FRAMEWORK AND MPS_FRAMEWORK AND MPSGRAPH_FRAMEWORK)
+    string(APPEND _xpupeak_summary "  Metal  : ENABLED  (Apple silicon target, MPSGraph linked)\n")
+elseif(XPUPEAK_ENABLE_METAL AND APPLE)
+    string(APPEND _xpupeak_summary "  Metal  : disabled (Metal/Foundation/MPSGraph framework not found)\n")
+elseif(XPUPEAK_ENABLE_METAL)
+    string(APPEND _xpupeak_summary "  Metal  : disabled (non-Apple host)\n")
 else()
-    string(APPEND _clpeak_summary "  Metal  : disabled (CLPEAK_ENABLE_METAL=OFF)\n")
+    string(APPEND _xpupeak_summary "  Metal  : disabled (XPUPEAK_ENABLE_METAL=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND CLPEAK_ONEAPI_COMPILER_OK)
-    set(_clpeak_oneapi_features "SYCL")
+if(XPUPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND XPUPEAK_ONEAPI_COMPILER_OK)
+    set(_xpupeak_oneapi_features "SYCL")
     if(MKL_FOUND)
-        string(APPEND _clpeak_oneapi_features ", oneMKL")
+        string(APPEND _xpupeak_oneapi_features ", oneMKL")
     endif()
-    if(CLPEAK_ONEAPI_HAS_JOINT_MATRIX)
-        string(APPEND _clpeak_oneapi_features ", joint_matrix")
+    if(XPUPEAK_ONEAPI_HAS_JOINT_MATRIX)
+        string(APPEND _xpupeak_oneapi_features ", joint_matrix")
     endif()
-    string(APPEND _clpeak_summary "  oneAPI : ENABLED  (${_clpeak_oneapi_features})\n")
-elseif(CLPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND NOT CLPEAK_ONEAPI_COMPILER_OK)
+    string(APPEND _xpupeak_summary "  oneAPI : ENABLED  (${_xpupeak_oneapi_features})\n")
+elseif(XPUPEAK_ENABLE_ONEAPI AND IntelSYCL_FOUND AND NOT XPUPEAK_ONEAPI_COMPILER_OK)
     if(WIN32)
-        string(APPEND _clpeak_summary "  oneAPI : disabled (needs icx - reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx, current is ${CMAKE_CXX_COMPILER_ID})\n")
+        string(APPEND _xpupeak_summary "  oneAPI : disabled (needs icx - reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx, current is ${CMAKE_CXX_COMPILER_ID})\n")
     else()
-        string(APPEND _clpeak_summary "  oneAPI : disabled (needs icpx - reconfigure with -DCMAKE_CXX_COMPILER=icpx, current is ${CMAKE_CXX_COMPILER_ID})\n")
+        string(APPEND _xpupeak_summary "  oneAPI : disabled (needs icpx - reconfigure with -DCMAKE_CXX_COMPILER=icpx, current is ${CMAKE_CXX_COMPILER_ID})\n")
     endif()
-elseif(CLPEAK_ENABLE_ONEAPI)
+elseif(XPUPEAK_ENABLE_ONEAPI)
     if(WIN32)
-        string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - run setvars.bat then reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx)\n")
+        string(APPEND _xpupeak_summary "  oneAPI : disabled (IntelSYCL not found - run setvars.bat then reconfigure with -G Ninja -DCMAKE_CXX_COMPILER=icx)\n")
     else()
-        string(APPEND _clpeak_summary "  oneAPI : disabled (IntelSYCL not found - source setvars.sh then reconfigure with -DCMAKE_CXX_COMPILER=icpx)\n")
+        string(APPEND _xpupeak_summary "  oneAPI : disabled (IntelSYCL not found - source setvars.sh then reconfigure with -DCMAKE_CXX_COMPILER=icpx)\n")
     endif()
 else()
-    string(APPEND _clpeak_summary "  oneAPI : disabled (CLPEAK_ENABLE_ONEAPI=OFF)\n")
+    string(APPEND _xpupeak_summary "  oneAPI : disabled (XPUPEAK_ENABLE_ONEAPI=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_CPU)
-    string(APPEND _clpeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch)\n")
+if(XPUPEAK_ENABLE_CPU)
+    string(APPEND _xpupeak_summary "  CPU    : ENABLED  (portable: baseline + runtime ISA dispatch)\n")
 else()
-    string(APPEND _clpeak_summary "  CPU    : disabled (CLPEAK_ENABLE_CPU=OFF)\n")
+    string(APPEND _xpupeak_summary "  CPU    : disabled (XPUPEAK_ENABLE_CPU=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_ONNX)
-    string(APPEND _clpeak_summary "  ONNX   : ENABLED  (onnxruntime dlopen'd at run time)\n")
+if(XPUPEAK_ENABLE_ONNX)
+    string(APPEND _xpupeak_summary "  ONNX   : ENABLED  (onnxruntime dlopen'd at run time)\n")
 else()
-    string(APPEND _clpeak_summary "  ONNX   : disabled (CLPEAK_ENABLE_ONNX=OFF)\n")
+    string(APPEND _xpupeak_summary "  ONNX   : disabled (XPUPEAK_ENABLE_ONNX=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_LITERT)
-    string(APPEND _clpeak_summary "  LiteRT : ENABLED  (libLiteRt dlopen'd at run time)\n")
+if(XPUPEAK_ENABLE_LITERT)
+    string(APPEND _xpupeak_summary "  LiteRT : ENABLED  (libLiteRt dlopen'd at run time)\n")
 else()
-    string(APPEND _clpeak_summary "  LiteRT : disabled (CLPEAK_ENABLE_LITERT=OFF)\n")
+    string(APPEND _xpupeak_summary "  LiteRT : disabled (XPUPEAK_ENABLE_LITERT=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_COREML AND TARGET peak_coreml)
-    string(APPEND _clpeak_summary "  CoreML : ENABLED  (Neural Engine / GPU / CPU compute devices)\n")
-elseif(CLPEAK_ENABLE_COREML AND APPLE)
-    string(APPEND _clpeak_summary "  CoreML : disabled (CoreML framework not found)\n")
-elseif(CLPEAK_ENABLE_COREML)
-    string(APPEND _clpeak_summary "  CoreML : disabled (non-Apple host)\n")
+if(XPUPEAK_ENABLE_COREML AND TARGET peak_coreml)
+    string(APPEND _xpupeak_summary "  CoreML : ENABLED  (Neural Engine / GPU / CPU compute devices)\n")
+elseif(XPUPEAK_ENABLE_COREML AND APPLE)
+    string(APPEND _xpupeak_summary "  CoreML : disabled (CoreML framework not found)\n")
+elseif(XPUPEAK_ENABLE_COREML)
+    string(APPEND _xpupeak_summary "  CoreML : disabled (non-Apple host)\n")
 else()
-    string(APPEND _clpeak_summary "  CoreML : disabled (CLPEAK_ENABLE_COREML=OFF)\n")
+    string(APPEND _xpupeak_summary "  CoreML : disabled (XPUPEAK_ENABLE_COREML=OFF)\n")
 endif()
-if(CLPEAK_ENABLE_GUI AND FLUTTER_EXECUTABLE)
-    string(APPEND _clpeak_summary "  GUI    : ENABLED  (${FLUTTER_EXECUTABLE})\n")
-elseif(CLPEAK_ENABLE_GUI)
-    string(APPEND _clpeak_summary "  GUI    : disabled (Flutter SDK not found - install flutter or set FLUTTER_HOME)\n")
+if(XPUPEAK_ENABLE_GUI AND FLUTTER_EXECUTABLE)
+    string(APPEND _xpupeak_summary "  GUI    : ENABLED  (${FLUTTER_EXECUTABLE})\n")
+elseif(XPUPEAK_ENABLE_GUI)
+    string(APPEND _xpupeak_summary "  GUI    : disabled (Flutter SDK not found - install flutter or set FLUTTER_HOME)\n")
 else()
-    string(APPEND _clpeak_summary "  GUI    : disabled (CLPEAK_ENABLE_GUI=OFF)\n")
+    string(APPEND _xpupeak_summary "  GUI    : disabled (XPUPEAK_ENABLE_GUI=OFF)\n")
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")
-message(STATUS "clpeak components summary")
+message(STATUS "xpupeak components summary")
 message(STATUS "")
 # Derived at configure time, so re-running cmake is what refreshes it.
-message(STATUS "  Version: ${CLPEAK_VERSION_STR}")
+message(STATUS "  Version: ${XPUPEAK_VERSION_STR}")
 message(STATUS "")
 # Print the multi-line block.  CMake `message(STATUS "...")` re-prefixes
 # every newline so we split manually.
-string(REPLACE "\n" ";" _summary_lines "${_clpeak_summary}")
+string(REPLACE "\n" ";" _summary_lines "${_xpupeak_summary}")
 foreach(_line IN LISTS _summary_lines)
     if(NOT "${_line}" STREQUAL "")
         message(STATUS "${_line}")
@@ -352,26 +382,26 @@ endforeach()
 message(STATUS "===============================================================")
 message(STATUS "")
 
-install(TARGETS clpeak RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/clpeak")
+install(TARGETS xpupeak RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/xpupeak")
 enable_testing()
-add_test(clpeak_test_run clpeak)
+add_test(xpupeak_test_run xpupeak)
 
 # --- CPack: self-contained, clearly-named zip per build --------------------
-# Name: clpeak-<version>-<os>-<arch>[-<backend>], e.g.
+# Name: xpupeak-<version>-<os>-<arch>[-<backend>], e.g.
 # clpeak-1.1.8-linux-x86_64-cuda.  Archive generators wrap the contents in a
 # top-level dir of the same name, so each zip extracts to one clean folder.
-string(TOLOWER "${CMAKE_SYSTEM_NAME}" _clpeak_os)
-if(_clpeak_os STREQUAL "darwin")
-  set(_clpeak_os "macos")
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" _xpupeak_os)
+if(_xpupeak_os STREQUAL "darwin")
+  set(_xpupeak_os "macos")
 endif()
-set(CLPEAK_PACKAGE_SUFFIX "" CACHE STRING
+set(XPUPEAK_PACKAGE_SUFFIX "" CACHE STRING
     "Backend tag appended to the package name (e.g. cuda, rocm, oneapi)")
-set(_clpeak_pkg "clpeak-${CLPEAK_VERSION_STR}-${_clpeak_os}-${CMAKE_SYSTEM_PROCESSOR}")
-if(NOT CLPEAK_PACKAGE_SUFFIX STREQUAL "")
-  set(_clpeak_pkg "${_clpeak_pkg}-${CLPEAK_PACKAGE_SUFFIX}")
+set(_xpupeak_pkg "xpupeak-${XPUPEAK_VERSION_STR}-${_xpupeak_os}-${CMAKE_SYSTEM_PROCESSOR}")
+if(NOT XPUPEAK_PACKAGE_SUFFIX STREQUAL "")
+  set(_xpupeak_pkg "${_xpupeak_pkg}-${XPUPEAK_PACKAGE_SUFFIX}")
 endif()
-set(CPACK_PACKAGE_FILE_NAME "${_clpeak_pkg}")
+set(CPACK_PACKAGE_FILE_NAME "${_xpupeak_pkg}")
 set(CPACK_GENERATOR "ZIP")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY 1)
 include(CPack)
@@ -379,14 +409,14 @@ include(CPack)
 # --- macOS: drag-to-Applications disk image for the GUI ---------------------
 # The zip is the developer artifact (CLI + .app); the .dmg is how a macOS user
 # actually installs the GUI.  Not part of ALL -- `cmake --build build --target
-# clpeak-gui-dmg` after the normal build, which CI does on tag builds.
-if(APPLE AND TARGET clpeak-gui)
-    add_custom_target(clpeak-gui-dmg
+# xpupeak-gui-dmg` after the normal build, which CI does on tag builds.
+if(APPLE AND TARGET xpupeak-gui)
+    add_custom_target(xpupeak-gui-dmg
         COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/make_dmg.sh"
-                "${CMAKE_BINARY_DIR}/clpeak-gui/clpeak-gui.app"
-                "${CMAKE_BINARY_DIR}/${_clpeak_pkg}.dmg"
-                "clpeak ${CLPEAK_VERSION_STR}"
-        COMMENT "clpeak-gui: packaging ${_clpeak_pkg}.dmg"
+                "${CMAKE_BINARY_DIR}/xpupeak-gui/xpupeak-gui.app"
+                "${CMAKE_BINARY_DIR}/${_xpupeak_pkg}.dmg"
+                "xpupeak ${XPUPEAK_VERSION_STR}"
+        COMMENT "xpupeak-gui: packaging ${_xpupeak_pkg}.dmg"
         VERBATIM)
-    add_dependencies(clpeak-gui-dmg clpeak-gui)
+    add_dependencies(xpupeak-gui-dmg xpupeak-gui)
 endif()

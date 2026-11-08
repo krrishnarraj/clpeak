@@ -141,7 +141,7 @@ Category categoryFromUnit(const std::string &unit)
 // A unit symbol is <SI prefix><base>, so rescaling is a matter of swapping
 // the prefix — which works for FLOPS → GFLOPS → TFLOPS, B/s → GB/s → TB/s,
 // Texel/s → GTexel/s and s → ms/µs/ns alike, without a table of every unit
-// clpeak might one day report.  Byte-wise prefix matching: every prefix is
+// xpupeak might one day report.  Byte-wise prefix matching: every prefix is
 // one logical character, "µ" included (two UTF-8 bytes).
 
 namespace

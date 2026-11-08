@@ -103,7 +103,7 @@ HostInfo probeHost()
     h.arch = hostArch();
 
     h.logicalCores = std::thread::hardware_concurrency();
-    h.memoryBytes  = clpeak::systemMemoryBytes();
+    h.memoryBytes  = xpupeak::systemMemoryBytes();
 
 #if defined(__APPLE__)
     // kern.osproductversion is the user-visible number ("26.6.2"); the Darwin

@@ -1,5 +1,5 @@
-#ifndef CLPEAK_UNITS_H
-#define CLPEAK_UNITS_H
+#ifndef XPUPEAK_UNITS_H
+#define XPUPEAK_UNITS_H
 
 #include <string>
 #include <common/benchmark_enums.h>
@@ -95,4 +95,4 @@ inline std::string formatReading(double value, const std::string &unitToken)
 // pass Category explicitly.
 Category categoryFromUnit(const std::string &unit);
 
-#endif  // CLPEAK_UNITS_H
+#endif  // XPUPEAK_UNITS_H

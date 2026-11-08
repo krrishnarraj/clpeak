@@ -12,7 +12,7 @@ MSTRINGIFY(
 // builtin as a slow precise path and never lower it to the hardware FMA:
 // Apple's deprecated CL-on-Metal compiler halves peak fp32 that way.  This
 // also matches the integer/char/short kernels here and the explicit fma
-// intrinsics every other clpeak backend uses.  Do not "restore" mad().
+// intrinsics every other xpupeak backend uses.  Do not "restore" mad().
 
 \n#undef MAD_4
 \n#undef MAD_16
@@ -97,7 +97,7 @@ __kernel void compute_sp_v16(__global float *ptr, float _A)
 // ---- affine-chain variants (see mad_chain.cl) ----
 //
 // One macro per width, instantiated as compute_sp_alt_v* at whatever sub-group
-// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// size the compiler picks and, where the host defines XPUPEAK_ALT_SG16 (a
 // device with cl_intel_required_subgroup_size that offers 16), again as
 // compute_sp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
 // the squaring chain.
@@ -169,7 +169,7 @@ SP_ALT_V4(compute_sp_alt_v4, )
 SP_ALT_V8(compute_sp_alt_v8, )
 SP_ALT_V16(compute_sp_alt_v16, )
 
-\n#ifdef CLPEAK_ALT_SG16
+\n#ifdef XPUPEAK_ALT_SG16
 \nSP_ALT_V1(compute_sp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
 SP_ALT_V2(compute_sp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
 SP_ALT_V4(compute_sp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))

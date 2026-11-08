@@ -57,7 +57,7 @@ struct MetalPeakImpl {
 // Shared helpers used by benchmark files
 // ---------------------------------------------------------------------------
 
-NSArray<id<MTLDevice>> *copyClpeakMetalDevices();
+NSArray<id<MTLDevice>> *copyXpupeakMetalDevices();
 
 id<MTLLibrary> mtlGetLibrary(MetalDevice &dev, const char *src, const char *srcName);
 

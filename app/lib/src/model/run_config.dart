@@ -69,7 +69,7 @@ class RunConfig {
     on ? set.add(ref) : set.remove(ref);
   }
 
-  /// Build the clpeak_launch argv (without the program name).
+  /// Build the xpupeak_launch argv (without the program name).
   ///
   /// Only backend/device/category/time flags are ever emitted -- never
   /// individual test flags, so test churn in the core needs no app changes.

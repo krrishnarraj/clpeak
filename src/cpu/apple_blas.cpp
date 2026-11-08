@@ -96,8 +96,8 @@ SweepResult sweep(const std::vector<uint64_t> &sizes, size_t elemBytes,
     double g = runSize(n);
     if (g <= 0.0)
       continue;
-    CLPEAK_VLOG("  [accelerate] %s N=%llu: %.1f FLOPS\n", label,
-                (unsigned long long)n, g);
+    XPUPEAK_VLOG("  [accelerate] %s N=%llu: %.1f FLOPS\n", label,
+                 (unsigned long long)n, g);
     if (g > res.peakFlops) { res.peakFlops = g; res.peakN = n; }
     res.largestFlops = g;
     res.largestN      = n;
@@ -158,8 +158,8 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
 
     // Which N peaked is the AMX/SME size-cliff signature -- worth recording
     // when validating a new Apple part.
-    CLPEAK_VLOG("  [accelerate] peak sizes: sgemm N=%llu, dgemm N=%llu\n",
-                (unsigned long long)sp.peakN, (unsigned long long)dp.peakN);
+    XPUPEAK_VLOG("  [accelerate] peak sizes: sgemm N=%llu, dgemm N=%llu\n",
+                 (unsigned long long)sp.peakN, (unsigned long long)dp.peakN);
 
     const char *spNote = "Best 32-bit result over a sweep of matrix sizes; the "
                          "coprocessor is fastest at one particular size.";

@@ -5,17 +5,17 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-import 'clpeak_bindings.dart';
+import 'xpupeak_bindings.dart';
 import '../model/run_document.dart';
-import 'clpeak_events.dart';
+import 'xpupeak_events.dart';
 
 /// One in-flight benchmark run, wherever it executes: in this process
-/// ([ClpeakRun]) or in the engine process (`ChildRun`, clpeak_engine.dart).
+/// ([XpupeakRun]) or in the engine process (`ChildRun`, xpupeak_engine.dart).
 abstract interface class EngineRun {
   /// Decoded run events, ending with [DoneEvent].
-  Stream<ClpeakEvent> get events;
+  Stream<XpupeakEvent> get events;
 
-  /// The clpeak_launch return code (CLPEAK_RUN_* / OR'd backend status).
+  /// The xpupeak_launch return code (XPUPEAK_RUN_* / OR'd backend status).
   Future<int> get result;
 
   /// Why the run ended without finishing, when it did not end by itself: the
@@ -26,21 +26,21 @@ abstract interface class EngineRun {
   void cancel();
 
   /// Pause the run at its next boundary between readings, or let it go on
-  /// (clpeak_set_paused).
+  /// (xpupeak_set_paused).
   void setPaused(bool paused);
 }
 
 /// A single in-flight benchmark run in this process.
 ///
-/// Threading contract: the blocking `clpeak_launch` runs in a short-lived
+/// Threading contract: the blocking `xpupeak_launch` runs in a short-lived
 /// worker isolate; native events fire on that isolate's thread and are
 /// marshalled back here through a `NativeCallable.listener`, so [events]
 /// delivers on the main isolate in emission order.  The final native `done`
 /// event is the drain barrier — the listener is closed only after both the
 /// done event has been consumed and the launch call has returned.
-class ClpeakRun implements EngineRun {
-  ClpeakRun._(this._bindings, List<String> args) {
-    _callable = NativeCallable<ClpeakEventCallbackNative>.listener(_onNative);
+class XpupeakRun implements EngineRun {
+  XpupeakRun._(this._bindings, List<String> args) {
+    _callable = NativeCallable<XpupeakEventCallbackNative>.listener(_onNative);
     _spawn(_callable.nativeFunction.address, args).then((rc) {
       _launchReturned = true;
       _rc.complete(rc);
@@ -53,16 +53,16 @@ class ClpeakRun implements EngineRun {
     });
   }
 
-  final ClpeakBindings _bindings;
-  final _events = StreamController<ClpeakEvent>();
+  final XpupeakBindings _bindings;
+  final _events = StreamController<XpupeakEvent>();
   final _rc = Completer<int>();
-  late final NativeCallable<ClpeakEventCallbackNative> _callable;
+  late final NativeCallable<XpupeakEventCallbackNative> _callable;
   bool _doneSeen = false;
   bool _launchReturned = false;
   bool _finished = false;
 
   @override
-  Stream<ClpeakEvent> get events => _events.stream;
+  Stream<XpupeakEvent> get events => _events.stream;
 
   @override
   Future<int> get result => _rc.future;
@@ -80,9 +80,9 @@ class ClpeakRun implements EngineRun {
   void _onNative(Pointer<Void> userData, Pointer<Utf8> eventJson) {
     final json = _bindings.takeString(eventJson);
     if (json == null || _finished) return;
-    ClpeakEvent event;
+    XpupeakEvent event;
     try {
-      event = ClpeakEvent.fromJson(jsonDecode(json) as Map<String, dynamic>);
+      event = XpupeakEvent.fromJson(jsonDecode(json) as Map<String, dynamic>);
     } catch (_) {
       event = LogEntryEvent(LogEntry(
           level: LogLevel.warning, message: 'undecodable event: $json'));
@@ -109,22 +109,22 @@ class ClpeakRun implements EngineRun {
   }
 }
 
-/// Launches benchmark runs over the clpeak_ffi C ABI.
-class ClpeakRunner {
-  ClpeakRunner(this._bindings);
+/// Launches benchmark runs over the xpupeak_ffi C ABI.
+class XpupeakRunner {
+  XpupeakRunner(this._bindings);
 
-  final ClpeakBindings _bindings;
+  final XpupeakBindings _bindings;
 
   /// Start a run with CLI-grammar arguments (without the leading program
   /// name — it is prepended here).
-  ClpeakRun start(List<String> args) => ClpeakRun._(_bindings, args);
+  XpupeakRun start(List<String> args) => XpupeakRun._(_bindings, args);
 }
 
 /// Runs in the worker isolate: reopens the library, marshals argv, and makes
 /// the blocking launch call against the listener's native function pointer.
 int _launchBlocking(int callbackAddress, List<String> args) {
-  final bindings = ClpeakBindings.open();
-  final argv = ['clpeak', ...args];
+  final bindings = XpupeakBindings.open();
+  final argv = ['xpupeak', ...args];
   final argvPtrs = calloc<Pointer<Utf8>>(argv.length);
   final allocated = <Pointer<Utf8>>[];
   try {
@@ -134,7 +134,7 @@ int _launchBlocking(int callbackAddress, List<String> args) {
       argvPtrs[i] = s;
     }
     final callback =
-        Pointer<NativeFunction<ClpeakEventCallbackNative>>.fromAddress(
+        Pointer<NativeFunction<XpupeakEventCallbackNative>>.fromAddress(
             callbackAddress);
     return bindings.launch(argv.length, argvPtrs, callback, nullptr);
   } finally {

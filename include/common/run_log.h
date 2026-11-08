@@ -1,5 +1,5 @@
-#ifndef CLPEAK_RUN_LOG_H
-#define CLPEAK_RUN_LOG_H
+#ifndef XPUPEAK_RUN_LOG_H
+#define XPUPEAK_RUN_LOG_H
 
 #include <atomic>
 #include <chrono>
@@ -16,9 +16,9 @@ class logger;
 
 // ── The run's diagnostic stream ────────────────────────────────────────────
 //
-// One RunLog per run, owned by the host (the CLI's main(), clpeak_launch())
+// One RunLog per run, owned by the host (the CLI's main(), xpupeak_launch())
 // and alive for the whole of it.  It is the process's LogSink while it lives:
-// every clpeak::logMessage() -- a CLPEAK_VLOG line in a backend, a logger's
+// every xpupeak::logMessage() -- a XPUPEAK_VLOG line in a backend, a logger's
 // note(), a warning relayed from ONNX Runtime's logger, a line captured off
 // a muted console -- lands here, and from here on the document's `log`.
 //
@@ -50,7 +50,7 @@ class logger;
 // serialised.  Scope is read from the open logger without locking it: the
 // callbacks that arrive off-thread do so while the calling thread is inside
 // the library call that triggered them, with its scope standing still.
-class RunLog : public clpeak::LogSink
+class RunLog : public xpupeak::LogSink
 {
 public:
     // Entries go to `doc.log`; `doc.meta` is what the sidecar header names,
@@ -71,7 +71,7 @@ public:
     // not: it neither reads the open logger nor outlives the RunLog, and
     // once finish() has run the document may be being written, so a later
     // note reaches the sidecar alone.
-    static void hostNote(clpeak::LogLevel level, const std::string &source,
+    static void hostNote(xpupeak::LogLevel level, const std::string &source,
                          const std::string &message);
 
     // Seconds on the run's clock: since `generated_at`, which is this
@@ -114,7 +114,7 @@ public:
 
     // LogSink: a message with no logger context of its own.  Scoped by the
     // attached logger when there is one, else recorded as-is.
-    void onLog(clpeak::LogLevel level, const std::string &source,
+    void onLog(xpupeak::LogLevel level, const std::string &source,
                const std::string &message) override;
 
     // The logger whose scope and channel entries use while it lives.
@@ -164,4 +164,4 @@ private:
     std::size_t  priorEntries       = 0;       // doc.log's first, on disk already
 };
 
-#endif  // CLPEAK_RUN_LOG_H
+#endif  // XPUPEAK_RUN_LOG_H

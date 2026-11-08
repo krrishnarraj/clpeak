@@ -544,9 +544,9 @@ std::string CoremlProgram::buildModel() const
     desc.str(10, feature(o));       // ModelDescription.output
   {
     Pb md;
-    md.str(1, "clpeak micro-graph");
+    md.str(1, "xpupeak micro-graph");
     md.str(2, "1");
-    md.str(3, "clpeak");
+    md.str(3, "xpupeak");
     desc.str(100, md.b);            // ModelDescription.metadata
   }
 

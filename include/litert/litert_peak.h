@@ -129,7 +129,7 @@ public:
   // (Mali's int8 path on a Pixel 7a was 250% off) is not a capability, and
   // its speed is not a number anyone should divide by.  The line and the
   // words are the three ML backends' (include/common/answer_check.h).
-  struct AnswerCheck : clpeak::AnswerCheck
+  struct AnswerCheck : xpupeak::AnswerCheck
   {
     // The output is filled with a marker before the run.  The share of its
     // elements still holding it once the run returned, and -- read only for
@@ -172,7 +172,7 @@ std::vector<litert_device_info_t> litertUsableDevices(
 
 // Choose which LiteRT library to load, ahead of the platform's conventional
 // names; empty clears the choice.  Backs `--litert-lib` and the FFI's
-// clpeak_set_litert_library().  Re-declared here so the CLI and the FFI can
+// xpupeak_set_litert_library().  Re-declared here so the CLI and the FFI can
 // set it without the backend's private loader header.  Between runs only.
 void litertSetLibraryOverride(const std::string &path);
 
@@ -181,7 +181,7 @@ void litertSetLibraryOverride(const std::string &path);
 void litertSetNpuDirOverride(const std::string &dir);
 
 // A writable directory the backend may stage one vendor's NPU shims in
-// (Android; the FFI's clpeak_set_litert_npu_stage_dir).  LiteRT loads the
+// (Android; the FFI's xpupeak_set_litert_npu_stage_dir).  LiteRT loads the
 // first libLiteRtDispatch_* it lists in one directory, so an app that
 // carries every vendor's shims gives the one for this SoC a directory of
 // its own here -- links to the packaged files, remade at every launch.

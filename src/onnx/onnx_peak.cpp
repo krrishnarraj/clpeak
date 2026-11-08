@@ -16,11 +16,11 @@
 // ---------------------------------------------------------------------------
 // Execution-provider table
 // ---------------------------------------------------------------------------
-// Maps ORT registration names to how clpeak presents them.  Providers not in
+// Maps ORT registration names to how xpupeak presents them.  Providers not in
 // this table are still listed (name passed through) so a new EP shows up
 // rather than being silently hidden; it just carries Unknown type until the
 // table learns it.  The Azure EP is the one deliberate exclusion: it proxies
-// inference to a remote service, and clpeak measures local silicon only.
+// inference to a remote service, and xpupeak measures local silicon only.
 
 struct EpTableEntry
 {
@@ -141,7 +141,7 @@ static void pluginNotes(const OrtRuntime &rt,
                              : std::string(", Windows ML off");
     loud.push_back("the runtime setup chosen since ONNX Runtime " + rt.versionString +
                    " loaded (" + setup +
-                   ") takes effect the next time clpeak starts: one process keeps "
+                   ") takes effect the next time xpupeak starts: one process keeps "
                    "the runtime it loaded first");
   }
 }
@@ -246,8 +246,8 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
     }
     else
     {
-      CLPEAK_VLOG("onnx: %s not usable (%s), skipping\n",
-                  ep.displayName.c_str(), reason.c_str());
+      XPUPEAK_VLOG("onnx: %s not usable (%s), skipping\n",
+                   ep.displayName.c_str(), reason.c_str());
       if (skipped)
         skipped->emplace_back(ep, reason);
     }
@@ -258,7 +258,7 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
 OnnxRuntimeStatus onnxRuntimeStatus()
 {
   OnnxRuntimeStatus st;
-#ifdef CLPEAK_ONNX_STATIC
+#ifdef XPUPEAK_ONNX_STATIC
   st.linkedIn = true;
 #endif
   if (const OrtRuntime *rt = ortRuntime())
@@ -334,8 +334,8 @@ int OnnxPeak::runAll()
   // missing accelerator (OpenVINO NPU with no NPU, a declining NNAPI), not
   // a warning, so the default output stays a device table.
   for (const auto &sk : skipped)
-    CLPEAK_VLOG("ONNX: skipping %s (%s)\n", sk.first.displayName.c_str(),
-                sk.second.c_str());
+    XPUPEAK_VLOG("ONNX: skipping %s (%s)\n", sk.first.displayName.c_str(),
+                 sk.second.c_str());
   // The plugin libraries and the Windows ML catalog: what someone asked for
   // and did not get is said in normal output (pluginNotes explains which).
   {
@@ -344,7 +344,7 @@ int OnnxPeak::runAll()
     for (const auto &n : loud)
       log->note("ONNX: " + n + "\n");
     for (const auto &n : quiet)
-      CLPEAK_VLOG("ONNX: %s\n", n.c_str());
+      XPUPEAK_VLOG("ONNX: %s\n", n.c_str());
   }
   if (eps.empty())
   {
@@ -369,7 +369,7 @@ int OnnxPeak::runAll()
 
   for (int idx = 0; idx < (int)eps.size(); idx++)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;
@@ -481,7 +481,7 @@ int OnnxPeak::runAll()
     auto phase = [&](Benchmark b, int (OnnxPeak::*fn)(const OrtRuntime &,
                                                       const onnx_ep_info_t &,
                                                       benchmark_config_t &)) {
-      if (clpeak::cancelRequested() || deviceLost())
+      if (xpupeak::cancelRequested() || deviceLost())
         return;
       if (auto run = admit(b))
         (this->*fn)(*rt, ep, cfg);
@@ -511,25 +511,25 @@ int OnnxPeak::runAll()
     // (gemm, conv, the block) also drop a size timed across the loss, whose
     // cut-short run can still come back a success.
     if (deviceLost())
-      CLPEAK_LOG(Error,
-                 "ONNX %s: the device was lost during the run (the driver reset "
-                 "it, and the provider cannot recover), so no further tests "
-                 "were attempted on it; the readings taken before the loss "
-                 "stand",
-                 ep.displayName.c_str());
+      XPUPEAK_LOG(Error,
+                  "ONNX %s: the device was lost during the run (the driver reset "
+                  "it, and the provider cannot recover), so no further tests "
+                  "were attempted on it; the readings taken before the loss "
+                  "stand",
+                  ep.displayName.c_str());
 
     currentDeviceScope = nullptr;
 
     // The CoreML execution provider leaves every model it compiled, weights
     // included, in Core ML's compile cache, which nothing evicts; see
     // include/common/coreml_cache.h.  A no-op everywhere else.
-    clpeak::purgeCoreMLCompileCache();
+    xpupeak::purgeCoreMLCompileCache();
 
     // What a plugin provider holds on the environment goes with its device.
     // Registering a plugin library makes ORT create a shared allocator for
     // each of its devices on the OrtEnv (ORT 1.23+), from the factory's own
     // implementation -- for a GPU provider a device-memory pool -- and that
-    // allocator outlives every session.  Sessions are what clpeak releases;
+    // allocator outlives every session.  Sessions are what xpupeak releases;
     // the pool is what a provider that runs after it sees.  On an RTX 5060
     // (ORT 1.30, the CUDA provider as a plugin), every TensorRT graph with a
     // matmul or a convolution failed to build after the plugin's tests, and
@@ -554,14 +554,14 @@ int OnnxPeak::runAll()
           OrtStatus *st = rt->api->CreateSharedAllocator(env, ep.epDevicePtr, kind,
                                                          OrtDeviceAllocator, nullptr, nullptr);
           if (st)
-            CLPEAK_VLOG("onnx[%s]: could not replace the shared %s allocator: %s\n",
-                        ep.displayName.c_str(),
-                        kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible",
-                        onnxStatusText(*rt, st).c_str());
+            XPUPEAK_VLOG("onnx[%s]: could not replace the shared %s allocator: %s\n",
+                         ep.displayName.c_str(),
+                         kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible",
+                         onnxStatusText(*rt, st).c_str());
           else
-            CLPEAK_VLOG("onnx[%s]: replaced the shared %s allocator, releasing what it held\n",
-                        ep.displayName.c_str(),
-                        kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible");
+            XPUPEAK_VLOG("onnx[%s]: replaced the shared %s allocator, releasing what it held\n",
+                         ep.displayName.c_str(),
+                         kind == OrtDeviceMemoryType_DEFAULT ? "device" : "host-accessible");
         }
       }
     }
@@ -571,9 +571,9 @@ int OnnxPeak::runAll()
     // and this is the line that shows it happening.
     {
       unsigned long fds = 0, limit = 0;
-      if (clpeak::openFileDescriptors(fds, limit))
-        CLPEAK_VLOG("onnx[%s]: %lu open file descriptors%s\n", ep.displayName.c_str(), fds,
-                    limit ? (" (limit " + std::to_string(limit) + ")").c_str() : "");
+      if (xpupeak::openFileDescriptors(fds, limit))
+        XPUPEAK_VLOG("onnx[%s]: %lu open file descriptors%s\n", ep.displayName.c_str(), fds,
+                     limit ? (" (limit " + std::to_string(limit) + ")").c_str() : "");
     }
   }
 

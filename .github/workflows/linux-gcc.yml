@@ -45,11 +45,11 @@ jobs:
       - name: Configure CMake & Build (GCC, LTO)
         run: |
           # GUI off: this job is a compiler smoke test, not a packaging job.
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCLPEAK_ENABLE_GUI=OFF \
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DXPUPEAK_ENABLE_GUI=OFF \
             -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_C_FLAGS=-flto=auto -DCMAKE_CXX_FLAGS=-flto=auto \
             -DCMAKE_EXE_LINKER_FLAGS=-flto=auto
           cmake --build build --config Release -j4
 
       - name: Run
-        run: ./build/clpeak --version
+        run: ./build/xpupeak --version

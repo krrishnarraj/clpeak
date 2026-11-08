@@ -314,7 +314,7 @@ int CpuPeak::runAll()
   // pool exists.  Android starts moving the app back to its foreground cpuset
   // as it resumes the activity, before the app has its window's focus, which
   // is when Flutter reports `resumed` and the app says it is on screen.
-  clpeak::holdGate();
+  xpupeak::holdGate();
   detectCpuInfo(info);
   if (!pool)
   {
@@ -327,22 +327,22 @@ int CpuPeak::runAll()
   // Sizes the OS lists a cache without -- an Android device tree with none
   // -- are measured on the pinned workers before the header names them.
   probeCacheSizes(info, *pool);
-  if (clpeak::verboseEnabled())
+  if (xpupeak::verboseEnabled())
   {
     std::string order;
     for (const cpu_core_t &c : info.cores)
       order += " cpu" + std::to_string(c.id);
     if (!order.empty())
-      CLPEAK_VLOG("[cpu] workers pinned fastest first:%s\n", order.c_str());
+      XPUPEAK_VLOG("[cpu] workers pinned fastest first:%s\n", order.c_str());
     // Every worker pins on its first job; say which ones the OS refused.
     pool->run(pool->maxThreads(), [](int) {});
     for (const std::string &f : pool->pinFailures())
-      CLPEAK_VLOG("[cpu] could not pin a worker to %s\n", f.c_str());
+      XPUPEAK_VLOG("[cpu] could not pin a worker to %s\n", f.c_str());
     // Each size the OS withheld; a level it lists nowhere (no L3) is not one.
     const bool withheld[3] = {!info.l1dCacheBytes, info.l2Unsized, info.l3Unsized};
     for (int lvl = 1; lvl <= 3; lvl++)
       if (withheld[lvl - 1])
-        CLPEAK_VLOG("[cpu] %s; the cache rows that need it skip\n", cacheSizeGap(info, lvl));
+        XPUPEAK_VLOG("[cpu] %s; the cache rows that need it skip\n", cacheSizeGap(info, lvl));
   }
 
   // An Android app's cpuset, taskset or a container: the all-core rows run
@@ -403,9 +403,9 @@ int CpuPeak::runAll()
     std::string list;
     for (int id : ids)
       list += " cpu" + std::to_string(id);
-    CLPEAK_LOG(Info, "[cpu] this process may run on %d of the %d logical CPUs:%s; "
-               "every multi-thread row measures those alone",
-               (int)info.cores.size(), info.logicalCores, list.c_str());
+    XPUPEAK_LOG(Info, "[cpu] this process may run on %d of the %d logical CPUs:%s; "
+                "every multi-thread row measures those alone",
+                (int)info.cores.size(), info.logicalCores, list.c_str());
   }
 
   benchmark_config_t cfg = benchmark_config_t::forDevice(DeviceType::Cpu);

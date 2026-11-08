@@ -1,5 +1,5 @@
-#ifndef CLPEAK_LITERT_MODEL_H
-#define CLPEAK_LITERT_MODEL_H
+#ifndef XPUPEAK_LITERT_MODEL_H
+#define XPUPEAK_LITERT_MODEL_H
 
 // The models the LiteRT tests run, as recipes over tflite_model.h, and the
 // formats they come in.
@@ -55,8 +55,8 @@ struct LitertPlan
 {
   bool applies = true;
   std::string whyNot;
-  clpeak_tflite::TfType act = clpeak_tflite::TfType::F32;      // activations and result
-  clpeak_tflite::TfType weight = clpeak_tflite::TfType::F32;   // stored weight type
+  xpupeak_tflite::TfType act = xpupeak_tflite::TfType::F32;    // activations and result
+  xpupeak_tflite::TfType weight = xpupeak_tflite::TfType::F32; // stored weight type
   bool perChannel = false;        // one scale per output row
   int32_t weightBlock = 0;        // > 0: blockwise weight scales
   bool dynamicQuant = false;      // FULLY_CONNECTED.asymmetric_quantize_inputs
@@ -107,11 +107,11 @@ LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 // The type a plan's activation-shaped constants are stored in: fp16 under
 // `halfConstants`, otherwise the activation type.  What a resident tensor
 // costs in host memory and, on the GPU, the bytes it streams.
-clpeak_tflite::TfType litertConstantType(const LitertPlan &p);
+xpupeak_tflite::TfType litertConstantType(const LitertPlan &p);
 
 // The type a graph's inputs and outputs are in: the activation type, or
 // float32 for an integer plan under `floatIo`.
-clpeak_tflite::TfType litertIoType(const LitertPlan &p);
+xpupeak_tflite::TfType litertIoType(const LitertPlan &p);
 
 // The plan one form's graph is written in (LitertForm::floatIo); the rest of
 // a form is the session's (litertConfigFor).
@@ -157,8 +157,8 @@ float litertWeightScale(int bits);                    // symmetric weights in [-
 // so nothing large leaves the device.  The reduction is a maximum rather
 // than a sum on purpose: summing rows of A*W equals multiplying summed rows
 // of A, a rewrite an optimiser is free to make.
-clpeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
-                                             uint32_t seedA = 0x243f6a88u, uint32_t seedW = 0x85a308d3u);
+xpupeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
+                                              uint32_t seedA = 0x243f6a88u, uint32_t seedW = 0x85a308d3u);
 
 // The throughput chain, the ONNX backend's gemm graph (onnxResidentMatMulModel
 // with its chain and OnnxLiveSeed): `layers` distinct D x D FULLY_CONNECTEDs
@@ -176,8 +176,8 @@ clpeak_tflite::TfliteBytes litertMatMulModel(const LitertPlan &p, int64_t M, int
 // compilers were first built for (src/litert/gemm.cpp races the two).  For
 // the float and full-integer int8 plans; a blockwise weight has no
 // convolution form.
-clpeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers,
-                                                  int64_t seedWidth, bool conv1x1 = false);
+xpupeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D, int layers,
+                                                   int64_t seedWidth, bool conv1x1 = false);
 
 // The accuracy matmul: x [1, M, K] is a model input and y [1, M, N] the
 // whole result, so the host can hand over exact values and read back
@@ -185,34 +185,34 @@ clpeak_tflite::TfliteBytes litertMatMulChainModel(const LitertPlan &p, int64_t D
 // stores, dequantized -- the values a reference multiplies.  `conv1x1`
 // computes the same product as a 1x1 CONV_2D over a grid of M positions,
 // whose input and output hold the same bytes as the matmul's.
-clpeak_tflite::TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
-                                                  std::vector<float> *weights,
-                                                  uint32_t seedW = 0x85a308d3u, bool conv1x1 = false);
+xpupeak_tflite::TfliteBytes litertPlainMatMulModel(const LitertPlan &p, int64_t M, int64_t K, int64_t N,
+                                                   std::vector<float> *weights,
+                                                   uint32_t seedW = 0x85a308d3u, bool conv1x1 = false);
 
 // y [1, 1, N] = x [1, 1, K] (input) * W [N, K]: the streaming shape.
-clpeak_tflite::TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t seedW);
+xpupeak_tflite::TfliteBytes litertGemvModel(const LitertPlan &p, int64_t K, int64_t N, uint32_t seedW);
 
 // The between-the-matmuls operations, over a resident [1, rows, cols]
 // tensor scaled by `s`; None is the reference graph that only scales and
 // reduces.
 enum class LitertActivation { None, Silu, Softmax, LayerNorm };
-clpeak_tflite::TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t cols,
-                                                 LitertActivation act);
+xpupeak_tflite::TfliteBytes litertActivationModel(const LitertPlan &p, int64_t rows, int64_t cols,
+                                                  LitertActivation act);
 
 // The transfer graphs: X [1, elems] as a model input.  ToDevice gathers one
 // element back; RoundTrip returns X squared in full.
 enum class LitertTransfer { ToDevice, RoundTrip };
-clpeak_tflite::TfliteBytes litertTransferModel(const LitertPlan &p, LitertTransfer dir, int64_t elems);
+xpupeak_tflite::TfliteBytes litertTransferModel(const LitertPlan &p, LitertTransfer dir, int64_t elems);
 
 // The smallest graph worth expressing: Y = X * K over [1, width].
-clpeak_tflite::TfliteBytes litertTrivialModel(const LitertPlan &p, int64_t width);
+xpupeak_tflite::TfliteBytes litertTrivialModel(const LitertPlan &p, int64_t width);
 
 // 2-D convolution over a resident [1, spatial, spatial, channels] feature
 // map scaled by `s`, with a [channels, k, k, channels/group] filter in the
 // plan's weight format (depthwise when group == channels) at `stride`, SAME
 // padding, its spatial / stride output reduced to [1, 1, 1, channels].
-clpeak_tflite::TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial,
-                                           int64_t kernel, int64_t stride, bool depthwise);
+xpupeak_tflite::TfliteBytes litertConvModel(const LitertPlan &p, int64_t channels, int64_t spatial,
+                                            int64_t kernel, int64_t stride, bool depthwise);
 
 // One transformer decoder block: `seq` tokens in one pass (prefill) when
 // kvLen is 0, else one token against a resident cache of kvLen entries
@@ -243,16 +243,16 @@ struct LitertBlockShape
   // decode's single row needs.
   int64_t seedWidth = 0;
 };
-clpeak_tflite::TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh);
+xpupeak_tflite::TfliteBytes litertBlockModel(const LitertPlan &p, const LitertBlockShape &sh);
 
 // Bytes of one [N, K] projection matrix in the plan's weight format,
 // including blockwise scales.
 uint64_t litertWeightBytes(const LitertPlan &p, int64_t N, int64_t K);
 
 // Element bytes for a tensor type.
-size_t litertElemBytes(clpeak_tflite::TfType t, int64_t count);
+size_t litertElemBytes(xpupeak_tflite::TfType t, int64_t count);
 
 // One value of the activation type from a float, for scalar inputs.
-std::string litertScalarBytes(clpeak_tflite::TfType t, float v);
+std::string litertScalarBytes(xpupeak_tflite::TfType t, float v);
 
-#endif // CLPEAK_LITERT_MODEL_H
+#endif // XPUPEAK_LITERT_MODEL_H

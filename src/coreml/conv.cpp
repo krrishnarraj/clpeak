@@ -39,7 +39,7 @@ constexpr unsigned int kSizeBudgetUs = 2000000;
 // Everything a rung holds at once (coremlHeldBytes), capped at a quarter of
 // physical memory and at 3 GB, which still admits the 1024-square fp16 map
 // the GPU's depthwise row is fastest at.
-uint64_t maxRungBytes() { return clpeak::memoryBudget(3ull << 30); }
+uint64_t maxRungBytes() { return xpupeak::memoryBudget(3ull << 30); }
 
 struct DType
 {
@@ -101,20 +101,20 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
     // numeric_error.cpp): the conv1x1 row's operator, and the nearest there
     // is to the other shapes'.
     const std::string wrongConv =
-        clpeak::cancelRequested()
+        xpupeak::cancelRequested()
             ? std::string()
             : wrongAnswer(dev, dt.dtype == CML_FP32 ? CoremlWeight::Fp32 : CoremlWeight::Fp16, false,
                           /*conv1x1=*/true);
     for (const Shape &v : kShapes)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const std::string row = std::string(dt.label) + "_" + v.label;
       logger::EmitOptions o;
       o.description = std::string(v.note) + ", " + dt.note;
       if (!wrongConv.empty())
       {
-        CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());
+        XPUPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());
         test.skip(row, ResultStatus::Error, wrongConv, o);
         continue;
       }
@@ -133,7 +133,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
       for (int64_t sp = kMinSpatial; sp <= kMaxSpatial; sp *= 2)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         // The feature map and the filter are constants (coremlHeldBytes);
         // the scaled copy of the map and the result, a quarter of it at
@@ -145,25 +145,25 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         const uint64_t budget = maxRungBytes();
         if (bytes > budget)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
-                      (unsigned long long)(budget >> 20));
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld needs %llu MB of a %llu MB budget, stopping\n",
+                       dev.displayName.c_str(), row.c_str(), (long long)sp, (unsigned long long)(bytes >> 20),
+                       (unsigned long long)(budget >> 20));
           break;
         }
         if (lastRate > 0.0 && convFlops(v, sp) / lastRate > kMaxIterUs)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would take too long, stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp);
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld would take too long, stopping\n",
+                       dev.displayName.c_str(), row.c_str(), (long long)sp);
           break;
         }
         // On a GPU a prediction is also held to what one run may keep the
         // device busy (gpuRunCapUs): a driver resets a GPU held too long.
         if (lastRate > 0.0 && runCapUs > 0.0 && convFlops(v, sp) / lastRate > runCapUs)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a prediction, past "
-                      "--max-time-ml-gpu (%.2f s), stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
-                      runCapUs / 1.0e6);
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld would keep the GPU busy ~%.2f s a prediction, past "
+                       "--max-time-ml-gpu (%.2f s), stopping\n",
+                       dev.displayName.c_str(), row.c_str(), (long long)sp, convFlops(v, sp) / lastRate / 1.0e6,
+                       runCapUs / 1.0e6);
           break;
         }
         if (sp > kMinSpatial && prevCreateUs > 0.0 && prevCreateUs * 4.0 > kCoremlMaxCreateUs)
@@ -174,20 +174,20 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
             dev, coremlConvModel(spec, kChannels, sp, v.kernel, v.stride, group, dt.dtype), err);
         if (!s)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld create failed: %s\n", dev.displayName.c_str(),
-                      row.c_str(), (long long)sp, err.c_str());
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld create failed: %s\n", dev.displayName.c_str(),
+                       row.c_str(), (long long)sp, err.c_str());
           if (firstErr.empty())
             firstErr = err;
           break;
         }
         const double createUs = coremlCreateUs(*s);
-        CLPEAK_VLOG("coreml-conv[%s/%s]: %lld create %.2f s\n", dev.displayName.c_str(), row.c_str(),
-                    (long long)sp, createUs / 1.0e6);
+        XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld create %.2f s\n", dev.displayName.c_str(), row.c_str(),
+                     (long long)sp, createUs / 1.0e6);
         if (!s->onDevice())
         {
           const std::string why = coremlOffDeviceReason(dev, *s);
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld %s\n", dev.displayName.c_str(), row.c_str(),
-                      (long long)sp, why.c_str());
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld %s\n", dev.displayName.c_str(), row.c_str(),
+                       (long long)sp, why.c_str());
           if (rungs == 0)
           {
             if (firstErr.empty())
@@ -229,8 +229,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         {
           // Logged whatever the row says: above a measured size it publishes
           // the sizes below, and this failure would leave no trace.
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld run failed: %s\n", dev.displayName.c_str(), row.c_str(),
-                      (long long)sp, m.error.c_str());
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld run failed: %s\n", dev.displayName.c_str(), row.c_str(),
+                       (long long)sp, m.error.c_str());
           if (firstErr.empty())
           {
             firstErr = m.error;
@@ -241,7 +241,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         // A wrong answer withholds the whole row, as in gemm.cpp.
         if (!wrong.empty())
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrong.c_str());
           best = 0.0;
           firstErr = wrong;
           errStatus = ResultStatus::Error;
@@ -251,8 +251,8 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
         const double flops = convFlops(v, sp);
         const double rate = flops * 1.0e6 / m.meanUs;
         lastRate = flops / m.meanUs;
-        CLPEAK_VLOG("coreml-conv[%s/%s]: %lld -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
-                    (long long)sp, rate, m.meanUs);
+        XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld -> %.3f (%.1f us)\n", dev.displayName.c_str(), row.c_str(),
+                     (long long)sp, rate, m.meanUs);
 
         if (rate > best * kImproveFactor)
         {
@@ -269,10 +269,10 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           }
           if (ladderDropEnds(rate, best, 4.0 * m.meanUs))
           {
-            CLPEAK_VLOG("coreml-conv[%s/%s]: %lld fell to %.0f%% of the best, and the next size would take "
-                        "~%.0f s a prediction, stopping\n",
-                        dev.displayName.c_str(), row.c_str(), (long long)sp, 100.0 * rate / best,
-                        4.0 * m.meanUs / 1.0e6);
+            XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld fell to %.0f%% of the best, and the next size would take "
+                         "~%.0f s a prediction, stopping\n",
+                         dev.displayName.c_str(), row.c_str(), (long long)sp, 100.0 * rate / best,
+                         4.0 * m.meanUs / 1.0e6);
             break;
           }
           if (++strikes >= kMaxStrikes)
@@ -282,9 +282,9 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
           break;
         if (runCapUs > 0.0 && m.probeUs > runCapUs)
         {
-          CLPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-ml-gpu (%.2f s), "
-                      "stopping\n",
-                      dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
+          XPUPEAK_VLOG("coreml-conv[%s/%s]: %lld measured %.2f s a prediction, past --max-time-ml-gpu (%.2f s), "
+                       "stopping\n",
+                       dev.displayName.c_str(), row.c_str(), (long long)sp, m.probeUs / 1.0e6, runCapUs / 1.0e6);
           break;
         }
         if (prevCreateUs > 0.0 && createUs > kCoremlCreateGrowthFloor &&

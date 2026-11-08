@@ -142,7 +142,7 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
   Timed trivial, first;
   for (int64_t w : kTrivialWidths)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const int64_t rows = w > kTrivialCols ? w / kTrivialCols : 1;
     const int64_t cols = w > kTrivialCols ? kTrivialCols : w;
@@ -154,14 +154,14 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
     trivial = t;
     if (t.perRunUs > 0.0 || t.status != ResultStatus::Unsupported)
       break;
-    CLPEAK_VLOG("coreml-dispatch[%s]: %lld-wide multiply: %s\n", dev.displayName.c_str(), (long long)w,
-                t.error.c_str());
+    XPUPEAK_VLOG("coreml-dispatch[%s]: %lld-wide multiply: %s\n", dev.displayName.c_str(), (long long)w,
+                 t.error.c_str());
   }
 
   Timed matmul;
   for (int64_t d : kMatMulDims)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     Timed t = timeGraph(dev, coremlSmallMatMulModel(spec, d), "x", d, d, warmupCount, forceIters,
                         specifiedIters);
@@ -169,8 +169,8 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
     matmul = t;
     if (t.perRunUs > 0.0 || t.status != ResultStatus::Unsupported)
       break;
-    CLPEAK_VLOG("coreml-dispatch[%s]: %lld-cube matmul: %s\n", dev.displayName.c_str(), (long long)d,
-                t.error.c_str());
+    XPUPEAK_VLOG("coreml-dispatch[%s]: %lld-cube matmul: %s\n", dev.displayName.c_str(), (long long)d,
+                 t.error.c_str());
   }
 
   auto test = currentDeviceScope->beginTest(

@@ -1,10 +1,10 @@
-if(NOT CLPEAK_ENABLE_OPENCL)
+if(NOT XPUPEAK_ENABLE_OPENCL)
     return()
 endif()
 
 # ---- Find OpenCL --------------------------------------------------------
 # Allow callers (Android) to pre-define OpenCL_LIBRARIES / OpenCL_INCLUDE_DIRS.
-if(NOT DEFINED CLPEAK_OPENCL_PREDEFINED)
+if(NOT DEFINED XPUPEAK_OPENCL_PREDEFINED)
 find_package(OpenCL)
 FIND_PATH(HPP_FOUND CL/opencl.hpp PATHS ${OpenCL_INCLUDE_DIRS})
 if(NOT OpenCL_FOUND OR NOT HPP_FOUND)
@@ -25,20 +25,20 @@ message(STATUS "Selected OpenCL lib ${OpenCL_LIBRARIES}")
 # defined by the Khronos headers when CL_TARGET_OPENCL_VERSION >= 300, so set
 # that for the probe.)
 include(CheckSymbolExists)
-set(_clpeak_saved_required_defs "${CMAKE_REQUIRED_DEFINITIONS}")
-set(_clpeak_saved_required_incs "${CMAKE_REQUIRED_INCLUDES}")
+set(_xpupeak_saved_required_defs "${CMAKE_REQUIRED_DEFINITIONS}")
+set(_xpupeak_saved_required_incs "${CMAKE_REQUIRED_INCLUDES}")
 list(APPEND CMAKE_REQUIRED_DEFINITIONS "-DCL_TARGET_OPENCL_VERSION=300")
 set(CMAKE_REQUIRED_INCLUDES ${OpenCL_INCLUDE_DIRS})
-check_symbol_exists(CL_VERSION_3_0 "CL/cl.h" CLPEAK_HAS_OPENCL_30)
-set(CMAKE_REQUIRED_DEFINITIONS "${_clpeak_saved_required_defs}")
-set(CMAKE_REQUIRED_INCLUDES    "${_clpeak_saved_required_incs}")
+check_symbol_exists(CL_VERSION_3_0 "CL/cl.h" XPUPEAK_HAS_OPENCL_30)
+set(CMAKE_REQUIRED_DEFINITIONS "${_xpupeak_saved_required_defs}")
+set(CMAKE_REQUIRED_INCLUDES    "${_xpupeak_saved_required_incs}")
 
-if(CLPEAK_HAS_OPENCL_30)
+if(XPUPEAK_HAS_OPENCL_30)
     message(STATUS "OpenCL 3.0 headers detected -- targeting 3.0 host API")
-    set(CLPEAK_OPENCL_TARGET_VERSION 300)
+    set(XPUPEAK_OPENCL_TARGET_VERSION 300)
 else()
     message(STATUS "OpenCL 1.2 baseline -- targeting 1.2 host API")
-    set(CLPEAK_OPENCL_TARGET_VERSION 120)
+    set(XPUPEAK_OPENCL_TARGET_VERSION 120)
 endif()
 
 # extra libs for static library
@@ -47,11 +47,11 @@ if(UNIX AND ${OpenCL_LIBRARIES} MATCHES "libOpenCL.a")
 elseif(WIN32 AND ${OpenCL_LIBRARIES} MATCHES "OpenCL.lib")
     set(OpenCL_LIBRARIES ${OpenCL_LIBRARIES} cfgmgr32.lib runtimeobject.lib)
 endif()
-endif()  # CLPEAK_OPENCL_PREDEFINED
+endif()  # XPUPEAK_OPENCL_PREDEFINED
 
 # Fallback when caller provides OpenCL vars (e.g. Android with stub)
-if(NOT DEFINED CLPEAK_OPENCL_TARGET_VERSION)
-    set(CLPEAK_OPENCL_TARGET_VERSION 300)
+if(NOT DEFINED XPUPEAK_OPENCL_TARGET_VERSION)
+    set(XPUPEAK_OPENCL_TARGET_VERSION 300)
 endif()
 
 # ---- peak_opencl static library -----------------------------------------
@@ -74,6 +74,6 @@ target_include_directories(peak_opencl PUBLIC
     ${OpenCL_INCLUDE_DIRS}
 )
 target_compile_definitions(peak_opencl PRIVATE
-    CL_TARGET_OPENCL_VERSION=${CLPEAK_OPENCL_TARGET_VERSION}
+    CL_TARGET_OPENCL_VERSION=${XPUPEAK_OPENCL_TARGET_VERSION}
 )
 target_compile_definitions(peak_common PRIVATE ENABLE_OPENCL)

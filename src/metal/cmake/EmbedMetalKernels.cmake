@@ -18,7 +18,7 @@
 # `extern const char *<name>_src;` and `<name>_name;` per kernel, in the
 # mtl_kernels namespace declared in include/mtl_peak.h.
 #
-# Defines CLPEAK_MTL_HAS_<NAME> on the target so per-kernel host code can
+# Defines XPUPEAK_MTL_HAS_<NAME> on the target so per-kernel host code can
 # be conditionally compiled.
 
 function(embed_metal_kernels)
@@ -47,7 +47,7 @@ function(embed_metal_kernels)
       APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${KERNEL}")
 
     file(READ "${KERNEL}" KSRC)
-    set(DELIM "CLPEAK_MDELIM")
+    set(DELIM "XPUPEAK_MDELIM")
     string(APPEND CPP_CONTENT "// from ${KERNEL_NAME}.metal\n")
     # No `extern` keyword: `const char *X = ...` has external linkage at
     # namespace scope (only top-level const objects default to internal),
@@ -59,7 +59,7 @@ function(embed_metal_kernels)
     string(APPEND CPP_CONTENT ")${DELIM}\";\n\n")
 
     string(TOUPPER "${KERNEL_NAME}" KU)
-    target_compile_definitions(${EM_TARGET} PRIVATE CLPEAK_MTL_HAS_${KU})
+    target_compile_definitions(${EM_TARGET} PRIVATE XPUPEAK_MTL_HAS_${KU})
   endforeach()
 
   string(APPEND CPP_CONTENT "} // namespace mtl_kernels\n")

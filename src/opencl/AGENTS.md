@@ -53,7 +53,7 @@ Every compute family defines its kernels at least twice: `compute_<fam>_v<W>`
 with the squaring chain, and `compute_<fam>_alt_v<W>` with a second shape from
 `kernels/mad_chain.cl`.  Float families use the affine `AF*` macros, written
 once per width as `<FAM>_ALT_V<W>(NAME, ATTR)`; where `runAll` passes
-`-DCLPEAK_ALT_SG16` (a device offering sub-group 16 through
+`-DXPUPEAK_ALT_SG16` (a device offering sub-group 16 through
 `cl_intel_required_subgroup_size`) the same macro also instantiates
 `compute_<fam>_alt_sg16_v<W>` pinned to 16.  Integer families use the rotating
 `RT*` ones -- an integer affine recurrence folds legally and Apple's compiler

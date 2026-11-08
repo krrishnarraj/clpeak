@@ -23,10 +23,10 @@
 # (`nvcc --list-gpu-arch`); a kernel left with no buildable arch gets an empty
 # stub Blob so the symbol still links (it would be capability-gated off anyway).
 
-set(_CLPEAK_EMBED_CUDA_DIR "${CMAKE_CURRENT_LIST_DIR}")
+set(_XPUPEAK_EMBED_CUDA_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
 # Cache the arch list the toolkit supports (numbers only, e.g. 52;...;90;120).
-function(_clpeak_cuda_supported_archs out)
+function(_xpupeak_cuda_supported_archs out)
   execute_process(
     COMMAND "${CUDAToolkit_NVCC_EXECUTABLE}" --list-gpu-arch
     OUTPUT_VARIABLE _o RESULT_VARIABLE _r
@@ -46,7 +46,7 @@ function(embed_cuda_kernels)
   cmake_parse_arguments(EC "" "TARGET;MIN_ARCH;MAX_ARCH"
                           "MASTER_ARCHS;EXTRA_ARCHS;KERNELS" ${ARGN})
 
-  _clpeak_cuda_supported_archs(_supported)
+  _xpupeak_cuda_supported_archs(_supported)
 
   # Build this group's arch list: MASTER filtered by [MIN_ARCH, MAX_ARCH],
   # then EXTRA_ARCHS appended, all intersected with toolkit support.
@@ -94,7 +94,7 @@ function(embed_cuda_kernels)
   set(_fatdir "${CMAKE_CURRENT_BINARY_DIR}/cuda_fatbins")
   set(_gendir "${CMAKE_CURRENT_BINARY_DIR}/cuda_kernels_gen")
   file(MAKE_DIRECTORY "${_fatdir}" "${_gendir}")
-  set(_embed "${_CLPEAK_EMBED_CUDA_DIR}/EmbedBin.cmake")
+  set(_embed "${_XPUPEAK_EMBED_CUDA_DIR}/EmbedBin.cmake")
 
   # Windows: nvcc reuses the build's INCLUDE for the cl.exe it spawns for host
   # preprocessing. Under the ClangCL toolset that INCLUDE leads with clang's
@@ -108,7 +108,7 @@ function(embed_cuda_kernels)
     set(NVCC_EXE "${_nvcc_native}")
     # CRLF regardless of checkout: cmd can miss goto/call :label targets in
     # an LF-only batch file.
-    configure_file("${_CLPEAK_EMBED_CUDA_DIR}/nvccw.bat.in"
+    configure_file("${_XPUPEAK_EMBED_CUDA_DIR}/nvccw.bat.in"
                    "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat" @ONLY NEWLINE_STYLE CRLF)
     set(_nvcc_cmd "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
     set(_nvcc_depends "${CMAKE_CURRENT_BINARY_DIR}/nvccw.bat")
@@ -139,7 +139,7 @@ function(embed_cuda_kernels)
         COMMENT "embed ${_kn}.fatbin"
         VERBATIM)
     else()
-      message(STATUS "clpeak CUDA: ${_kn} has no buildable arch for this toolkit; emitting stub")
+      message(STATUS "xpupeak CUDA: ${_kn} has no buildable arch for this toolkit; emitting stub")
       add_custom_command(
         OUTPUT  "${_gen}"
         COMMAND "${CMAKE_COMMAND}" -DINPUT=NONE -DOUTPUT=${_gen}
@@ -152,7 +152,7 @@ function(embed_cuda_kernels)
 
     list(APPEND _gen_srcs "${_gen}")
     string(TOUPPER "${_kn}" _ku)
-    target_compile_definitions(${EC_TARGET} PRIVATE CLPEAK_CUDA_HAS_${_ku})
+    target_compile_definitions(${EC_TARGET} PRIVATE XPUPEAK_CUDA_HAS_${_ku})
   endforeach()
 
   target_sources(${EC_TARGET} PRIVATE ${_gen_srcs})

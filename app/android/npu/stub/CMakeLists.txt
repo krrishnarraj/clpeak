@@ -7,6 +7,6 @@
 # Chromebooks the base does; Play delivers the modules to arm64 chipsets
 # only, where it sits beside the real libraries unused.
 cmake_minimum_required(VERSION 3.22)
-project(clpeak_npu_stub C)
+project(xpupeak_npu_stub C)
 
-add_library(${CLPEAK_NPU_STUB} SHARED stub.c)
+add_library(${XPUPEAK_NPU_STUB} SHARED stub.c)

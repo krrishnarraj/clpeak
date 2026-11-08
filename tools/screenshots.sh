@@ -23,6 +23,6 @@ raw="$(mktemp -d)"
 trap 'rm -rf "$raw"' EXIT
 
 (cd "$repo/app" &&
-  CLPEAK_SHOTS_OUT="$raw" CLPEAK_SHOTS_REPO="$repo" \
+  XPUPEAK_SHOTS_OUT="$raw" XPUPEAK_SHOTS_REPO="$repo" \
     flutter test integration_test/screenshots_test.dart -d "$device")
 python3 "$repo/tools/screenshots/frame.py" "$raw" "$repo/docs/assets/img"

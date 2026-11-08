@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ANSWER_CHECK_H
-#define CLPEAK_ANSWER_CHECK_H
+#ifndef XPUPEAK_ANSWER_CHECK_H
+#define XPUPEAK_ANSWER_CHECK_H
 
 // Whether an ML runtime's answer is right: the line, the figure and the
 // words the ONNX Runtime, Core ML and LiteRT backends share.
@@ -24,7 +24,7 @@
 #include <cstdio>
 #include <string>
 
-namespace clpeak
+namespace xpupeak
 {
 
 // A relative RMS error at or past this is a wrong answer, not a loss of
@@ -98,7 +98,7 @@ void judgeAnswer(AnswerCheck &c, const G *got, const R *ref, size_t n, const Ans
   }
   // A NaN or an infinity anywhere in the answer makes the figure one too.
   // That is no error figure, and it cannot be recorded either: the document
-  // would spell it `nan`, which no JSON reader -- clpeak's own included --
+  // would spell it `nan`, which no JSON reader -- xpupeak's own included --
   // will load.
   if (!std::isfinite(ppm))
   {
@@ -169,6 +169,6 @@ inline std::string wrongAnswerRowReason(const AnswerCheck &c, const AnswerWords 
          detail::kKernelCause + " -- " + consequence;
 }
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_ANSWER_CHECK_H
+#endif // XPUPEAK_ANSWER_CHECK_H

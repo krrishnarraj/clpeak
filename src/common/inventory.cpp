@@ -200,7 +200,7 @@ void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os)
     if (!any)
       os << "   no usable devices\n";
 
-    if (clpeak::verboseEnabled())
+    if (xpupeak::verboseEnabled())
       for (const auto &n : b.notes)
         os << "   (" << n << ")\n";
   }

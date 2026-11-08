@@ -6,11 +6,11 @@
 #include <cstdint>
 #include <type_traits>
 
-#ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
-#define CLPEAK_ONEAPI_JM_HAS_BF16 1
+#define XPUPEAK_ONEAPI_JM_HAS_BF16 1
 #endif
 #include "joint_matrix_spread.h"
 
@@ -106,14 +106,14 @@ static float runJmBlockVariant(OneapiPeak &peak, OneapiDevice &dev,
           syclex::joint_matrix_fill(sg, b3, b3f);
           if (spread != 0)
           {
-            clpeak_oneapi::jmSpread(sg, a0);
-            clpeak_oneapi::jmSpread(sg, a1);
-            clpeak_oneapi::jmSpread(sg, a2);
-            clpeak_oneapi::jmSpread(sg, a3);
-            clpeak_oneapi::jmSpread(sg, b0);
-            clpeak_oneapi::jmSpread(sg, b1);
-            clpeak_oneapi::jmSpread(sg, b2);
-            clpeak_oneapi::jmSpread(sg, b3);
+            xpupeak_oneapi::jmSpread(sg, a0);
+            xpupeak_oneapi::jmSpread(sg, a1);
+            xpupeak_oneapi::jmSpread(sg, a2);
+            xpupeak_oneapi::jmSpread(sg, a3);
+            xpupeak_oneapi::jmSpread(sg, b0);
+            xpupeak_oneapi::jmSpread(sg, b1);
+            xpupeak_oneapi::jmSpread(sg, b2);
+            xpupeak_oneapi::jmSpread(sg, b3);
           }
 
           // JM_SG_COUNT_NOTE in joint_matrix.cpp: the host counts the ops per
@@ -200,7 +200,7 @@ static float runJmBlockVariant(OneapiPeak &peak, OneapiDevice &dev,
 // four accumulators fit the registers at the sub-group widths Xe offers
 // (JM_FOUR_ACC_BYTES_PER_LANE in joint_matrix.cpp).  Four of Alchemist's
 // 32x32 tiles of each would spill.
-#define CLPEAK_JM_BLOCK_SHAPES(X)  X(8, 8)  X(8, 16)
+#define XPUPEAK_JM_BLOCK_SHAPES(X)  X(8, 8)  X(8, 16)
 
 template <typename At, typename Bt, typename Acc, int K, typename FillA, typename FillB>
 static float runJmBlockShape(OneapiPeak &peak, OneapiDevice &dev,
@@ -210,7 +210,7 @@ static float runJmBlockShape(OneapiPeak &peak, OneapiDevice &dev,
                              uint32_t accumulators, uint32_t trips, uint32_t spread,
                              unsigned int targetTimeUs, unsigned int forced)
 {
-#define CLPEAK_JM_CASE_BLOCK(MM, NN)                                            \
+#define XPUPEAK_JM_CASE_BLOCK(MM, NN)                                           \
   if (M == (MM) && N == (NN))                                                   \
   {                                                                             \
     if (accumulators == 1)                                                      \
@@ -222,14 +222,14 @@ static float runJmBlockShape(OneapiPeak &peak, OneapiDevice &dev,
           peak, dev, (Acc *)out, sgCount, numBlocks, blockSize,                  \
           aFill, bFill, trips, spread, targetTimeUs, forced);                    \
   }
-  CLPEAK_JM_BLOCK_SHAPES(CLPEAK_JM_CASE_BLOCK)
-#undef CLPEAK_JM_CASE_BLOCK
+  XPUPEAK_JM_BLOCK_SHAPES(XPUPEAK_JM_CASE_BLOCK)
+#undef XPUPEAK_JM_CASE_BLOCK
   return -1.0f;
 }
 
 } // namespace
 
-namespace clpeak_oneapi {
+namespace xpupeak_oneapi {
 
 // One tile as sixteen-product blocks on `accumulators` (1 or 4), `trips`
 // trips of them: the microseconds a launch took (OneapiPeak::runKernel), or -1
@@ -245,7 +245,7 @@ float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCou
   using mt = syclex::matrix_type;
   if (ct == mt::fp32)
   {
-#ifdef CLPEAK_ONEAPI_JM_HAS_BF16
+#ifdef XPUPEAK_ONEAPI_JM_HAS_BF16
     using bfloat16 = sycl::ext::oneapi::bfloat16;
     if (at == mt::bf16 && bt == mt::bf16 && K == 16)
       return runJmBlockShape<bfloat16, bfloat16, float, 16>(
@@ -285,7 +285,7 @@ float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCou
   return -1.0f;
 }
 
-} // namespace clpeak_oneapi
+} // namespace xpupeak_oneapi
 
-#endif // CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#endif // XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 #endif // ENABLE_ONEAPI

@@ -211,7 +211,7 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // precision 3.44-3.55, 3.98-4.88 and 3.89 against 4.60-4.80, 4.68-4.89 and
 // 4.60.  fp16 read 9.48-9.56 at SIMD32 in Vulkan and OpenCL against 4.92-4.95
 // at 16 -- but 9.50 at 16 in oneAPI, whose compiler keeps the packed rate
-// there.  The two widths race as a clpeak::FormRace (form_race.h) that drops
+// there.  The two widths race as a xpupeak::FormRace (form_race.h) that drops
 // only a clear loser: a tie at one vector width does not predict the next,
 // because the allocator lays each width out afresh.
 //
@@ -319,7 +319,7 @@ static const unsigned int COOPMAT_MMA_PER_TRIP = 16;
 // and at localSize=1024 it exceeded the SM register file on e.g. RTX 5060
 // (65536 regs/SM), causing clEnqueueNDRangeKernel to fail with
 // CL_OUT_OF_RESOURCES.  The single-accumulator chain roughly halves that, but
-// the cap stays at 256: it matches clpeak's historical cap, leaves broad
+// the cap stays at 256: it matches xpupeak's historical cap, leaves broad
 // headroom across all devices, and the higher setting has not been re-tested
 // on the hardware that originally failed.
 static const unsigned int MAX_WG_SIZE = 256;
@@ -464,7 +464,7 @@ void populate(float *ptr, uint64_t N);
 // System memory
 // ---------------------------------------------------------------------------
 
-namespace clpeak {
+namespace xpupeak {
 
 // Total physical RAM in bytes, or 0 if it cannot be determined.
 //
@@ -487,7 +487,7 @@ uint64_t memoryBudget(uint64_t ceiling, unsigned fraction = 4);
 // instead of leaving the later failures to look like their own.
 bool openFileDescriptors(unsigned long &used, unsigned long &limit);
 
-} // namespace clpeak
+} // namespace xpupeak
 
 // ---------------------------------------------------------------------------
 // String helpers
@@ -556,9 +556,9 @@ inline bool mlLadderScouts(DeviceType type)
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostics.  Everything clpeak has to say outside a reading -- a missing
+// Diagnostics.  Everything xpupeak has to say outside a reading -- a missing
 // library, a failed kernel build, a calibration decision -- is one message
-// at one level, routed through clpeak::logMessage():
+// at one level, routed through xpupeak::logMessage():
 //
 //   Error    something failed that was expected to work
 //   Warning  why something is absent or partial (the old logger::note())
@@ -573,11 +573,11 @@ inline bool mlLadderScouts(DeviceType type)
 // the emitting sites include free functions and error macros in the
 // *_device.cpp files that have no access to the Peak object or the logger.
 //
-// `source` names the library a message came from when clpeak merely relayed
+// `source` names the library a message came from when xpupeak merely relayed
 // it: "onnxruntime", "vulkan", "opencl", or "console" for output captured
-// off stdout/stderr.  Empty for clpeak's own messages.
+// off stdout/stderr.  Empty for xpupeak's own messages.
 // ---------------------------------------------------------------------------
-namespace clpeak {
+namespace xpupeak {
 bool verboseEnabled();
 void setVerbose(bool on);
 
@@ -623,18 +623,18 @@ int  realStderrFd();
 // test boundaries: Peak::isAllowed() returns false once cancellation is
 // requested, so every remaining test silently no-ops and runAll() unwinds
 // quickly.  Backends additionally break out of their device loops.  Used by
-// the GUI (via clpeak_ffi) — the CLI never sets it.  Reset at the start of
+// the GUI (via xpupeak_ffi) — the CLI never sets it.  Reset at the start of
 // each embedded launch.
 // ---------------------------------------------------------------------------
-namespace clpeak {
+namespace xpupeak {
 void requestCancel();
 bool cancelRequested();
 void resetCancel();
 }
 
-// One diagnostic at an explicit level: CLPEAK_LOG(Error, "cuInit failed: %s", s).
-#define CLPEAK_LOG(level, ...) \
-    ::clpeak::logf(::clpeak::LogLevel::level, __VA_ARGS__)
+// One diagnostic at an explicit level: XPUPEAK_LOG(Error, "cuInit failed: %s", s).
+#define XPUPEAK_LOG(level, ...) \
+    ::xpupeak::logf(::xpupeak::LogLevel::level, __VA_ARGS__)
 
 // Debug-level diagnostic -- a no-op unless --verbose was passed.  Gated at
 // the call site, not inside logf(), so the arguments are never evaluated
@@ -642,8 +642,8 @@ void resetCancel();
 // --verbose is the only tool we have for locating a fault inside someone
 // else's shader compiler, so every line is flushed as it is written, and
 // with -o it is also on disk before the next line runs (run_log.h).
-#define CLPEAK_VLOG(...) \
-    do { if (::clpeak::verboseEnabled()) \
-             ::clpeak::logf(::clpeak::LogLevel::Debug, __VA_ARGS__); } while (0)
+#define XPUPEAK_VLOG(...) \
+    do { if (::xpupeak::verboseEnabled()) \
+             ::xpupeak::logf(::xpupeak::LogLevel::Debug, __VA_ARGS__); } while (0)
 
 #endif  // COMMON_H

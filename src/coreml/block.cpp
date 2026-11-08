@@ -233,23 +233,23 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
                              " " + coremlLayoutName(transposed);
     if (!s)
     {
-      CLPEAK_VLOG("coreml-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
-                  what.c_str(), err.c_str());
+      XPUPEAK_VLOG("coreml-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
+                   what.c_str(), err.c_str());
       pt.error = err;
       pt.status = ResultStatus::Unsupported;
       return;
     }
     const double createUs = coremlCreateUs(*s);
     pt.createUs = createUs;
-    CLPEAK_VLOG("coreml-block[%s/%s]: %s create %.1f s\n", dev.displayName.c_str(), v.label, what.c_str(),
-                createUs / 1.0e6);
+    XPUPEAK_VLOG("coreml-block[%s/%s]: %s create %.1f s\n", dev.displayName.c_str(), v.label, what.c_str(),
+                 createUs / 1.0e6);
     if (!s->onDevice())
     {
       pt.error = coremlOffDeviceReason(dev, *s);
       pt.status = ResultStatus::Unsupported;
       pt.plannerDeclined = s->offDeviceCapable();
-      CLPEAK_VLOG("coreml-block[%s/%s]: %s %s\n", dev.displayName.c_str(), v.label, what.c_str(),
-                  pt.error.c_str());
+      XPUPEAK_VLOG("coreml-block[%s/%s]: %s %s\n", dev.displayName.c_str(), v.label, what.c_str(),
+                   pt.error.c_str());
       return;
     }
     if (createUs > kCoremlMaxBlockCreateUs)
@@ -282,7 +282,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
             ", weights stored " + coremlLayoutName(transposed));
     if (!wrong.empty())
     {
-      CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
+      XPUPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
       pt.error = wrong;
       pt.status = ResultStatus::Error;
       pt.wrong = true;
@@ -291,8 +291,8 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     pt.us = m.meanUs;
     pt.status = ResultStatus::Ok;
     pt.glue = coremlGlueNote(*s);
-    CLPEAK_VLOG("coreml-block[%s/%s]: %s %.1f us\n", dev.displayName.c_str(), v.label, what.c_str(),
-                m.meanUs);
+    XPUPEAK_VLOG("coreml-block[%s/%s]: %s %.1f us\n", dev.displayName.c_str(), v.label, what.c_str(),
+                 m.meanUs);
   };
 
   // One point, raced (CoremlLayoutRace): each weight layout the shape's race
@@ -409,7 +409,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     {
       const uint64_t needed = weightBytes(v) + kvBytes(v, contextsFor(v).back()) +
                               (64ull << 20) * coremlElemBytes(coremlActDtype(v.w), 1) / 2;
-      const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+      const uint64_t budget = xpupeak::memoryBudget(~0ull, 8);
       if (budget && budget < needed)
       {
         vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the "
@@ -427,7 +427,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       if (!wrongWhy[0].empty() && !wrongWhy[1].empty())
       {
         const int read = answerCheck(dev, v.w).read;
-        CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[read == 1].c_str());
+        XPUPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[read == 1].c_str());
         vr.skipReason = wrongWhy[read == 1];
         vr.skipStatus = ResultStatus::Error;
         return false;
@@ -435,7 +435,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       for (int t = 0; t < 2; t++)
         if (!wrongWhy[t].empty())
         {
-          CLPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[t].c_str());
+          XPUPEAK_VLOG("coreml-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrongWhy[t].c_str());
           vr.wrongLayout[t] = true;
           vr.prefillRace.drop(t);
           vr.wrongNote = std::string("; ") + coremlLayoutName(t) + " answered wrong";
@@ -611,7 +611,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     auto test = currentDeviceScope->beginTest(prefillSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       if (v.unit || v.decodeOnly)
@@ -624,7 +624,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       }
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         measurePrefill(v, vr, seq);
       }
@@ -639,7 +639,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     auto test = currentDeviceScope->beginTest(prefillOpsSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       if (!v.unit || v.decodeOnly)
@@ -652,7 +652,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       }
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         measurePrefill(v, vr, seq);
       }
@@ -666,7 +666,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     auto test = currentDeviceScope->beginTest(decodeSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
@@ -701,7 +701,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     auto test = currentDeviceScope->beginTest(latencySpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
@@ -724,7 +724,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       }
       for (int64_t kv : contextsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         const std::string token =

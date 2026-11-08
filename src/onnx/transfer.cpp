@@ -33,7 +33,7 @@ constexpr int64_t  kMinElems       = 8ll << 20;    // 16 MB of fp16
 // second, not something that improves with problem size -- so unlike the
 // compute sweeps this ceiling is a safety bound rather than a measurement
 // limit.  The improvement rule normally stops well before it.
-static uint64_t maxTensorBytes() { return clpeak::memoryBudget(128ull << 20); }
+static uint64_t maxTensorBytes() { return xpupeak::memoryBudget(128ull << 20); }
 constexpr unsigned int kSizeBudgetUs = 300000;
 
 struct Run
@@ -62,9 +62,9 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     const char *dirName = (dir == OnnxTransfer::ToDevice) ? "h2d"
                           : (dir == OnnxTransfer::RoundTrip) ? "roundtrip"
                                                              : "compute-only";
-    CLPEAK_VLOG("onnx-transfer[%s/%s]: %lld elems create %.1f s\n",
-                ep.providerKey.c_str(), dirName,
-                (long long)elems, createUs / 1.0e6);
+    XPUPEAK_VLOG("onnx-transfer[%s/%s]: %lld elems create %.1f s\n",
+                 ep.providerKey.c_str(), dirName,
+                 (long long)elems, createUs / 1.0e6);
     model.clear(); model.shrink_to_fit();
     if (!ses.session)
     {
@@ -74,9 +74,9 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     }
     if (createUs > kOnnxMaxCreateUs)
     {
-      CLPEAK_VLOG("onnx-transfer[%s/%s]: create %.1f s > %.1f s, skipping\n",
-                  ep.providerKey.c_str(), dirName,
-                  createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+      XPUPEAK_VLOG("onnx-transfer[%s/%s]: create %.1f s > %.1f s, skipping\n",
+                   ep.providerKey.c_str(), dirName,
+                   createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
       r.error = "session creation took " +
                 std::to_string((long long)(createUs / 1.0e6)) +
                 " s, exceeds " +
@@ -137,7 +137,7 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // The status still tells us what happened.
   double warmed = 0.0;
   {
-    clpeak::ScopedConsoleMute mute;
+    xpupeak::ScopedConsoleMute mute;
     warmed = run(1 + warmup);
   }
   if (!st && warmed > 0.0)
@@ -157,10 +157,10 @@ Run measure(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   if (r.us <= 0.0 && r.status == ResultStatus::Ok)
     r.status = ResultStatus::Error;
   if (r.us <= 0.0)
-    CLPEAK_VLOG("onnx-transfer[%s/%s]: run failed: %s\n", ep.providerKey.c_str(),
-                (dir == OnnxTransfer::ToDevice) ? "h2d"
-                : (dir == OnnxTransfer::RoundTrip) ? "roundtrip" : "compute-only",
-                r.error.empty() ? "no error text" : r.error.c_str());
+    XPUPEAK_VLOG("onnx-transfer[%s/%s]: run failed: %s\n", ep.providerKey.c_str(),
+                 (dir == OnnxTransfer::ToDevice) ? "h2d"
+                 : (dir == OnnxTransfer::RoundTrip) ? "roundtrip" : "compute-only",
+                 r.error.empty() ? "no error text" : r.error.c_str());
 
   if (inVal)  rt.api->ReleaseValue(inVal);
   if (outVal) rt.api->ReleaseValue(outVal);
@@ -205,7 +205,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
 
   for (int64_t elems = kMinElems;; elems *= 2)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if ((uint64_t)elems * 2ull > maxTensorBytes())
       break;
@@ -226,8 +226,8 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     lastUs = r.us; lastElems = elems;
 
     const double bps = (double)elems * 2.0 / (r.us * 1.0e-6);
-    CLPEAK_VLOG("onnx-transfer[%s/h2d]: %lld MB -> %.1f GB/s\n",
-                ep.providerKey.c_str(), (long long)((elems * 2) >> 20), bps);
+    XPUPEAK_VLOG("onnx-transfer[%s/h2d]: %lld MB -> %.1f GB/s\n",
+                 ep.providerKey.c_str(), (long long)((elems * 2) >> 20), bps);
     lastBps = bps;
   }
 
@@ -248,11 +248,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   {
     transfers = (lastUs > firstUs * 2.0);
     if (!transfers)
-      CLPEAK_VLOG("onnx-transfer[%s]: %.0f us at %lld MB and %.0f us at "
-                  "%lld MB -- time barely moved, nothing is copied\n",
-                  ep.providerKey.c_str(), firstUs,
-                  (long long)((firstElems * 2) >> 20), lastUs,
-                  (long long)((lastElems * 2) >> 20));
+      XPUPEAK_VLOG("onnx-transfer[%s]: %.0f us at %lld MB and %.0f us at "
+                   "%lld MB -- time barely moved, nothing is copied\n",
+                   ep.providerKey.c_str(), firstUs,
+                   (long long)((firstElems * 2) >> 20), lastUs,
+                   (long long)((lastElems * 2) >> 20));
   }
 
   const std::string h2dNote =
@@ -294,7 +294,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       "The whole cost of offloading a trivial operation: a tensor out, one "
       "elementwise pass, the result back, at " + rtSize + ".";
   double roundUs = 0.0;
-  if ((uint64_t)rtElems * 2ull <= maxTensorBytes() && !clpeak::cancelRequested())
+  if ((uint64_t)rtElems * 2ull <= maxTensorBytes() && !xpupeak::cancelRequested())
   {
     Run r = measure(rt, ep, OnnxTransfer::RoundTrip, rtElems, warmupCount,
                     forceIters, specifiedIters);
@@ -302,9 +302,9 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
     {
       roundUs = r.us;
       const double bps = 2.0 * (double)rtElems * 2.0 / (r.us * 1.0e-6);
-      CLPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
-                  ep.providerKey.c_str(),
-                  (long long)((rtElems * 2) >> 20), bps);
+      XPUPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
+                   ep.providerKey.c_str(),
+                   (long long)((rtElems * 2) >> 20), bps);
       test.emit("roundtrip", (float)bps, rtNote.c_str());
     }
     else
@@ -337,14 +337,14 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
   {
     double computeUs = 0.0;
     Run compute;
-    if (roundUs > 0.0 && !clpeak::cancelRequested())
+    if (roundUs > 0.0 && !xpupeak::cancelRequested())
     {
       compute = measure(rt, ep, OnnxTransfer::ComputeOnly, rtElems,
                         warmupCount, forceIters, specifiedIters);
       if (compute.us > 0.0)
         computeUs = compute.us;
-      CLPEAK_VLOG("onnx-transfer[%s/compute-only]: %.0f us vs round trip "
-                  "%.0f us\n", ep.providerKey.c_str(), compute.us, roundUs);
+      XPUPEAK_VLOG("onnx-transfer[%s/compute-only]: %.0f us vs round trip "
+                   "%.0f us\n", ep.providerKey.c_str(), compute.us, roundUs);
     }
 
     if (computeUs > 0.0 && roundUs > computeUs)

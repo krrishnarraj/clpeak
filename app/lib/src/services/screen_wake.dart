@@ -36,7 +36,7 @@ class ScreenWake {
     try {
       await WakelockPlus.toggle(enable: on);
     } catch (e) {
-      debugPrint('clpeak: screen wakelock ${on ? 'acquire' : 'release'}: $e');
+      debugPrint('xpupeak: screen wakelock ${on ? 'acquire' : 'release'}: $e');
     }
   }
 }

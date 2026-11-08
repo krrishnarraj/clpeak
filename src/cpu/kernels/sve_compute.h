@@ -16,7 +16,7 @@
 // NEON FMLA chain.
 //
 // The whole set is #if-gated on __ARM_FEATURE_SVE and excluded under
-// CLPEAK_CORE_ONLY, so this header only contributes kernels in an SVE TU.
+// XPUPEAK_CORE_ONLY, so this header only contributes kernels in an SVE TU.
 // Also excluded when the TU has SME (__ARM_FEATURE_SME): these are
 // NON-streaming SVE kernels, and an SME TU must never pick them up -- on Apple
 // Silicon (SME without any non-streaming SVE) they would SIGILL if selected.
@@ -25,10 +25,10 @@
 #include "cpu_kernels.h"
 #include "cpu_simd.h"
 
-#if defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_SME) && !defined(CLPEAK_CORE_ONLY)
+#if defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_SME) && !defined(XPUPEAK_CORE_ONLY)
 #include <arm_sve.h>
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 #define CPU_HAS_SVE_KERNELS 1
@@ -135,11 +135,11 @@ static double runSveInt32Chain(uint64_t outer)
 // divider idle behind the add+divide chain latency.
 // Precise-FP region for the same reason as base_compute.h: fast-math "afn"
 // may substitute estimate+Newton (SVE has frecpe/frsqrte) for the fp32 forms.
-// CLPEAK_PRECISE_FP comes from base_compute.h (always included before this).
+// XPUPEAK_PRECISE_FP comes from base_compute.h (always included before this).
 #if defined(__clang__)
 #pragma float_control(precise, on, push)
 #endif
-static CLPEAK_PRECISE_FP double runSveFp32DivChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runSveFp32DivChain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b32();
   volatile float vc1 = 1.5f, vc2 = 0.5f;
@@ -162,7 +162,7 @@ static CLPEAK_PRECISE_FP double runSveFp32DivChain(uint64_t outer)
   return (double)svaddv_f32(pg, s);
 }
 
-static CLPEAK_PRECISE_FP double runSveFp64DivChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runSveFp64DivChain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b64();
   volatile double vc1 = 1.5, vc2 = 0.5;
@@ -185,7 +185,7 @@ static CLPEAK_PRECISE_FP double runSveFp64DivChain(uint64_t outer)
   return (double)svaddv_f64(pg, s);
 }
 
-static CLPEAK_PRECISE_FP double runSveFp32SqrtChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runSveFp32SqrtChain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b32();
   volatile float vc = 0.75f;
@@ -208,7 +208,7 @@ static CLPEAK_PRECISE_FP double runSveFp32SqrtChain(uint64_t outer)
   return (double)svaddv_f32(pg, s);
 }
 
-static CLPEAK_PRECISE_FP double runSveFp64SqrtChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runSveFp64SqrtChain(uint64_t outer)
 {
   const svbool_t pg = svptrue_b64();
   volatile double vc = 0.75;
@@ -408,9 +408,9 @@ static double runSveStrScanChain(uint64_t outer)
 }
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // __ARM_FEATURE_SVE && !CLPEAK_CORE_ONLY
+#endif // __ARM_FEATURE_SVE && !XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_SVE_COMPUTE_H

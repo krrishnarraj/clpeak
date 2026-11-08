@@ -6,7 +6,7 @@ import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/resume_offer.dart';
 import '../../services/settings_service.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../app.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
@@ -95,7 +95,7 @@ class _Masthead extends StatelessWidget {
       children: [
         const CAppMark(size: 30),
         const SizedBox(width: 12),
-        Expanded(child: Text('clpeak', style: t.wordmark)),
+        Expanded(child: Text('xpupeak', style: t.wordmark)),
         Text('v$version', style: t.micro.copyWith(letterSpacing: 0.6)),
       ],
     );
@@ -250,7 +250,7 @@ class _BackendPanel extends StatelessWidget {
         children: [
           CPanelHead(
             title: backend.name,
-            icon: ClpeakTheme.backendIcon(backend.name),
+            icon: XpupeakTheme.backendIcon(backend.name),
             trailing: Text(
               backend.deviceCount == 1
                   ? '1 DEVICE'

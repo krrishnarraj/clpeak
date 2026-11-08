@@ -156,8 +156,8 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
     auto createEnd = std::chrono::steady_clock::now();
     double createUs = std::chrono::duration<double, std::micro>(
                           createEnd - createStart).count();
-    CLPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s\n",
-                ep.providerKey.c_str(), (long long)d, createUs / 1.0e6);
+    XPUPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s\n",
+                 ep.providerKey.c_str(), (long long)d, createUs / 1.0e6);
     model.clear();
     model.shrink_to_fit();
     if (!ses.session)
@@ -168,9 +168,9 @@ Result measure(const OrtRuntime &rt, const onnx_ep_info_t &ep, int64_t d,
     }
     if (createUs > kOnnxMaxCreateUs)
     {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s > %.1f s, skipping\n",
-                  ep.providerKey.c_str(), (long long)d,
-                  createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+      XPUPEAK_VLOG("onnx-tensor-bw[%s]: %lld dim create %.1f s > %.1f s, skipping\n",
+                   ep.providerKey.c_str(), (long long)d,
+                   createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
       r.error = "session creation took " +
                 std::to_string((long long)(createUs / 1.0e6)) +
                 " s, exceeds " +
@@ -276,8 +276,8 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   Result floor = measure(rt, ep, kFloorDim, dtype, warmupCount, forceIters,
                          specifiedIters);
   const double floorUs = (floor.us > 0.0) ? floor.us : 0.0;
-  CLPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
-              ep.providerKey.c_str(), floorUs);
+  XPUPEAK_VLOG("onnx-tensor-bw[%s]: dispatch floor %.2f us\n",
+               ep.providerKey.c_str(), floorUs);
 
   double prevBps = 0.0;
   bool   stillFalling = true;
@@ -285,7 +285,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   for (const Size &s : kSizes)
   {
     const size_t rung = index++;
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
 
     // Stop once the curve has flattened, but only past the base rungs: those
@@ -293,8 +293,8 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // what every reading is compared against.
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
     {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: rate flattened, stopping below %s\n",
-                  ep.providerKey.c_str(), s.label);
+      XPUPEAK_VLOG("onnx-tensor-bw[%s]: rate flattened, stopping below %s\n",
+                   ep.providerKey.c_str(), s.label);
       break;
     }
 
@@ -304,13 +304,13 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // a kill rather than a failed allocation.
     const uint64_t held =
         onnxHeldBytes(ep, (uint64_t)s.dim * (uint64_t)s.dim * 2ull, 0);
-    const uint64_t budget = clpeak::memoryBudget(2ull << 30);
+    const uint64_t budget = xpupeak::memoryBudget(2ull << 30);
     if (held > budget)
     {
-      CLPEAK_VLOG("onnx-tensor-bw[%s]: %s needs %llu MB of a %llu MB budget, "
-                  "stopping\n", ep.providerKey.c_str(), s.label,
-                  (unsigned long long)(held >> 20),
-                  (unsigned long long)(budget >> 20));
+      XPUPEAK_VLOG("onnx-tensor-bw[%s]: %s needs %llu MB of a %llu MB budget, "
+                   "stopping\n", ep.providerKey.c_str(), s.label,
+                   (unsigned long long)(held >> 20),
+                   (unsigned long long)(budget >> 20));
       break;
     }
 
@@ -324,8 +324,8 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // worth a row.
       if (s.dim > 8192)
       {
-        CLPEAK_VLOG("onnx-tensor-bw[%s]: %s unavailable (%s)\n",
-                    ep.providerKey.c_str(), s.label, r.error.c_str());
+        XPUPEAK_VLOG("onnx-tensor-bw[%s]: %s unavailable (%s)\n",
+                     ep.providerKey.c_str(), s.label, r.error.c_str());
         break;
       }
       test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error,

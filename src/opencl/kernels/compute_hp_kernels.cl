@@ -103,7 +103,7 @@ __kernel void compute_hp_v16(__global half *ptr, float _B)
 // ---- affine-chain variants (see mad_chain.cl) ----
 //
 // One macro per width, instantiated as compute_hp_alt_v* at whatever sub-group
-// size the compiler picks and, where the host defines CLPEAK_ALT_SG16 (a
+// size the compiler picks and, where the host defines XPUPEAK_ALT_SG16 (a
 // device with cl_intel_required_subgroup_size that offers 16), again as
 // compute_hp_alt_sg16_v* pinned to 16.  runComputeTest races the two beside
 // the squaring chain.
@@ -175,7 +175,7 @@ HP_ALT_V4(compute_hp_alt_v4, )
 HP_ALT_V8(compute_hp_alt_v8, )
 HP_ALT_V16(compute_hp_alt_v16, )
 
-\n#ifdef CLPEAK_ALT_SG16
+\n#ifdef XPUPEAK_ALT_SG16
 \nHP_ALT_V1(compute_hp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
 HP_ALT_V2(compute_hp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
 HP_ALT_V4(compute_hp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))

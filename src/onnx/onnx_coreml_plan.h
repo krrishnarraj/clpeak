@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONNX_COREML_PLAN_H
-#define CLPEAK_ONNX_COREML_PLAN_H
+#ifndef XPUPEAK_ONNX_COREML_PLAN_H
+#define XPUPEAK_ONNX_COREML_PLAN_H
 
 // The Core ML compute plan behind a CoreML-provider session: which compute
 // unit Core ML gave each operation, read from the lines the provider logs
@@ -87,4 +87,4 @@ struct OnnxCoremlUnit
 };
 OnnxCoremlUnit onnxCoremlUnitFor(const std::string &computeUnits);
 
-#endif // CLPEAK_ONNX_COREML_PLAN_H
+#endif // XPUPEAK_ONNX_COREML_PLAN_H

@@ -29,7 +29,7 @@ namespace
 void CL_CALLBACK contextNotify(const char *errinfo, const void *, size_t, void *)
 {
   if (errinfo)
-    clpeak::logMessage(clpeak::LogLevel::Error, "opencl", errinfo);
+    xpupeak::logMessage(xpupeak::LogLevel::Error, "opencl", errinfo);
 }
 
 // Whether the device takes intel_reqd_sub_group_size(16): the extension, and
@@ -77,7 +77,7 @@ int clPeak::runAll()
 
     for (size_t p = 0; p < platforms.size(); p++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       std::string platformName = platforms[p].getInfo<CL_PLATFORM_NAME>();
@@ -103,7 +103,7 @@ int clPeak::runAll()
 
       for (size_t d = 0; d < devices.size(); d++, deviceIndex++)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         if (!isDeviceSelected(deviceIndex))
           continue;
@@ -158,7 +158,7 @@ int clPeak::runAll()
         // chain a second time pinned to it (kernels/mad_chain.cl).
         const std::string floatOptions =
             std::string(BUILD_OPTIONS) +
-            (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
+            (offersSubGroup16(devices[d]) ? " -DXPUPEAK_ALT_SG16 " : "");
         // The int8 dot builtins hang off OpenCL C 3.0 feature macros, which a
         // compiler left at its default 1.2 never defines.  Its four-accumulator
         // cycle races pinned to sub-group 16 too, like the float families'
@@ -167,7 +167,7 @@ int clPeak::runAll()
             std::string(BUILD_OPTIONS) +
             (devInfo.int8DotProductPackedSupported ? " -DUSE_PACKED_DOT " : "") +
             (devInfo.openclC30 ? " -cl-std=CL3.0 " : "") +
-            (offersSubGroup16(devices[d]) ? " -DCLPEAK_ALT_SG16 " : "");
+            (offersSubGroup16(devices[d]) ? " -DXPUPEAK_ALT_SG16 " : "");
         want(Benchmark::ComputeSP, "Single-precision compute",
              isAllowed(Benchmark::ComputeSP), floatOptions);
         want(Benchmark::ComputeHP, "Half-precision compute",
@@ -258,11 +258,11 @@ int clPeak::runAll()
           // -- so that is an error on the run log, not a --verbose extra, and
           // a file from a machine nobody can reach still explains the rows.
           if (b.quiet)
-            CLPEAK_VLOG("  %s kernel build failed, test skipped: %s\n", b.label,
-                        b.error.c_str());
+            XPUPEAK_VLOG("  %s kernel build failed, test skipped: %s\n", b.label,
+                         b.error.c_str());
           else
-            CLPEAK_LOG(Error, "OpenCL: %s program build failed on %s (%s)", b.label,
-                       devInfo.deviceName.c_str(), b.error.c_str());
+            XPUPEAK_LOG(Error, "OpenCL: %s program build failed on %s (%s)", b.label,
+                        devInfo.deviceName.c_str(), b.error.c_str());
         }
         cl::Program none;
         auto prog = [&](Benchmark which) -> cl::Program &

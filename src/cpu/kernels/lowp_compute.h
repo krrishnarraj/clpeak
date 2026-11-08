@@ -8,7 +8,7 @@
 // (fp16xfp16+fp32 FMLAL), int8 dot product, and the AVX10.2 native bf16 vector
 // FMA.  Each kernel is #if-gated on a specific compile feature, so a dedicated
 // feature TU enables exactly one path per dtype.  Guarded as a whole by
-// CLPEAK_CORE_ONLY (passed to MSVC cl.exe TUs, whose coarse /arch:AVX512 can't
+// XPUPEAK_CORE_ONLY (passed to MSVC cl.exe TUs, whose coarse /arch:AVX512 can't
 // isolate sub-features) so a core-AVX-512 binary never emits VNNI/BF16/FP16 it
 // might lack at runtime.  To add a new low-precision dtype: add its #if block +
 // a CPU_HAS_<X>_KERNEL define here, then wire the slot in the table builder.
@@ -19,9 +19,9 @@
 
 #include <cstring>
 
-#ifndef CLPEAK_CORE_ONLY
+#ifndef XPUPEAK_CORE_ONLY
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 // ---- FP16 native FMA -------------------------------------------------------
@@ -489,9 +489,9 @@ static double runBf16FmaChain(uint64_t outer)
 #endif
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // CLPEAK_CORE_ONLY
+#endif // XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_LOWP_COMPUTE_H

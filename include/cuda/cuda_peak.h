@@ -109,7 +109,7 @@ public:
   // targeted none of the kernel's arch group.  CUDA_ERROR_NO_BINARY_FOR_GPU
   // means the fatbin holds neither a cubin for this sm nor PTX the driver can
   // JIT for it.  Anything else carries the driver's error; details go to
-  // CLPEAK_VLOG.
+  // XPUPEAK_VLOG.
   CudaKernel getKernel(const cuda_kernels::Blob &blob, const char *kernelName);
 
 private:

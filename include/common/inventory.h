@@ -1,5 +1,5 @@
-#ifndef CLPEAK_INVENTORY_H
-#define CLPEAK_INVENTORY_H
+#ifndef XPUPEAK_INVENTORY_H
+#define XPUPEAK_INVENTORY_H
 
 #include <cstdint>
 #include <iosfwd>
@@ -55,7 +55,7 @@ struct BackendInventory
   std::vector<InventoryPlatform> platforms;   // Vulkan/CUDA: a single synthetic platform
 };
 
-// JSON serializer used by the GUI catalog (clpeak_copy_backend_catalog_json):
+// JSON serializer used by the GUI catalog (xpupeak_copy_backend_catalog_json):
 //   {"backends":[{"name","flag","available",info?,reason?,notes?,
 //   "platforms":[{"index","name","devices":[{"index","name","type",arch?,
 //       driver?,api?,origin?,compute_units?,clock_mhz?,global_mem_bytes?,
@@ -75,4 +75,4 @@ void writeInventoryBackends(JsonWriter &w, const std::vector<BackendInventory> &
 // in the order given, which is the registry's -- the run order.
 void printInventory(const std::vector<BackendInventory> &inv, std::ostream &os);
 
-#endif // CLPEAK_INVENTORY_H
+#endif // XPUPEAK_INVENTORY_H

@@ -35,8 +35,8 @@
 // print() for structured data, and no consumer has to regroup a flat table
 // back into tests.
 //
-// Diagnostics take the same road.  A backend's note() and every CLPEAK_LOG /
-// CLPEAK_VLOG line in the process reaches the open logger (through the run's
+// Diagnostics take the same road.  A backend's note() and every XPUPEAK_LOG /
+// XPUPEAK_VLOG line in the process reaches the open logger (through the run's
 // RunLog, run_log.h), which stamps it with the scope it fired in -- backend,
 // device, test -- records it on the run's `log`, and dispatches it as a Log
 // event for the channel to render.  So the file a user exports holds the
@@ -230,9 +230,9 @@ public:
   /// One diagnostic at an explicit level, scoped to whatever is open.
   /// Recorded on the run's log (when a RunLog is live) and dispatched as a
   /// Log event.  `source` names the library the message was relayed from;
-  /// empty for clpeak's own.  Free functions with no logger in reach use
-  /// CLPEAK_LOG / CLPEAK_VLOG, which arrive here through the RunLog.
-  void log(clpeak::LogLevel level, std::string message, std::string source = "");
+  /// empty for xpupeak's own.  Free functions with no logger in reach use
+  /// XPUPEAK_LOG / XPUPEAK_VLOG, which arrive here through the RunLog.
+  void log(xpupeak::LogLevel level, std::string message, std::string source = "");
 
   /// The device open in this logger: its index as its backend numbers it --
   /// the one --devices and a run's checkpoint name it by -- or -1, and its

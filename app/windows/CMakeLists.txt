@@ -1,10 +1,10 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
-project(clpeak LANGUAGES CXX)
+project(xpupeak LANGUAGES CXX)
 
 # The name of the executable created for the application.  Deliberately NOT
-# "clpeak": release zips place this bundle next to the CLI binary of that name.
-set(BINARY_NAME "clpeak-gui")
+# "xpupeak": release zips place this bundle next to the CLI binary of that name.
+set(BINARY_NAME "xpupeak-gui")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

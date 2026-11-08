@@ -5,7 +5,7 @@
 // platform's fonts exactly as in the app.  (flutter_tester's font manager
 // answers every family name with its test font, which swallows the theme's
 // monospace fallback walk -- CP.monoStack -- on any span that sets no family
-// of its own.)  Each shot is the real app shell (ClpeakShell and the screens
+// of its own.)  Each shot is the real app shell (XpupeakShell and the screens
 // under it) fed a saved run document from results/ and a device catalog
 // captured from the machine that produced it
 // (tools/screenshots/m1_pro_catalog.json: the `inventory` of a --verbose run),
@@ -13,26 +13,26 @@
 // is the app's own.  Nothing is captured from the screen: each shot is its
 // widget tree rendered to an image.
 //
-//   CLPEAK_SHOTS_OUT      where the raw PNGs go (required)
-//   CLPEAK_SHOTS_REPO     the repository root (required)
-//   CLPEAK_SHOTS_VERSION  the version label on the shots (default: 3.0.1)
+//   XPUPEAK_SHOTS_OUT      where the raw PNGs go (required)
+//   XPUPEAK_SHOTS_REPO     the repository root (required)
+//   XPUPEAK_SHOTS_VERSION  the version label on the shots (default: 3.0.1)
 import 'dart:convert';
 import 'dart:ffi' hide Size;
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:clpeak/src/ffi/clpeak_bindings.dart';
-import 'package:clpeak/src/model/catalog.dart';
-import 'package:clpeak/src/model/run_config.dart';
-import 'package:clpeak/src/model/run_document.dart';
-import 'package:clpeak/src/model/run_summary.dart';
-import 'package:clpeak/src/services/benchmark_service.dart';
-import 'package:clpeak/src/services/export_service.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
-import 'package:clpeak/src/services/settings_service.dart';
-import 'package:clpeak/src/theme/clpeak_theme.dart';
-import 'package:clpeak/src/ui/app.dart';
-import 'package:clpeak/src/ui/run_config/run_config_screen.dart';
+import 'package:xpupeak/src/ffi/xpupeak_bindings.dart';
+import 'package:xpupeak/src/model/catalog.dart';
+import 'package:xpupeak/src/model/run_config.dart';
+import 'package:xpupeak/src/model/run_document.dart';
+import 'package:xpupeak/src/model/run_summary.dart';
+import 'package:xpupeak/src/services/benchmark_service.dart';
+import 'package:xpupeak/src/services/export_service.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/settings_service.dart';
+import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/app.dart';
+import 'package:xpupeak/src/ui/run_config/run_config_screen.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -42,24 +42,24 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final _env = Platform.environment;
-final _outDir = _env['CLPEAK_SHOTS_OUT'] ?? '';
-final _repo = _env['CLPEAK_SHOTS_REPO'] ?? '';
-final _version = _env['CLPEAK_SHOTS_VERSION'] ?? '3.0.1';
+final _outDir = _env['XPUPEAK_SHOTS_OUT'] ?? '';
+final _repo = _env['XPUPEAK_SHOTS_REPO'] ?? '';
+final _version = _env['XPUPEAK_SHOTS_VERSION'] ?? '3.0.1';
 
 /// The desktop app's default window (app/AGENTS.md), captured at 2x.
 const _desktop = Size(1280, 860);
 const _pixelRatio = 2.0;
 
-class _StubBindings implements ClpeakBindings {
+class _StubBindings implements XpupeakBindings {
   _StubBindings(this._catalog);
 
   final Map<String, dynamic> _catalog;
 
   @override
-  ClpeakLaunch get launch => (_, _, _, _) => 0;
+  XpupeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  ClpeakRequestCancel get requestCancel => () {};
+  XpupeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -145,7 +145,7 @@ Map<String, dynamic> _readJson(String path) =>
     backends: {for (final r in doc.runs) r.backend}.toList(),
     cancelled: false,
     fileName: '$id.clpeak.json',
-    clpeakVersion: _version,
+    xpupeakVersion: _version,
   );
   return (document: doc, summary: summary);
 }
@@ -171,14 +171,14 @@ Future<void> _shoot(
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider<BenchmarkService>.value(value: service),
       ],
-      // ClpeakApp, with the theme pinned instead of read from settings.
+      // XpupeakApp, with the theme pinned instead of read from settings.
       child: MaterialApp(
-        title: 'clpeak',
+        title: 'xpupeak',
         debugShowCheckedModeBanner: false,
-        theme: ClpeakTheme.light(),
-        darkTheme: ClpeakTheme.dark(),
+        theme: XpupeakTheme.light(),
+        darkTheme: XpupeakTheme.dark(),
         themeMode: theme,
-        home: home ?? const ClpeakShell(),
+        home: home ?? const XpupeakShell(),
       ),
     ),
   ));
@@ -225,7 +225,7 @@ void main() {
 
   testWidgets('screenshots', (tester) async {
     if (_outDir.isEmpty || _repo.isEmpty) {
-      fail('set CLPEAK_SHOTS_OUT and CLPEAK_SHOTS_REPO '
+      fail('set XPUPEAK_SHOTS_OUT and XPUPEAK_SHOTS_REPO '
           '(tools/screenshots.sh does)');
     }
     Directory(_outDir).createSync(recursive: true);
@@ -234,7 +234,7 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsService.load();
-    final tmp = Directory.systemTemp.createTempSync('clpeak_shots');
+    final tmp = Directory.systemTemp.createTempSync('xpupeak_shots');
     addTearDown(() => tmp.deleteSync(recursive: true));
     final history = RunHistoryStore(directoryOverride: tmp);
 

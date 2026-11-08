@@ -89,8 +89,8 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
     catch (cl::Error &error)
     {
-      CLPEAK_VLOG("Pinned host buffer unavailable (%s, %d); falling back to pageable memory\n",
-                  error.what(), error.err());
+      XPUPEAK_VLOG("Pinned host buffer unavailable (%s, %d); falling back to pageable memory\n",
+                   error.what(), error.err());
       hostPtr = nullptr;
     }
 

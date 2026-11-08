@@ -1,7 +1,7 @@
 // NSProcessInfo.thermalState for thermal.cpp, which is C++ (thermal.h).
 #import <Foundation/Foundation.h>
 
-int clpeakIosThermalState()
+int xpupeakIosThermalState()
 {
   @autoreleasepool
   {

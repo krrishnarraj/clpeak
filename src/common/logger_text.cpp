@@ -52,18 +52,18 @@ void LoggerText::onEvent(const LogEvent &e)
 
 void LoggerText::renderLog(const LogEntry &l)
 {
-    // Library diagnostics and clpeak's own debug/info lines are the --verbose
+    // Library diagnostics and xpupeak's own debug/info lines are the --verbose
     // channel: stderr, flushed per line, so the last one before a driver-side
     // crash is on screen -- and written past any console capture in progress,
     // or the line would be captured again.
-    if (!l.source.empty() || l.level == clpeak::LogLevel::Debug ||
-        l.level == clpeak::LogLevel::Info)
+    if (!l.source.empty() || l.level == xpupeak::LogLevel::Debug ||
+        l.level == xpupeak::LogLevel::Info)
     {
         if (!verbose) return;
-        clpeak::stderrWrite(l.message + "\n");
+        xpupeak::stderrWrite(l.message + "\n");
         return;
     }
-    // clpeak's own warnings and errors print inline with the results, as
+    // xpupeak's own warnings and errors print inline with the results, as
     // notes always have -- before the message, or it would appear above rows
     // that were measured before it.
     flushMetrics();
@@ -144,7 +144,7 @@ void LoggerText::renderTestBegin(const LogEvent &e)
     indentLevel  = propIndent;       // test header at prop level
 
     // Build the header.  In verbose mode the header is printed
-    // immediately so that backend CLPEAK_VLOG lines (stderr) land
+    // immediately so that backend XPUPEAK_VLOG lines (stderr) land
     // under it, not above it.  In default mode the header is deferred
     // until we know the test has visible output, so a fully-skipped
     // test leaves no orphan header behind.  The header always

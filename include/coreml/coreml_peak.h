@@ -119,7 +119,7 @@ public:
   // convolution instead, one layout, which the convolution rows ask.
   struct AnswerCheck
   {
-    clpeak::AnswerCheck layout[2];   // [in, out] and [out, in]
+    xpupeak::AnswerCheck layout[2];   // [in, out] and [out, in]
     // The layout the accuracy row reads -- of those that answer right, the
     // faster -- or -1 when neither could be built.
     int read = -1;

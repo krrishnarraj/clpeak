@@ -7,7 +7,7 @@
 // CPU matrix-engine kernels (the tensor-core analog): Intel AMX tile ops on x86
 // (int8 / bf16 / fp16 / fp8) and the ARM NEON matrix instructions SMMLA
 // (int8) + BFMMLA (bf16).  ops are PER-k; the table builder multiplies by INNER.
-// Feature-gated + CLPEAK_CORE_ONLY-excluded like the other advanced kernels.  To
+// Feature-gated + XPUPEAK_CORE_ONLY-excluded like the other advanced kernels.  To
 // add a new AMX dtype: reuse amxConfig16x64(), add a #if block + a
 // CPU_MAT_<X>_KERNEL define, and wire the slot in the table builder.
 // ===========================================================================
@@ -19,9 +19,9 @@
 #include <immintrin.h>
 #endif
 
-#ifndef CLPEAK_CORE_ONLY
+#ifndef XPUPEAK_CORE_ONLY
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 // ---- Matrix engine: int8 (AMX / SMMLA) and bf16 (AMX / BFMMLA) -------------
@@ -205,9 +205,9 @@ static double runMatFp8Chain(uint64_t outer)
 #endif
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // CLPEAK_CORE_ONLY
+#endif // XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_MATRIX_COMPUTE_H

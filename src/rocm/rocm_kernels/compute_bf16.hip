@@ -4,10 +4,10 @@
 // whichever the installed headers expose so the kernel builds on old and new.
 #if __has_include(<hip/hip_bf16.h>)
 #include <hip/hip_bf16.h>
-using clpeak_bf16 = __hip_bfloat16;
+using xpupeak_bf16 = __hip_bfloat16;
 #else
 #include <hip/hip_bfloat16.h>
-using clpeak_bf16 = hip_bfloat16;
+using xpupeak_bf16 = hip_bfloat16;
 #endif
 
 // Chain shape and why: see the MAD chain block in include/common/common.h.
@@ -20,14 +20,14 @@ using clpeak_bf16 = hip_bfloat16;
 
 extern "C" __global__ void compute_bf16(float *out, float A)
 {
-    float x = (float)clpeak_bf16(A);
-    float c = (float)clpeak_bf16((float)threadIdx.x);
+    float x = (float)xpupeak_bf16(A);
+    float c = (float)xpupeak_bf16((float)threadIdx.x);
 
     #pragma unroll 1
     for (int i = 0; i < 16; i++)
     {
         MAD_128(x, c)
-        x = (float)clpeak_bf16(x);
+        x = (float)xpupeak_bf16(x);
     }
 
     out[blockIdx.x * blockDim.x + threadIdx.x] = x;

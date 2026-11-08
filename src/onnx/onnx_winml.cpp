@@ -179,7 +179,7 @@ HMODULE loadCatalogDll(const OrtRuntime *rt, const std::string &hint,
       return h;
     }
     error = std::string(kDllName) +
-            " not found beside the loaded onnxruntime, beside clpeak or on the "
+            " not found beside the loaded onnxruntime, beside xpupeak or on the "
             "DLL search path (tools/fetch_winml.ps1 fetches it, or name it "
             "with --onnx-winml)";
   }
@@ -311,14 +311,14 @@ void resolveWindows(const OrtRuntime *rt, const std::string &hint,
       // this process is added in a moment, and that is only worth a
       // verbose line.
       if (!p.installed)
-        clpeak::logMessage(clpeak::LogLevel::Warning, "",
-                           "ONNX: Windows ML is installing the " + p.name +
+        xpupeak::logMessage(xpupeak::LogLevel::Warning, "",
+                            "ONNX: Windows ML is installing the " + p.name +
                                (p.version.empty() ? "" : " " + p.version) +
                                " execution provider from the Microsoft Store; "
                                "this can take a few minutes");
       else
-        CLPEAK_VLOG("onnx: Windows ML adding the installed %s provider to this process\n",
-                    p.name.c_str());
+        XPUPEAK_VLOG("onnx: Windows ML adding the installed %s provider to this process\n",
+                     p.name.c_str());
       hr = api.epEnsureReady(ep);
       if (FAILED(hr))
       {
@@ -372,12 +372,12 @@ const OnnxWinmlResolution &onnxWinmlResolve(const OrtRuntime *rt,
 #ifdef _WIN32
   resolveWindows(rt, hint, g_res);
   for (const auto &p : g_res.providers)
-    CLPEAK_VLOG("onnx: Windows ML provider %s %s: %s%s\n", p.name.c_str(),
-                p.version.c_str(),
-                p.ready ? p.libraryPath.c_str() : "not ready",
-                p.error.empty() ? "" : (" (" + p.error + ")").c_str());
+    XPUPEAK_VLOG("onnx: Windows ML provider %s %s: %s%s\n", p.name.c_str(),
+                 p.version.c_str(),
+                 p.ready ? p.libraryPath.c_str() : "not ready",
+                 p.error.empty() ? "" : (" (" + p.error + ")").c_str());
   if (!g_res.error.empty())
-    CLPEAK_VLOG("onnx: Windows ML catalog: %s\n", g_res.error.c_str());
+    XPUPEAK_VLOG("onnx: Windows ML catalog: %s\n", g_res.error.c_str());
 #else
   (void)rt;
   (void)hint;

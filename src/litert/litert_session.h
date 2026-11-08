@@ -1,5 +1,5 @@
-#ifndef CLPEAK_LITERT_SESSION_H
-#define CLPEAK_LITERT_SESSION_H
+#ifndef XPUPEAK_LITERT_SESSION_H
+#define XPUPEAK_LITERT_SESSION_H
 
 // One compiled LiteRT model on one accelerator, with its input and output
 // buffers, plus what the runtime says about where its operations ran.  Pure
@@ -50,7 +50,7 @@ public:
   // with whatever LiteRT logged while failing, is the answer the row reports.
   static std::unique_ptr<LitertSession> create(const LitertRuntime &rt,
                                                const litert_device_info_t &dev,
-                                               clpeak_tflite::TfliteBytes &&model,
+                                               xpupeak_tflite::TfliteBytes &&model,
                                                const LitertSessionConfig &cfg,
                                                std::string &error);
   ~LitertSession();
@@ -123,7 +123,7 @@ private:
   LiteRtOptions options_ = nullptr;
   LiteRtModel model_ = nullptr;
   LiteRtCompiledModel compiled_ = nullptr;
-  clpeak_tflite::TfliteBytes bytes_;
+  xpupeak_tflite::TfliteBytes bytes_;
   std::vector<LiteRtTensorBuffer> inputs_, outputs_;
   std::vector<size_t> inputBytes_, outputBytes_;
   bool fullyAccelerated_ = true;
@@ -173,4 +173,4 @@ double litertCreateFloorUs(LitertAccel accel);
 bool litertProfilesNameKernels(LitertAccel accel);
 void litertNoteUnnamedProfile(LitertAccel accel);
 
-#endif // CLPEAK_LITERT_SESSION_H
+#endif // XPUPEAK_LITERT_SESSION_H

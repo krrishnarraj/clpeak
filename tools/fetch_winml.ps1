@@ -1,4 +1,4 @@
-# fetch_winml.ps1 -- stage the Windows ML runtime for clpeak's --onnx-winml.
+# fetch_winml.ps1 -- stage the Windows ML runtime for xpupeak's --onnx-winml.
 #
 #   tools\fetch_winml.ps1 [-Version 2.3.42] [-Arch x64|arm64] [-Dest <dir>]
 #
@@ -7,17 +7,17 @@
 # the Microsoft Store and hands an app the path of each one's plugin library.
 # The API for that lives in Microsoft.Windows.AI.MachineLearning.dll, which
 # Microsoft ships in the Microsoft.Windows.AI.MachineLearning NuGet package
-# beside the onnxruntime.dll its providers were built against.  clpeak does
+# beside the onnxruntime.dll its providers were built against.  xpupeak does
 # not carry either DLL: this script downloads the package (a zip) from
 # nuget.org and copies its native DLLs for one architecture, with Microsoft's
 # license and third-party notices, into build\winml\<arch>\ (git-ignored).
 # DirectML.dll comes along (~19 MB of the ~50 MB package): that runtime
-# delay-loads it the moment its DirectML provider is attached, which clpeak's
+# delay-loads it the moment its DirectML provider is attached, which xpupeak's
 # viability probe does, and a delay-load with no DLL to find is a crash, not
 # a refusal.
 #
 # Then:
-#   build\clpeak.exe --onnx --onnx-winml build\winml\<arch> --list-devices
+#   build\xpupeak.exe --onnx --onnx-winml build\winml\<arch> --list-devices
 #
 # --onnx-winml with a directory makes the onnxruntime.dll beside the catalog
 # the runtime as well (no --onnx-lib needed), and the first enumeration
@@ -42,7 +42,7 @@ if ($Dest -eq "") {
 
 $package = "Microsoft.Windows.AI.MachineLearning"
 $url = "https://www.nuget.org/api/v2/package/$package/$Version"
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) "clpeak-winml-$([System.Guid]::NewGuid().ToString('N'))"
+$staging = Join-Path ([System.IO.Path]::GetTempPath()) "xpupeak-winml-$([System.Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {
     $zip = Join-Path $staging "$package.$Version.zip"
@@ -65,7 +65,7 @@ try {
     }
     Write-Host ""
     Write-Host "Windows ML $Version ($Arch) is in $Dest. Try:"
-    Write-Host "  build\clpeak.exe --onnx --onnx-winml `"$Dest`" --list-devices"
+    Write-Host "  build\xpupeak.exe --onnx --onnx-winml `"$Dest`" --list-devices"
 }
 finally {
     Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue

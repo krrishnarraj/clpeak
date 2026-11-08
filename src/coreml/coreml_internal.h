@@ -1,5 +1,5 @@
-#ifndef CLPEAK_COREML_INTERNAL_H
-#define CLPEAK_COREML_INTERNAL_H
+#ifndef XPUPEAK_COREML_INTERNAL_H
+#define XPUPEAK_COREML_INTERNAL_H
 
 // Objective-C helpers shared by the .mm files of this backend.  Never
 // included from a .cpp: the public surface for the tests is coreml_session.h
@@ -16,4 +16,4 @@ CoremlDeviceKind coremlKindOf(id<MLComputeDeviceProtocol> d);
 // and, for a GPU, the Metal device to pin.
 MLModelConfiguration *coremlConfigurationFor(const coreml_device_info_t &dev);
 
-#endif // CLPEAK_COREML_INTERNAL_H
+#endif // XPUPEAK_COREML_INTERNAL_H

@@ -1,5 +1,5 @@
-#ifndef CLPEAK_RUN_DOCUMENT_H
-#define CLPEAK_RUN_DOCUMENT_H
+#ifndef XPUPEAK_RUN_DOCUMENT_H
+#define XPUPEAK_RUN_DOCUMENT_H
 
 #include <cstdint>
 #include <map>
@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <common/benchmark_enums.h>
-#include <common/common.h>     // clpeak::LogLevel
+#include <common/common.h>     // xpupeak::LogLevel
 #include <common/host_info.h>
 #include <common/inventory.h>
 #include <common/units.h>
@@ -213,7 +213,7 @@ struct DeviceResult {
 
 // ---- Run ------------------------------------------------------------------
 
-// One line of the run's diagnostic stream: what clpeak (or a library it
+// One line of the run's diagnostic stream: what xpupeak (or a library it
 // called) had to say, at what moment, inside which scope.  The whole stream
 // in emission order is the document's `log`; it is what a maintainer reads
 // when a number from a machine they cannot reach looks wrong, so it carries
@@ -223,8 +223,8 @@ struct DeviceResult {
 // them.  `test` is the test's key (`id@variant`), joinable to `tests[]`.
 struct LogEntry {
     double           elapsedS = 0.0;     // seconds since the run started
-    clpeak::LogLevel level    = clpeak::LogLevel::Info;
-    std::string      source;             // "" = clpeak; else the library relayed
+    xpupeak::LogLevel level    = xpupeak::LogLevel::Info;
+    std::string      source;             // "" = xpupeak; else the library relayed
     std::string      backend;
     std::string      device;
     int              deviceIndex = -1;
@@ -239,7 +239,7 @@ struct BuildInfo {
     std::string config;                  // CMake configuration ("Release", "Debug"), when the build stamped it
 };
 
-// How clpeak was asked to run.  Recorded because every number here is
+// How xpupeak was asked to run.  Recorded because every number here is
 // sensitive to it: a shorter --max-time-gpu measures a different thing, and a
 // selective run is not a full one even though the file looks the same shape.
 struct Invocation {
@@ -301,7 +301,7 @@ struct RunProgress {
 };
 
 struct RunMeta {
-    std::string clpeakVersion;
+    std::string xpupeakVersion;
     std::string generatedAt;        // ISO-8601 UTC, "2026-08-29T14:03:11Z"
 
     // Seconds spent running.  For a resumed run, the parts summed: the time
@@ -410,4 +410,4 @@ std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress
 bool loadPartialJson(const std::string &filename, RunDocument &out,
                      RunProgress &progress, std::string &error);
 
-#endif  // CLPEAK_RUN_DOCUMENT_H
+#endif  // XPUPEAK_RUN_DOCUMENT_H

@@ -1,5 +1,5 @@
 /// Parsed device catalog — the inventoryToJson() document from
-/// clpeak_copy_backend_catalog_json (src/common/inventory.cpp).  The same
+/// xpupeak_copy_backend_catalog_json (src/common/inventory.cpp).  The same
 /// `backends` array a verbose run document embeds as its `inventory`.
 library;
 

@@ -1,4 +1,4 @@
-if(NOT CLPEAK_ENABLE_VULKAN OR NOT Vulkan_FOUND)
+if(NOT XPUPEAK_ENABLE_VULKAN OR NOT Vulkan_FOUND)
   return()
 endif()
 
@@ -27,7 +27,7 @@ if(WIN32)
 endif()
 
 # Compile GLSL shaders to SPIR-V and embed as C++ arrays
-set(CLPEAK_VK_SHADERS
+set(XPUPEAK_VK_SHADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_sp_v1.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_sp_v2.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compute_sp_v4.comp
@@ -68,5 +68,5 @@ set(CLPEAK_VK_SHADERS
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompileShaders.cmake)
 compile_shaders(
     TARGET peak_vulkan
-    SHADERS ${CLPEAK_VK_SHADERS}
+    SHADERS ${XPUPEAK_VK_SHADERS}
 )

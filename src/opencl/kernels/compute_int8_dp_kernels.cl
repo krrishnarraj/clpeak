@@ -207,7 +207,7 @@ __kernel void compute_int8_dp_v16(__global int *ptr, char _A)
 //
 // compute_int8_dp_alt_v*, which runComputeTest races beside the pair chains
 // above (see mad_chain.cl for how twins are found), and where the host
-// defines CLPEAK_ALT_SG16 again as compute_int8_dp_alt_sg16_v*, pinned to
+// defines XPUPEAK_ALT_SG16 again as compute_int8_dp_alt_sg16_v*, pinned to
 // sub-group 16.  Each dot multiplies the next two accumulators of its cycle,
 // a = dot(b, c, a), b = dot(c, d, b), c = dot(d, a, c), d = dot(a, b, d), so
 // nothing loop-invariant is left and every dot still reads three distinct
@@ -277,7 +277,7 @@ DP_ALT_V1(compute_int8_dp_alt_v1, )
 DP_ALT_V2(compute_int8_dp_alt_v2, )
 DP_ALT_V4(compute_int8_dp_alt_v4, )
 
-\n#ifdef CLPEAK_ALT_SG16
+\n#ifdef XPUPEAK_ALT_SG16
 \nDP_ALT_V1(compute_int8_dp_alt_sg16_v1, __attribute__((intel_reqd_sub_group_size(16))))
 DP_ALT_V2(compute_int8_dp_alt_sg16_v2, __attribute__((intel_reqd_sub_group_size(16))))
 DP_ALT_V4(compute_int8_dp_alt_sg16_v4, __attribute__((intel_reqd_sub_group_size(16))))

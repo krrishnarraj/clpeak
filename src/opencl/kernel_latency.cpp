@@ -6,7 +6,7 @@
 //
 //   dispatch  : CL_PROFILING_COMMAND_QUEUED -> CL_PROFILING_COMMAND_START.
 //               One-way host-enqueue -> device-execution-start latency.
-//               This is the historical clpeak number.
+//               This is the historical xpupeak number.
 //
 //   roundtrip : std::chrono around enqueueNDRangeKernel + finish().
 //               Full host submit -> GPU complete -> signal back.

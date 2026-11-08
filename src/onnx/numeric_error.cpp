@@ -18,7 +18,7 @@
 // refused and this row is suppressed with it (see onnxGemmFolded), even
 // though this test's non-resident graph would still run.
 //
-// The fp32 row does a second job.  clpeak's CPU-fallback guard works at
+// The fp32 row does a second job.  xpupeak's CPU-fallback guard works at
 // ORT's partitioning level, so it cannot see an EP that accepts a node and
 // then quietly computes it at lower precision internally -- Core ML running
 // an fp32 graph on the fp16 Neural Engine is the standard example.  An fp32
@@ -54,8 +54,8 @@ namespace
 constexpr int64_t kDim = 1024;
 
 // How this backend's answer checks name things (include/common/answer_check.h).
-const clpeak::AnswerWords kWords = {"this provider's", "onnx_numeric_error", "the fp32 reference",
-                                    "the fp32 reference"};
+const xpupeak::AnswerWords kWords = {"this provider's", "onnx_numeric_error", "the fp32 reference",
+                                     "the fp32 reference"};
 
 // What the accuracy row of a wrong answer says became of its rates.
 constexpr const char *kRowConsequence = "so its rate rows are withheld";
@@ -541,8 +541,8 @@ void measureAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant
       {
         if (firstErr.empty())
           firstErr = err;
-        CLPEAK_VLOG("onnx-numeric-error[%s/%s]: %s rejected: %s\n",
-                    ep.providerKey.c_str(), what, qs.name, err.c_str());
+        XPUPEAK_VLOG("onnx-numeric-error[%s/%s]: %s rejected: %s\n",
+                     ep.providerKey.c_str(), what, qs.name, err.c_str());
         continue;
       }
       // Fusion check is the selector, exactly as in gemm.cpp.
@@ -554,8 +554,8 @@ void measureAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant
       const std::string joined = joinRan(ops);
       if (tried.empty() && !joined.empty())
         tried = joined;
-      CLPEAK_VLOG("onnx-numeric-error[%s/%s]: %s executed %s (no fused quantized matmul)\n",
-                  ep.providerKey.c_str(), what, qs.name, joined.c_str());
+      XPUPEAK_VLOG("onnx-numeric-error[%s/%s]: %s executed %s (no fused quantized matmul)\n",
+                   ep.providerKey.c_str(), what, qs.name, joined.c_str());
       // Symmetry requires a fused kernel, so an unfused success is not kept.
       raw.clear();
       if (firstErr.empty())
@@ -635,8 +635,8 @@ void measureAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant
     // The fusion check the gemm probe applies to these rows.
     if (!onnxOpsRanQuantizedMatMul(ops))
     {
-      CLPEAK_VLOG("onnx-numeric-error[%s/%s]: executed %s (no fused quantized matmul)\n",
-                  ep.providerKey.c_str(), what, joinRan(ops).c_str());
+      XPUPEAK_VLOG("onnx-numeric-error[%s/%s]: executed %s (no fused quantized matmul)\n",
+                   ep.providerKey.c_str(), what, joinRan(ops).c_str());
       c.status = ResultStatus::Unsupported;
       c.error = unfusedReason(v, joinRan(ops));
       return;
@@ -689,10 +689,10 @@ void measureAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep, const Variant
 
   // The figure.  The reference multiplies values in [-1, 1] in fp32, so a
   // NaN or an infinity in it is the provider's.
-  clpeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
+  xpupeak::judgeAnswer(c, got.data(), ref.data(), got.size(), kWords);
   if (c.ppm >= 0.0)
-    CLPEAK_VLOG("onnx-numeric-error[%s/%s]: %.2f ppm%s\n", ep.providerKey.c_str(), what, c.ppm,
-                c.wrong() ? ", a wrong answer" : "");
+    XPUPEAK_VLOG("onnx-numeric-error[%s/%s]: %.2f ppm%s\n", ep.providerKey.c_str(), what, c.ppm,
+                 c.wrong() ? ", a wrong answer" : "");
 }
 
 } // namespace
@@ -723,7 +723,7 @@ std::string OnnxPeak::wrongAnswer(const OrtRuntime &rt, const onnx_ep_info_t &ep
 {
   const AnswerCheck &c = answerCheck(rt, ep, label);
   const Variant *v = findVariant(label);
-  return clpeak::wrongAnswerReason(c, kWords, v ? whatOf(*v) : label);
+  return xpupeak::wrongAnswerReason(c, kWords, v ? whatOf(*v) : label);
 }
 
 int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
@@ -745,7 +745,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   {
     if (!v.note)
       continue;   // a check the rate rows ask, with no row of its own
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
 
     logger::EmitOptions o;
@@ -761,8 +761,8 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // publishes the accuracy alone.
     if (onnxGemmFolded(ep, v.label))
     {
-      CLPEAK_VLOG("onnx-numeric-error[%s/%s]: suppressed (gemm folded)\n",
-                  ep.providerKey.c_str(), v.label);
+      XPUPEAK_VLOG("onnx-numeric-error[%s/%s]: suppressed (gemm folded)\n",
+                   ep.providerKey.c_str(), v.label);
       test.skip(v.label, ResultStatus::Unsupported,
                 "suppressed: onnx-gemm folded the operands for this datatype, "
                 "so no rate was published for the pair",
@@ -777,7 +777,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (c.wrong())
     {
       test.skip(v.label, ResultStatus::Error,
-                clpeak::wrongAnswerRowReason(c, kWords, kRowConsequence), o.description);
+                xpupeak::wrongAnswerRowReason(c, kWords, kRowConsequence), o.description);
       continue;
     }
     if (c.ppm < 0.0)

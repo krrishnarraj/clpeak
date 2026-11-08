@@ -116,8 +116,8 @@ uint64_t weightBytes(const LitertPlan &p)
 uint64_t kvBytes(const LitertPlan &p, bool int8Kv, int64_t kv)
 {
   LitertPlan fp = p;
-  if (fp.act == clpeak_tflite::TfType::I8)
-    fp.act = clpeak_tflite::TfType::F32;
+  if (fp.act == xpupeak_tflite::TfType::I8)
+    fp.act = xpupeak_tflite::TfType::F32;
   const uint64_t elem = int8Kv ? 1 : litertElemBytes(litertConstantType(fp), 1);
   return 2ull * (uint64_t)kHeads * (uint64_t)kv * (uint64_t)kHeadDim * elem;
 }
@@ -181,7 +181,7 @@ struct VariantResult
   // graph pipelines each through both, each regime racing them as gemm.cpp
   // does; one form everywhere else.
   std::vector<LitertForm> forms;
-  clpeak::MultiFormRace prefillRace{1}, decodeRace{1};
+  xpupeak::MultiFormRace prefillRace{1}, decodeRace{1};
   // The failure that took a regime's last racing form out: what a longer
   // prompt or context, which then has no form left to run it, reports.
   Point prefillLeft, decodeLeft;
@@ -257,14 +257,14 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
                              litertGpuFormWords(plan, form);
     if (!s)
     {
-      CLPEAK_VLOG("litert-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
-                  what.c_str(), err.c_str());
+      XPUPEAK_VLOG("litert-block[%s/%s]: %s create failed: %s\n", dev.displayName.c_str(), v.label,
+                   what.c_str(), err.c_str());
       pt.error = err;
       pt.status = ResultStatus::Unsupported;
       return;
     }
-    CLPEAK_VLOG("litert-block[%s/%s]: %s create %.2f s\n", dev.displayName.c_str(), v.label, what.c_str(),
-                s->createUs / 1.0e6);
+    XPUPEAK_VLOG("litert-block[%s/%s]: %s create %.2f s\n", dev.displayName.c_str(), v.label, what.c_str(),
+                 s->createUs / 1.0e6);
     pt.createUs = s->createUs;
     if (!s->onDevice())
     {
@@ -280,8 +280,8 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       return;
     }
     LitertPlan sp = plan;
-    if (sp.act == clpeak_tflite::TfType::I8)
-      sp.act = clpeak_tflite::TfType::F32;   // the block's float parts carry the scalar
+    if (sp.act == xpupeak_tflite::TfType::I8)
+      sp.act = xpupeak_tflite::TfType::F32;   // the block's float parts carry the scalar
     if (!litertBindScalar(*s, sp, err))
     {
       pt.error = err;
@@ -305,7 +305,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
                : "for a " + std::to_string(prefillSeq) + "-token prompt");
     if (!wrong.empty())
     {
-      CLPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
+      XPUPEAK_VLOG("litert-block[%s/%s]: %s\n", dev.displayName.c_str(), v.label, wrong.c_str());
       pt.error = wrong;
       pt.status = ResultStatus::Error;
       pt.nonFinite = true;
@@ -326,14 +326,14 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
   auto measureRaced = [&](size_t vi, bool decode, int64_t kvLen, int64_t prefillSeq, Point &pt)
   {
     VariantResult &vr = results[vi];
-    clpeak::MultiFormRace &race = decode ? vr.decodeRace : vr.prefillRace;
+    xpupeak::MultiFormRace &race = decode ? vr.decodeRace : vr.prefillRace;
     Point &left = decode ? vr.decodeLeft : vr.prefillLeft;
     const size_t nf = vr.forms.size();
     std::vector<Point> pts(nf);
     std::vector<double> rate(nf, 0.0), build(nf, 0.0);
     for (size_t f = 0; f < nf; f++)
     {
-      if (!race.runs(f) || clpeak::cancelRequested())
+      if (!race.runs(f) || xpupeak::cancelRequested())
         continue;
       measure(kVariants[vi], plans[vi], vr.forms[f], decode, kvLen, prefillSeq, pts[f]);
       if (pts[f].us > 0.0)
@@ -359,8 +359,8 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     size_t w = nf, failed = nf;
     for (size_t f = 0; f < nf; f++)
     {
-      if (rate[f] > 0.0 && (w == nf || rate[f] > rate[w] * clpeak::kFormRaceTie ||
-                            (rate[f] * clpeak::kFormRaceTie >= rate[w] && build[w] >= build[f] * clpeak::kFormRaceBuildGap)))
+      if (rate[f] > 0.0 && (w == nf || rate[f] > rate[w] * xpupeak::kFormRaceTie ||
+                            (rate[f] * xpupeak::kFormRaceTie >= rate[w] && build[w] >= build[f] * xpupeak::kFormRaceBuildGap)))
         w = f;
       if (failed == nf && !pts[f].error.empty())
         failed = f;
@@ -431,8 +431,8 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       vr.skipStatus = ResultStatus::Error;
       return false;
     }
-    vr.prefillRace = clpeak::MultiFormRace(vr.forms.size());
-    vr.decodeRace = clpeak::MultiFormRace(vr.forms.size());
+    vr.prefillRace = xpupeak::MultiFormRace(vr.forms.size());
+    vr.decodeRace = xpupeak::MultiFormRace(vr.forms.size());
     if (v.int8Kv && dev.accel != LitertAccel::Npu)
     {
       // XNNPACK dequantizes a constant int8 tensor once, when the model
@@ -450,7 +450,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     {
       const uint64_t acts = (64ull << 20) * litertElemBytes(plan.act, 1) / 2;
       const uint64_t needed = 2 * weightBytes(plan) + kvBytes(plan, v.int8Kv, contextsFor(v).back()) + acts;
-      const uint64_t budget = clpeak::memoryBudget(~0ull, 8);
+      const uint64_t budget = xpupeak::memoryBudget(~0ull, 8);
       if (budget && budget < needed)
       {
         vr.skipReason = "not enough memory for the canonical block; its geometry is fixed so the "
@@ -562,17 +562,17 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (!profileReadable || !litertProfilesNameKernels(dev.accel))
         return std::string();
       LitertPlan sp = plan;
-      if (sp.act == clpeak_tflite::TfType::I8)
-        sp.act = clpeak_tflite::TfType::F32;
+      if (sp.act == xpupeak_tflite::TfType::I8)
+        sp.act = xpupeak_tflite::TfType::F32;
       const std::string kernel = litertProfiledKernel(
           rt, dev, [&] { return litertBlockModel(plan, shapeFor(v, false, kDecodeKv, seq)); },
           litertConfigFor(plan, vr.forms[f], true), sp);
-      CLPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'\n", dev.displayName.c_str(),
-                  v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str());
+      XPUPEAK_VLOG("litert-block[%s/%s]: prefill_s%lld%s projections ran as '%s'\n", dev.displayName.c_str(),
+                   v.label, (long long)seq, litertGpuFormWords(plan, vr.forms[f]).c_str(), kernel.c_str());
       if (litertKernelArithmetic(kernel, dev.accel) == LitertArithmetic::Unknown)
       {
-        CLPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",
-                    dev.displayName.c_str());
+        XPUPEAK_VLOG("litert-block[%s]: no kernel to read in the profile, so no more are taken\n",
+                     dev.displayName.c_str());
         profileReadable = false;
       }
       return kernel;
@@ -682,7 +682,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     auto test = currentDeviceScope->beginTest(prefillSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       if (v.unit || v.decodeOnly)
@@ -694,7 +694,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       }
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
         profilePrefill(vi, seq);
@@ -711,7 +711,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     auto test = currentDeviceScope->beginTest(prefillOpsSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       if (!v.unit || v.decodeOnly)
@@ -723,7 +723,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       }
       for (int64_t seq : promptsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         measurePrefill(vi, seq);
         profilePrefill(vi, seq);
@@ -738,7 +738,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     auto test = currentDeviceScope->beginTest(decodeSpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       const LitertPlan &plan = plans[vi];
@@ -773,7 +773,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     auto test = currentDeviceScope->beginTest(latencySpec);
     for (size_t vi = 0; vi < kNVariants; vi++)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
       const Variant &v = kVariants[vi];
       VariantResult &vr = results[vi];
@@ -797,7 +797,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       }
       for (int64_t kv : contextsFor(v))
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         if (!vr.usable)

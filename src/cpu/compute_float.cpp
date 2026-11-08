@@ -9,7 +9,7 @@
 // cpu_kernels_tu.cpp and selected at runtime; here we just look up the chosen
 // variant and emit (or record Unsupported when no variant exists for this CPU).
 
-using clpeak_cpu::kernelMenu;
+using xpupeak_cpu::kernelMenu;
 
 int CpuPeak::runComputeSP(benchmark_config_t &cfg)
 {

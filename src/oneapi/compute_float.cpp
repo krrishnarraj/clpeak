@@ -5,12 +5,12 @@
 #include <common/form_race.h>
 
 #include <sycl/sycl.hpp>
-#if defined(CLPEAK_ONEAPI_HAS_BF16) || __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
+#if defined(XPUPEAK_ONEAPI_HAS_BF16) || __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
 #endif
 #include <algorithm>
 
-namespace clpeak_oneapi {
+namespace xpupeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
                            uint32_t elemSize);
@@ -70,7 +70,7 @@ float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 // where oneAPI parts company with the other two: their fp16 pinned to 16 runs
 // at its fp32 rate, but here the pinned build read 9.50 against 9.75 at the
 // compiler's width and won at half8, 9.37 against 7.79, so nothing on that
-// card drops it.  The widths race as a clpeak::FormRace that drops only a
+// card drops it.  The widths race as a xpupeak::FormRace that drops only a
 // clear loser (include/common/form_race.h), as in those two backends.
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
 
@@ -118,7 +118,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
                        T *out, uint64_t totalThreads, uint32_t blockSize,
                        int baseIters, double scalarA, uint32_t workPerWI,
                        unsigned int targetTimeUs, unsigned int forced,
-                       clpeak::FormRace &widthRace)
+                       xpupeak::FormRace &widthRace)
 {
   using VecT = sycl::vec<T, W>;
   int iters = baseIters / W;
@@ -294,7 +294,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     test.skip(label, ResultStatus::Error, "kernel launch failed", note);
     return;
   }
-  const float squaring = clpeak_oneapi::computeFlops(totalThreads, workPerWI, us);
+  const float squaring = xpupeak_oneapi::computeFlops(totalThreads, workPerWI, us);
   float value = squaring;
 
   // Time a second shape against the squaring reading: its rate, or 0 when it
@@ -304,18 +304,18 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     float shapeUs = peak.runKernel(dev, shape, targetTimeUs, forced);
     if (shapeUs <= 0.0f)
       return 0.0;
-    float rate = clpeak_oneapi::computeFlops(totalThreads, workPerWI, shapeUs);
-    CLPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
+    float rate = xpupeak_oneapi::computeFlops(totalThreads, workPerWI, shapeUs);
+    XPUPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
     if (rate > squaring * MAX_ALT_CHAIN_RATIO)
     {
-      CLPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
-                  label, what, rate / squaring);
+      XPUPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
+                   label, what, rate / squaring);
       return 0.0;
     }
     return rate;
   };
 
-  CLPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
+  XPUPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
   const bool sg16 = offersSubGroup16(dev.info);
   double raced[2] = {0.0, 0.0};
   if (widthRace.runs(false))
@@ -335,9 +335,9 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     {
       widthRace.dropTrailing(raced);
       if (!widthRace.runs(false) || !widthRace.runs(true))
-        CLPEAK_VLOG("%s: alt chain at the %s sub-group trails by %.1fx -- dropped from here\n",
-                    label, widthRace.runs(true) ? "compiler's" : "16",
-                    widthRace.runs(true) ? raced[1] / raced[0] : raced[0] / raced[1]);
+        XPUPEAK_VLOG("%s: alt chain at the %s sub-group trails by %.1fx -- dropped from here\n",
+                     label, widthRace.runs(true) ? "compiler's" : "16",
+                     widthRace.runs(true) ? raced[1] / raced[0] : raced[0] / raced[1]);
     }
   }
 
@@ -354,7 +354,7 @@ static void runFpSweep(OneapiPeak &peak, OneapiDevice &dev,
                        unsigned int targetTimeUs, unsigned int forced)
 {
   const std::string b(baseLabel);
-  clpeak::FormRace widthRace;
+  xpupeak::FormRace widthRace;
   runFpWidth<Tag, T, 1, D>(peak, dev, test, b.c_str(),          out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
   runFpWidth<Tag, T, 2, D>(peak, dev, test, (b + "2").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
   runFpWidth<Tag, T, 4, D>(peak, dev, test, (b + "4").c_str(),  out, totalThreads, blockSize, baseIters, scalarA, workPerWI, targetTimeUs, forced, widthRace);
@@ -377,7 +377,7 @@ int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
      TestShape::Homogeneous, "vector width"});
 
   const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
+  uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
   uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   float *out = sycl::malloc_device<float>(totalThreads, dev.stream);
@@ -415,7 +415,7 @@ int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
   }
 
   const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(sycl::half));
+  uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(sycl::half));
   uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   sycl::half *out = sycl::malloc_device<sycl::half>(totalThreads, dev.stream);
@@ -454,7 +454,7 @@ int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
   }
 
   const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(double));
+  uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(double));
   uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   double *out = sycl::malloc_device<double>(totalThreads, dev.stream);
@@ -484,18 +484,18 @@ static float raceScalarShapes(OneapiPeak &peak, OneapiDevice &dev, const char *l
                               const OneapiPeak::KernelSubmitter &alt16,
                               unsigned int targetTimeUs, unsigned int forced)
 {
-  const float squaring = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, squaringUs);
-  CLPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
+  const float squaring = xpupeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, squaringUs);
+  XPUPEAK_VLOG("%s: squaring chain %.1f flops\n", label, squaring);
   float value = squaring;
   auto race = [&](const OneapiPeak::KernelSubmitter &shape, const char *what) {
     float shapeUs = peak.runKernel(dev, shape, targetTimeUs, forced);
     if (shapeUs <= 0.0f)
       return;
-    float rate = clpeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, shapeUs);
-    CLPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
+    float rate = xpupeak_oneapi::computeFlops(totalThreads, COMPUTE_FP_WORK_PER_WI, shapeUs);
+    XPUPEAK_VLOG("%s: %s %.1f flops\n", label, what, rate);
     if (rate > squaring * MAX_ALT_CHAIN_RATIO)
-      CLPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
-                  label, what, rate / squaring);
+      XPUPEAK_VLOG("%s: %s %.1fx faster -- rejecting it as a compiler fold\n",
+                   label, what, rate / squaring);
     else if (rate > value)
       value = rate;
   };
@@ -531,7 +531,7 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
   }
 
   const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
+  uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
   uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   float *out = sycl::malloc_device<float>(totalThreads, dev.stream);
@@ -659,7 +659,7 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
   }
 
   const uint32_t blockSize = 256;
-  uint32_t numBlocks = clpeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
+  uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
   uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
 
   float *out = sycl::malloc_device<float>(totalThreads, dev.stream);

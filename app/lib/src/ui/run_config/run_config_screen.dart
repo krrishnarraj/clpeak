@@ -6,7 +6,7 @@ import '../../model/result_model.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/settings_service.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/kit.dart';
 
 /// Custom run configuration: devices, categories (chips only — individual
@@ -194,7 +194,7 @@ class _BackendSelector extends StatelessWidget {
         children: [
           CPanelHead(
             title: backend.name,
-            icon: ClpeakTheme.backendIcon(backend.name),
+            icon: XpupeakTheme.backendIcon(backend.name),
             trailing: CSwitch(
               value: selectedCount > 0,
               onChanged: (on) => service.updateConfig((c) {
@@ -266,7 +266,7 @@ class _CategoryChips extends StatelessWidget {
               CChip(
                 label: category.label,
                 selected: config.categories.contains(category),
-                color: ClpeakTheme.categoryColor(category,
+                color: XpupeakTheme.categoryColor(category,
                     brightness: brightness),
                 onTap: () => service.updateConfig((c) =>
                     c.categories.contains(category)

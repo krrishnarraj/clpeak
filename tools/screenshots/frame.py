@@ -4,7 +4,7 @@
 Each raw capture (app/integration_test/screenshots_test.dart, 2x) becomes a
 window: a slim title bar, rounded corners, a hairline border and a soft
 shadow on a transparent ground, scaled to OUT_WIDTH.  The window colours are
-the app's own theme tokens (app/lib/src/theme/clpeak_theme.dart), so a frame
+the app's own theme tokens (app/lib/src/theme/xpupeak_theme.dart), so a frame
 never reads as a different product from the pixels inside it.
 
 Written as 8-bit palette PNGs (palettize), which is what keeps them in the

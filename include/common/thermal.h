@@ -1,5 +1,5 @@
-#ifndef CLPEAK_THERMAL_H
-#define CLPEAK_THERMAL_H
+#ifndef XPUPEAK_THERMAL_H
+#define XPUPEAK_THERMAL_H
 
 // Pauses a run while the OS says the device is too hot to touch.
 //
@@ -26,7 +26,7 @@
 
 #include <functional>
 
-namespace clpeak {
+namespace xpupeak {
 
 // The OS's thermal status is watched for as long as one lives: one per run,
 // beside KeepAwake, in the CLI's run loop and the GUI bridge's alike.
@@ -47,6 +47,6 @@ public:
 // runs once, when the gate is about to wait (see holdGate in screen_hold.h).
 void thermalGate(const std::function<void()> &beforePausing = {});
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_THERMAL_H
+#endif // XPUPEAK_THERMAL_H

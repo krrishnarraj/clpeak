@@ -70,8 +70,8 @@ Result measure(const coreml_device_info_t &dev, int spec, int64_t d, unsigned wa
     return r;
   }
   const double createUs = coremlCreateUs(*s);
-  CLPEAK_VLOG("coreml-tensor-bw[%s]: %lld dim create %.2f s\n", dev.displayName.c_str(),
-              (long long)d, createUs / 1.0e6);
+  XPUPEAK_VLOG("coreml-tensor-bw[%s]: %lld dim create %.2f s\n", dev.displayName.c_str(),
+               (long long)d, createUs / 1.0e6);
   if (!s->onDevice())
   {
     r.error = coremlOffDeviceReason(dev, *s);
@@ -156,14 +156,14 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
   // bias of tens of microseconds against rungs that take milliseconds.
   Result floor = measureFloor(dev, spec, warmupCount, forceIters, specifiedIters);
   const double floorUs = floor.us > 0.0 ? floor.us : 0.0;
-  CLPEAK_VLOG("coreml-tensor-bw[%s]: per-dispatch floor %.1f us\n", dev.displayName.c_str(), floorUs);
+  XPUPEAK_VLOG("coreml-tensor-bw[%s]: per-dispatch floor %.1f us\n", dev.displayName.c_str(), floorUs);
 
   double prevBps = 0.0;
   bool stillFalling = true;
   size_t index = 0;
   for (const Size &s : kSizes)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const size_t rung = index++;
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
@@ -171,7 +171,7 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
     // The weights are held as any constant is (coremlHeldBytes); the
     // vector they multiply is nothing beside them.
-    if (coremlHeldBytes(bytes, 0) > clpeak::memoryBudget(3ull << 30))
+    if (coremlHeldBytes(bytes, 0) > xpupeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
         test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note);
@@ -197,8 +197,8 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
       break;
     }
     const double bps = (double)bytes / (netUs * 1.0e-6);
-    CLPEAK_VLOG("coreml-tensor-bw[%s]: %s -> %.2f GB/s (%.1f us net of %.1f)\n", dev.displayName.c_str(),
-                s.label, bps / 1.0e9, netUs, floorUs);
+    XPUPEAK_VLOG("coreml-tensor-bw[%s]: %s -> %.2f GB/s (%.1f us net of %.1f)\n", dev.displayName.c_str(),
+                 s.label, bps / 1.0e9, netUs, floorUs);
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;
     test.emit(s.label, (float)bps, s.note);

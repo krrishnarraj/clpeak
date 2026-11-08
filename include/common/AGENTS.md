@@ -11,7 +11,7 @@ No backend-specific includes live here.
 - Looking for CLI options struct? → `options.h`
 - Looking for result output format? → `run_document.h` (model) / `docs/format-v3.md` (schema)
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
-- Emitting a diagnostic? → `CLPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `CLPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
+- Emitting a diagnostic? → `XPUPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `XPUPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
 - Looking for gating? → `peak.h` (gating is part of Peak): a backend's one gate per Benchmark per device is `admit()`, whose guard marks the Benchmark finished for the run's checkpoint; `isAllowed()` is for asking without starting anything
 - Classifying or documenting a test? → see *What a backend authors at beginTest()* below
@@ -74,7 +74,7 @@ Two things are easy to get wrong here:
   whole test in flops. Both presenters print the unit per row, so no row is
   mislabelled by the test header.
 
-**A test's `CLPEAK_VLOG` lines belong after its `beginTest()`.** The table
+**A test's `XPUPEAK_VLOG` lines belong after its `beginTest()`.** The table
 streams per metric, and the run log stamps every diagnostic with the *open*
 scope; a line emitted during the *setup* that precedes `beginTest()` therefore
 prints under the previous test's readings and is filed under that test in the
@@ -175,7 +175,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 |------|---------|
 | `peak.h` | `Peak` abstract base class + gating — every backend implements this |
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
-| `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `CLPEAK_LOG` / `CLPEAK_VLOG`, `LogSink`) |
+| `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `XPUPEAK_LOG` / `XPUPEAK_VLOG`, `LogSink`) |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
 | `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix, `formatReading()` the same as one string for a reading quoted in a description |
@@ -188,8 +188,8 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
 | `inventory.h` | `InventoryDevice`, `BackendInventory`, `inventoryToJson()` (the GUI catalog) and `writeInventoryBackends()` (the same array inside a verbose run document) |
-| `form_race.h` | `clpeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out). `clpeak::MultiFormRace` — the same rule over more forms, for work with more than one choice (LiteRT's int8 operators and GPU kernel policy) |
-| `answer_check.h` | `clpeak::AnswerCheck` — whether an ML runtime's answer is right: the line the ONNX Runtime, Core ML and LiteRT backends share (`kWrongAnswerPpm`, 50% RMS, and why it sits there), the figure (`judgeAnswer`), and the reasons a refused rate row (`wrongAnswerReason`) and a wrong answer's accuracy row (`wrongAnswerRowReason`) give. Each backend measures and memoises its own checks in its `numeric_error.cpp` |
+| `form_race.h` | `xpupeak::FormRace` — two spellings of the same work timed point by point, the faster reported; the rule that settles a race early (Core ML's weight layouts, the Vulkan, OpenCL and oneAPI compute peaks' sub-group widths, where only a clear loser drops out). `xpupeak::MultiFormRace` — the same rule over more forms, for work with more than one choice (LiteRT's int8 operators and GPU kernel policy) |
+| `answer_check.h` | `xpupeak::AnswerCheck` — whether an ML runtime's answer is right: the line the ONNX Runtime, Core ML and LiteRT backends share (`kWrongAnswerPpm`, 50% RMS, and why it sits there), the figure (`judgeAnswer`), and the reasons a refused rate row (`wrongAnswerReason`) and a wrong answer's accuracy row (`wrongAnswerRowReason`) give. Each backend measures and memoises its own checks in its `numeric_error.cpp` |
 | `dynlib.h` | `dynOpen()`/`dynSym()` — load-on-demand vendor libraries, so the shipped binary needs only the GPU driver. No close: a handle stays mapped for the life of the process, even one that turned out to be the wrong file (the header has the exit crash that proved it) |
 
 ## When You Change This Directory

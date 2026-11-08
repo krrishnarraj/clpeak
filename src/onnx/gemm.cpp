@@ -132,12 +132,12 @@ namespace
   // Everything a rung holds at once (onnxHeldBytes: the operands, and every
   // layer's output), capped at a quarter of physical memory -- a fixed
   // ceiling here would be a crash on a phone and a needless limit on a
-  // workstation; see clpeak::memoryBudget -- and at 8 GB, which still admits
+  // workstation; see xpupeak::memoryBudget -- and at 8 GB, which still admits
   // the 8192-wide integer and 4-bit chains CPU providers peak at.  On a
   // Threadripper's CPU provider the 4096-wide fp32 chain, 1 GB of weights,
   // peaked 3.2 GB above them, and a count of the operands alone admitted it
   // on the 15.8 GB phone the same rung through LiteRT had killed.
-  static uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
+  static uint64_t maxRungBytes() { return xpupeak::memoryBudget(8ull << 30); }
 
   // And the operands alone are capped by protobuf.  An ONNX model is a
   // protobuf message, whose serialized size cannot exceed 2 GiB, and the
@@ -284,9 +284,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // and 2048 and lost its device at 4096, and only the runtime's log said
     // so.
     auto logFailure = [&](int64_t D, const char *what, const std::string &why) {
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d %s: %s\n",
-                  ep.providerKey.c_str(), tag, (long long)D, layers, what,
-                  why.empty() ? "no reason given" : why.c_str());
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d %s: %s\n",
+                   ep.providerKey.c_str(), tag, (long long)D, layers, what,
+                   why.empty() ? "no reason given" : why.c_str());
     };
 
     int rungs = 0;
@@ -322,7 +322,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // an NPU.
     double scoutUs = 0.0;
     int64_t startDim = kMinDim;
-    if (mlLadderScouts(ep.deviceType) && !clpeak::cancelRequested())
+    if (mlLadderScouts(ep.deviceType) && !xpupeak::cancelRequested())
     {
       GemmSetup s = makeSetup(rt, ep, v, kScoutDim, /*profile=*/false,
                               pr.actDtype, pr.reduceInFloat, pr.wgtDtype,
@@ -337,10 +337,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             2.0 * (double)kMinDim * (double)kMinDim * (double)kMinDim * layers / lastRate;
         if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / layers > kMaxIterUs)
           startDim = kScoutDim;
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d scout %.1f ms%s\n",
-                    ep.providerKey.c_str(), tag, (long long)kScoutDim, layers,
-                    scoutUs / 1.0e3,
-                    startDim == kScoutDim
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d scout %.1f ms%s\n",
+                     ep.providerKey.c_str(), tag, (long long)kScoutDim, layers,
+                     scoutUs / 1.0e3,
+                     startDim == kScoutDim
                         ? ", too slow for the first size: climbing from the scout's"
                         : "");
       }
@@ -355,7 +355,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     for (int64_t D = startDim; D <= kMaxDim; D *= 2)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       // Would this size fit, and would one iteration finish in reasonable
@@ -370,16 +370,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (weightBytes > kProtobufCeiling || held > budget)
       {
         if (weightBytes > kProtobufCeiling)
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
-                      "past protobuf's 2 GB, stopping\n",
-                      ep.providerKey.c_str(), tag,
-                      (long long)D, (unsigned long long)(weightBytes >> 20));
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of operands, "
+                       "past protobuf's 2 GB, stopping\n",
+                       ep.providerKey.c_str(), tag,
+                       (long long)D, (unsigned long long)(weightBytes >> 20));
         else
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of a %llu MB "
-                      "budget, stopping\n",
-                      ep.providerKey.c_str(), tag, (long long)D,
-                      (unsigned long long)(held >> 20),
-                      (unsigned long long)(budget >> 20));
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 needs %llu MB of a %llu MB "
+                       "budget, stopping\n",
+                       ep.providerKey.c_str(), tag, (long long)D,
+                       (unsigned long long)(held >> 20),
+                       (unsigned long long)(budget >> 20));
         endedOnWork = true;
         break;
       }
@@ -392,16 +392,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (runTooLong || predictedUs / layers > kMaxIterUs)
         {
           if (runTooLong)
-            CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d would keep the GPU "
-                        "busy ~%.2f s a run, past --max-time-ml-gpu (%.2f s), "
-                        "stopping\n",
-                        ep.providerKey.c_str(), tag, (long long)D, layers,
-                        predictedUs / 1.0e6, runCapUs / 1.0e6);
+            XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d would keep the GPU "
+                         "busy ~%.2f s a run, past --max-time-ml-gpu (%.2f s), "
+                         "stopping\n",
+                         ep.providerKey.c_str(), tag, (long long)D, layers,
+                         predictedUs / 1.0e6, runCapUs / 1.0e6);
           else
-            CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
-                        "multiply, stopping\n",
-                        ep.providerKey.c_str(),
-                        tag, (long long)D, predictedUs / layers / 1.0e6);
+            XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 would take ~%.1f s per "
+                         "multiply, stopping\n",
+                         ep.providerKey.c_str(),
+                         tag, (long long)D, predictedUs / layers / 1.0e6);
           // Before any rung that prediction is the scout's, and it is all
           // the row has to say.
           if (rungs == 0 && L.err.empty())
@@ -432,12 +432,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             prevCreateUs, prevPrevCreateUs, /*confirming=*/strikes > 0);
         if (predictedUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s "
-                      "(prev %.1f s%s) > %.1f s, stopping\n",
-                      ep.providerKey.c_str(), tag, (long long)D,
-                      predictedUs / 1.0e6, prevCreateUs / 1.0e6,
-                      strikes > 0 ? ", after a size that did not gain" : "",
-                      kOnnxMaxCreateUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 predicted create %.1f s "
+                       "(prev %.1f s%s) > %.1f s, stopping\n",
+                       ep.providerKey.c_str(), tag, (long long)D,
+                       predictedUs / 1.0e6, prevCreateUs / 1.0e6,
+                       strikes > 0 ? ", after a size that did not gain" : "",
+                       kOnnxMaxCreateUs / 1.0e6);
           break;
         }
       }
@@ -450,12 +450,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         createUs = std::chrono::duration<double, std::micro>(
                        std::chrono::steady_clock::now() - createStart)
                        .count();
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d session create %.1f s%s%s%s\n",
-                    ep.providerKey.c_str(), tag, (long long)D, layers,
-                    createUs / 1.0e6,
-                    rv == OnnxReduceView::Rows ? "" : " (reduced ",
-                    rv == OnnxReduceView::Rows ? "" : viewNameFor(rv),
-                    rv == OnnxReduceView::Rows ? "" : ")");
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d session create %.1f s%s%s%s\n",
+                     ep.providerKey.c_str(), tag, (long long)D, layers,
+                     createUs / 1.0e6,
+                     rv == OnnxReduceView::Rows ? "" : " (reduced ",
+                     rv == OnnxReduceView::Rows ? "" : viewNameFor(rv),
+                     rv == OnnxReduceView::Rows ? "" : ")");
         return g;
       };
       double createUs = 0.0;
@@ -475,7 +475,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (!g.session && !g.offDevice && view != OnnxReduceView::Rank4 &&
           !v.conv1x1 &&
           onnxFailureStatus(g.error) == ResultStatus::Unsupported &&
-          !onnxReasonIsOutOfMemory(g.error) && !clpeak::cancelRequested())
+          !onnxReasonIsOutOfMemory(g.error) && !xpupeak::cancelRequested())
       {
         retried = true;
         std::vector<OnnxReduceView> next;
@@ -485,12 +485,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         std::string why = g.error;
         for (OnnxReduceView nv : next)
         {
-          if (clpeak::cancelRequested())
+          if (xpupeak::cancelRequested())
             break;
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused (%s); retrying the "
-                      "reduction %s\n",
-                      ep.providerKey.c_str(), tag, (long long)D, why.c_str(),
-                      viewNameFor(nv));
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused (%s); retrying the "
+                       "reduction %s\n",
+                       ep.providerKey.c_str(), tag, (long long)D, why.c_str(),
+                       viewNameFor(nv));
           double retryUs = 0.0;
           GemmSetup r = build(nv, retryUs);
           if (r.session)
@@ -509,8 +509,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           destroySetup(rt, r);
         }
         if (!g.session)
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused in every view (%s)\n",
-                      ep.providerKey.c_str(), tag, (long long)D, why.c_str());
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 refused in every view (%s)\n",
+                       ep.providerKey.c_str(), tag, (long long)D, why.c_str());
       }
 
       if (!g.session)
@@ -527,8 +527,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           // and each refused size still costs a compile.  Above a measured
           // rung it is the unit declining larger work, which ends the
           // ladder the way any other limit does.
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 %s\n", ep.providerKey.c_str(),
-                      tag, (long long)D, g.error.c_str());
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 %s\n", ep.providerKey.c_str(),
+                       tag, (long long)D, g.error.c_str());
           if (rungs > 0)
           {
             L.offDeviceAbove = D;
@@ -606,9 +606,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // arithmetic differently and is no way around a wrong answer.
       if (!wrong.empty())
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d, %s: %s\n",
-                    ep.providerKey.c_str(), tag, (long long)D, layers,
-                    shapeNameFor(shape), wrong.c_str());
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d, %s: %s\n",
+                     ep.providerKey.c_str(), tag, (long long)D, layers,
+                     shapeNameFor(shape), wrong.c_str());
         L.best = 0.0;
         L.err = wrong;
         L.errStatus = ResultStatus::Error;
@@ -628,8 +628,8 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // Rate per FLOP-count is what the ladder is searching on; the raw rate
       // in ops/us drives the time prediction for the next rung.
       lastRate = ops / mean_us;
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d -> %.3f\n",
-                  ep.providerKey.c_str(), tag, (long long)D, layers, rate);
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d -> %.3f\n",
+                   ep.providerKey.c_str(), tag, (long long)D, layers, rate);
 
       // Per-doubling fold detector, for the foldable shape only.  A folded
       // graph leaves dispatch plus a reduction over D elements, so its time
@@ -671,18 +671,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (computedNothing || workFlat)
       {
         if (computedNothing)
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 took %.1f us against a %.1f us "
-                      "submission -- it computed nothing, constants were "
-                      "folded\n",
-                      ep.providerKey.c_str(), tag, (long long)D, mean_us,
-                      dispatchUs);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 took %.1f us against a %.1f us "
+                       "submission -- it computed nothing, constants were "
+                       "folded\n",
+                       ep.providerKey.c_str(), tag, (long long)D, mean_us,
+                       dispatchUs);
         else
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld, "
-                      "less a %.1f us submission -- %.2fx for 8x the work, "
-                      "constants were folded\n",
-                      ep.providerKey.c_str(), tag, prevUs,
-                      (long long)prevD, mean_us, (long long)D, dispatchUs,
-                      work / prevWork);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld, "
+                       "less a %.1f us submission -- %.2fx for 8x the work, "
+                       "constants were folded\n",
+                       ep.providerKey.c_str(), tag, prevUs,
+                       (long long)prevD, mean_us, (long long)D, dispatchUs,
+                       work / prevWork);
         L.best = 0.0;
         L.err = "this provider folded the operands at compile time: the "
                 "timed runs measure dispatch plus a reduction of a "
@@ -713,16 +713,16 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         }
         if (ladderDropEnds(rate, L.best, 8.0 * mean_us))
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 fell to %.0f%% of the best, and the next "
-                      "size would take ~%.0f s a run, stopping\n",
-                      ep.providerKey.c_str(), tag, (long long)D, 100.0 * rate / L.best,
-                      8.0 * mean_us / 1.0e6);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 fell to %.0f%% of the best, and the next "
+                       "size would take ~%.0f s a run, stopping\n",
+                       ep.providerKey.c_str(), tag, (long long)D, 100.0 * rate / L.best,
+                       8.0 * mean_us / 1.0e6);
           break;
         }
         if (++strikes >= kOnnxPlateauStrikes)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld^3\n",
-                      ep.providerKey.c_str(), tag, (long long)L.bestDim);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld^3\n",
+                       ep.providerKey.c_str(), tag, (long long)L.bestDim);
           break;
         }
       }
@@ -743,10 +743,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // wait, whatever the rate did.
       if (per_iter_us / layers > kMaxIterUs)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 measured %.1f s per multiply, "
-                    "stopping\n",
-                    ep.providerKey.c_str(), tag,
-                    (long long)D, per_iter_us / layers / 1.0e6);
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 measured %.1f s per multiply, "
+                     "stopping\n",
+                     ep.providerKey.c_str(), tag,
+                     (long long)D, per_iter_us / layers / 1.0e6);
         endedOnWork = true;
         break;
       }
@@ -755,10 +755,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // it eight times as long.
       if (runCapUs > 0.0 && per_iter_us > runCapUs)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d measured %.2f s a run, "
-                    "past --max-time-ml-gpu (%.2f s), stopping\n",
-                    ep.providerKey.c_str(), tag, (long long)D, layers,
-                    per_iter_us / 1.0e6, runCapUs / 1.0e6);
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 x%d measured %.2f s a run, "
+                     "past --max-time-ml-gpu (%.2f s), stopping\n",
+                     ep.providerKey.c_str(), tag, (long long)D, layers,
+                     per_iter_us / 1.0e6, runCapUs / 1.0e6);
         endedOnWork = true;
         break;
       }
@@ -768,9 +768,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // the prediction above; truncating it would discard a valid peak.
       if (D != startDim && createUs > kOnnxMaxCreateUs)
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create %.1f s > %.1f s, stopping\n",
-                    ep.providerKey.c_str(), tag,
-                    (long long)D, createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %lld^3 create %.1f s > %.1f s, stopping\n",
+                     ep.providerKey.c_str(), tag,
+                     (long long)D, createUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
         break;
       }
       prevPrevCreateUs = prevCreateUs;
@@ -791,10 +791,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (foldable && L.best > 0.0 && firstUs > 0.0 && lastDim > L.firstDim &&
         lastUs < firstUs * expectedGrowth / 64.0)
     {
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
-                  "work does not scale, constants were folded\n",
-                  ep.providerKey.c_str(), tag, firstUs,
-                  (long long)L.firstDim, lastUs, (long long)lastDim);
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: %.1f us at %lld vs %.1f us at %lld -- "
+                   "work does not scale, constants were folded\n",
+                   ep.providerKey.c_str(), tag, firstUs,
+                   (long long)L.firstDim, lastUs, (long long)lastDim);
       L.best = 0.0;
       L.err = "this runtime folded the operands at load time: it accepted "
               "the request to disable constant folding and ignored it, "
@@ -814,9 +814,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // all the same 179 us, before this rule existed.
     if (foldable && L.best > 0.0 && rungs == 1 && !endedOnWork)
     {
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: one rung, ended on a compile-time gate; "
-                  "cannot rule out folding\n",
-                  ep.providerKey.c_str(), tag);
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: one rung, ended on a compile-time gate; "
+                   "cannot rule out folding\n",
+                   ep.providerKey.c_str(), tag);
       L.best = 0.0;
       L.err = "only one size could be measured before the provider's "
               "compile time ran out, so nothing confirms the timing "
@@ -833,13 +833,13 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         });
     const int64_t K = L.bestDim / 2;
     if (layers > 1 && L.best > 0.0 && !L.folded && fellOff && K >= kMinTallDim &&
-        !clpeak::cancelRequested())
+        !xpupeak::cancelRequested())
     {
       const int64_t squareDim = L.bestDim;
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: fell off past %lld-wide layers; trying "
-                  "%lld-wide layers with taller activations\n",
-                  ep.providerKey.c_str(), tag, (long long)squareDim,
-                  (long long)K);
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: fell off past %lld-wide layers; trying "
+                   "%lld-wide layers with taller activations\n",
+                   ep.providerKey.c_str(), tag, (long long)squareDim,
+                   (long long)K);
       // The first tall rung does the best square rung's multiply-adds, so its
       // time and compile are predicted from that rung's; each one after
       // doubles the rows -- twice the run, about the same weights.
@@ -853,7 +853,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       for (int64_t M = 4 * squareDim; M <= kMaxTallRowsPerDim * squareDim;
            M *= 2)
       {
-        if (clpeak::cancelRequested())
+        if (xpupeak::cancelRequested())
           break;
         const std::string size = std::to_string(M) + " x " + std::to_string(K);
         const uint64_t weightBytes = operandBytes(v, K, shape, layers, M);
@@ -862,10 +862,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             (uint64_t)(layers + 1) * layerOutputBytes(v, K, M));
         if (weightBytes > kProtobufCeiling || held > maxRungBytes())
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s needs %llu MB, past the memory "
-                      "budget or protobuf's 2 GB, stopping\n",
-                      ep.providerKey.c_str(), tag, size.c_str(),
-                      (unsigned long long)(std::max(weightBytes, held) >> 20));
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s needs %llu MB, past the memory "
+                       "budget or protobuf's 2 GB, stopping\n",
+                       ep.providerKey.c_str(), tag, size.c_str(),
+                       (unsigned long long)(std::max(weightBytes, held) >> 20));
           break;
         }
         const double ops = 2.0 * (double)M * (double)K * (double)K * layers;
@@ -873,20 +873,20 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if ((runCapUs > 0.0 && predictedUs > runCapUs) ||
             predictedUs / layers > kMaxIterUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s would take ~%.2f s a run, "
-                      "stopping\n",
-                      ep.providerKey.c_str(), tag, size.c_str(),
-                      predictedUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s would take ~%.2f s a run, "
+                       "stopping\n",
+                       ep.providerKey.c_str(), tag, size.c_str(),
+                       predictedUs / 1.0e6);
           break;
         }
         const double predictedCreateUs =
             (M == 4 * squareDim) ? prevTallCreateUs : 2.0 * prevTallCreateUs;
         if (predictedCreateUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s predicted create %.1f s > %.1f s, "
-                      "stopping\n",
-                      ep.providerKey.c_str(), tag, size.c_str(),
-                      predictedCreateUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s predicted create %.1f s > %.1f s, "
+                       "stopping\n",
+                       ep.providerKey.c_str(), tag, size.c_str(),
+                       predictedCreateUs / 1.0e6, kOnnxMaxCreateUs / 1.0e6);
           break;
         }
 
@@ -897,14 +897,14 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const double createUs = std::chrono::duration<double, std::micro>(
                                     std::chrono::steady_clock::now() - createStart)
                                     .count();
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d session create %.1f s\n",
-                    ep.providerKey.c_str(), tag, size.c_str(), layers,
-                    createUs / 1.0e6);
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d session create %.1f s\n",
+                     ep.providerKey.c_str(), tag, size.c_str(), layers,
+                     createUs / 1.0e6);
         if (!g.session)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d refused, stopping: %s\n",
-                      ep.providerKey.c_str(), tag, size.c_str(), layers,
-                      g.error.empty() ? "no reason given" : g.error.c_str());
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d refused, stopping: %s\n",
+                       ep.providerKey.c_str(), tag, size.c_str(), layers,
+                       g.error.empty() ? "no reason given" : g.error.c_str());
           destroySetup(rt, g);
           break;
         }
@@ -936,18 +936,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         destroySetup(rt, g);
         if (mean_us <= 0.0)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d timed runs failed, stopping: "
-                      "%s\n",
-                      ep.providerKey.c_str(), tag, size.c_str(), layers,
-                      g.error.empty() ? "no reason given" : g.error.c_str());
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d timed runs failed, stopping: "
+                       "%s\n",
+                       ep.providerKey.c_str(), tag, size.c_str(), layers,
+                       g.error.empty() ? "no reason given" : g.error.c_str());
           break;
         }
         // A wrong answer withholds the row, as it does at a square rung.
         if (!wrong.empty())
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d, %s: %s\n",
-                      ep.providerKey.c_str(), tag, size.c_str(), layers,
-                      shapeNameFor(shape), wrong.c_str());
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d, %s: %s\n",
+                       ep.providerKey.c_str(), tag, size.c_str(), layers,
+                       shapeNameFor(shape), wrong.c_str());
           L.best = 0.0;
           L.bestRows = 0;
           L.err = wrong;
@@ -959,17 +959,17 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (foldable && pr.probeUs > 0.0 &&
             mean_us - pr.probeUs < kFoldWorkFloor * pr.probeUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s took %.1f us against a %.1f us "
-                      "submission -- it computed nothing, stopping\n",
-                      ep.providerKey.c_str(), tag, size.c_str(), mean_us,
-                      pr.probeUs);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s took %.1f us against a %.1f us "
+                       "submission -- it computed nothing, stopping\n",
+                       ep.providerKey.c_str(), tag, size.c_str(), mean_us,
+                       pr.probeUs);
           break;
         }
 
         const double rate = ops * 1.0e6 / mean_us;
         predRate = ops / mean_us;
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d -> %.3f\n",
-                    ep.providerKey.c_str(), tag, size.c_str(), layers, rate);
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d -> %.3f\n",
+                     ep.providerKey.c_str(), tag, size.c_str(), layers, rate);
         if (rate > L.best * kOnnxPlateauGain)
         {
           L.best = rate;
@@ -996,18 +996,18 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           // to the third figure, stopped there at 22.7.
           if (!climbing && !gained)
           {
-            CLPEAK_VLOG("onnx-gemm[%s/%s]: %s did not gain on %lld-wide "
-                        "layers, stopping\n",
-                        ep.providerKey.c_str(), tag, size.c_str(),
-                        (long long)squareDim);
+            XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s did not gain on %lld-wide "
+                         "layers, stopping\n",
+                         ep.providerKey.c_str(), tag, size.c_str(),
+                         (long long)squareDim);
             break;
           }
           climbing = true;
           if (++tallStrikes >= kOnnxPlateauStrikes)
           {
-            CLPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld x %lld\n",
-                        ep.providerKey.c_str(), tag,
-                        (long long)L.bestRows, (long long)K);
+            XPUPEAK_VLOG("onnx-gemm[%s/%s]: plateau past %lld x %lld\n",
+                         ep.providerKey.c_str(), tag,
+                         (long long)L.bestRows, (long long)K);
             break;
           }
         }
@@ -1016,10 +1016,10 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
             (runCapUs > 0.0 && per_iter_us > runCapUs) ||
             createUs > kOnnxMaxCreateUs)
         {
-          CLPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d took %.2f s a run and %.1f s "
-                      "to build, stopping\n",
-                      ep.providerKey.c_str(), tag, size.c_str(), layers,
-                      per_iter_us / 1.0e6, createUs / 1.0e6);
+          XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s x%d took %.2f s a run and %.1f s "
+                       "to build, stopping\n",
+                       ep.providerKey.c_str(), tag, size.c_str(), layers,
+                       per_iter_us / 1.0e6, createUs / 1.0e6);
           break;
         }
         prevTallCreateUs = createUs;
@@ -1071,7 +1071,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     // checked before a ladder is built.
     if (const std::string wrong = wrongAnswer(rt, ep, v.label); !wrong.empty())
     {
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: %s\n", ep.providerKey.c_str(), v.label, wrong.c_str());
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s\n", ep.providerKey.c_str(), v.label, wrong.c_str());
       test.skip(v.label, ResultStatus::Error, wrong, o);
       return;
     }
@@ -1093,9 +1093,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     else if (providerFolds && shapes.size() > 1 &&
              shapes.front() == OnnxLiveShape::ResultScaled)
     {
-      CLPEAK_VLOG("onnx-gemm[%s/%s]: this provider folded an earlier row's "
-                  "resident product; starting at %s\n",
-                  ep.providerKey.c_str(), v.label, shapeNameFor(shapes[1]));
+      XPUPEAK_VLOG("onnx-gemm[%s/%s]: this provider folded an earlier row's "
+                   "resident product; starting at %s\n",
+                   ep.providerKey.c_str(), v.label, shapeNameFor(shapes[1]));
       shapes.erase(shapes.begin());
     }
 
@@ -1123,9 +1123,9 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // error.
       if (L.folded && shi + 1 < shapes.size())
       {
-        CLPEAK_VLOG("onnx-gemm[%s/%s]: %s folded, retrying %s\n",
-                    ep.providerKey.c_str(), v.label,
-                    shapeNameFor(shapes[shi]), shapeNameFor(shapes[shi + 1]));
+        XPUPEAK_VLOG("onnx-gemm[%s/%s]: %s folded, retrying %s\n",
+                     ep.providerKey.c_str(), v.label,
+                     shapeNameFor(shapes[shi]), shapeNameFor(shapes[shi + 1]));
         continue;
       }
       break; // settled: this shape produced the row (measurement or error)
@@ -1181,12 +1181,12 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
   for (size_t i = 0; i < kFpVariantCount; i++)
   {
-    if (clpeak::cancelRequested()) break;
+    if (xpupeak::cancelRequested()) break;
     runVariant(kFpVariants[i]);
   }
   for (size_t i = 0; i < kIntVariantCount; i++)
   {
-    if (clpeak::cancelRequested()) break;
+    if (xpupeak::cancelRequested()) break;
     runVariant(kIntVariants[i]);
   }
 

@@ -1,5 +1,5 @@
-#ifndef CLPEAK_DYNLIB_H
-#define CLPEAK_DYNLIB_H
+#ifndef XPUPEAK_DYNLIB_H
+#define XPUPEAK_DYNLIB_H
 
 // Tiny cross-platform dynamic-library loader.  Used to make optional vendor
 // libraries (cuBLASLt / hipBLASLt / rocBLAS, ONNX Runtime, LiteRT) load-on-
@@ -24,7 +24,7 @@
 #include <initializer_list>
 #include <string>
 
-namespace clpeak {
+namespace xpupeak {
 
 // Try each candidate name in order; return the first that loads, or nullptr.
 void *dynOpen(std::initializer_list<const char *> names);
@@ -48,6 +48,6 @@ bool sameModulePath(const std::string &a, const std::string &b);
 // Resolve a symbol; nullptr if missing.
 void *dynSym(void *lib, const char *name);
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#endif // CLPEAK_DYNLIB_H
+#endif // XPUPEAK_DYNLIB_H

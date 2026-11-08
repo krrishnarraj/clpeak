@@ -253,10 +253,10 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     {
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
                                          pipeline, d.specInfo, 0);
-      CLPEAK_VLOG("%s %s: the driver refused the pipeline pinned to subgroup "
-                  "%u and %s\n",
-                  d.resultTag, label, width,
-                  *built ? "built it unpinned" : "unpinned as well");
+      XPUPEAK_VLOG("%s %s: the driver refused the pipeline pinned to subgroup "
+                   "%u and %s\n",
+                   d.resultTag, label, width,
+                   *built ? "built it unpinned" : "unpinned as well");
     }
     if (!*built)
       return -1.0f;
@@ -291,7 +291,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       (!dev.info.maxComputeWorkgroupSubgroups ||
        (uint64_t)wgSize <= (uint64_t)(subgroup / 2) * dev.info.maxComputeWorkgroupSubgroups))
     halfSubgroup = subgroup / 2;
-  clpeak::FormRace widthRace;
+  xpupeak::FormRace widthRace;
   if (!halfSubgroup)
     widthRace.drop(true);
 
@@ -340,7 +340,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
         else if (f == 1)
           widthRace.drop(true);
       }
-      if (clpeak::verboseEnabled() && (altValue[0] > 0.0 || altValue[1] > 0.0))
+      if (xpupeak::verboseEnabled() && (altValue[0] > 0.0 || altValue[1] > 0.0))
       {
         std::string alts;
         for (int f = 0; f < 2; f++)
@@ -355,8 +355,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
             snprintf(reading, sizeof(reading), "%.1f", altValue[f]);
           alts += reading;
         }
-        CLPEAK_VLOG("%s %s: first shape %.1f, alt shape %s %s\n",
-                    d.resultTag, v.label, value, alts.c_str(), d.unit);
+        XPUPEAK_VLOG("%s %s: first shape %.1f, alt shape %s %s\n",
+                     d.resultTag, v.label, value, alts.c_str(), d.unit);
       }
       // The fold guard first, so a reading it rejects cannot decide the race.
       const double first = value;
@@ -365,9 +365,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       {
         if (altValue[f] > first * MAX_ALT_CHAIN_RATIO)
         {
-          CLPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
-                      "compiler fold\n",
-                      d.resultTag, v.label, altValue[f] / first);
+          XPUPEAK_VLOG("%s %s: alt chain %.1fx faster -- rejecting it as a "
+                       "compiler fold\n",
+                       d.resultTag, v.label, altValue[f] / first);
           raced[f] = 0.0;
         }
         else if (altValue[f] > value)
@@ -377,11 +377,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       {
         widthRace.dropTrailing(raced);
         if (!widthRace.runs(false) || !widthRace.runs(true))
-          CLPEAK_VLOG("%s %s: alt shape at subgroup %u trails by %.1fx -- "
-                      "dropped from here\n", d.resultTag, v.label,
-                      widthRace.runs(true) ? subgroup : halfSubgroup,
-                      widthRace.runs(true) ? altValue[1] / altValue[0]
-                                           : altValue[0] / altValue[1]);
+          XPUPEAK_VLOG("%s %s: alt shape at subgroup %u trails by %.1fx -- "
+                       "dropped from here\n", d.resultTag, v.label,
+                       widthRace.runs(true) ? subgroup : halfSubgroup,
+                       widthRace.runs(true) ? altValue[1] / altValue[0]
+                                            : altValue[0] / altValue[1]);
       }
     }
 

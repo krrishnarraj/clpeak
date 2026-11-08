@@ -1,4 +1,4 @@
-// clpeak_engine_main: the desktop app's engine process (clpeak_ffi.h has the
+// xpupeak_engine_main: the desktop app's engine process (xpupeak_ffi.h has the
 // protocol).
 //
 // The desktop app never enumerates or runs in its own process.  That process
@@ -12,7 +12,7 @@
 // CLI has: no toolkit, a main-thread stack, a runtime setup loaded fresh, and
 // a native crash that ends the run instead of the app.
 
-#include "clpeak_ffi.h"
+#include "xpupeak_ffi.h"
 #include "launch.h"
 
 #include <common/common.h>
@@ -94,7 +94,7 @@ public:
             // The app is gone: stop at the next test boundary, which also
             // saves what ran (-o).
             broken_ = true;
-            clpeak::requestCancel();
+            xpupeak::requestCancel();
         }
     }
 
@@ -137,33 +137,33 @@ void onEvent(void *userData, char *json)
     if (!json)
         return;
     static_cast<EventSink *>(userData)->emit(json);
-    clpeak_free_string(json);
+    xpupeak_free_string(json);
 }
 
 // Cancellation, from the app: a "cancel" line, or stdin closing.  A closed
 // stdin means the app has gone, and without it the run would go on alone to
 // the end.  Either way the run stops at the next test boundary with -o
 // saving what ran, as a cancel in the app's own process did.  "pause" and
-// "resume" lines are clpeak_set_paused.
+// "resume" lines are xpupeak_set_paused.
 void watchStdin()
 {
     char line[256];
     while (std::fgets(line, sizeof line, stdin))
     {
         if (std::strncmp(line, "cancel", 6) == 0)
-            clpeak::requestCancel();
+            xpupeak::requestCancel();
         else if (std::strncmp(line, "pause", 5) == 0)
-            clpeak_set_paused(1);
+            xpupeak_set_paused(1);
         else if (std::strncmp(line, "resume", 6) == 0)
-            clpeak_set_paused(0);
+            xpupeak_set_paused(0);
     }
-    clpeak::requestCancel();
+    xpupeak::requestCancel();
 }
 
 std::string take(char *s, const char *fallback)
 {
     std::string out = s ? s : fallback;
-    clpeak_free_string(s);
+    xpupeak_free_string(s);
     return out;
 }
 
@@ -183,8 +183,8 @@ std::string take(char *s, const char *fallback)
 int usage(const char *why)
 {
     std::fprintf(stderr,
-                 "clpeak-engine: %s\n"
-                 "usage: clpeak-engine <clpeak_ffi library> <catalog|launch> "
+                 "xpupeak-engine: %s\n"
+                 "usage: xpupeak-engine <xpupeak_ffi library> <catalog|launch> "
                  "[--set-onnx-library PATH] [--set-onnx-ep [!]NAME=PATH]... "
                  "[--set-onnx-winml PATH] [--set-litert-library PATH] "
                  "[-- run arguments]\n",
@@ -194,7 +194,7 @@ int usage(const char *why)
 
 } // namespace
 
-int clpeak_engine_main(int argc, const char **argv)
+int xpupeak_engine_main(int argc, const char **argv)
 {
     if (argc < 1 || !argv || !argv[0])
         return usage("no mode given");
@@ -218,23 +218,23 @@ int clpeak_engine_main(int argc, const char **argv)
             return usage((std::string("missing value for ") + a).c_str());
         const char *v = argv[++i];
         if (!std::strcmp(a, "--set-onnx-library"))
-            clpeak_set_onnx_library(v);
+            xpupeak_set_onnx_library(v);
         else if (!std::strcmp(a, "--set-onnx-ep"))
             epSpec += (epSpec.empty() ? "" : "\n") + std::string(v);
         else if (!std::strcmp(a, "--set-onnx-winml"))
-            clpeak_set_onnx_winml(1, v);
+            xpupeak_set_onnx_winml(1, v);
         else if (!std::strcmp(a, "--set-litert-library"))
-            clpeak_set_litert_library(v);
+            xpupeak_set_litert_library(v);
         else
             return usage((std::string("unknown option ") + a).c_str());
     }
     if (!epSpec.empty())
-        clpeak_set_onnx_ep_libraries(epSpec.c_str());
+        xpupeak_set_onnx_ep_libraries(epSpec.c_str());
 
     EventSink sink;
     if (!sink.open())
     {
-        std::fprintf(stderr, "clpeak-engine: no stdout to send events on\n");
+        std::fprintf(stderr, "xpupeak-engine: no stdout to send events on\n");
         return 70;  // EX_SOFTWARE
     }
 
@@ -243,20 +243,20 @@ int clpeak_engine_main(int argc, const char **argv)
         // The statuses after the enumeration, which is what loads the
         // runtimes they describe.
         std::string doc = "{\"t\":\"catalog\",\"catalog\":";
-        doc += take(clpeak_copy_backend_catalog_json(), "{\"backends\":[]}");
-        doc += ",\"onnx\":" + take(clpeak_copy_onnx_status_json(), "{}");
-        doc += ",\"litert\":" + take(clpeak_copy_litert_status_json(), "{}");
+        doc += take(xpupeak_copy_backend_catalog_json(), "{\"backends\":[]}");
+        doc += ",\"onnx\":" + take(xpupeak_copy_onnx_status_json(), "{}");
+        doc += ",\"litert\":" + take(xpupeak_copy_litert_status_json(), "{}");
         doc += "}";
         sink.emit(doc.c_str());
         endProcess(0);
     }
 
     std::thread(watchStdin).detach();
-    std::vector<const char *> run{"clpeak"};
+    std::vector<const char *> run{"xpupeak"};
     for (; i < argc; i++)
         run.push_back(argv[i]);
-    const int rc = clpeakLaunch(static_cast<int>(run.size()), run.data(),
-                                &onEvent, &sink, /*resetControls=*/false);
+    const int rc = xpupeakLaunch(static_cast<int>(run.size()), run.data(),
+                                 &onEvent, &sink, /*resetControls=*/false);
     // The status itself travels on the `done` event; the exit code only says
     // whether there was one worth reading.
     endProcess(rc == 0 ? 0 : 1);

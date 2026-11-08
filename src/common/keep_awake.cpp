@@ -2,23 +2,23 @@
 #include <common/common.h>
 
 #if defined(_WIN32)
-#define CLPEAK_KEEP_AWAKE_WINDOWS 1
+#define XPUPEAK_KEEP_AWAKE_WINDOWS 1
 #elif defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
-#define CLPEAK_KEEP_AWAKE_MACOS 1
+#define XPUPEAK_KEEP_AWAKE_MACOS 1
 #endif
 #elif defined(__linux__) && !defined(__ANDROID__)
-#define CLPEAK_KEEP_AWAKE_LINUX 1
+#define XPUPEAK_KEEP_AWAKE_LINUX 1
 #endif
 
-#if defined(CLPEAK_KEEP_AWAKE_WINDOWS)
+#if defined(XPUPEAK_KEEP_AWAKE_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <powrprof.h>
-#elif defined(CLPEAK_KEEP_AWAKE_MACOS)
+#elif defined(XPUPEAK_KEEP_AWAKE_MACOS)
 #include <IOKit/pwr_mgt/IOPMLib.h>
-#elif defined(CLPEAK_KEEP_AWAKE_LINUX)
+#elif defined(XPUPEAK_KEEP_AWAKE_LINUX)
 #include <common/dynlib.h>
 
 #include <cerrno>
@@ -31,9 +31,9 @@
 #include <unistd.h>
 #endif
 
-#if defined(CLPEAK_KEEP_AWAKE_WINDOWS)
+#if defined(XPUPEAK_KEEP_AWAKE_WINDOWS)
 
-namespace clpeak {
+namespace xpupeak {
 
 struct KeepAwake::Impl
 {
@@ -45,7 +45,7 @@ struct KeepAwake::Impl
 KeepAwake::KeepAwake() : impl_(new Impl)
 {
     // What `powercfg /requests` prints under the process; the call copies it.
-    wchar_t reason[] = L"clpeak benchmark run in progress";
+    wchar_t reason[] = L"xpupeak benchmark run in progress";
     REASON_CONTEXT context = {};
     context.Version                   = POWER_REQUEST_CONTEXT_VERSION;
     context.Flags                     = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
@@ -53,8 +53,8 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     impl_->request = PowerCreateRequest(&context);
     if (impl_->request == INVALID_HANDLE_VALUE)
     {
-        CLPEAK_VLOG("keep-awake: PowerCreateRequest failed (error %lu), so the "
-                    "machine may sleep during the run\n", GetLastError());
+        XPUPEAK_VLOG("keep-awake: PowerCreateRequest failed (error %lu), so the "
+                     "machine may sleep during the run\n", GetLastError());
         return;
     }
 
@@ -80,14 +80,14 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     }
 
     if (impl_->system || impl_->display)
-        CLPEAK_VLOG("keep-awake: holding a %s power request%s\n",
-                    impl_->system && impl_->display ? "system + display"
-                    : impl_->system                 ? "system"
-                                                    : "display",
-                    modernStandby ? " (Modern Standby)" : "");
+        XPUPEAK_VLOG("keep-awake: holding a %s power request%s\n",
+                     impl_->system && impl_->display ? "system + display"
+                     : impl_->system                 ? "system"
+                                                     : "display",
+                     modernStandby ? " (Modern Standby)" : "");
     if (error)
-        CLPEAK_VLOG("keep-awake: PowerSetRequest failed (error %lu), so the "
-                    "machine may sleep during the run\n", error);
+        XPUPEAK_VLOG("keep-awake: PowerSetRequest failed (error %lu), so the "
+                     "machine may sleep during the run\n", error);
 }
 
 KeepAwake::~KeepAwake()
@@ -101,11 +101,11 @@ KeepAwake::~KeepAwake()
     CloseHandle(impl_->request);
 }
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#elif defined(CLPEAK_KEEP_AWAKE_MACOS)
+#elif defined(XPUPEAK_KEEP_AWAKE_MACOS)
 
-namespace clpeak {
+namespace xpupeak {
 
 struct KeepAwake::Impl
 {
@@ -119,16 +119,16 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     // sleep on its own timeout.  The name is what `pmset -g assertions` lists.
     const IOReturn r = IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep, kIOPMAssertionLevelOn,
-        CFSTR("clpeak benchmark run in progress"), &impl_->assertion);
+        CFSTR("xpupeak benchmark run in progress"), &impl_->assertion);
     if (r != kIOReturnSuccess)
     {
         impl_->assertion = kIOPMNullAssertionID;
-        CLPEAK_VLOG("keep-awake: IOPMAssertionCreateWithName failed (0x%x), so "
-                    "the machine may sleep during the run\n",
-                    static_cast<unsigned>(r));
+        XPUPEAK_VLOG("keep-awake: IOPMAssertionCreateWithName failed (0x%x), so "
+                     "the machine may sleep during the run\n",
+                     static_cast<unsigned>(r));
         return;
     }
-    CLPEAK_VLOG("keep-awake: holding a PreventUserIdleSystemSleep assertion\n");
+    XPUPEAK_VLOG("keep-awake: holding a PreventUserIdleSystemSleep assertion\n");
 }
 
 KeepAwake::~KeepAwake()
@@ -137,9 +137,9 @@ KeepAwake::~KeepAwake()
         IOPMAssertionRelease(impl_->assertion);
 }
 
-} // namespace clpeak
+} // namespace xpupeak
 
-#elif defined(CLPEAK_KEEP_AWAKE_LINUX)
+#elif defined(XPUPEAK_KEEP_AWAKE_LINUX)
 
 namespace {
 
@@ -177,30 +177,30 @@ const SdBus &sdBus()
 {
     static const SdBus api = [] {
         SdBus b;
-        void *lib = clpeak::dynOpen({"libsystemd.so.0", "libelogind.so.0"});
+        void *lib = xpupeak::dynOpen({"libsystemd.so.0", "libelogind.so.0"});
         if (!lib)
             return b;
         bool ok = true;
-#define CLPEAK_SD_SYM(member, name)                                             \
-    b.member = reinterpret_cast<decltype(b.member)>(clpeak::dynSym(lib, name)); \
+#define XPUPEAK_SD_SYM(member, name)                                            \
+    b.member = reinterpret_cast<decltype(b.member)>(xpupeak::dynSym(lib, name)); \
     ok = ok && (b.member != nullptr)
-        CLPEAK_SD_SYM(openSystem, "sd_bus_open_system");
-        CLPEAK_SD_SYM(openUser, "sd_bus_open_user");
-        CLPEAK_SD_SYM(callMethod, "sd_bus_call_method");
-        CLPEAK_SD_SYM(readMessage, "sd_bus_message_read");
-        CLPEAK_SD_SYM(unrefMessage, "sd_bus_message_unref");
-        CLPEAK_SD_SYM(freeError, "sd_bus_error_free");
-        CLPEAK_SD_SYM(closeBus, "sd_bus_flush_close_unref");
-#undef CLPEAK_SD_SYM
+        XPUPEAK_SD_SYM(openSystem, "sd_bus_open_system");
+        XPUPEAK_SD_SYM(openUser, "sd_bus_open_user");
+        XPUPEAK_SD_SYM(callMethod, "sd_bus_call_method");
+        XPUPEAK_SD_SYM(readMessage, "sd_bus_message_read");
+        XPUPEAK_SD_SYM(unrefMessage, "sd_bus_message_unref");
+        XPUPEAK_SD_SYM(freeError, "sd_bus_error_free");
+        XPUPEAK_SD_SYM(closeBus, "sd_bus_flush_close_unref");
+#undef XPUPEAK_SD_SYM
         b.setTimeout = reinterpret_cast<decltype(b.setTimeout)>(
-            clpeak::dynSym(lib, "sd_bus_set_method_call_timeout"));
+            xpupeak::dynSym(lib, "sd_bus_set_method_call_timeout"));
         b.ok = ok;
         return b;
     }();
     return api;
 }
 
-const char *const kWho = "clpeak";
+const char *const kWho = "xpupeak";
 const char *const kWhy = "benchmark run in progress";
 constexpr unsigned kInhibitSuspend = 4;  // the GNOME session and portal flag
 
@@ -283,7 +283,7 @@ std::string joined(const std::vector<std::string> &items)
 
 } // namespace
 
-namespace clpeak {
+namespace xpupeak {
 
 // logind's inhibitor lives on a descriptor, the desktop's on the session-bus
 // connection that asked for them; closing either ends what it holds, whether
@@ -299,8 +299,8 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     const SdBus &sd = sdBus();
     if (!sd.ok)
     {
-        CLPEAK_VLOG("keep-awake: no libsystemd or libelogind to ask logind or "
-                    "the desktop with, so the machine may sleep during the run\n");
+        XPUPEAK_VLOG("keep-awake: no libsystemd or libelogind to ask logind or "
+                     "the desktop with, so the machine may sleep during the run\n");
         return;
     }
     std::vector<std::string> held, missed;
@@ -373,12 +373,12 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     }
 
     if (!held.empty())
-        CLPEAK_VLOG("keep-awake: holding %s\n", joined(held).c_str());
+        XPUPEAK_VLOG("keep-awake: holding %s\n", joined(held).c_str());
     if (!missed.empty())
-        CLPEAK_VLOG("keep-awake: not held: %s\n", joined(missed).c_str());
+        XPUPEAK_VLOG("keep-awake: not held: %s\n", joined(missed).c_str());
     if (held.empty())
-        CLPEAK_VLOG("keep-awake: nothing held, so the machine may sleep during "
-                    "the run\n");
+        XPUPEAK_VLOG("keep-awake: nothing held, so the machine may sleep during "
+                     "the run\n");
 }
 
 KeepAwake::~KeepAwake()
@@ -389,11 +389,11 @@ KeepAwake::~KeepAwake()
         close(impl_->logindFd);
 }
 
-} // namespace clpeak
+} // namespace xpupeak
 
 #else
 
-namespace clpeak {
+namespace xpupeak {
 
 // Android and iOS: the app holds the screen on itself (screen_wake.dart).
 struct KeepAwake::Impl
@@ -404,6 +404,6 @@ KeepAwake::KeepAwake() {}
 
 KeepAwake::~KeepAwake() = default;
 
-} // namespace clpeak
+} // namespace xpupeak
 
 #endif

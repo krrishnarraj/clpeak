@@ -35,7 +35,7 @@ void appendStr(std::ostringstream &ss, const char *key, const std::string &value
 }
 
 // JSON numbers are '.'-separated by definition, so this must not follow the
-// process locale.  It matters here more than anywhere else in clpeak: the GUI
+// process locale.  It matters here more than anywhere else in xpupeak: the GUI
 // hosts this library inside a toolkit that sets the locale for us (GTK's
 // gtk_init calls setlocale(LC_ALL, "")), so on a comma-decimal desktop a
 // printf("%.4f") emitted `"value":1234,5678` -- malformed JSON that the Dart
@@ -152,7 +152,7 @@ std::string ffiEventToJson(const LogEvent &e)
         // The entry as the document records it (run_document.h LogEntry):
         // the consumer appends it to its own `log` and, when the run ends,
         // reads the same line back from the file.
-        appendStr(ss, "level",  clpeak::logLevelString(e.log.level));
+        appendStr(ss, "level",  xpupeak::logLevelString(e.log.level));
         appendStr(ss, "source", e.log.source);
         ss << ",\"elapsed_s\":" << fmtNum(e.log.elapsedS);
         appendStr(ss, "test",    e.testId);
@@ -168,7 +168,7 @@ std::string ffiEventToJson(const LogEvent &e)
     return ss.str();
 }
 
-void ffiEmitJson(ClpeakEventCallback cb, void *userData, const std::string &json)
+void ffiEmitJson(XpupeakEventCallback cb, void *userData, const std::string &json)
 {
     if (!cb)
         return;

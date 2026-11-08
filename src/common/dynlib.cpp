@@ -12,7 +12,7 @@
 #include <string>
 #include <system_error>
 
-namespace clpeak {
+namespace xpupeak {
 
 void *dynOpen(std::initializer_list<const char *> names)
 {
@@ -74,4 +74,4 @@ bool sameModulePath(const std::string &a, const std::string &b)
   return !x.empty() && !y.empty() && std::filesystem::equivalent(x, y, ec) && !ec;
 }
 
-} // namespace clpeak
+} // namespace xpupeak

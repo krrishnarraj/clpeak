@@ -15,7 +15,7 @@
 
 #include <cstring>
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 using namespace cpu_simd;
@@ -213,7 +213,7 @@ static constexpr int DIV_NACC = 8;
 // Precise FP for the divide/sqrt kernels only: clang via a float_control
 // push/pop region (ends after runFp64SqrtChain), GCC via a per-function
 // attribute.  cl.exe takes neither path but doesn't substitute intrinsics.
-// CLPEAK_HAS_FLOAT_CONTROL (from cpu_simd.h, included above) is unset on
+// XPUPEAK_HAS_FLOAT_CONTROL (from cpu_simd.h, included above) is unset on
 // targets -- 32-bit ARM (armv7) -- where clang doesn't implement the pragma;
 // there f32_div/f32_sqrt already fall back to plain scalar ops with no known
 // substitution risk (see cpu_simd.h), so skipping the pragma is a documented
@@ -222,17 +222,17 @@ static constexpr int DIV_NACC = 8;
 // attribute below is GCC-only -- clang just ignores it with a warning, so a
 // bare `#elif defined(__GNUC__)` would silently misfire on clang-without-
 // float_control instead of falling through to the no-op case.
-#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
+#if defined(__clang__) && defined(XPUPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
-#define CLPEAK_PRECISE_FP
+#define XPUPEAK_PRECISE_FP
 #elif defined(__clang__)
-#define CLPEAK_PRECISE_FP
+#define XPUPEAK_PRECISE_FP
 #elif defined(__GNUC__)
-#define CLPEAK_PRECISE_FP __attribute__((optimize("no-fast-math")))
+#define XPUPEAK_PRECISE_FP __attribute__((optimize("no-fast-math")))
 #else
-#define CLPEAK_PRECISE_FP
+#define XPUPEAK_PRECISE_FP
 #endif
-static CLPEAK_PRECISE_FP double runFp32DivChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runFp32DivChain(uint64_t outer)
 {
   f32v acc[DIV_NACC];
   volatile float vc1 = 1.5f, vc2 = 0.5f;
@@ -251,7 +251,7 @@ static CLPEAK_PRECISE_FP double runFp32DivChain(uint64_t outer)
   return (double)f32_hsum(s);
 }
 
-static CLPEAK_PRECISE_FP double runFp64DivChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runFp64DivChain(uint64_t outer)
 {
   f64v acc[DIV_NACC];
   volatile double vc1 = 1.5, vc2 = 0.5;
@@ -270,7 +270,7 @@ static CLPEAK_PRECISE_FP double runFp64DivChain(uint64_t outer)
   return (double)f64_hsum(s);
 }
 
-static CLPEAK_PRECISE_FP double runFp32SqrtChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runFp32SqrtChain(uint64_t outer)
 {
   f32v acc[DIV_NACC];
   volatile float vc = 0.75f;
@@ -289,7 +289,7 @@ static CLPEAK_PRECISE_FP double runFp32SqrtChain(uint64_t outer)
   return (double)f32_hsum(s);
 }
 
-static CLPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
+static XPUPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
 {
   f64v acc[DIV_NACC];
   volatile double vc = 0.75;
@@ -307,7 +307,7 @@ static CLPEAK_PRECISE_FP double runFp64SqrtChain(uint64_t outer)
   for (int j = 1; j < DIV_NACC; j++) s = f64_add(s, acc[j]);
   return (double)f64_hsum(s);
 }
-#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
+#if defined(__clang__) && defined(XPUPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(pop)
 #endif
 
@@ -613,7 +613,7 @@ static void copyBufferVec(float *dst, const float *src, size_t M, uint64_t iters
 }
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_BASE_COMPUTE_H

@@ -65,7 +65,7 @@ public:
 
   // Whether this build carries code for the device's gfx arch at all.  False
   // for a GPU missing from the arch list the kernels were compiled for, or
-  // newer than it: none of clpeak's own kernels can run on such a GPU.
+  // newer than it: none of xpupeak's own kernels can run on such a GPU.
   bool archCovered = true;
 
   // Why init() returned false: the HIP call and its error.
@@ -88,7 +88,7 @@ public:
   // because the GPU lacks the instruction: the reading is `notBuilt`,
   // Unsupported.  If the build has no code for this GPU at all, it is an Error
   // naming the arch.  A slice that is present but will not load is an Error
-  // with HIP's reason; details go to CLPEAK_VLOG.
+  // with HIP's reason; details go to XPUPEAK_VLOG.
   RocmKernel getKernel(const rocm_kernels::Blob &blob, const char *kernelName,
                        const char *notBuilt = nullptr);
 

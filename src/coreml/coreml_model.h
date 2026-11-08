@@ -1,7 +1,7 @@
-#ifndef CLPEAK_COREML_MODEL_H
-#define CLPEAK_COREML_MODEL_H
+#ifndef XPUPEAK_COREML_MODEL_H
+#define XPUPEAK_COREML_MODEL_H
 
-// In-memory Core ML model construction.  The graphs clpeak benchmarks are a
+// In-memory Core ML model construction.  The graphs xpupeak benchmarks are a
 // handful of operations, so it emits the ML Program (MIL) protobuf wire
 // format and the weight blob directly -- no protobuf library, no coremltools,
 // no .mlpackage shipped as an asset, and byte-identical models on every
@@ -407,4 +407,4 @@ std::string coremlFloatScalar(float v, int dtype);
 std::string coremlFillFloats(int dtype, int64_t count, uint32_t seed,
                              float magnitude = 1.0f);
 
-#endif // CLPEAK_COREML_MODEL_H
+#endif // XPUPEAK_COREML_MODEL_H

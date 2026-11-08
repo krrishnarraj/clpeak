@@ -52,12 +52,12 @@ public:
         return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
     }
 
-    // A requested cancellation (clpeak::requestCancel) gates every remaining
+    // A requested cancellation (xpupeak::requestCancel) gates every remaining
     // test off, so runAll() unwinds quickly at the next test boundary.  So
     // does a Benchmark the part of the run this one resumes already finished
     // on the open device (--resume).
     bool isAllowed(Benchmark b) const {
-        return !clpeak::cancelRequested() && isSelected(b) && !resumedPast(b);
+        return !xpupeak::cancelRequested() && isSelected(b) && !resumedPast(b);
     }
 
     // ---- Benchmark admission --------------------------------------------

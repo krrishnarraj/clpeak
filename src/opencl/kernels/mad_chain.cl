@@ -35,7 +35,7 @@ MSTRINGIFY(
 // at vector width 1, 2 at width 2 and 1 from width 4 up, where the vector
 // itself already supplies the instruction-level parallelism.
 //
-// Every float family builds AF* twice where the host defines CLPEAK_ALT_SG16:
+// Every float family builds AF* twice where the host defines XPUPEAK_ALT_SG16:
 // compute_*_alt_v* at whatever sub-group size the compiler picks, and
 // compute_*_alt_sg16_v* pinned to 16 with intel_reqd_sub_group_size.  Intel's
 // compiler picks SIMD32 for these, and at SIMD32 Alchemist's register banks

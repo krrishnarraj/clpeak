@@ -9,11 +9,11 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:clpeak/src/model/catalog.dart';
-import 'package:clpeak/src/model/run_summary.dart';
-import 'package:clpeak/src/services/process_exit.dart';
-import 'package:clpeak/src/services/resume_offer.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/model/catalog.dart';
+import 'package:xpupeak/src/model/run_summary.dart';
+import 'package:xpupeak/src/services/process_exit.dart';
+import 'package:xpupeak/src/services/resume_offer.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _id = '20261017_201306';
@@ -29,7 +29,7 @@ String _header() => jsonEncode({
       'generated_at': '2026-10-17T16:13:06Z',
       'host': {'os': 'Android', 'os_version': '17'},
       'invocation': {
-        'argv': ['clpeak', '-o', '$_id.clpeak.json'],
+        'argv': ['xpupeak', '-o', '$_id.clpeak.json'],
       },
     });
 
@@ -71,7 +71,7 @@ Map<String, dynamic> _checkpoint({String version = _version}) => {
       'duration_s': 6.0,
       'host': {'os': 'Android', 'os_version': '17'},
       'invocation': {
-        'argv': ['clpeak', '-o', '$_id.clpeak.json'],
+        'argv': ['xpupeak', '-o', '$_id.clpeak.json'],
       },
       'progress': {
         'backends_done': [],
@@ -119,7 +119,7 @@ ProcessExitRecord _exit(String reason, {int importance = 400, int min = 30}) =>
 
 void main() {
   late Directory dir;
-  setUp(() => dir = Directory.systemTemp.createTempSync('clpeak_resume'));
+  setUp(() => dir = Directory.systemTemp.createTempSync('xpupeak_resume'));
   tearDown(() => dir.deleteSync(recursive: true));
 
   // A run that did not finish, as the native side and the app leave it.
@@ -169,7 +169,7 @@ void main() {
       expect(offer.skipCrashed, isFalse);
       expect(offer.testsSaved, 1);
       expect(offer.headline,
-          'Android closed clpeak during CPU · Memory latency (pointer-chase).');
+          'Android closed xpupeak during CPU · Memory latency (pointer-chase).');
     });
 
     test('a swipe from Recents is the user ending it, wherever the app was',
@@ -178,7 +178,7 @@ void main() {
       final offer = decide(log);
       expect(offer.canContinue, isTrue);
       expect(offer.skipCrashed, isFalse);
-      expect(offer.headline, startsWith('You closed clpeak during CPU'));
+      expect(offer.headline, startsWith('You closed xpupeak during CPU'));
     });
 
     test('a crash on screen does not run the test it died in again',
@@ -188,7 +188,7 @@ void main() {
       final offer = decide(log);
       expect(offer.canContinue, isTrue);
       expect(offer.skipCrashed, isTrue);
-      expect(offer.headline, startsWith('clpeak crashed during CPU'));
+      expect(offer.headline, startsWith('xpupeak crashed during CPU'));
     });
 
     test('running out of memory on screen is not run again either', () async {
@@ -201,11 +201,11 @@ void main() {
 
     test('with no exit record (iOS), where the app was decides', () async {
       final off = await leave(lines: _run(leftScreen: true));
-      expect(decide(off).headline, startsWith('clpeak was closed during'));
+      expect(decide(off).headline, startsWith('xpupeak was closed during'));
       expect(decide(off).skipCrashed, isFalse);
 
       final on = await leave(lines: _run());
-      expect(decide(on).headline, startsWith('clpeak stopped during'));
+      expect(decide(on).headline, startsWith('xpupeak stopped during'));
       expect(decide(on).skipCrashed, isTrue);
     });
 
@@ -238,10 +238,10 @@ void main() {
       expect(offer.whyNot, 'it saved nothing to continue from');
     });
 
-    test('another build of clpeak', () async {
+    test('another build of xpupeak', () async {
       final offer = decide(await leave(lines: _run()), version: '3.0.3');
       expect(offer.canContinue, isFalse);
-      expect(offer.whyNot, 'clpeak was updated since it started');
+      expect(offer.whyNot, 'xpupeak was updated since it started');
     });
 
     test('another OS release', () async {
@@ -253,7 +253,7 @@ void main() {
       final offer = decide(await leave(lines: _run()),
           catalog: '$_catalog\nONNX|1.24.4|0:Qualcomm QNN (HTP)');
       expect(offer.whyNot,
-          'the devices or runtimes clpeak finds have changed since');
+          'the devices or runtimes xpupeak finds have changed since');
     });
 
     test('devices still being detected: not yet told', () async {
@@ -322,7 +322,7 @@ void main() {
       // A saved run, not one that did not finish.
       expect(await store.listCrashLogs(), isEmpty);
       expect((await decideOn(store, run, version: '3.0.3')).whyNot,
-          'clpeak was updated since it started');
+          'xpupeak was updated since it started');
     });
 
     test('goes whole when deleted', () async {
@@ -411,10 +411,10 @@ void main() {
     // changed" after an update that changed it.
     expect(ResumeOffer.fingerprint(catalog), _catalog);
     // "device 3 of 9": the run's own --devices list, else every device.
-    expect(ResumeOffer.plannedDevices(['clpeak', '-o', 'x'], catalog), 1);
+    expect(ResumeOffer.plannedDevices(['xpupeak', '-o', 'x'], catalog), 1);
     expect(
         ResumeOffer.plannedDevices(
-            ['clpeak', '--devices', 'cpu:0,vulkan:0', '-o', 'x'], catalog),
+            ['xpupeak', '--devices', 'cpu:0,vulkan:0', '-o', 'x'], catalog),
         2);
   });
 }

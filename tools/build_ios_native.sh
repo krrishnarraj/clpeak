@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
-# Builds the clpeak_ffi iOS framework (device + simulator) and stages the
-# artifacts the Flutter Runner's "Embed clpeak native frameworks" build
+# Builds the xpupeak_ffi iOS framework (device + simulator) and stages the
+# artifacts the Flutter Runner's "Embed xpupeak native frameworks" build
 # phase consumes:
 #
-#   app/ios/clpeak_native/clpeak_ffi.xcframework       (both platforms)
-#   app/ios/clpeak_native/embed-device/*.framework     (optional Vulkan loader +
+#   app/ios/xpupeak_native/xpupeak_ffi.xcframework       (both platforms)
+#   app/ios/xpupeak_native/embed-device/*.framework     (optional Vulkan loader +
 #                                                       MoltenVK, device only)
-#   app/ios/clpeak_native/embed-device/vulkan/         (ICD resources)
-#   app/ios/clpeak_native/embed-device/*.dylib         (LiteRT runtime + Metal
-#   app/ios/clpeak_native/embed-simulator/*.dylib       accelerator, per slice)
+#   app/ios/xpupeak_native/embed-device/vulkan/         (ICD resources)
+#   app/ios/xpupeak_native/embed-device/*.dylib         (LiteRT runtime + Metal
+#   app/ios/xpupeak_native/embed-simulator/*.dylib       accelerator, per slice)
 #
 # Vulkan is env-gated exactly like the retired native iOS app: it is enabled
 # when the LunarG iOS SDK is discoverable via $VULKAN_SDK or
 # ~/VulkanSDK/1.4.350.0/iOS; otherwise the framework ships Metal + CPU only.
 #
 # ONNX Runtime is fetched (the official static C pod) and linked into the
-# framework; --no-onnx leaves it out, and CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK
+# framework; --no-onnx leaves it out, and XPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK
 # points the build at a local one instead.
 #
 # LiteRT is fetched (Google's iOS dylibs for the release the vendored headers
 # came from) and embedded beside the framework, to be dlopen'd like on every
-# other platform; --no-litert leaves the backend out, and CLPEAK_IOS_LITERT_DIR
+# other platform; --no-litert leaves the backend out, and XPUPEAK_IOS_LITERT_DIR
 # points at a local directory holding ios_arm64/ and ios_sim_arm64/ instead.
 #
 # Usage: tools/build_ios_native.sh [--no-vulkan] [--no-onnx] [--no-litert]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/app/ios/clpeak_native"
+OUT="$ROOT/app/ios/xpupeak_native"
 BUILD="$ROOT/build-ios"
 
 # The build trees under build-ios/ keep their CMake cache between runs, so
@@ -45,20 +45,20 @@ for arg in "$@"; do
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
-EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_VULKAN=$VULKAN)
+EXTRA_ARGS+=(-DXPUPEAK_IOS_ENABLE_VULKAN=$VULKAN)
 
 # ---- ONNX Runtime (static, from the official C pod archive) -----------------
 # iOS is the one platform where the runtime cannot be dlopen'd: Apple's pod is
 # a static framework and iOS will not load a library that was not built into
 # the app.  So it is fetched here and linked in.  Cached under build-ios/, not
-# checked in -- it is 61 MB.  Set CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
+# checked in -- it is 61 MB.  Set XPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
 # at your own build instead, or pass --no-onnx to leave the backend out.
-ORT_POD_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.30.0}"
+ORT_POD_VERSION="${XPUPEAK_IOS_ONNXRUNTIME_VERSION:-1.30.0}"
 ORT_DIR="$BUILD/onnxruntime/$ORT_POD_VERSION"
 
 if [[ $NO_ONNX -eq 0 ]]; then
-    if [[ -n "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK:-}" ]]; then
-        ORT_XCFRAMEWORK="$CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK"
+    if [[ -n "${XPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK:-}" ]]; then
+        ORT_XCFRAMEWORK="$XPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK"
     else
         ORT_XCFRAMEWORK="$ORT_DIR/onnxruntime.xcframework"
         if [[ ! -d "$ORT_XCFRAMEWORK" ]]; then
@@ -77,7 +77,7 @@ if [[ $NO_ONNX -eq 0 ]]; then
 else
     ORT_XCFRAMEWORK=""
 fi
-EXTRA_ARGS+=(-DCLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK="$ORT_XCFRAMEWORK")
+EXTRA_ARGS+=(-DXPUPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK="$ORT_XCFRAMEWORK")
 
 # ---- LiteRT (dynamic, Google's iOS binaries) --------------------------------
 # Unlike ONNX Runtime, LiteRT ships iOS as plain dylibs built to live in an
@@ -94,7 +94,7 @@ EXTRA_ARGS+=(-DCLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK="$ORT_XCFRAMEWORK")
 # is the one the vendored headers came from
 # (third_party/litert/README.md): the ABI is checked at load, and a mismatch
 # is a backend that reports itself absent.  Cached under build-ios/.
-LITERT_VERSION="${CLPEAK_IOS_LITERT_VERSION:-$(sed -n 's/^- \*\*Tag:\*\* `v\([0-9.]*\)`.*/\1/p' \
+LITERT_VERSION="${XPUPEAK_IOS_LITERT_VERSION:-$(sed -n 's/^- \*\*Tag:\*\* `v\([0-9.]*\)`.*/\1/p' \
     "$ROOT/third_party/litert/README.md")}"
 LITERT_DIR="$BUILD/litert/$LITERT_VERSION"
 LITERT_BUCKET="https://storage.googleapis.com/litert/binaries/$LITERT_VERSION"
@@ -106,8 +106,8 @@ if [[ $NO_LITERT -eq 0 ]]; then
         echo "error: could not read the LiteRT tag from third_party/litert/README.md" >&2
         exit 1
     fi
-    if [[ -n "${CLPEAK_IOS_LITERT_DIR:-}" ]]; then
-        LITERT_SRC="$CLPEAK_IOS_LITERT_DIR"
+    if [[ -n "${XPUPEAK_IOS_LITERT_DIR:-}" ]]; then
+        LITERT_SRC="$XPUPEAK_IOS_LITERT_DIR"
     else
         LITERT_SRC="$LITERT_DIR"
         for slice in ios_arm64 ios_sim_arm64; do
@@ -132,9 +132,9 @@ if [[ $NO_LITERT -eq 0 ]]; then
     done
 fi
 if [[ -n "$LITERT_SRC" ]]; then
-    EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_LITERT=ON)
+    EXTRA_ARGS+=(-DXPUPEAK_IOS_ENABLE_LITERT=ON)
 else
-    EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_LITERT=OFF)
+    EXTRA_ARGS+=(-DXPUPEAK_IOS_ENABLE_LITERT=OFF)
 fi
 
 configure_and_build() {
@@ -145,28 +145,28 @@ configure_and_build() {
         -DCMAKE_OSX_ARCHITECTURES=arm64 \
         "${EXTRA_ARGS[@]:-}" \
         "$ROOT/src/ffi/ios"
-    cmake --build "$dir" --config Release --target clpeak_ffi -- \
+    cmake --build "$dir" --config Release --target xpupeak_ffi -- \
         CODE_SIGNING_ALLOWED=NO
 }
 
-echo "==> Building clpeak_ffi for iphoneos"
+echo "==> Building xpupeak_ffi for iphoneos"
 configure_and_build "$BUILD/device" iphoneos
 
-echo "==> Building clpeak_ffi for iphonesimulator (arm64)"
+echo "==> Building xpupeak_ffi for iphonesimulator (arm64)"
 configure_and_build "$BUILD/simulator" iphonesimulator
 
 echo "==> Creating xcframework"
-rm -rf "$OUT/clpeak_ffi.xcframework" "$OUT/embed-device" "$OUT/embed-simulator"
+rm -rf "$OUT/xpupeak_ffi.xcframework" "$OUT/embed-device" "$OUT/embed-simulator"
 mkdir -p "$OUT"
-# clpeak_ffi's LIBRARY_OUTPUT_DIRECTORY places frameworks at
+# xpupeak_ffi's LIBRARY_OUTPUT_DIRECTORY places frameworks at
 # <build>/<config>/ regardless of platform.
 xcodebuild -create-xcframework \
-    -framework "$BUILD/device/Release/clpeak_ffi.framework" \
-    -framework "$BUILD/simulator/Release/clpeak_ffi.framework" \
-    -output "$OUT/clpeak_ffi.xcframework"
+    -framework "$BUILD/device/Release/xpupeak_ffi.framework" \
+    -framework "$BUILD/simulator/Release/xpupeak_ffi.framework" \
+    -output "$OUT/xpupeak_ffi.xcframework"
 
 # ---- Optional Vulkan runtime pieces (device only) ---------------------------
-VULKAN_SDK_ROOT="$(sed -n 's/^CLPEAK_IOS_VULKAN_SDK:PATH=//p' \
+VULKAN_SDK_ROOT="$(sed -n 's/^XPUPEAK_IOS_VULKAN_SDK:PATH=//p' \
     "$BUILD/device/CMakeCache.txt" 2>/dev/null || true)"
 if [[ -n "$VULKAN_SDK_ROOT" && -d "$VULKAN_SDK_ROOT/lib/vulkan.framework" ]]; then
     echo "==> Staging Vulkan loader + MoltenVK from $VULKAN_SDK_ROOT"

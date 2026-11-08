@@ -10,23 +10,23 @@ import 'dart:convert';
 import 'dart:ffi' hide Size;
 import 'dart:io';
 
-import 'package:clpeak/src/ffi/clpeak_bindings.dart';
-import 'package:clpeak/src/services/benchmark_service.dart';
-import 'package:clpeak/src/services/export_service.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
-import 'package:clpeak/src/theme/clpeak_theme.dart';
-import 'package:clpeak/src/ui/history/history_screen.dart';
+import 'package:xpupeak/src/ffi/xpupeak_bindings.dart';
+import 'package:xpupeak/src/services/benchmark_service.dart';
+import 'package:xpupeak/src/services/export_service.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/history/history_screen.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
-class _StubBindings implements ClpeakBindings {
+class _StubBindings implements XpupeakBindings {
   @override
-  ClpeakLaunch get launch => (_, _, _, _) => 0;
+  XpupeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  ClpeakRequestCancel get requestCancel => () {};
+  XpupeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -101,7 +101,7 @@ void main() {
     tester.view.devicePixelRatio = 3.0;
     addTearDown(tester.view.reset);
 
-    final dir = Directory.systemTemp.createTempSync('clpeak_hist_overflow');
+    final dir = Directory.systemTemp.createTempSync('xpupeak_hist_overflow');
     addTearDown(() => dir.deleteSync(recursive: true));
 
     // Disk IO hangs in the widget-test fake-async zone; run it for real.
@@ -156,7 +156,7 @@ void main() {
           ChangeNotifierProvider.value(value: service),
         ],
         child: MaterialApp(
-          theme: ClpeakTheme.dark(),
+          theme: XpupeakTheme.dark(),
           home: const Scaffold(body: HistoryScreen()),
         ),
       ),

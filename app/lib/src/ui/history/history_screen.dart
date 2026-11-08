@@ -9,7 +9,7 @@ import '../../services/benchmark_service.dart';
 import '../../services/export_service.dart';
 import '../../services/resume_offer.dart';
 import '../../services/run_history_store.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
 import '../results/results_screen.dart';
@@ -65,7 +65,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _import() async {
     try {
       const typeGroup = XTypeGroup(
-        label: 'clpeak results',
+        label: 'xpupeak results',
         extensions: ['clpeak.json', 'json'],
       );
       final file = await openFile(acceptedTypeGroups: [typeGroup]);
@@ -486,7 +486,7 @@ class _CrashLogTile extends StatelessWidget {
                   [
                     formatDate(log.startedAt),
                     '${log.entries} log lines',
-                    if (log.clpeakVersion.isNotEmpty) 'v${log.clpeakVersion}',
+                    if (log.xpupeakVersion.isNotEmpty) 'v${log.xpupeakVersion}',
                   ].join('  ·  '),
                   style: t.micro,
                 ),
@@ -685,7 +685,7 @@ class _RunTile extends StatelessWidget {
                       context.read<BenchmarkService>().resume(offer),
                 ),
               ],
-              if (summary.clpeakVersion.isNotEmpty ||
+              if (summary.xpupeakVersion.isNotEmpty ||
                   summary.hostOs.isNotEmpty ||
                   summary.hostArch.isNotEmpty) ...[
                 const SizedBox(height: 5),
@@ -699,8 +699,8 @@ class _RunTile extends StatelessWidget {
                           summary.hostOsVersion,
                         ].where((s) => s.isNotEmpty).join(' '),
                       if (summary.hostArch.isNotEmpty) summary.hostArch,
-                      if (summary.clpeakVersion.isNotEmpty)
-                        'v${summary.clpeakVersion}',
+                      if (summary.xpupeakVersion.isNotEmpty)
+                        'v${summary.xpupeakVersion}',
                     ].join('  ·  '),
                     style: t.monoSmallDim,
                     maxLines: 1,

@@ -9,19 +9,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:clpeak/src/ffi/clpeak_events.dart';
-import 'package:clpeak/src/model/run_document.dart';
-import 'package:clpeak/src/services/process_exit.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
-import 'package:clpeak/src/services/settings_service.dart';
-import 'package:clpeak/src/theme/clpeak_theme.dart';
-import 'package:clpeak/src/ui/results/results_body.dart';
+import 'package:xpupeak/src/ffi/xpupeak_events.dart';
+import 'package:xpupeak/src/model/run_document.dart';
+import 'package:xpupeak/src/services/process_exit.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/settings_service.dart';
+import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/results/results_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _host(RunDocument doc) => MaterialApp(
-      theme: ClpeakTheme.dark(),
+      theme: XpupeakTheme.dark(),
       home: Scaffold(body: ResultsBody(document: doc)),
     );
 
@@ -31,7 +31,7 @@ String _header({bool verbose = false}) => jsonEncode({
       'clpeak_version': '3.0.0',
       'generated_at': '2026-09-15T06:05:57Z',
       'invocation': {
-        'argv': ['clpeak', if (verbose) '--verbose'],
+        'argv': ['xpupeak', if (verbose) '--verbose'],
         if (verbose) 'verbose': true,
       },
     });
@@ -76,7 +76,7 @@ Uint8List _pb(Map<int, Object> fields) {
 void main() {
   group('log events', () {
     test('decode into the entry the file records', () {
-      final event = ClpeakEvent.fromJson({
+      final event = XpupeakEvent.fromJson({
         't': 'log',
         'backend': 'Vulkan',
         'platform': 'Vulkan',
@@ -101,7 +101,7 @@ void main() {
     });
 
     test('a variant joins the test key, as on metric events', () {
-      final event = ClpeakEvent.fromJson({
+      final event = XpupeakEvent.fromJson({
         't': 'log',
         'level': 'debug',
         'test': 'single_precision_compute',
@@ -113,7 +113,7 @@ void main() {
     });
 
     test('an unknown event kind becomes a warning, not a crash', () {
-      final event = ClpeakEvent.fromJson({'t': 'brand_new'}) as LogEntryEvent;
+      final event = XpupeakEvent.fromJson({'t': 'brand_new'}) as LogEntryEvent;
       expect(event.entry.level, LogLevel.warning);
       expect(event.entry.message, contains('unknown event'));
     });
@@ -158,7 +158,7 @@ void main() {
   group('crashed runs', () {
     late Directory dir;
     setUp(() {
-      dir = Directory.systemTemp.createTempSync('clpeak_crashlog');
+      dir = Directory.systemTemp.createTempSync('xpupeak_crashlog');
     });
     tearDown(() => dir.deleteSync(recursive: true));
 
@@ -177,7 +177,7 @@ void main() {
       final log = logs.single;
       expect(log.id, '20260915_120000');
       expect(log.fileName, '20260915_120000.clpeak.log');
-      expect(log.clpeakVersion, '3.0.0');
+      expect(log.xpupeakVersion, '3.0.0');
       expect(log.verbose, isTrue);
       expect(log.entries, 2);
       expect(log.backends, ['Vulkan']);
@@ -284,7 +284,7 @@ void main() {
         6: '/apex/com.android.runtime/lib64/bionic/libc.so',
         8: 'abc123',
       });
-      final thread = _pb({1: 4242, 2: 'clpeak-run', 4: frame});
+      final thread = _pb({1: 4242, 2: 'xpupeak-run', 4: frame});
       final tombstone = _pb({
         6: 4242,
         10: _pb({1: 6, 2: 'SIGABRT', 3: -6, 4: 'SI_TKILL'}),
@@ -315,7 +315,7 @@ void main() {
           'process ended: CRASH_NATIVE (signal 6, foreground)\n'
           'signal 6 (SIGABRT), code -6 (SI_TKILL)\n'
           "Abort message: 'QNN graph execute error'\n"
-          'backtrace (thread 4242 "clpeak-run"):\n'
+          'backtrace (thread 4242 "xpupeak-run"):\n'
           '  #00 pc 000000000004e8cc  '
           '/apex/com.android.runtime/lib64/bionic/libc.so (abort+164) '
           '(BuildId: abc123)\n'

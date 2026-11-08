@@ -40,7 +40,7 @@
 // not stop LICM from hoisting an entire pass out of the outer loop.  A
 // compiler memory barrier at the top of every pass makes the buffer contents
 // opaque per pass, forcing every scan to be re-executed.  Guarded by
-// CLPEAK_CORE_ONLY like crypto_compute.h (cl.exe TUs are core-only; every
+// XPUPEAK_CORE_ONLY like crypto_compute.h (cl.exe TUs are core-only; every
 // other toolchain supports the GNU inline-asm barrier).
 // ===========================================================================
 
@@ -49,9 +49,9 @@
 
 #include <cstdint>
 
-#ifndef CLPEAK_CORE_ONLY
+#ifndef XPUPEAK_CORE_ONLY
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 // Compiler-only fence: tells the optimizer memory may have changed, so buffer
@@ -493,9 +493,9 @@ static double runUtf8Chain(uint64_t outer)
 #endif // utf8 ISA chain
 
 } // anonymous namespace
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
-#endif // CLPEAK_CORE_ONLY
+#endif // XPUPEAK_CORE_ONLY
 
 #endif // ENABLE_CPU
 #endif // CPU_KERN_STRING_COMPUTE_H

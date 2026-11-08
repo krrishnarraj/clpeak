@@ -6,8 +6,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
-import 'src/ffi/clpeak_bindings.dart';
-import 'src/ffi/clpeak_engine.dart';
+import 'src/ffi/xpupeak_bindings.dart';
+import 'src/ffi/xpupeak_engine.dart';
 import 'src/model/run_config.dart';
 import 'src/services/benchmark_service.dart';
 import 'src/services/export_service.dart';
@@ -18,10 +18,10 @@ import 'src/ui/app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final bindings = ClpeakBindings.open();
+  final bindings = XpupeakBindings.open();
   // On desktop, enumeration and runs happen in an engine process of their
-  // own (ClpeakEngine explains why); on mobile, here.
-  final engine = ClpeakEngine.forPlatform(bindings);
+  // own (XpupeakEngine explains why); on mobile, here.
+  final engine = XpupeakEngine.forPlatform(bindings);
 
   // Settings first, and specifically before BenchmarkService's first
   // enumeration, which is what loads the ONNX Runtime -- in-process, a saved
@@ -61,10 +61,10 @@ Future<void> main() async {
       onExitRequested: service.onExitRequested,
       onStateChange: service.onLifecycleState);
 
-  // Dev hook: CLPEAK_AUTORUN=1 starts a run at launch (used by automated UI
+  // Dev hook: XPUPEAK_AUTORUN=1 starts a run at launch (used by automated UI
   // verification; harmless otherwise).  Waits for the catalog: device
   // indices are positions in the enumerated list.
-  final autorun = Platform.environment['CLPEAK_AUTORUN'];
+  final autorun = Platform.environment['XPUPEAK_AUTORUN'];
   if (autorun != null && autorun.isNotEmpty && autorun != '0') {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await service.ready;
@@ -79,6 +79,6 @@ Future<void> main() async {
       ChangeNotifierProvider.value(value: settings),
       ChangeNotifierProvider.value(value: service),
     ],
-    child: const ClpeakApp(),
+    child: const XpupeakApp(),
   ));
 }

@@ -49,7 +49,7 @@ struct AlignedFloats
 // cpu_kernels_tu.cpp).  Forward to the selected variant.
 static inline uint64_t readBufferChecksum(const float *p, size_t M, uint64_t iters)
 {
-  return clpeak_cpu::kernels().readsum(p, M, iters);
+  return xpupeak_cpu::kernels().readsum(p, M, iters);
 }
 
 // ---------------------------------------------------------------------------
@@ -305,14 +305,14 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     // single-thread rows (worker 0 runs them), each worker's own for MT.
     auto writeBody = [&](const std::vector<size_t> &n) {
       return Workload([&bufs, &n](int tid, uint64_t iters) {
-        clpeak_cpu::kernels().writefill(bufs[(size_t)tid].data(), n[(size_t)tid], iters);
+        xpupeak_cpu::kernels().writefill(bufs[(size_t)tid].data(), n[(size_t)tid], iters);
       });
     };
     auto copyBody = [&](const std::vector<size_t> &n) {
       return Workload([&bufs, &n](int tid, uint64_t iters) {
         const size_t c = n[(size_t)tid] / 2;
         float *p = bufs[(size_t)tid].data();
-        clpeak_cpu::kernels().copybuf(p, p + c, c, iters);
+        xpupeak_cpu::kernels().copybuf(p, p + c, c, iters);
       });
     };
     const std::vector<size_t> wFloatsST((size_t)maxT, wFloats1);
@@ -405,12 +405,12 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
   // The one number that decides whether this test measures DRAM at all, so it
   // is worth being able to read it back off a suspicious run: a "DRAM" figure
   // above the memory's rated peak means the array was not big enough.
-  CLPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache%s, %d threads\n",
-              (unsigned long long)((uint64_t)N * sizeof(float) >> 20),
-              (unsigned long long)((info.l1dTotalBytes + info.l2TotalBytes +
-                                    std::max(info.l3TotalBytes, info.l3CacheBytes)) >> 20),
-              cacheSizesMissing(info) ? " (not every level sized: arrays at the cap)" : "",
-              maxT);
+  XPUPEAK_VLOG("[cpu] STREAM array %llu MB x3, %llu MB total cache%s, %d threads\n",
+               (unsigned long long)((uint64_t)N * sizeof(float) >> 20),
+               (unsigned long long)((info.l1dTotalBytes + info.l2TotalBytes +
+                                     std::max(info.l3TotalBytes, info.l3CacheBytes)) >> 20),
+               cacheSizesMissing(info) ? " (not every level sized: arrays at the cap)" : "",
+               maxT);
 
   auto chunk = [&](int tid, size_t &lo, size_t &hi)
   {

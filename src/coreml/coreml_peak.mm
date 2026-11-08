@@ -137,7 +137,7 @@ int CoreMLPeak::runAll()
   // Whatever earlier runs left in Core ML's compile cache -- a crashed run's
   // models, or the ONNX backend's CoreML sessions -- goes before the first
   // model of this one is built.
-  clpeak::purgeCoreMLCompileCache();
+  xpupeak::purgeCoreMLCompileCache();
 
   auto backendScope = log->beginBackend("CoreML");
   const std::string os = coremlOsVersionString();
@@ -145,7 +145,7 @@ int CoreMLPeak::runAll()
 
   for (int idx = 0; idx < (int)devs.size(); idx++)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(idx))
       continue;

@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
-#define CLPEAK_ONEAPI_JM_HAS_BF16 1
+#define XPUPEAK_ONEAPI_JM_HAS_BF16 1
 #endif
 #include "joint_matrix_spread.h"
 #endif
@@ -38,9 +38,9 @@
 // chain, and how many sub-groups the compiler packs into a work-group is its
 // choice — see the note on JM_SG_COUNT_NOTE below.
 
-#ifdef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 
-namespace clpeak_oneapi {
+namespace xpupeak_oneapi {
 float runJmBlock(OneapiPeak &peak, OneapiDevice &dev, void *out, uint32_t *sgCount,
                  uint32_t numBlocks, uint32_t blockSize,
                  sycl::ext::oneapi::experimental::matrix::matrix_type at,
@@ -141,7 +141,7 @@ static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool 
     return d.get_info<
       sycl::ext::oneapi::experimental::info::device::matrix_combinations>();
   } catch (const std::exception &e) {
-    CLPEAK_VLOG("joint_matrix: matrix_combinations query threw: %s\n", e.what());
+    XPUPEAK_VLOG("joint_matrix: matrix_combinations query threw: %s\n", e.what());
     threw = true;
     return {};
   }
@@ -151,15 +151,15 @@ static std::vector<syclex::combination> queryCombos(const sycl::device &d, bool 
 // This is the ground truth the row list below is derived from.
 static void dumpMatrixCombinations(const std::vector<syclex::combination> &combos)
 {
-  if (!::clpeak::verboseEnabled()) return;
-  CLPEAK_VLOG("joint_matrix: device reports %zu matrix combination(s):\n",
-              combos.size());
+  if (!::xpupeak::verboseEnabled()) return;
+  XPUPEAK_VLOG("joint_matrix: device reports %zu matrix combination(s):\n",
+               combos.size());
   for (const auto &c : combos)
-    CLPEAK_VLOG("  a=%-5s b=%-5s c=%-5s d=%-5s  M=%zu N=%zu K=%zu  "
-                "(max M=%zu N=%zu K=%zu)\n",
-                mtName(c.atype), mtName(c.btype), mtName(c.ctype), mtName(c.dtype),
-                c.msize, c.nsize, c.ksize,
-                c.max_msize, c.max_nsize, c.max_ksize);
+    XPUPEAK_VLOG("  a=%-5s b=%-5s c=%-5s d=%-5s  M=%zu N=%zu K=%zu  "
+                 "(max M=%zu N=%zu K=%zu)\n",
+                 mtName(c.atype), mtName(c.btype), mtName(c.ctype), mtName(c.dtype),
+                 c.msize, c.nsize, c.ksize,
+                 c.max_msize, c.max_nsize, c.max_ksize);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,8 +400,8 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
           {
             if (spread != 0)
             {
-              clpeak_oneapi::jmSpread(sg, a);
-              clpeak_oneapi::jmSpread(sg, b);
+              xpupeak_oneapi::jmSpread(sg, a);
+              xpupeak_oneapi::jmSpread(sg, b);
             }
           }
           #pragma unroll 1
@@ -442,7 +442,7 @@ static float runJmVariant(OneapiPeak &peak, OneapiDevice &dev,
 // large 32x32 bf16 tile Alchemist reports alongside its 8x8 one.  A shape
 // outside this list records a row that names it rather than vanishing, so the
 // next unusual part tells us exactly which instantiation to add.
-#define CLPEAK_JM_SHAPES(X)  X(8, 8)  X(8, 16)  X(16, 16)  X(32, 32)
+#define XPUPEAK_JM_SHAPES(X)  X(8, 8)  X(8, 16)  X(16, 16)  X(32, 32)
 
 template <typename At, typename Bt, typename Acc, int K, typename FillA, typename FillB>
 static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
@@ -452,7 +452,7 @@ static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
                              unsigned int targetTimeUs, unsigned int forced,
                              uint32_t M, uint32_t N)
 {
-#define CLPEAK_JM_CASE(MM, NN)                                                  \
+#define XPUPEAK_JM_CASE(MM, NN)                                                 \
   if (M == (MM) && N == (NN))                                                   \
     return spreadTiles                                                          \
         ? runJmVariant<At, Bt, Acc, MM, NN, K, true, FillA, FillB>(              \
@@ -461,8 +461,8 @@ static float dispatchJmShape(OneapiPeak &peak, OneapiDevice &dev,
         : runJmVariant<At, Bt, Acc, MM, NN, K, false, FillA, FillB>(             \
               peak, dev, out, sgCount, numBlocks, blockSize,                     \
               aFill, bFill, spread, targetTimeUs, forced);
-  CLPEAK_JM_SHAPES(CLPEAK_JM_CASE)
-#undef CLPEAK_JM_CASE
+  XPUPEAK_JM_SHAPES(XPUPEAK_JM_CASE)
+#undef XPUPEAK_JM_CASE
   return JM_NOT_COMPILED;
 }
 
@@ -476,7 +476,7 @@ static float runJmFp(OneapiPeak &peak, OneapiDevice &dev,
 {
   using mt = syclex::matrix_type;
   if (t.ct != mt::fp32) return JM_NOT_COMPILED;
-#ifdef CLPEAK_ONEAPI_JM_HAS_BF16
+#ifdef XPUPEAK_ONEAPI_JM_HAS_BF16
   using bfloat16 = sycl::ext::oneapi::bfloat16;
   if (t.at == mt::bf16 && t.bt == mt::bf16 && t.K == 16)
     return dispatchJmShape<bfloat16, bfloat16, float, 16>(
@@ -528,7 +528,7 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 
 } // namespace
 
-#endif // CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#endif // XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 
 int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 {
@@ -560,7 +560,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
     test.skip("int8", status, reason, o);
   };
 
-#ifndef CLPEAK_ONEAPI_HAS_JOINT_MATRIX
+#ifndef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
   skipEverything(ResultStatus::Unsupported,
                  "joint_matrix header not available in this oneAPI toolchain");
   return 0;
@@ -679,9 +679,9 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 
       float us;
       if (blockAccs)
-        us = clpeak_oneapi::runJmBlock(*this, dev, out, sgCount, numBlocks, blockSize,
-                                       t.at, t.bt, t.ct, t.M, t.N, t.K, blockAccs,
-                                       JM_ITERS / 16, spread, cfg.targetTimeUs, forced);
+        us = xpupeak_oneapi::runJmBlock(*this, dev, out, sgCount, numBlocks, blockSize,
+                                        t.at, t.bt, t.ct, t.M, t.N, t.K, blockAccs,
+                                        JM_ITERS / 16, spread, cfg.targetTimeUs, forced);
       else if (isInt)
         us = runJmInt(*this, dev, (int32_t *)out, sgCount, numBlocks, blockSize, spread,
                       spreadTiles, cfg.targetTimeUs, forced, t);
@@ -696,7 +696,7 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       try {
         dev.stream.memcpy(&sgPerWG, sgCount, sizeof(uint32_t)).wait();
       } catch (const std::exception &e) {
-        CLPEAK_VLOG("joint_matrix: sub-group count readback failed: %s\n", e.what());
+        XPUPEAK_VLOG("joint_matrix: sub-group count readback failed: %s\n", e.what());
         sgPerWG = 0;
       }
       // maxSgPerWG is a hard upper bound (widest work-group over narrowest
@@ -704,17 +704,17 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       // to be trusted; fall back to the historical assumption and say so.
       if (sgPerWG == 0 || sgPerWG > maxSgPerWG)
       {
-        CLPEAK_VLOG("joint_matrix: implausible sub-group count %u (bound %u), "
-                    "assuming 1\n", sgPerWG, maxSgPerWG);
+        XPUPEAK_VLOG("joint_matrix: implausible sub-group count %u (bound %u), "
+                     "assuming 1\n", sgPerWG, maxSgPerWG);
         sgPerWG = 1;
       }
-      CLPEAK_VLOG("joint_matrix: %s %s%s -- %u work-items/work-group ran as %u "
-                  "sub-group(s), %u blocks\n",
-                  t.label.c_str(), t.shape.c_str(),
-                  blockAccs == 1 ? " as one-accumulator blocks"
-                  : blockAccs ? " as four-accumulator blocks"
-                  : spreadTiles ? " as a chain" : " as a chain on filled tiles",
-                  blockSize, sgPerWG, numBlocks);
+      XPUPEAK_VLOG("joint_matrix: %s %s%s -- %u work-items/work-group ran as %u "
+                   "sub-group(s), %u blocks\n",
+                   t.label.c_str(), t.shape.c_str(),
+                   blockAccs == 1 ? " as one-accumulator blocks"
+                   : blockAccs ? " as four-accumulator blocks"
+                   : spreadTiles ? " as a chain" : " as a chain on filled tiles",
+                   blockSize, sgPerWG, numBlocks);
       // Both shapes issue JM_ITERS mads a sub-group: the blocks as
       // JM_ITERS / 16 trips of sixteen.
       const double mads = (double)JM_ITERS;
@@ -765,14 +765,14 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       if (formUs <= 0.0f)
         continue;
       const float form = (float)(formOps * 1.0e6 / formUs);
-      CLPEAK_VLOG("joint_matrix: %s %s chain on filled tiles %.1f, %s %.1f %s\n",
-                  t.label.c_str(), t.shape.c_str(), chain, shapeNames[shape], form,
-                  isInt ? "ops" : "flops");
+      XPUPEAK_VLOG("joint_matrix: %s %s chain on filled tiles %.1f, %s %.1f %s\n",
+                   t.label.c_str(), t.shape.c_str(), chain, shapeNames[shape], form,
+                   isInt ? "ops" : "flops");
       if (form > chain * MAX_ALT_CHAIN_RATIO)
       {
-        CLPEAK_VLOG("joint_matrix: %s %s %s %.1fx faster -- rejecting it as a "
-                    "compiler fold\n",
-                    t.label.c_str(), t.shape.c_str(), shapeNames[shape], form / chain);
+        XPUPEAK_VLOG("joint_matrix: %s %s %s %.1fx faster -- rejecting it as a "
+                     "compiler fold\n",
+                     t.label.c_str(), t.shape.c_str(), shapeNames[shape], form / chain);
         continue;
       }
       ran++;

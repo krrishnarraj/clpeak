@@ -1,5 +1,5 @@
-#ifndef CLPEAK_JSON_WRITER_H
-#define CLPEAK_JSON_WRITER_H
+#ifndef XPUPEAK_JSON_WRITER_H
+#define XPUPEAK_JSON_WRITER_H
 
 #include <cstdint>
 #include <iomanip>
@@ -124,4 +124,4 @@ private:
     int  inlineFrom = -1;  // depth at which an inline record began, or -1
 };
 
-#endif  // CLPEAK_JSON_WRITER_H
+#endif  // XPUPEAK_JSON_WRITER_H

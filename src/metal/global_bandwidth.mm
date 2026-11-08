@@ -30,8 +30,8 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     // size and the SLC is memory-side, so this stays on the shared default --
     // print the working set so an implausible reading can be checked without
     // a rebuild.
-    CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB (Metal reports no cache size)\n",
-                (unsigned long long)(numItems * sizeof(float) >> 20));
+    XPUPEAK_VLOG("global_memory_bandwidth: working set %llu MB (Metal reports no cache size)\n",
+                 (unsigned long long)(numItems * sizeof(float) >> 20));
 
     id<MTLBuffer> inBuf  = [dev.impl->device newBufferWithLength:numItems * sizeof(float)
                                                          options:MTLResourceStorageModeShared];

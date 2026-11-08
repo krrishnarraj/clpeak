@@ -51,18 +51,18 @@ static void logPickedTiles(const char *label, const coopmat_tiles_t &tiles,
 {
   if (tiles.empty())
   {
-    CLPEAK_VLOG("  picked %-8s (none)\n", label);
+    XPUPEAK_VLOG("  picked %-8s (none)\n", label);
     return;
   }
   const coopmat_tile_t &t = tiles.front();
   std::string then;
   for (size_t i = 1; i < tiles.size(); i++)
     then += (i == 1 ? "; then " : ", ") + coopmatTileName(tiles[i]);
-  CLPEAK_VLOG("  picked %-8s %ux%ux%u, running subgroup %u (%s)%s\n", label,
-              t.M, t.N, t.K,
-              coopmatSubgroupWidth(info, t.subgroupSize),
-              t.subgroupSize ? "advertised at this width" : "width unknown",
-              then.c_str());
+  XPUPEAK_VLOG("  picked %-8s %ux%ux%u, running subgroup %u (%s)%s\n", label,
+               t.M, t.N, t.K,
+               coopmatSubgroupWidth(info, t.subgroupSize),
+               t.subgroupSize ? "advertised at this width" : "width unknown",
+               then.c_str());
 }
 #endif
 
@@ -113,18 +113,18 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugMessage(
 {
   if (!data || !data->pMessage)
     return VK_FALSE;
-  clpeak::LogLevel level = clpeak::LogLevel::Debug;
+  xpupeak::LogLevel level = xpupeak::LogLevel::Debug;
   if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
-    level = clpeak::LogLevel::Error;
+    level = xpupeak::LogLevel::Error;
   else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-    level = clpeak::LogLevel::Warning;
-  if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
+    level = xpupeak::LogLevel::Warning;
+  if (level == xpupeak::LogLevel::Debug && !xpupeak::verboseEnabled())
     return VK_FALSE;
   std::string message;
   if (data->pMessageIdName)
     message = std::string(data->pMessageIdName) + ": ";
   message += data->pMessage;
-  clpeak::logMessage(level, "vulkan", message);
+  xpupeak::logMessage(level, "vulkan", message);
   return VK_FALSE;
 }
 
@@ -134,9 +134,9 @@ bool vkPeak::initInstance()
 {
   VkApplicationInfo appInfo = {};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  appInfo.pApplicationName = "clpeak-vulkan";
+  appInfo.pApplicationName = "xpupeak-vulkan";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-  appInfo.pEngineName = "clpeak";
+  appInfo.pEngineName = "xpupeak";
   // Only request 1.1 when we compiled in code that actually needs 1.1-core
   // symbols (e.g. vkGetPhysicalDeviceFeatures2 for INT8 DP feature query).
   // Otherwise request 1.0 so we work on older drivers / Android API levels
@@ -344,7 +344,7 @@ int vkPeak::runAll()
 
   for (size_t d = 0; d < physicalDevices.size(); d++)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     if (!isDeviceSelected(static_cast<int>(d)))
       continue;
@@ -399,20 +399,20 @@ int vkPeak::runAll()
           uint32_t n2 = 0;
           if (pfn2(physicalDevices[d], &info2, &n2, nullptr) != VK_SUCCESS)
           {
-            CLPEAK_VLOG("  at subgroup %u: query failed\n", sg);
+            XPUPEAK_VLOG("  at subgroup %u: query failed\n", sg);
             continue;
           }
           std::vector<VkCooperativeMatrixProperties2EXT> p2(n2);
           for (auto &q : p2) q.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_2_EXT;
           if (n2 && pfn2(physicalDevices[d], &info2, &n2, p2.data()) != VK_SUCCESS)
             continue;
-          CLPEAK_VLOG("  at subgroup %u: %u tile(s)\n", sg, n2);
+          XPUPEAK_VLOG("  at subgroup %u: %u tile(s)\n", sg, n2);
           for (auto &q : p2)
           {
-            CLPEAK_VLOG("    %ux%ux%u  A=%s B=%s C=%s D=%s\n",
-                        q.MGranularity, q.NGranularity, q.KGranularity,
-                        coopmatComponentName(q.AType), coopmatComponentName(q.BType),
-                        coopmatComponentName(q.CType), coopmatComponentName(q.ResultType));
+            XPUPEAK_VLOG("    %ux%ux%u  A=%s B=%s C=%s D=%s\n",
+                         q.MGranularity, q.NGranularity, q.KGranularity,
+                         coopmatComponentName(q.AType), coopmatComponentName(q.BType),
+                         coopmatComponentName(q.CType), coopmatComponentName(q.ResultType));
             cands.push_back({q.MGranularity, q.NGranularity, q.KGranularity, sg,
                              q.AType, q.BType, q.CType, q.ResultType});
           }
@@ -422,9 +422,9 @@ int vkPeak::runAll()
 
       if (cands.empty())
       {
-        CLPEAK_VLOG("  no per-subgroup-width tile list (%s); falling back to the "
-                    "width-agnostic KHR query\n",
-                    dev.info.coopmatMaintenance1Supported
+        XPUPEAK_VLOG("  no per-subgroup-width tile list (%s); falling back to the "
+                     "width-agnostic KHR query\n",
+                     dev.info.coopmatMaintenance1Supported
                         ? "query returned nothing"
                         : "VK_EXT_cooperative_matrix_maintenance1 not available");
         auto pfn = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)
@@ -436,17 +436,17 @@ int vkPeak::runAll()
           for (auto &p : props) p.sType = VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR;
           if (pfn(physicalDevices[d], &propCount, props.data()) == VK_SUCCESS)
           {
-            CLPEAK_VLOG("Vulkan: device %zu advertises %u cooperative-matrix "
-                        "properties\n", d, propCount);
+            XPUPEAK_VLOG("Vulkan: device %zu advertises %u cooperative-matrix "
+                         "properties\n", d, propCount);
             for (auto &p : props)
             {
-              CLPEAK_VLOG("  %ux%ux%u  A=%s B=%s C=%s D=%s  scope=%s%s\n",
-                          p.MSize, p.NSize, p.KSize,
-                          coopmatComponentName(p.AType), coopmatComponentName(p.BType),
-                          coopmatComponentName(p.CType), coopmatComponentName(p.ResultType),
-                          p.scope == VK_SCOPE_SUBGROUP_KHR  ? "subgroup" :
-                          p.scope == VK_SCOPE_WORKGROUP_KHR ? "workgroup" : "other",
-                          p.saturatingAccumulation ? "  saturating (unusable)" : "");
+              XPUPEAK_VLOG("  %ux%ux%u  A=%s B=%s C=%s D=%s  scope=%s%s\n",
+                           p.MSize, p.NSize, p.KSize,
+                           coopmatComponentName(p.AType), coopmatComponentName(p.BType),
+                           coopmatComponentName(p.CType), coopmatComponentName(p.ResultType),
+                           p.scope == VK_SCOPE_SUBGROUP_KHR  ? "subgroup" :
+                           p.scope == VK_SCOPE_WORKGROUP_KHR ? "workgroup" : "other",
+                           p.saturatingAccumulation ? "  saturating (unusable)" : "");
               if (p.scope != VK_SCOPE_SUBGROUP_KHR) continue;
               // The shaders emit OpCooperativeMatrixMulAddKHR *without* the
               // SaturatingAccumulationKHR operand, and that operand is required
@@ -524,10 +524,10 @@ int vkPeak::runAll()
       logPickedTiles("fp8e5m2", dev.info.coopmatFP8E5M2, dev.info);
       logPickedTiles("int8",    dev.info.coopmatINT8,    dev.info);
 
-      CLPEAK_VLOG("  subgroup: device reports %u, range %u..%u, size control %s\n",
-                  dev.info.subgroupSize, dev.info.minSubgroupSize,
-                  dev.info.maxSubgroupSize,
-                  dev.info.subgroupSizeControl ? "yes" : "no");
+      XPUPEAK_VLOG("  subgroup: device reports %u, range %u..%u, size control %s\n",
+                   dev.info.subgroupSize, dev.info.minSubgroupSize,
+                   dev.info.maxSubgroupSize,
+                   dev.info.subgroupSizeControl ? "yes" : "no");
     }
 #endif
 

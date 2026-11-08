@@ -228,8 +228,8 @@ void RunCheckpoint::write(const RunDocument &live)
     if (warned) return;
     warned = true;
     const std::string why = ec ? " (" + ec.message() + ")" : std::string();
-    CLPEAK_LOG(Warning,
-               "cannot write the run's checkpoint %s%s; if the run is ended part-way, it "
-               "cannot be continued",
-               path.c_str(), why.c_str());
+    XPUPEAK_LOG(Warning,
+                "cannot write the run's checkpoint %s%s; if the run is ended part-way, it "
+                "cannot be continued",
+                path.c_str(), why.c_str());
 }

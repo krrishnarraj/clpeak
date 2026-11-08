@@ -1,5 +1,5 @@
-#ifndef CLPEAK_COREML_BENCH_H
-#define CLPEAK_COREML_BENCH_H
+#ifndef XPUPEAK_COREML_BENCH_H
+#define XPUPEAK_COREML_BENCH_H
 
 // The measurement shape every timed test in this backend follows -- the one
 // the GPU backends use and the ONNX backend documents (src/onnx/AGENTS.md,
@@ -136,9 +136,9 @@ inline const char *coremlLayoutName(bool transposed)
 // slower, rearranging every weight first.  So the gemm chain races the two
 // at every width and the block at every point, each row reporting the
 // faster and saying which, and the accuracy matmul reads the faster one --
-// `false` is [in, out], `true` [out, in], and clpeak::FormRace has the rule
+// `false` is [in, out], `true` [out, in], and xpupeak::FormRace has the rule
 // that closes a race.
-using CoremlLayoutRace = clpeak::FormRace;
+using CoremlLayoutRace = xpupeak::FormRace;
 
 // What the timed runs computed, read once they are over: a NaN or an
 // infinity in the row `output` reduces to withholds the timing as an error,
@@ -186,4 +186,4 @@ inline std::string coremlNonFiniteReason(CoremlSession &s, const std::string &ou
          "so its timing is withheld";
 }
 
-#endif // CLPEAK_COREML_BENCH_H
+#endif // XPUPEAK_COREML_BENCH_H

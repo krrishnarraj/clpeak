@@ -38,9 +38,9 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   // the last-level cache reports the cache.  benchmark_config_t::forDevice sizes
   // globalBWMaxSize to clear it; print both so an implausible reading can be
   // checked against them without a rebuild.
-  CLPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device-local heap %llu MB\n",
-              (unsigned long long)(numItems * sizeof(float) >> 20),
-              (unsigned long long)(dev.info.heapSize >> 20));
+  XPUPEAK_VLOG("global_memory_bandwidth: working set %llu MB, device-local heap %llu MB\n",
+               (unsigned long long)(numItems * sizeof(float) >> 20),
+               (unsigned long long)(dev.info.heapSize >> 20));
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
@@ -55,7 +55,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    CLPEAK_VLOG("Failed to allocate buffers\n");
+    XPUPEAK_VLOG("Failed to allocate buffers\n");
     return -1;
   }
 
@@ -71,7 +71,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
     {
-      CLPEAK_VLOG("Failed to allocate staging buffer\n");
+      XPUPEAK_VLOG("Failed to allocate staging buffer\n");
       vkDestroyBuffer(dev.device, inputBuf, nullptr);
       vkFreeMemory(dev.device, inputMem, nullptr);
       vkDestroyBuffer(dev.device, outputBuf, nullptr);

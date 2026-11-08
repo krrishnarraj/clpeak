@@ -1,5 +1,5 @@
-#ifndef CLPEAK_ONNX_PLUGIN_H
-#define CLPEAK_ONNX_PLUGIN_H
+#ifndef XPUPEAK_ONNX_PLUGIN_H
+#define XPUPEAK_ONNX_PLUGIN_H
 
 // Plugin execution providers (ONNX Runtime 1.22+).
 //
@@ -88,9 +88,9 @@ std::string onnxAppendPluginDevice(
 std::string onnxEpLibraryPath(const std::string &registrationName);
 
 // kEpTable lookup (onnx_peak.cpp): the display name, type label and device
-// class clpeak gives a provider it knows.  False for a provider it does not.
+// class xpupeak gives a provider it knows.  False for a provider it does not.
 bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
                       std::string &typeStr, DeviceType &deviceType);
 
 #endif // ENABLE_ONNX
-#endif // CLPEAK_ONNX_PLUGIN_H
+#endif // XPUPEAK_ONNX_PLUGIN_H

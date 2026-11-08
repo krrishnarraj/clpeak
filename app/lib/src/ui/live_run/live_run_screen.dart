@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../services/benchmark_service.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
 import '../results/results_body.dart';
@@ -161,7 +161,7 @@ class _StatusPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
               child: Text(
-                  'Leaving clpeak pauses the run until you come back.',
+                  'Leaving xpupeak pauses the run until you come back.',
                   style: t.monoSmallDim),
             ),
           ],

@@ -284,7 +284,7 @@ void writeLogEntry(JsonWriter &w, const LogEntry &e)
 {
     w.beginObjectInline();
     w.num("elapsed_s", e.elapsedS);
-    w.str("level", clpeak::logLevelString(e.level));
+    w.str("level", xpupeak::logLevelString(e.level));
     w.strIf("source",  e.source);
     w.strIf("backend", e.backend);
     w.strIf("device",  e.device);
@@ -442,9 +442,9 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
     w.beginObject();
     w.str("schema", progress ? "clpeak/run-partial" : "clpeak/run");
     w.integer("format_version", RESULT_FORMAT_VERSION);
-    w.str("clpeak_version", doc.meta.clpeakVersion.empty()
-                                ? std::string(CLPEAK_VERSION_STR)
-                                : doc.meta.clpeakVersion);
+    w.str("clpeak_version", doc.meta.xpupeakVersion.empty()
+                                ? std::string(XPUPEAK_VERSION_STR)
+                                : doc.meta.xpupeakVersion);
     w.strIf("generated_at", doc.meta.generatedAt);
     if (doc.meta.durationS > 0.0) w.num("duration_s", doc.meta.durationS);
     if (doc.meta.cancelled)       w.boolean("cancelled", true);
@@ -495,9 +495,9 @@ std::string runLogHeaderJson(const RunMeta &meta)
     w.beginObjectInline();
     w.str("schema", "clpeak/run-log");
     w.integer("format_version", RESULT_FORMAT_VERSION);
-    w.str("clpeak_version", meta.clpeakVersion.empty()
-                                ? std::string(CLPEAK_VERSION_STR)
-                                : meta.clpeakVersion);
+    w.str("clpeak_version", meta.xpupeakVersion.empty()
+                                ? std::string(XPUPEAK_VERSION_STR)
+                                : meta.xpupeakVersion);
     w.strIf("generated_at", meta.generatedAt);
     writeBuild(w, meta.build);
     writeHost(w, meta.host);
@@ -511,7 +511,7 @@ bool saveRunJson(const RunDocument &doc, const std::string &filename)
     std::ofstream f(filename);
     if (!f.is_open())
     {
-        std::cerr << "clpeak: cannot open output file: " << filename << "\n";
+        std::cerr << "xpupeak: cannot open output file: " << filename << "\n";
         return false;
     }
     writeDocument(doc, f);
@@ -568,7 +568,7 @@ LogEntry readLogEntry(const JsonValue &v)
 {
     LogEntry e;
     e.elapsedS    = v.num("elapsed_s");
-    e.level       = clpeak::logLevelFromString(v.str("level"));
+    e.level       = xpupeak::logLevelFromString(v.str("level"));
     e.source      = v.str("source");
     e.backend     = v.str("backend");
     e.device      = v.str("device");
@@ -679,7 +679,7 @@ void readProgress(const JsonValue &v, RunProgress &p)
 void readDocument(const JsonValue &root, RunDocument &out)
 {
     out = RunDocument();
-    out.meta.clpeakVersion = root.str("clpeak_version");
+    out.meta.xpupeakVersion = root.str("clpeak_version");
     out.meta.generatedAt   = root.str("generated_at");
     out.meta.durationS     = root.num("duration_s");
     out.meta.cancelled     = root.flag("cancelled");
@@ -727,7 +727,7 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     std::string text;
     if (!readFile(filename, text))
     {
-        std::cerr << "clpeak: cannot open result file: " << filename << "\n";
+        std::cerr << "xpupeak: cannot open result file: " << filename << "\n";
         return false;
     }
 
@@ -735,13 +735,13 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     JsonValue   root = jsonParse(text, &error);
     if (!root.isObject())
     {
-        std::cerr << "clpeak: " << filename << " is not a clpeak result file"
+        std::cerr << "xpupeak: " << filename << " is not a xpupeak result file"
                   << (error.empty() ? "" : " (" + error + ")") << "\n";
         return false;
     }
     if (root.str("schema") == "clpeak/run-partial")
     {
-        std::cerr << "clpeak: " << filename << " is the checkpoint of a run that "
+        std::cerr << "xpupeak: " << filename << " is the checkpoint of a run that "
                   << "did not finish, not a result; continue the run with --resume\n";
         return false;
     }
@@ -749,9 +749,9 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     const int version = static_cast<int>(root.num("format_version", 0));
     if (version != RESULT_FORMAT_VERSION)
     {
-        std::cerr << "clpeak: " << filename << " is format_version=" << version
+        std::cerr << "xpupeak: " << filename << " is format_version=" << version
                   << "; this build expects v" << RESULT_FORMAT_VERSION
-                  << ". Regenerate the file with this version of clpeak.\n";
+                  << ". Regenerate the file with this version of xpupeak.\n";
         return false;
     }
 
@@ -780,7 +780,7 @@ bool loadPartialJson(const std::string &filename, RunDocument &out,
     JsonValue   root = jsonParse(text, &why);
     if (!root.isObject() || root.str("schema") != "clpeak/run-partial")
     {
-        error = filename + " is not a clpeak run checkpoint" +
+        error = filename + " is not a xpupeak run checkpoint" +
                 (why.empty() ? "" : " (" + why + ")");
         return false;
     }

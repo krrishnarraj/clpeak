@@ -5,5 +5,5 @@ build/
 TODO
 # iOS native artifacts staged by tools/build_ios_native.sh, and its build tree
 # (which also caches the ~61 MB ONNX Runtime pod archive)
-app/ios/clpeak_native/
+app/ios/xpupeak_native/
 build-ios/

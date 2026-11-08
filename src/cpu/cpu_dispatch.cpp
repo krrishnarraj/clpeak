@@ -9,14 +9,14 @@
 #include <utility>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#define CLPEAK_X86 1
+#define XPUPEAK_X86 1
 #if defined(_MSC_VER)
 #include <intrin.h>
 #else
 #include <cpuid.h>
 #endif
 #elif defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64)
-#define CLPEAK_ARM 1
+#define XPUPEAK_ARM 1
 #if defined(__linux__) || defined(__ANDROID__)
 #include <sys/auxv.h>
 #elif defined(__APPLE__)
@@ -27,21 +27,21 @@
 #endif
 #endif
 
-#if defined(__linux__) && defined(CLPEAK_X86)
+#if defined(__linux__) && defined(XPUPEAK_X86)
 #include <unistd.h>
 #include <sys/syscall.h>
-#elif defined(__APPLE__) && defined(CLPEAK_X86)
+#elif defined(__APPLE__) && defined(XPUPEAK_X86)
 #include <sys/sysctl.h>   // sysctl.proc_translated (Rosetta 2)
-#elif defined(_WIN32) && defined(CLPEAK_X86)
+#elif defined(_WIN32) && defined(XPUPEAK_X86)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
-namespace clpeak_cpu {
+namespace xpupeak_cpu {
 namespace {
 
 // ---- x86 CPUID / XGETBV ----------------------------------------------------
-#if defined(CLPEAK_X86)
+#if defined(XPUPEAK_X86)
 static inline void cpuidex(uint32_t leaf, uint32_t sub, uint32_t r[4])
 {
 #if defined(_MSC_VER)
@@ -123,7 +123,7 @@ static bool isX86EmulatedOnArm()
 static CpuFeatures detect()
 {
   CpuFeatures f{};
-#if defined(CLPEAK_X86)
+#if defined(XPUPEAK_X86)
   uint32_t r[4];
   cpuidex(0, 0, r);
   uint32_t maxLeaf = r[0];
@@ -204,7 +204,7 @@ static CpuFeatures detect()
       f.amx_int8 = (edx >> 25) & 1;
     }
   }
-#elif defined(CLPEAK_ARM)
+#elif defined(XPUPEAK_ARM)
   // Only AArch64 has the NEON kernels; 32-bit ARMv7 uses the scalar generic TU
   // (and its HWCAP bit layout differs from the AArch64 bits below anyway), so
   // leave every feature false there and let isaName() report "scalar".
@@ -293,7 +293,7 @@ static CpuFeatures detect()
 #endif
 #endif // __aarch64__ || _M_ARM64
 #endif
-#if defined(CLPEAK_X86)
+#if defined(XPUPEAK_X86)
   f.emulatedX86OnArm = isX86EmulatedOnArm();
 #endif
   return f;
@@ -302,14 +302,14 @@ static CpuFeatures detect()
 // AMX tile XSTATE (component 18) is disabled by default and must be granted by
 // the OS on first use; the grant is process-wide, so request it once and cache
 // the result.
-#if defined(__linux__) && defined(CLPEAK_X86)
+#if defined(__linux__) && defined(XPUPEAK_X86)
 static bool amxPermOk()
 {
   // ARCH_REQ_XCOMP_PERM = 0x1023, XFEATURE_XTILEDATA = 18.
   static bool ok = (syscall(SYS_arch_prctl, 0x1023, 18) == 0);
   return ok;
 }
-#elif defined(_WIN32) && defined(CLPEAK_X86)
+#elif defined(_WIN32) && defined(XPUPEAK_X86)
 static bool amxPermOk()
 {
   // Windows 11 / Server 2022 equivalent of the Linux arch_prctl grant:
@@ -381,26 +381,26 @@ static void merge(CpuKernelTable &d, const CpuKernelTable *s)
 // ---- TU accessors (defined in each compiled cpu_kernels_tu.cpp) ------------
 // Declared unconditionally from the TU registry: a declaration for a TU CMake
 // didn't build is harmless (the symbol is never referenced -- every call site
-// is guarded by #if CLPEAK_TU_<tag>, or sits in TU()'s discarded branch).
-#define DECL_TU(tag) extern "C" const CpuKernelTable *clpeak_table_##tag();
-CLPEAK_TU_REGISTRY(DECL_TU)
+// is guarded by #if XPUPEAK_TU_<tag>, or sits in TU()'s discarded branch).
+#define DECL_TU(tag) extern "C" const CpuKernelTable *xpupeak_table_##tag();
+XPUPEAK_TU_REGISTRY(DECL_TU)
 #undef DECL_TU
 
 // TU(tag): the TU's table, or an empty one when CMake did not build that TU.
 // kernelMenu() reaches every TU through it, so a feature predicate runs in
 // every build and a TU this build lacks shows up as missing kernels rather
-// than not at all.  CMake defines CLPEAK_TU_<tag>=1 for each TU it built;
+// than not at all.  CMake defines XPUPEAK_TU_<tag>=1 for each TU it built;
 // stringified, that reads "1", and an undefined one reads as its own name.
 // An unbuilt TU's accessor sits in the discarded branch of the `if
 // constexpr`, which needs no definition, so the link never sees it.
-#define CLPEAK_STR_(x) #x
-#define CLPEAK_STR(x) CLPEAK_STR_(x)
+#define XPUPEAK_STR_(x) #x
+#define XPUPEAK_STR(x) XPUPEAK_STR_(x)
 static constexpr bool tuBuilt(const char *v) { return v[0] == '1' && v[1] == '\0'; }
 static const CpuKernelTable kNoTu{};
 #define TU(tag)                                             \
   ([]() -> const CpuKernelTable * {                         \
-    if constexpr (tuBuilt(CLPEAK_STR(CLPEAK_TU_##tag)))     \
-      return clpeak_table_##tag();                          \
+    if constexpr (tuBuilt(XPUPEAK_STR(XPUPEAK_TU_##tag)))   \
+      return xpupeak_table_##tag();                         \
     else                                                    \
       return &kNoTu;                                        \
   }())
@@ -431,76 +431,76 @@ const CpuKernelTable &kernels()
     const CpuFeatures &f = cpuFeatures();
     (void)f;
     // Merge supported TUs from baseline up, so the widest variant wins per kernel.
-#if CLPEAK_TU_generic
-    merge(t, clpeak_table_generic());     // ungated floor (SSE2 x86 / NEON arm / scalar)
+#if XPUPEAK_TU_generic
+    merge(t, xpupeak_table_generic());     // ungated floor (SSE2 x86 / NEON arm / scalar)
 #endif
-#if CLPEAK_TU_sse42
-    if (f.sse42) merge(t, clpeak_table_sse42());
+#if XPUPEAK_TU_sse42
+    if (f.sse42) merge(t, xpupeak_table_sse42());
 #endif
-#if CLPEAK_TU_avx
-    if (f.avx) merge(t, clpeak_table_avx());
+#if XPUPEAK_TU_avx
+    if (f.avx) merge(t, xpupeak_table_avx());
 #endif
-#if CLPEAK_TU_avx2
-    if (f.avx2 && f.fma) merge(t, clpeak_table_avx2());
+#if XPUPEAK_TU_avx2
+    if (f.avx2 && f.fma) merge(t, xpupeak_table_avx2());
 #endif
-#if CLPEAK_TU_avxvnni
+#if XPUPEAK_TU_avxvnni
     // Before avx512 so a wider AVX-512 base kernel still wins per-slot; the
     // avxvnni TU's real contribution is its 256-bit int8dp (Alder Lake+ etc.).
-    if (f.avxvnni && f.avx2 && f.fma) merge(t, clpeak_table_avxvnni());
+    if (f.avxvnni && f.avx2 && f.fma) merge(t, xpupeak_table_avxvnni());
 #endif
-#if CLPEAK_TU_avxvnniint8
-    if (f.avxvnniint8 && f.avx2 && f.fma) merge(t, clpeak_table_avxvnniint8());
+#if XPUPEAK_TU_avxvnniint8
+    if (f.avxvnniint8 && f.avx2 && f.fma) merge(t, xpupeak_table_avxvnniint8());
 #endif
-#if CLPEAK_TU_avxvnniint16
-    if (f.avxvnniint16 && f.avx2 && f.fma) merge(t, clpeak_table_avxvnniint16());
+#if XPUPEAK_TU_avxvnniint16
+    if (f.avxvnniint16 && f.avx2 && f.fma) merge(t, xpupeak_table_avxvnniint16());
 #endif
-#if CLPEAK_TU_avx512
-    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq) merge(t, clpeak_table_avx512());
+#if XPUPEAK_TU_avx512
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512dq) merge(t, xpupeak_table_avx512());
 #endif
-#if CLPEAK_TU_avx512vnni
-    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512vnni) merge(t, clpeak_table_avx512vnni());
+#if XPUPEAK_TU_avx512vnni
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512vnni) merge(t, xpupeak_table_avx512vnni());
 #endif
-#if CLPEAK_TU_avx512bf16
-    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512bf16) merge(t, clpeak_table_avx512bf16());
+#if XPUPEAK_TU_avx512bf16
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512bf16) merge(t, xpupeak_table_avx512bf16());
 #endif
-#if CLPEAK_TU_avx512fp16
-    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512fp16) merge(t, clpeak_table_avx512fp16());
+#if XPUPEAK_TU_avx512fp16
+    if (f.avx512f && f.avx512bw && f.avx512vl && f.avx512fp16) merge(t, xpupeak_table_avx512fp16());
 #endif
-#if CLPEAK_TU_amx
-    if (f.amx_tile && f.amx_int8 && f.amx_bf16 && amxPermOk()) merge(t, clpeak_table_amx());
+#if XPUPEAK_TU_amx
+    if (f.amx_tile && f.amx_int8 && f.amx_bf16 && amxPermOk()) merge(t, xpupeak_table_amx());
 #endif
-#if CLPEAK_TU_amxfp16
-    if (f.amx_tile && f.amx_fp16 && amxPermOk()) merge(t, clpeak_table_amxfp16());
+#if XPUPEAK_TU_amxfp16
+    if (f.amx_tile && f.amx_fp16 && amxPermOk()) merge(t, xpupeak_table_amxfp16());
 #endif
-#if CLPEAK_TU_amxfp8
-    if (f.amx_tile && f.amx_fp8 && amxPermOk()) merge(t, clpeak_table_amxfp8());
+#if XPUPEAK_TU_amxfp8
+    if (f.amx_tile && f.amx_fp8 && amxPermOk()) merge(t, xpupeak_table_amxfp8());
 #endif
-#if CLPEAK_TU_avx10bf16
-    if (f.avx10_2_512) merge(t, clpeak_table_avx10bf16());
+#if XPUPEAK_TU_avx10bf16
+    if (f.avx10_2_512) merge(t, xpupeak_table_avx10bf16());
 #endif
-#if CLPEAK_TU_fp16
-    if (f.fp16) merge(t, clpeak_table_fp16());
+#if XPUPEAK_TU_fp16
+    if (f.fp16) merge(t, xpupeak_table_fp16());
 #endif
-#if CLPEAK_TU_fp16fml
-    if (f.fp16fml) merge(t, clpeak_table_fp16fml());
+#if XPUPEAK_TU_fp16fml
+    if (f.fp16fml) merge(t, xpupeak_table_fp16fml());
 #endif
-#if CLPEAK_TU_dotprod
-    if (f.dotprod) merge(t, clpeak_table_dotprod());
+#if XPUPEAK_TU_dotprod
+    if (f.dotprod) merge(t, xpupeak_table_dotprod());
 #endif
-#if CLPEAK_TU_bf16
-    if (f.bf16) merge(t, clpeak_table_bf16());
+#if XPUPEAK_TU_bf16
+    if (f.bf16) merge(t, xpupeak_table_bf16());
 #endif
-#if CLPEAK_TU_i8mm
-    if (f.i8mm) merge(t, clpeak_table_i8mm());
+#if XPUPEAK_TU_i8mm
+    if (f.i8mm) merge(t, xpupeak_table_i8mm());
 #endif
-#if CLPEAK_TU_sve
-    if (f.sve) merge(t, clpeak_table_sve());
+#if XPUPEAK_TU_sve
+    if (f.sve) merge(t, xpupeak_table_sve());
 #endif
-#if CLPEAK_TU_svebf16
-    if (f.sve && f.svebf16) merge(t, clpeak_table_svebf16());
+#if XPUPEAK_TU_svebf16
+    if (f.sve && f.svebf16) merge(t, xpupeak_table_svebf16());
 #endif
-#if CLPEAK_TU_svei8mm
-    if (f.sve && f.svei8mm) merge(t, clpeak_table_svei8mm());
+#if XPUPEAK_TU_svei8mm
+    if (f.sve && f.svei8mm) merge(t, xpupeak_table_svei8mm());
 #endif
     // The fp8dot/svefp8dot and SME TUs are deliberately NOT merged here.
     // kernels() only feeds the bandwidth path (readsum) and those TUs add
@@ -526,9 +526,9 @@ int sveVLBytes()
 // into kernels() (see above).  0 when the host has no SME or no SME TU built.
 int smeSVLBytes()
 {
-#if CLPEAK_TU_sme
+#if XPUPEAK_TU_sme
   if (cpuFeatures().sme)
-    return clpeak_table_sme()->smeSVLBytes;
+    return xpupeak_table_sme()->smeSVLBytes;
 #endif
   return 0;
 }
@@ -593,9 +593,9 @@ const CpuKernelMenu &kernelMenu()
 
     // ---- x86 tier TUs (base dtypes) ----
     // The ungated floor: SSE2 on x86, NEON on aarch64, scalar elsewhere.
-#if defined(CLPEAK_X86)
+#if defined(XPUPEAK_X86)
     const char *genIsa = "SSE2";
-#elif defined(CLPEAK_ARM) && (defined(__aarch64__) || defined(_M_ARM64))
+#elif defined(XPUPEAK_ARM) && (defined(__aarch64__) || defined(_M_ARM64))
     const char *genIsa = "NEON";
 #else
     const char *genIsa = "scalar";
@@ -619,7 +619,7 @@ const CpuKernelMenu &kernelMenu()
       // SSSE3 kernel -- pushing it from here would emit a duplicate row with
       // a wrong "SSE2" label.
       add(m.strscan, t->strscan, genIsa, nullptr);
-#if defined(CLPEAK_ARM)
+#if defined(XPUPEAK_ARM)
       add(m.utf8, t->utf8, genIsa, nullptr);
 #endif
     }
@@ -711,16 +711,16 @@ const CpuKernelMenu &kernelMenu()
     // The aes/sha256/sha512/crc32 bits are set on both arches, so these routes
     // split by arch: the other arch's TU never exists, and its feature name
     // would be the wrong one to give.
-#if defined(CLPEAK_X86)
+#if defined(XPUPEAK_X86)
     if (f.aes) add(m.aes, TU(aes)->aes, "AES-NI", "AES-NI");
     // The 512-bit EVEX form needs the AVX-512 OS grant (f.avx512f includes it).
     if (f.vaes && f.avx512f)
       add(m.aes, TU(vaes)->aes, "VAES-512", "VAES");
     if (f.sha256) add(m.sha256, TU(sha)->sha256, "SHA-NI", "SHA-NI");
-    // The SHA512 EVEX extension (Arrow/Lunar Lake) is detected, but clpeak
+    // The SHA512 EVEX extension (Arrow/Lunar Lake) is detected, but xpupeak
     // has no x86 kernel for it yet.
     if (f.sha512) miss(m.sha512, MissingKernel::NotWritten, "SHA512");
-#elif defined(CLPEAK_ARM)
+#elif defined(XPUPEAK_ARM)
     if (f.aes) add(m.aes, TU(aes)->aes, "NEON AES", "FEAT_AES");
     if (f.sha256) add(m.sha256, TU(sha)->sha256, "NEON SHA2", "FEAT_SHA256");
     if (f.sha512) add(m.sha512, TU(sha512)->sha512, "NEON SHA512", "FEAT_SHA512");
@@ -790,6 +790,6 @@ const CpuKernelMenu &kernelMenu()
   return menu;
 }
 
-} // namespace clpeak_cpu
+} // namespace xpupeak_cpu
 
 #endif // ENABLE_CPU

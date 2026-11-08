@@ -13,9 +13,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleDisplayName</key>
-	<string>clpeak</string>
+	<string>xpupeak</string>
 	<key>CFBundleName</key>
-	<string>clpeak</string>
+	<string>xpupeak</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

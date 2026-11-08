@@ -242,7 +242,7 @@ namespace
 // debug: a target with no hardware behind it (OpenVINO NPU with no NPU)
 // reports the refusal at ERROR severity, and with no LogSink installed
 // (--list-devices, the GUI catalog) every Error reaches the terminal --
-// past ScopedConsoleMute, which deliberately lets clpeak's own diagnostics
+// past ScopedConsoleMute, which deliberately lets xpupeak's own diagnostics
 // through.  The probe already keeps the refusal reason from the returned
 // status, so nothing is lost.  Nesting-safe; the latch in ortLogMessage
 // stays first so a loss announced mid-probe is still caught.
@@ -265,22 +265,22 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   if (message)
     noteDeviceLost(message);
 
-  clpeak::LogLevel level;
+  xpupeak::LogLevel level;
   switch (severity)
   {
   case ORT_LOGGING_LEVEL_FATAL:
-  case ORT_LOGGING_LEVEL_ERROR:   level = clpeak::LogLevel::Error;   break;
-  case ORT_LOGGING_LEVEL_WARNING: level = clpeak::LogLevel::Warning; break;
-  default:                        level = clpeak::LogLevel::Debug;   break;
+  case ORT_LOGGING_LEVEL_ERROR:   level = xpupeak::LogLevel::Error;   break;
+  case ORT_LOGGING_LEVEL_WARNING: level = xpupeak::LogLevel::Warning; break;
+  default:                        level = xpupeak::LogLevel::Debug;   break;
   }
-  if (level != clpeak::LogLevel::Debug &&
+  if (level != xpupeak::LogLevel::Debug &&
       g_relaySuppressDepth.load(std::memory_order_relaxed) > 0)
-    level = clpeak::LogLevel::Debug;
-  if (level == clpeak::LogLevel::Debug && !clpeak::verboseEnabled())
+    level = xpupeak::LogLevel::Debug;
+  if (level == xpupeak::LogLevel::Debug && !xpupeak::verboseEnabled())
     return;
   // The optimizer narrates every pass over every session -- forty
   // "GraphTransformer X modified: 0" lines per session, none of them about
-  // the device -- and clpeak creates sessions by the hundred.  The TensorRT
+  // the device -- and xpupeak creates sessions by the hundred.  The TensorRT
   // for RTX plugin's pool allocator does the same per *run*: a
   // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
   // Run(), which over a ladder is tens of thousands of lines saying the
@@ -290,7 +290,7 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   // then, and pushed the run's last 8,452 entries out.  Everything else INFO says (provider
   // registration, partitioning, the session options, the pool's creation
   // and the arena's growth) is kept.
-  if (level == clpeak::LogLevel::Debug && message &&
+  if (level == xpupeak::LogLevel::Debug && message &&
       (std::strncmp(message, "GraphTransformer ", 17) == 0 ||
        std::strncmp(message, "Running graph optimizations", 27) == 0 ||
        std::strncmp(message, "CudaMempoolAllocator::DoAlloc", 29) == 0 ||
@@ -303,7 +303,7 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
   text += message ? message : "";
   if (codeLocation && *codeLocation)
     text += std::string(" (") + codeLocation + ")";
-  clpeak::logMessage(level, "onnxruntime", text);
+  xpupeak::logMessage(level, "onnxruntime", text);
 }
 
 } // namespace
@@ -371,7 +371,7 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
   // differ from run to run in the GUI, so it is opened at INFO and the
   // callback applies the current run's verbosity.
   OrtStatus *st = rt.api->CreateEnvWithCustomLogger(
-      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "clpeak", &g_env);
+      ortLogMessage, nullptr, ORT_LOGGING_LEVEL_INFO, "xpupeak", &g_env);
   if (st || !g_env)
   {
     // Two package-built runtimes (Debian's, Homebrew's) share one system
@@ -380,7 +380,7 @@ OrtEnv *onnxEnv(const OrtRuntime &rt)
     // The reason is the runtime's own words, kept for the skip rows.
     g_envError = st ? onnxStatusText(rt, st)
                     : "the runtime returned no environment and no error";
-    CLPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
+    XPUPEAK_VLOG("onnx: CreateEnv failed: %s\n", g_envError.c_str());
     g_env = nullptr;
     g_failedBase = rt.base;
     return nullptr;
@@ -575,7 +575,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   // The string-keyed append below knows the built-in names only and
   // answers "not supported in this build" for a plugin, however it was
   // registered.  The options are the same table: a plugin QNN takes the
-  // HTP options a built-in one does.  A plugin clpeak has no wiring for
+  // HTP options a built-in one does.  A plugin xpupeak has no wiring for
   // runs with the provider's own defaults -- the person naming the library
   // asked for exactly that, and the fallback guard still fails a session
   // the provider does not take whole.
@@ -613,7 +613,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
 
     using AppendNnapiFn = OrtStatus *(ORT_API_CALL *)(OrtSessionOptions *,
                                                       uint32_t);
-    auto append = reinterpret_cast<AppendNnapiFn>(clpeak::dynSym(
+    auto append = reinterpret_cast<AppendNnapiFn>(xpupeak::dynSym(
         rt.lib, "OrtSessionOptionsAppendExecutionProvider_Nnapi"));
     if (!append)
       return "this onnxruntime was built without the NNAPI provider";
@@ -659,13 +659,13 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
     // None of that search can help here.  Every session in this backend runs
     // with CPU fallback disabled, so a partition TensorRT only partly claims
     // fails the session exactly as a rejected one does.  One attempt answers
-    // the only question clpeak asks: all of it, or none.
+    // the only question xpupeak asks: all of it, or none.
     {
       const char *keys[] = {"trt_max_partition_iterations"};
       const char *vals[] = {"1"};
       if (OrtStatus *st = api->UpdateTensorRTProviderOptions(trt, keys, vals, 1))
-        CLPEAK_VLOG("onnx: trt_max_partition_iterations rejected: %s\n",
-                    onnxStatusText(rt, st).c_str());
+        XPUPEAK_VLOG("onnx: trt_max_partition_iterations rejected: %s\n",
+                     onnxStatusText(rt, st).c_str());
     }
 
     std::string err = onnxStatusText(
@@ -698,7 +698,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
         rt, api->SessionOptionsAppendExecutionProvider_MIGraphX(so, &mgx));
   }
 
-  return "clpeak has no session wiring for " + providerKey + " yet";
+  return "xpupeak has no session wiring for " + providerKey + " yet";
 }
 
 } // namespace
@@ -730,7 +730,7 @@ std::string onnxProviderAttach(const OrtRuntime &rt, const onnx_ep_info_t &ep)
   // Mute the append; the returned status still carries the reason.
   std::string err;
   {
-    clpeak::ScopedConsoleMute mute;
+    xpupeak::ScopedConsoleMute mute;
     err = appendProvider(rt, so, ep, /*wantPlan=*/false);
   }
   rt.api->ReleaseSessionOptions(so);
@@ -746,12 +746,12 @@ static std::string profilePrefixPath()
   char *tmpBuf = nullptr;
   size_t tmpLen = 0;
   if (_dupenv_s(&tmpBuf, &tmpLen, "TEMP") != 0) tmpBuf = nullptr;
-  std::string out = std::string(tmpBuf ? tmpBuf : ".") + "\\clpeak_onnx_prof";
+  std::string out = std::string(tmpBuf ? tmpBuf : ".") + "\\xpupeak_onnx_prof";
   free(tmpBuf);
   return out;
 #else
   const char *tmp = std::getenv("TEMP");
-  return std::string(tmp ? tmp : ".") + "\\clpeak_onnx_prof";
+  return std::string(tmp ? tmp : ".") + "\\xpupeak_onnx_prof";
 #endif
 #else
 #ifdef _MSC_VER
@@ -766,7 +766,7 @@ static std::string profilePrefixPath()
 #endif
   if (!dir.empty() && dir.back() == '/')
     dir.pop_back();
-  return dir + "/clpeak_onnx_prof";
+  return dir + "/xpupeak_onnx_prof";
 #endif
 }
 
@@ -821,8 +821,8 @@ static void removeProfileArtifacts(const std::string &prefix)
     std::error_code removeEc;
     std::filesystem::remove(it->path(), removeEc);
     if (removeEc)
-      CLPEAK_VLOG("onnx: could not remove profile %s: %s\n",
-                  it->path().string().c_str(), removeEc.message().c_str());
+      XPUPEAK_VLOG("onnx: could not remove profile %s: %s\n",
+                   it->path().string().c_str(), removeEc.message().c_str());
   }
 }
 
@@ -963,8 +963,8 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   char *path = nullptr;
   if (OrtStatus *st = rt.api->SessionEndProfiling(session, alloc, &path))
   {
-    CLPEAK_VLOG("onnx: SessionEndProfiling failed: %s\n",
-                onnxStatusText(rt, st).c_str());
+    XPUPEAK_VLOG("onnx: SessionEndProfiling failed: %s\n",
+                 onnxStatusText(rt, st).c_str());
     return ops;
   }
   if (!path)
@@ -978,7 +978,7 @@ std::vector<std::string> onnxCollectExecutedOps(const OrtRuntime &rt,
   std::string json((std::istreambuf_iterator<char>(in)),
                    std::istreambuf_iterator<char>());
   in.close();
-  CLPEAK_VLOG("onnx: profile %s (%zu bytes)\n", file.c_str(), json.size());
+  XPUPEAK_VLOG("onnx: profile %s (%zu bytes)\n", file.c_str(), json.size());
   std::remove(file.c_str());
 
   // Every executed kernel's event carries an op_name; the session's own
@@ -1129,8 +1129,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     st = api->EnableProfiling(so, profilePrefix.c_str());
 #endif
     if (st)
-      CLPEAK_VLOG("onnx: EnableProfiling rejected: %s\n",
-                  onnxStatusText(rt, st).c_str());
+      XPUPEAK_VLOG("onnx: EnableProfiling rejected: %s\n",
+                   onnxStatusText(rt, st).c_str());
   }
 
   // Optimizers this backend turns off, set once: ORT keeps one value per
@@ -1161,8 +1161,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     st = api->AddSessionConfigEntry(
         so, "optimization.disable_specified_optimizers", disabled.c_str());
     if (st)
-      CLPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
-                  onnxStatusText(rt, st).c_str());
+      XPUPEAK_VLOG("onnx: disable_specified_optimizers rejected: %s\n",
+                   onnxStatusText(rt, st).c_str());
   }
 
   // The CPU EP is implicit -- every session already has it -- so it is the
@@ -1182,8 +1182,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
     // under an NPU heading.
     st = api->AddSessionConfigEntry(so, "session.disable_cpu_ep_fallback", "1");
     if (st)
-      CLPEAK_VLOG("onnx: disable_cpu_ep_fallback rejected: %s\n",
-                  onnxStatusText(rt, st).c_str());
+      XPUPEAK_VLOG("onnx: disable_cpu_ep_fallback rejected: %s\n",
+                   onnxStatusText(rt, st).c_str());
   }
 
   // Registering a provider can drag in a second copy of the ONNX schema
@@ -1196,8 +1196,8 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   OrtSession *session = nullptr;
   std::string console;
   {
-    clpeak::ScopedConsoleMute mute(wantPlan ? clpeak::ScopedConsoleMute::Capture::Always
-                                            : clpeak::ScopedConsoleMute::Capture::Verbose);
+    xpupeak::ScopedConsoleMute mute(wantPlan ? xpupeak::ScopedConsoleMute::Capture::Always
+                                             : xpupeak::ScopedConsoleMute::Capture::Verbose);
     st = api->CreateSessionFromArray(env, modelBytes.data(), modelBytes.size(),
                                      so, &session);
     if (wantPlan)
@@ -1234,15 +1234,15 @@ OnnxSessionResult onnxCreateSession(const OrtRuntime &rt,
   {
     const OnnxCoremlPlan plan = onnxParseCoremlPlan(console);
     if (!plan.known)
-      CLPEAK_VLOG("onnx: no compute plan from the CoreML provider (%s); placement unverified\n",
-                  plan.failure.empty() ? "no placement lines on the console" : plan.failure.c_str());
+      XPUPEAK_VLOG("onnx: no compute plan from the CoreML provider (%s); placement unverified\n",
+                   plan.failure.empty() ? "no placement lines on the console" : plan.failure.c_str());
     else
     {
       size_t onUnit = 0;
       for (const auto &op : plan.ops)
         onUnit += (op.device == unit.cls) ? 1 : 0;
-      CLPEAK_VLOG("onnx: compute plan: %zu of %zu operations on %s\n", onUnit, plan.ops.size(),
-                  unit.name.c_str());
+      XPUPEAK_VLOG("onnx: compute plan: %zu of %zu operations on %s\n", onUnit, plan.ops.size(),
+                   unit.name.c_str());
       const std::string why = onnxCoremlPlanOffDeviceReason(plan, unit.cls, unit.name);
       if (!why.empty())
       {

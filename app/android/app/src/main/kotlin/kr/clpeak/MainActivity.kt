@@ -106,7 +106,7 @@ class MainActivity : FlutterActivity() {
             nm.createNotificationChannel(
                 NotificationChannel(RUN_CHANNEL, "Run status", NotificationManager.IMPORTANCE_LOW)
                     .apply {
-                        description = "A run waiting for clpeak to be back on screen"
+                        description = "A run waiting for xpupeak to be back on screen"
                         setShowBadge(false)
                     })
         }

@@ -7,7 +7,7 @@ This backend exists to reach **NPUs**.  Vendor neural accelerators (Qualcomm
 Hexagon, Intel AI Boost, AMD XDNA, Apple Neural Engine) expose no ISA, no
 kernel language, and no dispatch API — the vendor's AI runtime *is* the
 lowest reachable level.  ONNX Runtime is the one layer that fronts all of
-them on all five OSes clpeak targets, so an execution provider (EP) is
+them on all five OSes xpupeak targets, so an execution provider (EP) is
 treated as a device here, exactly as a `cl_device_id` is in the OpenCL
 backend.
 
@@ -33,7 +33,7 @@ backend.
 | File | Purpose |
 |------|---------|
 | `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
-| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `CLPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
+| `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `XPUPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxHeldBytes()` — what a session holds, every memory gate's count |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
@@ -57,9 +57,9 @@ Only `OrtGetApiBase` is resolved by name; everything else comes through the
 gets a one-line "library not found" note and no rows — the same shape as a
 missing GPU driver.
 
-**Choosing a runtime.** `--onnx-lib PATH`, `clpeak_set_onnx_library()` on the
+**Choosing a runtime.** `--onnx-lib PATH`, `xpupeak_set_onnx_library()` on the
 C ABI (what the GUI's settings screen calls, since
-`clpeak_copy_backend_catalog_json()` takes no arguments and enumeration is
+`xpupeak_copy_backend_catalog_json()` takes no arguments and enumeration is
 what loads the runtime), then the platform's conventional names.  **A named library is authoritative**: if it will not
 load, the backend reports itself unavailable rather than falling through to
 whatever else is installed — a run labelled with one runtime and measured on
@@ -110,7 +110,7 @@ runtime rather than chosen instead of it -- is synced onto it
 switch had worked with the catalog off, and so had turning it on under
 either runtime.  Neither Windows failure has been re-tested since the rule.
 
-**iOS is the exception** (`CLPEAK_ONNX_STATIC`): Apple's official pod ships
+**iOS is the exception** (`XPUPEAK_ONNX_STATIC`): Apple's official pod ships
 `onnxruntime.xcframework` as a *static* framework, and iOS will not dlopen a
 library that was not built into the app.  There the runtime is linked in,
 `OrtGetApiBase` is called directly, and the override does nothing because
@@ -172,7 +172,7 @@ installs from the Store.  A stock runtime on a Snapdragon laptop reaches
 the CPU and DirectML, and without this nothing else.
 
 `--onnx-ep NAME=PATH` (repeatable; the FFI's
-`clpeak_set_onnx_ep_libraries`) names the libraries; `--onnx-winml
+`xpupeak_set_onnx_ep_libraries`) names the libraries; `--onnx-winml
 [PATH]` adds whatever the catalog resolves (below).  Three things differ
 from a built-in provider, and `onnx_plugin.cpp` keeps all three in one
 place:
@@ -223,7 +223,7 @@ place:
   HTP options a built-in one does, with the backend chosen by the device's
   type (`backend_type` htp/gpu/cpu) -- or `backend_path` naming the
   `QnnHtp.dll` beside the plugin outright when it is there, so nothing is
-  left to a loader search.  A plugin clpeak has no wiring for runs with
+  left to a loader search.  A plugin xpupeak has no wiring for runs with
   the provider's own defaults: the person naming the library asked for
   exactly that, and the fallback guard still fails any session the
   provider does not take whole.
@@ -258,7 +258,7 @@ registered under -- so the CLI and the GUI, whose registration dialog
 suggests the catalog's names, list the same devices (`onnxSyncEpLibraries`
 says why one copy).  The replacing library's status carries `replaces`;
 the listing's info line and a run's notes say it, and the GUI shows it on
-that library's row.  The DLL is not shipped with clpeak:
+that library's row.  The DLL is not shipped with xpupeak:
 `tools/fetch_winml.ps1` downloads Microsoft's NuGet package and stages its
 `runtimes/win-<arch>/native/` DLLs under `build/winml/<arch>/`, and with a
 directory given to `--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll`
@@ -309,7 +309,7 @@ for the failure, not the success. A provider that executes ONNX operators one
 at a time names each kernel and a fused quantized matmul appears as something
 like `QLinearMatMul`, but a provider that compiles whole subgraphs reports one
 opaque kernel of its own: TensorRT builds a working int8 engine and calls it
-`TRTKernel_graph_clpeak_7216741020808563463_0`. Matching known good names
+`TRTKernel_graph_xpupeak_7216741020808563463_0`. Matching known good names
 rejected that. What a *failed* fusion leaves behind is unmistakable, though —
 a bare floating-point `MatMul` beside the dequantize nodes — so that is what
 is tested for. Anything else ran as the provider's own quantized kernel, and
@@ -357,7 +357,7 @@ for one float8 E5M2 graph it was never going to accept.
 None of that search can help here. Every session in this backend disables CPU
 fallback, so a partition TensorRT only partly claims fails the session exactly
 as a rejected one does. `onnx_session.cpp` sets the limit to **1**, which
-answers the only question clpeak asks — all of it, or none. Measured on the
+answers the only question xpupeak asks — all of it, or none. Measured on the
 same E5M2 graph that produced the flood: **four seconds and dozens of identical
 errors became one millisecond and two lines.**
 
@@ -367,7 +367,7 @@ Every model the CoreML execution provider compiles is cached by Core ML's
 runtime under `~/Library/Caches/<process>/com.apple.e5rt.e5bundlecache`
 with its weights, and never evicted -- 292 GB had accumulated on the
 development Mac before it was noticed.  `OnnxPeak::runAll` calls
-`clpeak::purgeCoreMLCompileCache()` (`include/common/coreml_cache.h`, a
+`xpupeak::purgeCoreMLCompileCache()` (`include/common/coreml_cache.h`, a
 no-op off Apple) after each provider; the Core ML backend does the same per
 session, and the header says why.
 
@@ -376,7 +376,7 @@ session, and the header says why.
 Registering a provider can pull in a second copy of the ONNX schema registry:
 the XNNPACK EP emits hundreds of `Schema error: ... already registered` lines
 from the bundled ONNX library, direct to the console, below any ORT log
-level. Session creation therefore runs inside `clpeak::ScopedConsoleMute`
+level. Session creation therefore runs inside `xpupeak::ScopedConsoleMute`
 (`common/console_mute.h`, shared with the ROCm backend's hipBLASLt query).
 Under `--verbose` the mute captures into the run log instead of discarding.
 
@@ -394,7 +394,7 @@ toggle `--verbose` between runs of one process.
 ## Models are emitted as protobuf bytes, not files
 
 `onnx_model.cpp` writes the ONNX wire format by hand (varint + length-
-delimited fields are all a single-op `ModelProto` needs).  This keeps clpeak
+delimited fields are all a single-op `ModelProto` needs).  This keeps xpupeak
 free of a protobuf dependency and of any `.onnx` asset to ship or embed, and
 guarantees byte-identical models on every platform — which is what makes the
 cross-vendor comparison meaningful.  Weights are embedded as an initializer
@@ -496,7 +496,7 @@ graph the EP cannot take **fails session creation** and the row reports
 
 Limits worth knowing: the guard is enforced at the ORT partitioning level.
 An EP that accepts a node and then falls back *internally* (QNN dropping
-from HTP to the DSP) is invisible to ORT and to clpeak.  Two cross-checks
+from HTP to the DSP) is invisible to ORT and to xpupeak.  Two cross-checks
 narrow that gap: the CPU EP row — always enumerated, always last — should
 be far below any accelerator row, and the `onnx-numeric-error` fp32 row
 exposes an EP that took an fp32 graph and computed it at lower precision
@@ -742,7 +742,7 @@ twenty times the quantization noise the same recipe costs everywhere else.
 The cause is the x86 U8S8 kernel: without VNNI, MLAS multiplies uint8 by int8
 into int16 accumulators, which saturate when the weights use the full int8
 range. It is the reason ONNX Runtime's quantizer offers `reduce_range` for
-pre-VNNI x86. clpeak deliberately does **not** reduce the range — the point
+pre-VNNI x86. xpupeak deliberately does **not** reduce the range — the point
 is to report what full-range int8 actually costs on that hardware, and a
 throughput row alone would have called it a win.
 
@@ -854,7 +854,7 @@ which the provider registers with no support query.
 keyed on.** The `int8_weight` matmul ladder runs on the same Arc A380 that
 dies on the block, so the format is fatal only in this graph; and an RTX
 4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run this graph, so
-it wants that GPU too. But clpeak registers DirectML with no device id, ORT
+it wants that GPU too. But xpupeak registers DirectML with no device id, ORT
 picks the adapter, and nothing in `onnx_ep_info_t` says which GPU answered —
 so `variantFence` in `block.cpp` withholds the row on every DirectML device
 and says why, while gemm, conv and the accuracy rows go on measuring the
@@ -1061,7 +1061,7 @@ too (3918 and 4377). A kernel that unpacks into a 16-bit multiply reads near
 its fp16 row instead (Core ML's GPU: 272 and 279). `int8_qdq_conv1x1` reads 9362
 against `int8_qdq`'s 9463, QLinearConv against QLinearMatMul.
 
-**TensorRT reaches float8 and clpeak's own numbers say what it costs.** RTX 5060,
+**TensorRT reaches float8 and xpupeak's own numbers say what it costs.** RTX 5060,
 ONNX Runtime 1.30: fp8_e4m3 fuses into a `TRTKernel_...` at **75.4 TFLOPS**,
 against 66.5 for fp16, 38.1 for bf16, 19.2 for fp32 and 124.6 TOPS for int8.
 Read against the accuracy rows that is a coherent picture of one card: fp16 at
@@ -1096,7 +1096,7 @@ which is what makes an int8 row an int8 row — but `QLinearMatMul` is an intege
 operator with no float8 type constraint, so on a float8 graph the rewrite turns
 a valid model into one that fails its own type check: *"Type
 'tensor(float8e4m3fn)' of input parameter (A_q) of operator (QLinearMatMul) in
-node (n2) is invalid"*. The message reads like clpeak emitted a broken graph and
+node (n2) is invalid"*. The message reads like xpupeak emitted a broken graph and
 it did not; the graph was correct until ORT changed it. `onnxCreateSession`
 takes `keepQdqUnfused` for exactly this, adding
 `QDQSelectorActionTransformer` to the disabled list, and only float8 graphs ask
@@ -1198,7 +1198,7 @@ that is valid — right up until ORT rewrites it. The QDQ selector fuses
 DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`, which carries fp32
 scales and nothing else, and the rewritten graph then fails its own type check:
 *"Type 'tensor(float16)' of input parameter (U_cs) of operator (QLinearMatMul)
-is invalid"*. The message reads as though clpeak emitted a broken graph. It did
+is invalid"*. The message reads as though xpupeak emitted a broken graph. It did
 not. This is the float8 trap from the opposite direction, and the same lesson:
 **check what ORT rewrote the graph into before believing anything.**
 
@@ -1494,7 +1494,7 @@ kernel ran at a TOPS and answered 2.5 million ppm):
   the rate row's own two resident operands with the whole fp32 product read
   back, quantizing nothing (see "There is no NVFP4 accuracy row").
 - **Wrong is at or past 50% RMS, or NaN or infinity anywhere**
-  (`clpeak::kWrongAnswerPpm`).  A right answer can cost a tenth: `fp4_e2m1`
+  (`xpupeak::kWrongAnswerPpm`).  A right answer can cost a tenth: `fp4_e2m1`
   rounds its answer to eight magnitudes at the four-sigma output scale, about
   12% (simulated -- no provider has run it), and the Zen 2's int8 saturates
   its 16-bit sums and loses 18% beside a 1.32 TOPS rate this backend publishes
@@ -1514,7 +1514,7 @@ kernel ran at a TOPS and answered 2.5 million ppm):
 ## The decode rows declare bytes; two providers do not move them
 
 `onnx-block-decode`'s numerator is what the *model declares* -- that is all
-clpeak can know, and a provider is free to store the weights narrower than
+xpupeak can know, and a provider is free to store the weights narrower than
 asked.  Two of them do, from opposite directions, and both land in the same
 place: a row reading twice its neighbour off the same wall clock.
 
@@ -1796,7 +1796,7 @@ be unbuildable — fp32 at 16384 needs exactly 2 GiB of operands and ORT answers
 the file format rather than of the device, so it is a hard cap in `gemm.cpp`
 alongside the memory budget rather than folded into it.
 
-**Every byte ceiling comes from `clpeak::memoryBudget()`** (`common.h`), a
+**Every byte ceiling comes from `xpupeak::memoryBudget()`** (`common.h`), a
 fraction of physical RAM rather than a constant. The difference between a
 workstation and a cheap phone is two orders of magnitude, and a ceiling that
 merely wastes time on one is an out-of-memory kill on the other — Android

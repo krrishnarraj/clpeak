@@ -22,5 +22,5 @@ runs benchmarks, and handles centralized file output.
   A test flag names what is measured and applies to every backend that runs
   (`--gemm`, not `--cuda-gemm`); a backend is a `Backend` enum value + a row in
   the backend table, and `--devices backend:index` and the listing then work for it unasked.
-- If you change how backends are invoked → update `main.cpp` (and mirror it in `../ffi/clpeak_ffi.cpp`, which ports this loop for the GUI). Which backends exist and in what order is not this file's to decide: both loops walk `backendRegistry()`.
+- If you change how backends are invoked → update `main.cpp` (and mirror it in `../ffi/xpupeak_ffi.cpp`, which ports this loop for the GUI). Which backends exist and in what order is not this file's to decide: both loops walk `backendRegistry()`.
 - If you change the text output format → update `../common/logger_text.cpp`.

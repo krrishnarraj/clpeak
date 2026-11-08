@@ -129,7 +129,7 @@ uint32_t measureGemmDim(id<MTLDevice> mtlDev, id<MTLCommandQueue> queue,
         id<MTLBuffer> c = makePrivateBuffer(mtlDev, bytes);
         if (!a || !b || !c)
         {
-            CLPEAK_VLOG("mps-gemm: probe alloc failed, using D=%u\n", fallback);
+            XPUPEAK_VLOG("mps-gemm: probe alloc failed, using D=%u\n", fallback);
             return fallback;
         }
         {
@@ -165,7 +165,7 @@ uint32_t measureGemmDim(id<MTLDevice> mtlDev, id<MTLCommandQueue> queue,
         double t0_us = timeMPSMatMul(queue, mm, mA, mB, mC, 3);
         if (t0_us <= 0.0)
         {
-            CLPEAK_VLOG("mps-gemm: probe timing failed, using D=%u\n", fallback);
+            XPUPEAK_VLOG("mps-gemm: probe timing failed, using D=%u\n", fallback);
             return fallback;
         }
 
@@ -180,8 +180,8 @@ uint32_t measureGemmDim(id<MTLDevice> mtlDev, id<MTLCommandQueue> queue,
         if (D > 16384) D = 16384;
 
         const uint32_t chosen = clampGemmDim(info, D);
-        CLPEAK_VLOG("mps-gemm: probe D=%u took %.2f ms/iter -> D=%u\n",
-                    D0, t0_us / 1000.0, chosen);
+        XPUPEAK_VLOG("mps-gemm: probe D=%u took %.2f ms/iter -> D=%u\n",
+                     D0, t0_us / 1000.0, chosen);
         return chosen;
     }
 }

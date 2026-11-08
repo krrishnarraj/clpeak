@@ -1,4 +1,4 @@
-/// The clpeak widget kit.
+/// The xpupeak widget kit.
 ///
 /// Deliberately built on raw Flutter primitives (`Container`, `GestureDetector`,
 /// `MouseRegion`) rather than Material's `Card` / `Chip` / `Switch` /
@@ -15,7 +15,7 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 
 // ── Pressable base ─────────────────────────────────────────────────────────
 

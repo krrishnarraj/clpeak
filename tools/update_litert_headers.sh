@@ -5,7 +5,7 @@
 #   update_litert_headers.sh --check      report the pinned tag and the latest
 #                                         upstream release, then exit
 #
-# The LiteRT backend dlopens the runtime, so clpeak needs only the C headers
+# The LiteRT backend dlopens the runtime, so xpupeak needs only the C headers
 # to build — see src/litert/AGENTS.md.  They come from the `litert_cc_sdk.zip`
 # asset of a GitHub release (280 KB) rather than a clone of the repository
 # (the whole runtime and converter, over a gigabyte).  Only the transitive
@@ -70,7 +70,7 @@ if [ ! -d "$dest" ]; then
     exit 1
 fi
 
-staging=$(mktemp -d "${TMPDIR:-/tmp}/clpeak-litert.XXXXXX")
+staging=$(mktemp -d "${TMPDIR:-/tmp}/xpupeak-litert.XXXXXX")
 trap 'rm -rf "$staging"' EXIT INT TERM
 
 if ! curl -sfL --max-time 300 "$repo/releases/download/$tag/litert_cc_sdk.zip" \

@@ -305,14 +305,14 @@ CPU_SIMD_ALWAYS_INLINE int   i32_hsum(i32v a)           { return a; }
 // scalar `a / b` / sqrtf() this file falls back to on armv7 has no known
 // fast-math substitution risk (no rcpps/frecpe-class estimate instruction
 // exists for plain VFP scalar ops, unlike x86 SSE/AVX or AArch64 NEON), so
-// this is a documented gap, not an unguarded bug -- CLPEAK_HAS_FLOAT_CONTROL
+// this is a documented gap, not an unguarded bug -- XPUPEAK_HAS_FLOAT_CONTROL
 // gates the pragma to the targets where it both applies and is needed.
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86) || \
     defined(__aarch64__) || defined(_M_ARM64)
-#define CLPEAK_HAS_FLOAT_CONTROL 1
+#define XPUPEAK_HAS_FLOAT_CONTROL 1
 #endif
 // ===========================================================================
-#if defined(__clang__) && defined(CLPEAK_HAS_FLOAT_CONTROL)
+#if defined(__clang__) && defined(XPUPEAK_HAS_FLOAT_CONTROL)
 #pragma float_control(precise, on, push)
 CPU_SIMD_ALWAYS_INLINE f32v f32_div(f32v a, f32v b)     { return a / b; }
 CPU_SIMD_ALWAYS_INLINE f64v f64_div(f64v a, f64v b)     { return a / b; }

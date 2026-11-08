@@ -55,7 +55,7 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
       }
       catch (const sycl::exception &e)
       {
-        CLPEAK_VLOG("SYCL transfer batch failed: %s\n", e.what());
+        XPUPEAK_VLOG("SYCL transfer batch failed: %s\n", e.what());
         return -1.0f;
       }
     };
@@ -68,7 +68,7 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     }
     catch (const sycl::exception &e)
     {
-      CLPEAK_VLOG("SYCL transfer warmup failed: %s\n", e.what());
+      XPUPEAK_VLOG("SYCL transfer warmup failed: %s\n", e.what());
       return -1.0f;
     }
 

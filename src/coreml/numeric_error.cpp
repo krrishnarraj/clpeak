@@ -54,8 +54,8 @@ constexpr int64_t kDim = 1024;
 constexpr unsigned int kRaceBudgetUs = 200000;
 
 // How this backend's answer checks name things (include/common/answer_check.h).
-const clpeak::AnswerWords kWords = {"this compute unit's", "coreml_numeric_error", "the host's reference",
-                                    "the host's double-precision reference"};
+const xpupeak::AnswerWords kWords = {"this compute unit's", "coreml_numeric_error", "the host's reference",
+                                     "the host's double-precision reference"};
 
 struct Variant
 {
@@ -174,7 +174,7 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
 
   if (coremlSpecForWeight(w) > spec)
   {
-    for (clpeak::AnswerCheck &l : c.layout)
+    for (xpupeak::AnswerCheck &l : c.layout)
     {
       l.status = ResultStatus::Unsupported;
       l.error = "needs " + coremlOsForSpec(coremlSpecForWeight(w)) + " (model specification " +
@@ -198,7 +198,7 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
   double rate[2] = {0.0, 0.0}, createUs[2] = {0.0, 0.0};
   for (int t = 0; t < 2; t++)
   {
-    clpeak::AnswerCheck &l = c.layout[t];
+    xpupeak::AnswerCheck &l = c.layout[t];
     l.status = ResultStatus::Unsupported;
     std::string err;
     auto s = CoremlSession::create(dev, coremlPlainMatMulModel(spec, kDim, kDim, kDim, w, &weights, t), err);
@@ -230,8 +230,8 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
     l.status = ResultStatus::Ok;
     rate[t] = 1.0 / m.meanUs;
     createUs[t] = coremlCreateUs(*s);
-    CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.1f us per multiply, create %.2f s\n",
-                dev.displayName.c_str(), label, coremlLayoutName(t), m.meanUs, createUs[t] / 1.0e6);
+    XPUPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.1f us per multiply, create %.2f s\n",
+                 dev.displayName.c_str(), label, coremlLayoutName(t), m.meanUs, createUs[t] / 1.0e6);
     sess[t] = std::move(s);
   }
   if (!sess[0] && !sess[1])
@@ -249,7 +249,7 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
   {
     if (!sess[t])
       continue;
-    clpeak::AnswerCheck &l = c.layout[t];
+    xpupeak::AnswerCheck &l = c.layout[t];
     std::string err;
     std::vector<float> got;
     if (sess[t]->run(err))
@@ -261,10 +261,10 @@ void measureMatMul(const coreml_device_info_t &dev, CoremlWeight w, unsigned war
       l.error = err;
       continue;
     }
-    clpeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
+    xpupeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
     if (l.ppm >= 0.0)
-      CLPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.2f ppm%s\n", dev.displayName.c_str(), label,
-                  coremlLayoutName(t), l.ppm, l.wrong() ? ", a wrong answer" : "");
+      XPUPEAK_VLOG("coreml-numeric-error[%s/%s]: %s %.2f ppm%s\n", dev.displayName.c_str(), label,
+                   coremlLayoutName(t), l.ppm, l.wrong() ? ", a wrong answer" : "");
   }
 
   // The row reads the faster layout of those that answer right; with none
@@ -294,7 +294,7 @@ void measureConv1x1(const coreml_device_info_t &dev, CoremlWeight w, unsigned wa
 {
   const int spec = coremlSpecVersion();
   const int dtype = coremlActDtype(w);
-  clpeak::AnswerCheck &l = c.layout[0];
+  xpupeak::AnswerCheck &l = c.layout[0];
   l.status = ResultStatus::Unsupported;
   std::vector<float> weights;
   std::string err;
@@ -332,10 +332,10 @@ void measureConv1x1(const coreml_device_info_t &dev, CoremlWeight w, unsigned wa
   const std::vector<double> b(weights.begin(), weights.end());
   std::vector<double> ref;
   referenceGemm(b, a, kDim, kDim, kDim, ref);
-  clpeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
+  xpupeak::judgeAnswer(l, got.data(), ref.data(), got.size(), kWords);
   if (l.ppm >= 0.0)
-    CLPEAK_VLOG("coreml-numeric-error[%s/%s as a 1x1 convolution]: %.2f ppm%s\n", dev.displayName.c_str(),
-                coremlWeightLabel(w), l.ppm, l.wrong() ? ", a wrong answer" : "");
+    XPUPEAK_VLOG("coreml-numeric-error[%s/%s as a 1x1 convolution]: %.2f ppm%s\n", dev.displayName.c_str(),
+                 coremlWeightLabel(w), l.ppm, l.wrong() ? ", a wrong answer" : "");
 }
 
 } // namespace
@@ -362,7 +362,7 @@ std::string CoreMLPeak::wrongAnswer(const coreml_device_info_t &dev, CoremlWeigh
   const std::string what = std::string(coremlWeightLabel(w)) +
                            (conv1x1 ? " written as a 1x1 convolution"
                                     : std::string(" stored ") + coremlLayoutName(transposed));
-  return clpeak::wrongAnswerReason(c.layout[conv1x1 ? 0 : (int)transposed], kWords, what);
+  return xpupeak::wrongAnswerReason(c.layout[conv1x1 ? 0 : (int)transposed], kWords, what);
 }
 
 int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_config_t &cfg)
@@ -379,7 +379,7 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 
   for (const Variant &v : kVariants)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const char *label = coremlWeightLabel(v.w);
     const AnswerCheck &c = answerCheck(dev, v.w);
@@ -389,15 +389,15 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
       continue;
     }
     const std::string note = std::string(v.note) + c.note;
-    const clpeak::AnswerCheck &r = c.layout[c.read];
+    const xpupeak::AnswerCheck &r = c.layout[c.read];
     // A wrong answer in every layout measured is no precision figure: the
     // row is an Error carrying it, beside the rate rows it withheld.
     if (r.wrong())
     {
-      const clpeak::AnswerCheck &o = c.layout[1 - c.read];
+      const xpupeak::AnswerCheck &o = c.layout[1 - c.read];
       const bool otherWrong = o.ppm >= 0.0 || o.nonFinite;
       test.skip(label, ResultStatus::Error,
-                clpeak::wrongAnswerRowReason(
+                xpupeak::wrongAnswerRowReason(
                     r, kWords,
                     otherWrong ? std::string("and stored ") + coremlLayoutName(1 - c.read) +
                                      " it is wrong too, so its rate rows are withheld"

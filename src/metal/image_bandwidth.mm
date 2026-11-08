@@ -152,8 +152,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         uint64_t bytes = (uint64_t)IMAGE_FETCH_PER_WI * v.bytesPerPixel * globalThreads;
         float rowBps = (float)bytes / us * 1e6f;
         float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
-        CLPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f B/s\n",
-                    v.label, rowBps, colBps);
+        XPUPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f B/s\n",
+                     v.label, rowBps, colBps);
         test.emit(v.label, std::max(rowBps, colBps), v.note);
     }
 

@@ -8,12 +8,12 @@
 import 'dart:ffi' hide Size;
 import 'dart:io';
 
-import 'package:clpeak/src/ffi/clpeak_bindings.dart';
-import 'package:clpeak/src/services/benchmark_service.dart';
-import 'package:clpeak/src/services/run_history_store.dart';
-import 'package:clpeak/src/services/settings_service.dart';
-import 'package:clpeak/src/theme/clpeak_theme.dart';
-import 'package:clpeak/src/ui/settings/settings_screen.dart';
+import 'package:xpupeak/src/ffi/xpupeak_bindings.dart';
+import 'package:xpupeak/src/services/benchmark_service.dart';
+import 'package:xpupeak/src/services/run_history_store.dart';
+import 'package:xpupeak/src/services/settings_service.dart';
+import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/settings/settings_screen.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -42,17 +42,17 @@ Map<String, dynamic> _litertJson({String? pendingPath}) => {
       if (pendingPath != null) 'pendingRuntime': {'path': pendingPath},
     };
 
-class _StubBindings implements ClpeakBindings {
+class _StubBindings implements XpupeakBindings {
   _StubBindings(this.onnx, this.litert);
 
   final OnnxStatus onnx;
   final LitertStatus litert;
 
   @override
-  ClpeakLaunch get launch => (_, _, _, _) => 0;
+  XpupeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  ClpeakRequestCancel get requestCancel => () {};
+  XpupeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -104,7 +104,7 @@ Future<void> _pumpSettings(
         ChangeNotifierProvider.value(value: service),
       ],
       child: MaterialApp(
-        theme: ClpeakTheme.dark(),
+        theme: XpupeakTheme.dark(),
         home: const SettingsScreen(),
       ),
     ),
@@ -157,7 +157,7 @@ void main() {
     expect(find.text(_next), findsOneWidget);
     expect(find.text(r'Windows ML on · C:\winml\x64'), findsOneWidget);
     expect(find.text('Found by name on the system paths'), findsOneWidget);
-    expect(find.text('Takes effect the next time clpeak starts.'),
+    expect(find.text('Takes effect the next time xpupeak starts.'),
         findsNWidgets(2));
     // No relaunch from inside the app: the note is the whole story.
     expect(find.textContaining('RESTART'), findsNothing);

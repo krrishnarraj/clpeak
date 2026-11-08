@@ -6,13 +6,13 @@ Git-describe version derivation and the generated `version.h.in` template.
 
 - Looking for version derivation? → `version.cmake`, configure time **only**
 - Looking for the version header template? → `version.h.in`
-- Looking for how backends are enabled/disabled? → root `CMakeLists.txt` (`CLPEAK_ENABLE_*` options)
+- Looking for how backends are enabled/disabled? → root `CMakeLists.txt` (`XPUPEAK_ENABLE_*` options)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `version.cmake` | git-describe → `CLPEAK_VERSION_STR` (`"unknown"` when git-describe cannot run) → `generated/version.h`; `clpeak_setup_version(<target>)` puts that header on the target's include path |
+| `version.cmake` | git-describe → `XPUPEAK_VERSION_STR` (`"unknown"` when git-describe cannot run) → `generated/version.h`; `xpupeak_setup_version(<target>)` puts that header on the target's include path |
 | `version.h.in` | Template for `generated/version.h` |
 
 ## Rules

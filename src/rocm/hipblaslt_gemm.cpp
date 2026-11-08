@@ -12,9 +12,9 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
-#include <common/dynlib.h>   // must stay at file scope (defines namespace clpeak)
+#include <common/dynlib.h>   // must stay at file scope (defines namespace xpupeak)
 
-#ifdef CLPEAK_ROCM_HAS_HIPBLASLT
+#ifdef XPUPEAK_ROCM_HAS_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
 #include <common/console_mute.h>
 #include <cstdio>
@@ -40,7 +40,7 @@ uint32_t pickGemmDim(const rocm_device_info_t &info)
   return (uint32_t)D;
 }
 
-#ifdef CLPEAK_ROCM_HAS_HIPBLASLT
+#ifdef XPUPEAK_ROCM_HAS_HIPBLASLT
 // Optional hipBLASLt loader -- not part of the HIP runtime, so it is resolved at
 // run time; if absent the FP8 GEMM benchmark is skipped.  Function-pointer types
 // come from the header via decltype; macros redirect the call sites unchanged.
@@ -66,26 +66,26 @@ bool HipblasLtApi::load()
 {
   if (lib)
     return true;
-  lib = clpeak::dynOpen({"libhipblaslt.so", "libhipblaslt.so.0", "hipblaslt.dll"});
+  lib = xpupeak::dynOpen({"libhipblaslt.so", "libhipblaslt.so.0", "hipblaslt.dll"});
   if (!lib)
     return false;
   bool ok = true;
-#define CLPEAK_HLT_SYM(member, name)                                      \
-  member = reinterpret_cast<decltype(member)>(clpeak::dynSym(lib, name)); \
+#define XPUPEAK_HLT_SYM(member, name)                                     \
+  member = reinterpret_cast<decltype(member)>(xpupeak::dynSym(lib, name)); \
   ok = ok && (member != nullptr)
-  CLPEAK_HLT_SYM(Create,           "hipblasLtCreate");
-  CLPEAK_HLT_SYM(Destroy,          "hipblasLtDestroy");
-  CLPEAK_HLT_SYM(Matmul,           "hipblasLtMatmul");
-  CLPEAK_HLT_SYM(AlgoGetHeuristic, "hipblasLtMatmulAlgoGetHeuristic");
-  CLPEAK_HLT_SYM(DescCreate,       "hipblasLtMatmulDescCreate");
-  CLPEAK_HLT_SYM(DescDestroy,      "hipblasLtMatmulDescDestroy");
-  CLPEAK_HLT_SYM(DescSetAttribute, "hipblasLtMatmulDescSetAttribute");
-  CLPEAK_HLT_SYM(PrefCreate,       "hipblasLtMatmulPreferenceCreate");
-  CLPEAK_HLT_SYM(PrefDestroy,      "hipblasLtMatmulPreferenceDestroy");
-  CLPEAK_HLT_SYM(PrefSetAttribute, "hipblasLtMatmulPreferenceSetAttribute");
-  CLPEAK_HLT_SYM(LayoutCreate,     "hipblasLtMatrixLayoutCreate");
-  CLPEAK_HLT_SYM(LayoutDestroy,    "hipblasLtMatrixLayoutDestroy");
-#undef CLPEAK_HLT_SYM
+  XPUPEAK_HLT_SYM(Create,           "hipblasLtCreate");
+  XPUPEAK_HLT_SYM(Destroy,          "hipblasLtDestroy");
+  XPUPEAK_HLT_SYM(Matmul,           "hipblasLtMatmul");
+  XPUPEAK_HLT_SYM(AlgoGetHeuristic, "hipblasLtMatmulAlgoGetHeuristic");
+  XPUPEAK_HLT_SYM(DescCreate,       "hipblasLtMatmulDescCreate");
+  XPUPEAK_HLT_SYM(DescDestroy,      "hipblasLtMatmulDescDestroy");
+  XPUPEAK_HLT_SYM(DescSetAttribute, "hipblasLtMatmulDescSetAttribute");
+  XPUPEAK_HLT_SYM(PrefCreate,       "hipblasLtMatmulPreferenceCreate");
+  XPUPEAK_HLT_SYM(PrefDestroy,      "hipblasLtMatmulPreferenceDestroy");
+  XPUPEAK_HLT_SYM(PrefSetAttribute, "hipblasLtMatmulPreferenceSetAttribute");
+  XPUPEAK_HLT_SYM(LayoutCreate,     "hipblasLtMatrixLayoutCreate");
+  XPUPEAK_HLT_SYM(LayoutDestroy,    "hipblasLtMatrixLayoutDestroy");
+#undef XPUPEAK_HLT_SYM
   if (!ok)
   {
     // Forgotten, not unloaded: common/dynlib.h explains why no handle is
@@ -115,7 +115,7 @@ bool HipblasLtApi::load()
 // per-candidate diagnostics straight to the console while walking instruction
 // tables (e.g. FP4 on gfx942: pages of "Warning: Latency not found" and
 // rocRoller XCC FatalError lines), bypassing the HIPBLASLT_LOG_* mechanism.
-// hipBLASLt is muted through clpeak::ScopedConsoleMute (common/console_mute.h)
+// hipBLASLt is muted through xpupeak::ScopedConsoleMute (common/console_mute.h)
 // while querying algorithms: its Tensile/rocRoller internals print
 // per-candidate diagnostics straight to the console (e.g. FP4 on gfx942:
 // pages of "Warning: Latency not found" and rocRoller XCC FatalError lines),
@@ -168,7 +168,7 @@ double timeHipblasLt(hipStream_t stream, hipblasLtHandle_t lt,
   (void)hipEventDestroy(stop);
   return (double)ms * 1000.0 / (double)n;
 }
-#endif // CLPEAK_ROCM_HAS_HIPBLASLT
+#endif // XPUPEAK_ROCM_HAS_HIPBLASLT
 
 } // namespace
 
@@ -188,7 +188,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   const char *mxf4Note = "fp4 E2M1 inputs, one shared scale per 32 values (OCP "
                          "MX), fp32 accumulator.";
 
-#ifndef CLPEAK_ROCM_HAS_HIPBLASLT
+#ifndef XPUPEAK_ROCM_HAS_HIPBLASLT
   test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt not found at configure time", e4m3Note);
   test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt not found at configure time", e5m2Note);
   test.skip("mxf4_e2m1", ResultStatus::Unsupported, "hipBLASLt not found at configure time", mxf4Note);
@@ -278,7 +278,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     int returnedResults = 0;
     hipblasStatus_t hs;
     {
-      clpeak::ScopedConsoleMute mute;
+      xpupeak::ScopedConsoleMute mute;
       hs = hipblasLtMatmulAlgoGetHeuristic(
           lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
           pref, kCandidates, heurs.data(), &returnedResults);
@@ -353,7 +353,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   runVariant("fp8_e4m3", e4m3Note, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ);
   runVariant("fp8_e5m2", e5m2Note, HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E4M3_FNUZ);
 
-#if defined(CLPEAK_HIPBLASLT_HAS_FP4)
+#if defined(XPUPEAK_HIPBLASLT_HAS_FP4)
   // mxfp4: block-scaled 4-bit GEMM (OCP MX, 32-element UE8M0 scales) on gfx950 /
   // MI350 -- the same dtype the mfma_mxfp4 microbench measures. Both operands are
   // HIP_R_4F_E2M1 (4 bits/elem, so they fit the fp8-sized dA/dB), output is bf16,
@@ -406,7 +406,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
         int returnedResults = 0;
         hipblasStatus_t hs;
         {
-          clpeak::ScopedConsoleMute mute;
+          xpupeak::ScopedConsoleMute mute;
           hs = hipblasLtMatmulAlgoGetHeuristic(
               lt, opDesc, Adesc, Bdesc, Cdesc, Cdesc,
               pref, kCandidates, heurs.data(), &returnedResults);
@@ -471,7 +471,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   test.skip("mxf4_e2m1", ResultStatus::Unsupported,
             "block-scaled FP4 GEMM API not in this hipBLASLt (needs gfx950 / recent ROCm)",
             mxf4Note);
-#endif // CLPEAK_HIPBLASLT_HAS_FP4
+#endif // XPUPEAK_HIPBLASLT_HAS_FP4
 
   (void)hipblasLtDestroy(lt);
   (void)hipFree(dA);
@@ -479,7 +479,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   (void)hipFree(dC);
   (void)hipFree(dWS);
   return 0;
-#endif // CLPEAK_ROCM_HAS_HIPBLASLT
+#endif // XPUPEAK_ROCM_HAS_HIPBLASLT
 }
 
 #endif // ENABLE_ROCM

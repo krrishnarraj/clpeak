@@ -7,13 +7,13 @@
 
 #ifdef _WIN32
 #include <io.h>
-#define CLPEAK_WRITE _write
+#define XPUPEAK_WRITE _write
 #else
 #include <unistd.h>
-#define CLPEAK_WRITE write
+#define XPUPEAK_WRITE write
 #endif
 
-namespace clpeak {
+namespace xpupeak {
 static bool g_verbose = false;
 bool verboseEnabled()   { return g_verbose; }
 void setVerbose(bool on) { g_verbose = on; }
@@ -59,8 +59,8 @@ void stderrWrite(const std::string &text)
         size_t done = 0;
         while (done < text.size())
         {
-            const auto n = CLPEAK_WRITE(fd, text.data() + done,
-                                        static_cast<unsigned>(text.size() - done));
+            const auto n = XPUPEAK_WRITE(fd, text.data() + done,
+                                         static_cast<unsigned>(text.size() - done));
             if (n <= 0) break;
             done += static_cast<size_t>(n);
         }
@@ -262,7 +262,7 @@ void populate(float *ptr, uint64_t N)
 #include <sys/resource.h>
 #endif
 
-namespace clpeak {
+namespace xpupeak {
 
 uint64_t systemMemoryBytes()
 {
@@ -333,4 +333,4 @@ bool openFileDescriptors(unsigned long &used, unsigned long &limit)
 #endif
 }
 
-} // namespace clpeak
+} // namespace xpupeak

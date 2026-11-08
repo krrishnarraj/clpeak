@@ -32,7 +32,7 @@
 // A weight-only row whose kernel multiplies int8 that way counts ops, not
 // flops (litertRateUnit).
 //
-// The int8 row races two spellings of its layers (clpeak::MultiFormRace):
+// The int8 row races two spellings of its layers (xpupeak::MultiFormRace):
 // FULLY_CONNECTED, and a 1x1 CONV_2D over a grid of as many positions as
 // the layer is wide -- the same arithmetic in the operator NPU compilers
 // were first built for, and on some of them the faster int8 path.  Through
@@ -118,7 +118,7 @@ constexpr double kFoldWorkFloor = 0.15;
 // physical memory (a fixed ceiling would be a crash on a phone and a
 // needless limit on a workstation) and at 8 GB, which still admits the
 // 8192-wide integer rungs XNNPACK and the Metal accelerator peak at.
-uint64_t maxRungBytes() { return clpeak::memoryBudget(8ull << 30); }
+uint64_t maxRungBytes() { return xpupeak::memoryBudget(8ull << 30); }
 
 uint64_t rungBytes(const LitertPlan &p, int64_t D)
 {
@@ -209,7 +209,7 @@ std::string foldReason(const std::string &form, const char *tail)
          "the compiler folded the multiplies away: " + tail;
 }
 
-// A raced row's winner (clpeak::MultiFormRace), in the words that follow
+// A raced row's winner (xpupeak::MultiFormRace), in the words that follow
 // "Fastest at N-wide layers": how its layers were written where that was
 // raced, whether the GPU's 8-bit kernels were allowed where that was, and
 // which pipeline built its GPU graph where that was.
@@ -251,12 +251,12 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       if (m.meanUs > 0.0)
         floorUs = m.meanUs;
     }
-    CLPEAK_VLOG("litert-gemm[%s]: submission floor %.1f us\n", dev.displayName.c_str(), floorUs);
+    XPUPEAK_VLOG("litert-gemm[%s]: submission floor %.1f us\n", dev.displayName.c_str(), floorUs);
   }
 
   for (const Variant &v : kVariants)
   {
-    if (clpeak::cancelRequested())
+    if (xpupeak::cancelRequested())
       break;
     const char *label = litertFormatLabel(v.f);
     const LitertPlan plan = litertPlanFor(v.f, dev.accel);
@@ -278,7 +278,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     const bool raced = nf > 1;
     for (LitertForm &form : forms)
       form = resolveIo(rt, dev, v.f, form);
-    clpeak::MultiFormRace race(nf);
+    xpupeak::MultiFormRace race(nf);
 
     // A form whose answer is wrong has no rate worth publishing, and leaves
     // the race rather than withholding the row: a broken convolution kernel
@@ -312,7 +312,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
     // unpredicted.
     for (size_t f = 0; f < nf && mlLadderScouts(dev.deviceType); f++)
     {
-      if (!race.runs(f) || clpeak::cancelRequested())
+      if (!race.runs(f) || xpupeak::cancelRequested())
         continue;
       const LitertPlan fp = litertFormPlan(plan, forms[f]);
       std::string err;
@@ -331,14 +331,14 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
                                lanes[f].lastRate;
         if ((runCapUs > 0.0 && firstUs > runCapUs) || firstUs / kChainLayers > kMaxIterUs)
           lanes[f].startDim = kScoutDim;
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
-                    (long long)kScoutDim, kChainLayers, what(f).c_str(), us / 1.0e3,
-                    lanes[f].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
-                                                   : "");
+        XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s scout %.1f ms%s\n", dev.displayName.c_str(), label,
+                     (long long)kScoutDim, kChainLayers, what(f).c_str(), us / 1.0e3,
+                     lanes[f].startDim == kScoutDim ? ", too slow for the first size: climbing from the scout's"
+                                                    : "");
       }
       else
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
-                    dev.displayName.c_str(), label, (long long)kScoutDim, what(f).c_str(), err.c_str());
+        XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s scout failed, first rung unpredicted: %s\n",
+                     dev.displayName.c_str(), label, (long long)kScoutDim, what(f).c_str(), err.c_str());
     }
 
     int64_t firstDim = kMinDim;
@@ -346,15 +346,15 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       firstDim = std::min(firstDim, ln.startDim);
     for (int64_t D = firstDim; D <= kMaxDim && !race.done() && wrongRow.empty(); D *= 2)
     {
-      if (clpeak::cancelRequested())
+      if (xpupeak::cancelRequested())
         break;
 
       const uint64_t bytes = rungBytes(plan, D), budget = maxRungBytes();
       if (bytes > budget)
       {
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
-                    dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
-                    (unsigned long long)(budget >> 20));
+        XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide layers need %llu MB of a %llu MB budget, stopping\n",
+                     dev.displayName.c_str(), label, (long long)D, (unsigned long long)(bytes >> 20),
+                     (unsigned long long)(budget >> 20));
         break;
       }
       const double layerOps = 2.0 * (double)D * (double)D * (double)D;
@@ -372,13 +372,13 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         if (runTooLong || runUs / kChainLayers > kMaxIterUs)
         {
           if (runTooLong)
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would keep the GPU busy ~%.2f s a run, past "
-                        "--max-time-ml-gpu (%.2f s), stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, form.c_str(), runUs / 1.0e6,
-                        runCapUs / 1.0e6);
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would keep the GPU busy ~%.2f s a run, past "
+                         "--max-time-ml-gpu (%.2f s), stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, form.c_str(), runUs / 1.0e6,
+                         runCapUs / 1.0e6);
           else
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would take ~%.1f s per multiply, stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, form.c_str(), runUs / kChainLayers / 1.0e6);
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s would take ~%.1f s per multiply, stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, form.c_str(), runUs / kChainLayers / 1.0e6);
           // Before any rung the prediction is the scout's, and it is all the
           // row has to say.
           if (ln.rungs == 0)
@@ -406,11 +406,11 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
               litertPredictCreateUs(ln.prevCreateUs, ln.prevPrevCreateUs, ln.strikes > 0);
           if (predictedUs > kLitertMaxChainCreateUs)
           {
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s predicted create %.1f s (prev %.1f s%s) > "
-                        "%.1f s, stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, form.c_str(), predictedUs / 1.0e6,
-                        ln.prevCreateUs / 1.0e6, ln.strikes > 0 ? ", after a size that did not gain" : "",
-                        kLitertMaxChainCreateUs / 1.0e6);
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s predicted create %.1f s (prev %.1f s%s) > "
+                         "%.1f s, stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, form.c_str(), predictedUs / 1.0e6,
+                         ln.prevCreateUs / 1.0e6, ln.strikes > 0 ? ", after a size that did not gain" : "",
+                         kLitertMaxChainCreateUs / 1.0e6);
             race.drop(f);
             continue;
           }
@@ -426,8 +426,8 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
               rt, dev, [&] { return litertMatMulChainModel(fp, D, kChainLayers, kSeedWidth, forms[f].conv1x1); },
               litertConfigFor(fp, forms[f], true), fp);
           if (!ln.kernel.empty())
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %s kernel '%s'\n", dev.displayName.c_str(), label, form.c_str(),
-                        ln.kernel.c_str());
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %s kernel '%s'\n", dev.displayName.c_str(), label, form.c_str(),
+                         ln.kernel.c_str());
         }
 
         std::string err;
@@ -436,20 +436,20 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
                                        litertConfigFor(fp, forms[f]), err);
         if (!s)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s create failed: %s\n", dev.displayName.c_str(), label,
-                      (long long)D, form.c_str(), err.c_str());
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s create failed: %s\n", dev.displayName.c_str(), label,
+                       (long long)D, form.c_str(), err.c_str());
           ln.fail(err);
           race.drop(f);   // larger sizes need strictly more of everything
           continue;
         }
         const double cu = s->createUs;
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s create %.3f s\n", dev.displayName.c_str(), label,
-                    (long long)D, kChainLayers, form.c_str(), cu / 1.0e6);
+        XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s create %.3f s\n", dev.displayName.c_str(), label,
+                     (long long)D, kChainLayers, form.c_str(), cu / 1.0e6);
         if (!s->onDevice())
         {
           const std::string why = s->offDevice();
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s %s\n", dev.displayName.c_str(), label, (long long)D,
-                      form.c_str(), why.c_str());
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s %s\n", dev.displayName.c_str(), label, (long long)D,
+                       form.c_str(), why.c_str());
           ln.fail(why);
           race.drop(f);
           continue;
@@ -477,8 +477,8 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         {
           // Logged whatever the row says: above a measured rung it publishes
           // the rungs below, and this failure would leave no trace.
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
-                      (long long)D, form.c_str(), m.error.c_str());
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s run failed: %s\n", dev.displayName.c_str(), label,
+                       (long long)D, form.c_str(), m.error.c_str());
           ln.fail(m.error, m.status);
           race.drop(f);
           continue;
@@ -488,7 +488,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         // alibi for the accelerator.
         if (!wrong.empty())
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrong.c_str());
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %s\n", dev.displayName.c_str(), label, wrong.c_str());
           wrongRow = wrong;
           break;
         }
@@ -503,8 +503,8 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         ln.lastDim = D;
         const double r = layerOps * kChainLayers * 1.0e6 / m.meanUs;
         ln.lastRate = layerOps * kChainLayers / m.meanUs;
-        CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s -> %.3f (%.1f us, %u iters)\n",
-                    dev.displayName.c_str(), label, (long long)D, kChainLayers, form.c_str(), r, m.meanUs, m.iters);
+        XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide x%d %s -> %.3f (%.1f us, %u iters)\n",
+                     dev.displayName.c_str(), label, (long long)D, kChainLayers, form.c_str(), r, m.meanUs, m.iters);
 
         // Fold detector: work is time less the submission floor, and eight
         // times the arithmetic has to cost at least twice the time however
@@ -519,9 +519,9 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         const bool workFlat = ln.prevUs > 0.0 && D == ln.prevD * 2 && prevWork > 0.0 && work < prevWork * 2.0;
         if (computedNothing || workFlat)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s took %.1f us against a %.1f us floor (previous "
-                      "%.1f us) -- the multiplies were folded away\n",
-                      dev.displayName.c_str(), label, (long long)D, form.c_str(), m.meanUs, floorUs, ln.prevUs);
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s took %.1f us against a %.1f us floor (previous "
+                       "%.1f us) -- the multiplies were folded away\n",
+                       dev.displayName.c_str(), label, (long long)D, form.c_str(), m.meanUs, floorUs, ln.prevUs);
           ln.folded(foldReason(whose(f), "the timings do not scale with the problem size, so they "
                                      "measure dispatch and a reduction rather than the matrix "
                                      "multiplies"));
@@ -548,16 +548,16 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
           }
           if (ladderDropEnds(r, ln.best, 8.0 * m.meanUs))
           {
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s fell to %.0f%% of the best, and the next size "
-                        "would take ~%.0f s a run, stopping\n",
-                        dev.displayName.c_str(), label, (long long)D, form.c_str(), 100.0 * r / ln.best,
-                        8.0 * m.meanUs / 1.0e6);
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s fell to %.0f%% of the best, and the next size "
+                         "would take ~%.0f s a run, stopping\n",
+                         dev.displayName.c_str(), label, (long long)D, form.c_str(), 100.0 * r / ln.best,
+                         8.0 * m.meanUs / 1.0e6);
             race.drop(f);
           }
           else if (++ln.strikes >= kMaxStrikes)
           {
-            CLPEAK_VLOG("litert-gemm[%s/%s]: %s: no further gain past %lld-wide layers\n",
-                        dev.displayName.c_str(), label, form.c_str(), (long long)ln.bestDim);
+            XPUPEAK_VLOG("litert-gemm[%s/%s]: %s: no further gain past %lld-wide layers\n",
+                         dev.displayName.c_str(), label, form.c_str(), (long long)ln.bestDim);
             race.drop(f);
           }
         }
@@ -566,17 +566,17 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         // the next size is eight times the work.
         if (race.runs(f) && m.probeUs / kChainLayers > kMaxIterUs)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.1f s per multiply, stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, form.c_str(),
-                      m.probeUs / kChainLayers / 1.0e6);
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.1f s per multiply, stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, form.c_str(),
+                       m.probeUs / kChainLayers / 1.0e6);
           race.drop(f);
         }
         else if (race.runs(f) && runCapUs > 0.0 && m.probeUs > runCapUs)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.2f s a run, past --max-time-ml-gpu (%.2f s), "
-                      "stopping\n",
-                      dev.displayName.c_str(), label, (long long)D, form.c_str(), m.probeUs / 1.0e6,
-                      runCapUs / 1.0e6);
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %lld-wide %s measured %.2f s a run, past --max-time-ml-gpu (%.2f s), "
+                       "stopping\n",
+                       dev.displayName.c_str(), label, (long long)D, form.c_str(), m.probeUs / 1.0e6,
+                       runCapUs / 1.0e6);
           race.drop(f);
         }
         // A size that compiled past the cap anyway is kept, and ends this
@@ -584,9 +584,9 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         // prediction.
         else if (race.runs(f) && D != ln.startDim && cu > kLitertMaxChainCreateUs)
         {
-          CLPEAK_VLOG("litert-gemm[%s/%s]: %s create %.1f s > %.1f s at %lld-wide layers, stopping\n",
-                      dev.displayName.c_str(), label, form.c_str(), cu / 1.0e6, kLitertMaxChainCreateUs / 1.0e6,
-                      (long long)D);
+          XPUPEAK_VLOG("litert-gemm[%s/%s]: %s create %.1f s > %.1f s at %lld-wide layers, stopping\n",
+                       dev.displayName.c_str(), label, form.c_str(), cu / 1.0e6, kLitertMaxChainCreateUs / 1.0e6,
+                       (long long)D);
           race.drop(f);
         }
         ln.prevPrevCreateUs = ln.prevCreateUs;
@@ -607,8 +607,8 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
         if (after < before)
           for (size_t f = 0; f < nf; f++)
             if (race.runs(f) && after == 1)
-              CLPEAK_VLOG("litert-gemm[%s/%s]: forms settled at %lld-wide layers: %s go on\n",
-                          dev.displayName.c_str(), label, (long long)D, what(f).c_str());
+              XPUPEAK_VLOG("litert-gemm[%s/%s]: forms settled at %lld-wide layers: %s go on\n",
+                           dev.displayName.c_str(), label, (long long)D, what(f).c_str());
       }
     }
 

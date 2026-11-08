@@ -29,7 +29,7 @@ inputs:
     description: >
       Colon-separated component IDs to install on Windows -- the counterpart of
       linux-packages.  Installing the full toolkit would cost
-      tens of GB for components clpeak never touches.
+      tens of GB for components xpupeak never touches.
     required: false
     default: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel
 
@@ -143,7 +143,7 @@ runs:
         # so this captures both.  One invocation, with a marker separating
         # setvars' own output from the `set` dump that follows -- so a failure
         # still shows why instead of being swallowed by a redirect to nul.
-        $marker = '___CLPEAK_SETVARS_DONE___'
+        $marker = '___XPUPEAK_SETVARS_DONE___'
         $lines  = @(cmd /c "call `"$setvars`" 2>&1 && echo $marker && set")
         # Trimmed comparison, not [Array]::IndexOf($lines, $marker), which needs
         # exact equality: cmd's `echo X && set` echoes the space *before* the

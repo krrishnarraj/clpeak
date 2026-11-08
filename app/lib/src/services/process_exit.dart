@@ -29,7 +29,7 @@ class ProcessExit {
     try {
       await _channel.invokeMethod<void>('markRun', runId);
     } catch (e) {
-      debugPrint('clpeak: process state summary: $e');
+      debugPrint('xpupeak: process state summary: $e');
     }
   }
 
@@ -40,7 +40,7 @@ class ProcessExit {
       final raw = await _channel.invokeListMethod<Map>('exits') ?? const [];
       return [for (final m in raw) ProcessExitRecord.fromMap(m)];
     } catch (e) {
-      debugPrint('clpeak: process exit records: $e');
+      debugPrint('xpupeak: process exit records: $e');
       return const [];
     }
   }

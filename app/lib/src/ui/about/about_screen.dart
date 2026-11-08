@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/benchmark_service.dart';
-import '../../theme/clpeak_theme.dart';
+import '../../theme/xpupeak_theme.dart';
 import '../app.dart';
 import '../common/kit.dart';
 
@@ -21,7 +21,7 @@ class AboutScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            const CHeader(title: 'About', subtitle: 'clpeak'),
+            const CHeader(title: 'About', subtitle: 'xpupeak'),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
@@ -38,7 +38,7 @@ class AboutScreen extends StatelessWidget {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('clpeak', style: t.wordmark),
+                                Text('xpupeak', style: t.wordmark),
                                 const SizedBox(height: 3),
                                 Text('v${service.version}',
                                     style: t.micro
@@ -91,7 +91,7 @@ class AboutScreen extends StatelessWidget {
                           rule: false,
                           onTap: () => showLicensePage(
                             context: context,
-                            applicationName: 'clpeak',
+                            applicationName: 'xpupeak',
                             applicationVersion: service.version,
                           ),
                           child: Row(

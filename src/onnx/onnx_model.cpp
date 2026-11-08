@@ -280,7 +280,7 @@ std::string OnnxGraph::build()
   // -- and on a Threadripper's CPU provider that, not ONNX Runtime, set a
   // gemm rung's peak.
   Pb gname;
-  gname.str(2, "clpeak");           // GraphProto.name
+  gname.str(2, "xpupeak");           // GraphProto.name
 
   const size_t graphSize = (m_inits.size() - kHeaderRoom) + m_nodes.size() +
                            gname.b.size() + m_inputs.size() + m_outputs.size();
@@ -300,7 +300,7 @@ std::string OnnxGraph::build()
 
   Pb head;
   head.vint(1, irVersion);          // ModelProto.ir_version
-  head.str(2, "clpeak");            // producer_name
+  head.str(2, "xpupeak");           // producer_name
   head.tag(7, 2);                   // ModelProto.graph, length-delimited
   head.varint(graphSize);
   Pb tail;

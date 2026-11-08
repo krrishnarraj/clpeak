@@ -4,10 +4,10 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
-import '../ffi/clpeak_bindings.dart';
-import '../ffi/clpeak_engine.dart';
-import '../ffi/clpeak_events.dart';
-import '../ffi/clpeak_runner.dart';
+import '../ffi/xpupeak_bindings.dart';
+import '../ffi/xpupeak_engine.dart';
+import '../ffi/xpupeak_events.dart';
+import '../ffi/xpupeak_runner.dart';
 import '../model/catalog.dart';
 import '../model/run_config.dart';
 import '../model/run_document.dart';
@@ -30,18 +30,18 @@ enum BenchmarkState { idle, running, cancelling, finished }
 /// [ready] completes for anyone that must wait (run start, AUTORUN).  Runs
 /// never see a partial catalog — [start] refuses while loading.
 ///
-/// Enumeration and runs go through [ClpeakEngine]: on desktop a process of
+/// Enumeration and runs go through [XpupeakEngine]: on desktop a process of
 /// their own, in this one when none is given (tests, and mobile).
 class BenchmarkService extends ChangeNotifier {
-  BenchmarkService(this._bindings, this._history, {ClpeakEngine? engine})
+  BenchmarkService(this._bindings, this._history, {XpupeakEngine? engine})
       : _engine = engine ?? InProcessEngine(_bindings) {
     _catalog = BackendCatalog(const []);
     _config = RunConfig.allDevices(_catalog);
     version = _bindings.version();
   }
 
-  final ClpeakBindings _bindings;
-  final ClpeakEngine _engine;
+  final XpupeakBindings _bindings;
+  final XpupeakEngine _engine;
   final RunHistoryStore _history;
 
   late BackendCatalog _catalog;
@@ -212,7 +212,7 @@ class BenchmarkService extends ChangeNotifier {
   LitertStatus litertStatus() => _engine.litertStatus();
 
   /// Whether a runtime choice waits for the next launch once a runtime has
-  /// loaded ([ClpeakEngine.runtimeFixedOnceLoaded]); on desktop it applies
+  /// loaded ([XpupeakEngine.runtimeFixedOnceLoaded]); on desktop it applies
   /// to the next enumeration and run instead.
   bool get runtimeFixedOnceLoaded => _engine.runtimeFixedOnceLoaded;
 
@@ -459,16 +459,16 @@ class BenchmarkService extends ChangeNotifier {
     _run = run;
     run.events.listen(_onEvent, onDone: () async {
       exitCode = await run.result.catchError((_) => 1);
-      cancelled = exitCode == clpeakRunCancelled;
+      cancelled = exitCode == xpupeakRunCancelled;
       runFailure = run.failure;
-      if (runFailure == null && exitCode == clpeakRunBadArgs) {
+      if (runFailure == null && exitCode == xpupeakRunBadArgs) {
         // Refused before anything ran -- a continuation the native side
         // will not resume says why on the log.
         final why = _document.log.lastWhere(
             (e) => e.level == LogLevel.error,
             orElse: () => const LogEntry(
                 level: LogLevel.error, message: 'the run could not start'));
-        runFailure = why.message.replaceFirst(RegExp(r'^clpeak: '), '');
+        runFailure = why.message.replaceFirst(RegExp(r'^xpupeak: '), '');
       }
       if (runFailure != null) {
         // The sidecar the native side derives from -o (.json -> .log).
@@ -574,7 +574,7 @@ class BenchmarkService extends ChangeNotifier {
   /// App-lifecycle hook: the engine is told whether the app is on screen,
   /// and a run in this process waits at its next boundary between readings
   /// while it is not.  On a phone an app off screen runs on background cores
-  /// at background clocks until it is frozen: a Galaxy Z Fold8 froze clpeak
+  /// at background clocks until it is frozen: a Galaxy Z Fold8 froze xpupeak
   /// about 45 and 70 s after it left, once inside a test, and its CPU
   /// backend, which started as the app came back, ran on four of eight
   /// cores.  The run's log records each change.  Desktop runs live in the
@@ -618,7 +618,7 @@ class BenchmarkService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onEvent(ClpeakEvent event) {
+  void _onEvent(XpupeakEvent event) {
     switch (event) {
       case BackendBeginEvent(:final backend):
         currentBackend = backend;

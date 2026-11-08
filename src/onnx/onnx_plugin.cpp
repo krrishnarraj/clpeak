@@ -123,10 +123,10 @@ void onnxSetEpLibraries(std::vector<OnnxEpLibrary> libs)
 {
   // Absolute before the runtime's own loader sees them: a relative plugin
   // path has the same sibling-resolution problem as a relative runtime one
-  // (see clpeak::absoluteModulePath).  Covers the CLI and the FFI setter;
+  // (see xpupeak::absoluteModulePath).  Covers the CLI and the FFI setter;
   // the catalog-appended libraries are absolute already.
   for (auto &lib : libs)
-    lib.path = clpeak::absoluteModulePath(lib.path.c_str());
+    lib.path = xpupeak::absoluteModulePath(lib.path.c_str());
   std::lock_guard<std::mutex> lock(g_cfgMutex);
   bool same = libs.size() == g_libs.size();
   for (size_t i = 0; same && i < libs.size(); i++)
@@ -184,7 +184,7 @@ static std::vector<const OrtEpDevice *> epDevices(const OrtRuntime &rt, OrtEnv *
   size_t n = 0;
   if (OrtStatus *st = rt.api->GetEpDevices(env, &devs, &n))
   {
-    CLPEAK_VLOG("onnx: GetEpDevices failed: %s\n", onnxStatusText(rt, st).c_str());
+    XPUPEAK_VLOG("onnx: GetEpDevices failed: %s\n", onnxStatusText(rt, st).c_str());
     return {};
   }
   return std::vector<const OrtEpDevice *>(devs, devs + n);
@@ -218,15 +218,15 @@ static Registration registerLibrary(const OrtRuntime &rt, OrtEnv *env,
   if (bundledLibraryMissing(rt, lib))
   {
     r.st.error = "not packaged with this app";
-    CLPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(), lib.path.c_str(),
-                r.st.error.c_str());
+    XPUPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(), lib.path.c_str(),
+                 r.st.error.c_str());
     return r;
   }
   const std::vector<const OrtEpDevice *> before = epDevices(rt, env);
   OrtStatus *status = nullptr;
   {
     // A vendor DLL can print below any log level; the status keeps the reason.
-    clpeak::ScopedConsoleMute mute;
+    xpupeak::ScopedConsoleMute mute;
 #ifdef _WIN32
     // ORTCHAR_T is wchar_t on Windows; the path arrived as UTF-8.
     std::wstring wide;
@@ -254,9 +254,9 @@ static Registration registerLibrary(const OrtRuntime &rt, OrtEnv *env,
     for (const OrtEpDevice *d : epDevices(rt, env))
       if (std::find(before.begin(), before.end(), d) == before.end())
         r.devices.push_back(d);
-  CLPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(),
-              lib.path.c_str(),
-              r.st.registered ? "registered" : r.st.error.c_str());
+  XPUPEAK_VLOG("onnx: plugin library %s (%s): %s\n", lib.name.c_str(),
+               lib.path.c_str(),
+               r.st.registered ? "registered" : r.st.error.c_str());
   return r;
 }
 
@@ -266,8 +266,8 @@ static void unregisterLibrary(const OrtRuntime &rt, OrtEnv *env, const Registrat
     return;
   OrtStatus *status = rt.api->UnregisterExecutionProviderLibrary(env, r.st.lib.name.c_str());
   const std::string err = status ? onnxStatusText(rt, status) : std::string();
-  CLPEAK_VLOG("onnx: plugin library %s (%s): unregistered%s%s\n", r.st.lib.name.c_str(),
-              r.st.lib.path.c_str(), err.empty() ? "" : ": ", err.c_str());
+  XPUPEAK_VLOG("onnx: plugin library %s (%s): unregistered%s%s\n", r.st.lib.name.c_str(),
+               r.st.lib.path.c_str(), err.empty() ? "" : ": ", err.c_str());
 }
 
 static bool sameLibrary(const OnnxEpLibrary &a, const OnnxEpLibrary &b)
@@ -529,11 +529,11 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
       for (size_t k = 0; k < n; k++)
       {
         if (k == 0)
-          CLPEAK_VLOG("onnx: plugin %s EP metadata (%lu entries):\n",
-                      ep.providerKey.c_str(), (unsigned long)n);
-        CLPEAK_VLOG("onnx: plugin %s metadata %s=%s\n", ep.providerKey.c_str(),
-                    keys && keys[k] ? keys[k] : "?",
-                    vals && vals[k] ? vals[k] : "?");
+          XPUPEAK_VLOG("onnx: plugin %s EP metadata (%lu entries):\n",
+                       ep.providerKey.c_str(), (unsigned long)n);
+        XPUPEAK_VLOG("onnx: plugin %s metadata %s=%s\n", ep.providerKey.c_str(),
+                     keys && keys[k] ? keys[k] : "?",
+                     vals && vals[k] ? vals[k] : "?");
         if (ep.pluginVersion.empty() && keys && keys[k] && vals && vals[k] &&
             std::string(keys[k]) == "version")
         {
@@ -551,7 +551,7 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
     const int nth = ++seen[ep.providerKey + '\x1f' + ep.typeStr];
     ep.epDevice = ep.typeStr + (nth > 1 ? "#" + std::to_string(nth) : "");
 
-    // Named as clpeak names the provider when it knows it and the device
+    // Named as xpupeak names the provider when it knows it and the device
     // is the one its table means (QNN's HTP row is "Hexagon NPU", not its
     // GPU backend); otherwise from what the runtime reported, which is
     // exact if less pretty: "QNN (Qualcomm GPU)".

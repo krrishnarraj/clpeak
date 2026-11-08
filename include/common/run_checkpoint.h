@@ -1,5 +1,5 @@
-#ifndef CLPEAK_RUN_CHECKPOINT_H
-#define CLPEAK_RUN_CHECKPOINT_H
+#ifndef XPUPEAK_RUN_CHECKPOINT_H
+#define XPUPEAK_RUN_CHECKPOINT_H
 
 #include <chrono>
 #include <set>
@@ -136,4 +136,4 @@ private:
     std::set<std::string> finished;     // the same keys: tests of finished Benchmarks
 };
 
-#endif  // CLPEAK_RUN_CHECKPOINT_H
+#endif  // XPUPEAK_RUN_CHECKPOINT_H
