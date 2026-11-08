@@ -176,7 +176,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `peak.h` | `Peak` abstract base class + gating — every backend implements this |
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `XPUPEAK_LOG` / `XPUPEAK_VLOG`, `LogSink`) |
-| `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations |
+| `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations; `setProgramName()` / `programName()`, the name messages give the program (the one the CLI was started as, `xpupeak` when embedded) |
 | `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
 | `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix, `formatReading()` the same as one string for a reading quoted in a description |
 | `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |

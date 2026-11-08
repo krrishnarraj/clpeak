@@ -1,5 +1,5 @@
 #!/bin/sh
-# make_dmg.sh — wrap xpupeak-gui.app in a drag-to-Applications disk image.
+# make_dmg.sh — wrap XpuPeak.app in a drag-to-Applications disk image.
 #
 #   make_dmg.sh <app-bundle> <output.dmg> [volume-name]
 #
@@ -8,13 +8,13 @@
 #
 # The app is ad-hoc signed (see src/ffi/CMakeLists.txt), so a downloaded image
 # is quarantined by Gatekeeper — first launch needs right-click → Open, or
-# `xattr -dr com.apple.quarantine /Applications/xpupeak-gui.app`.  Shipping a
+# `xattr -dr com.apple.quarantine /Applications/XpuPeak.app`.  Shipping a
 # clean first-launch means a Developer ID identity + notarytool in CI.
 set -eu
 
 app=${1:?usage: make_dmg.sh <app-bundle> <output.dmg> [volume-name]}
 dmg=${2:?usage: make_dmg.sh <app-bundle> <output.dmg> [volume-name]}
-vol=${3:-xpupeak}
+vol=${3:-XpuPeak}
 
 if [ ! -d "$app" ]; then
     echo "make_dmg.sh: no app bundle at $app (build the xpupeak-gui target first)" >&2

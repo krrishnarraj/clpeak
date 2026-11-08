@@ -1,5 +1,6 @@
 #include <common/options.h>
 #include <common/benchmark_enums.h>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -264,10 +265,42 @@ static void helpLine(std::string &s, const std::string &flag, const char *text,
   s += "\n";
 }
 
+// ---- Program name ------------------------------------------------------------
+
+static std::string &programNameSlot()
+{
+  static std::string name = "xpupeak";
+  return name;
+}
+
+void setProgramName(const char *argv0)
+{
+  std::string name = argv0 ? argv0 : "";
+#ifdef _WIN32
+  const size_t sep = name.find_last_of("/\\:");
+#else
+  const size_t sep = name.find_last_of('/');
+#endif
+  if (sep != std::string::npos)
+    name.erase(0, sep + 1);
+  // Less .exe, however the shell spelt it.
+  if (name.size() > 4)
+  {
+    std::string ext = name.substr(name.size() - 4);
+    for (char &c : ext)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (ext == ".exe")
+      name.resize(name.size() - 4);
+  }
+  programNameSlot() = name.empty() ? "xpupeak" : name;
+}
+
+const char *programName() { return programNameSlot().c_str(); }
+
 static std::string helpText()
 {
   std::string s;
-  s += "\n xpupeak [OPTIONS]\n";
+  s += std::string("\n ") + programName() + " [OPTIONS]\n";
   s += "\n";
   s += " Selection flags come in pairs: --<x> runs only what is named (an allow-list;\n";
   s += " several combine) and --no-<x> subtracts.  Backends say where, categories and\n";
@@ -468,13 +501,13 @@ static const char *nextArg(int argc, char **argv, int &i)
 
 static ParseResult missingArg(std::string &err, const char *flag)
 {
-  err = std::string("xpupeak: missing argument for ") + flag + "\n";
+  err = std::string(programName()) + ": missing argument for " + flag + "\n";
   return ParseResult::Error;
 }
 
 static ParseResult invalidValue(std::string &err, const char *flag, const char *v)
 {
-  err = std::string("xpupeak: invalid value for ") + flag + ": " + v + "\n";
+  err = std::string(programName()) + ": invalid value for " + flag + ": " + v + "\n";
   return ParseResult::Error;
 }
 
@@ -622,7 +655,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       std::string why;
       if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
       {
-        err = std::string("xpupeak: invalid --devices ") + why + "\n";
+        err = std::string(programName()) + ": invalid --devices " + why + "\n";
         return ParseResult::Error;
       }
       continue;
@@ -665,9 +698,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       const char *eq = strchr(v, '=');
       if (!eq || eq == v || !eq[1])
       {
-        err = std::string("xpupeak: --onnx-ep expects NAME=PATH, the "
-                          "registration name the provider wants (Qualcomm's "
-                          "QNN: QNNExecutionProvider) and the library to load; got '") +
+        err = std::string(programName()) +
+              ": --onnx-ep expects NAME=PATH, the "
+              "registration name the provider wants (Qualcomm's "
+              "QNN: QNNExecutionProvider) and the library to load; got '" +
               v + "'\n";
         return ParseResult::Error;
       }
@@ -740,20 +774,21 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         continue;
     }
 
-    err = std::string("xpupeak: unknown option '") + a + "'\n";
+    err = std::string(programName()) + ": unknown option '" + a + "'\n";
     return ParseResult::Error;
   }
 
   if (!out.resumeFile.empty() && otherOption)
   {
-    err = std::string("xpupeak: --resume continues a run with the options it started with, "
-                      "so it takes none but --skip-crashed; got '") +
+    err = std::string(programName()) +
+          ": --resume continues a run with the options it started with, "
+          "so it takes none but --skip-crashed; got '" +
           otherOption + "'\n";
     return ParseResult::Error;
   }
   if (out.skipCrashed && out.resumeFile.empty())
   {
-    err = "xpupeak: --skip-crashed goes with --resume\n";
+    err = std::string(programName()) + ": --skip-crashed goes with --resume\n";
     return ParseResult::Error;
   }
 
@@ -767,7 +802,8 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
         any = true;
     if (!any)
     {
-      err = "xpupeak: --devices names only devices of backends that are switched off\n";
+      err = std::string(programName()) +
+            ": --devices names only devices of backends that are switched off\n";
       return ParseResult::Error;
     }
   }
@@ -786,7 +822,7 @@ int parseCliOptions(int argc, char **argv, CliOptions &out)
     printHelpAndExit(0);
     break;
   case ParseResult::Version:
-    std::cout << "xpupeak version: " << XPUPEAK_VERSION_STR << "\n";
+    std::cout << programName() << " version: " << XPUPEAK_VERSION_STR << "\n";
     std::exit(0);
     break;
   case ParseResult::Error:
@@ -805,10 +841,10 @@ bool parseCliOptionsNoExit(int argc, char **argv, CliOptions &out,
   case ParseResult::Ok:
     return true;
   case ParseResult::Help:
-    errorMsg = "xpupeak: --help is not available in embedded mode\n";
+    errorMsg = std::string(programName()) + ": --help is not available in embedded mode\n";
     return false;
   case ParseResult::Version:
-    errorMsg = "xpupeak: --version is not available in embedded mode\n";
+    errorMsg = std::string(programName()) + ": --version is not available in embedded mode\n";
     return false;
   case ParseResult::Error:
   default:

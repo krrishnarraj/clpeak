@@ -14,7 +14,16 @@ runs benchmarks, and handles centralized file output.
 
 | File | Purpose |
 |------|---------|
-| `main.cpp` | `main()` — backend dispatch, `--list-devices`, `--resume` (`include/common/run_resume.h`), centralized file output; constructs `LoggerText(std::cout, …)` |
+| `main.cpp` | `main()` — `setProgramName(argv[0])` first, then backend dispatch, `--list-devices`, `--resume` (`include/common/run_resume.h`), centralized file output; constructs `LoggerText(std::cout, …)` |
+| `CMakeLists.txt` | the `xpupeak` target at the build root, and `clpeak` beside it (a link; a copy of the exe on Windows); the root `CMakeLists.txt` installs and tests both |
+
+## Two names, one program
+
+`clpeak`, the 3.x command, is `xpupeak` under its old name: the same flags,
+output and exit codes. The only difference is the name in help, usage and
+error messages, which is the one it was started as (`programName()` in
+`include/common/options.h`). A message that names the program takes it from
+there, never a literal `xpupeak:`.
 
 ## When You Change This Directory
 

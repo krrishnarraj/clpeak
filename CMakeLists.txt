@@ -353,13 +353,28 @@ message(STATUS "==============================================================="
 message(STATUS "")
 
 install(TARGETS xpupeak RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# clpeak, the 3.x command, beside it (src/cli/CMakeLists.txt): a link on Unix,
+# which the CPack zip keeps as one, and a copy of the exe on Windows.
+if(WIN32)
+    install(PROGRAMS "$<TARGET_FILE_DIR:xpupeak>/clpeak.exe"
+            DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+    install(CODE "
+        set(_link \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/clpeak\")
+        message(STATUS \"Installing: \${_link}\")
+        file(REMOVE \"\${_link}\")
+        file(CREATE_LINK xpupeak \"\${_link}\" SYMBOLIC)
+    ")
+endif()
 install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/xpupeak")
 enable_testing()
 add_test(xpupeak_test_run xpupeak)
+# The same program under its 3.x name, run the same way.
+add_test(clpeak_test_run clpeak)
 
 # --- CPack: self-contained, clearly-named zip per build --------------------
 # Name: xpupeak-<version>-<os>-<arch>[-<backend>], e.g.
-# clpeak-1.1.8-linux-x86_64-cuda.  Archive generators wrap the contents in a
+# xpupeak-4.0.0-linux-x86_64-cuda.  Archive generators wrap the contents in a
 # top-level dir of the same name, so each zip extracts to one clean folder.
 string(TOLOWER "${CMAKE_SYSTEM_NAME}" _xpupeak_os)
 if(_xpupeak_os STREQUAL "darwin")
@@ -383,9 +398,9 @@ include(CPack)
 if(APPLE AND TARGET xpupeak-gui)
     add_custom_target(xpupeak-gui-dmg
         COMMAND "${CMAKE_CURRENT_LIST_DIR}/tools/make_dmg.sh"
-                "${CMAKE_BINARY_DIR}/xpupeak-gui/xpupeak-gui.app"
+                "${CMAKE_BINARY_DIR}/xpupeak-gui/XpuPeak.app"
                 "${CMAKE_BINARY_DIR}/${_xpupeak_pkg}.dmg"
-                "xpupeak ${XPUPEAK_VERSION_STR}"
+                "XpuPeak ${XPUPEAK_VERSION_STR}"
         COMMENT "xpupeak-gui: packaging ${_xpupeak_pkg}.dmg"
         VERBATIM)
     add_dependencies(xpupeak-gui-dmg xpupeak-gui)

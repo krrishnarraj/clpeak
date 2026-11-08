@@ -26,6 +26,9 @@
 
 int main(int argc, char **argv)
 {
+    // clpeak (the 3.x command) and xpupeak are one program; its messages
+    // use the name it was started as.
+    setProgramName(argc > 0 ? argv[0] : nullptr);
     CliOptions opts;
     parseCliOptions(argc, argv, opts);
 
@@ -83,7 +86,7 @@ int main(int argc, char **argv)
     if (opts.listDevices)
     {
         for (Backend b : opts.requestedButNotBuilt())
-            std::cout << "xpupeak: the " << backendInfo(b).name
+            std::cout << programName() << ": the " << backendInfo(b).name
                       << " backend is not in this build\n";
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
@@ -142,8 +145,8 @@ int main(int argc, char **argv)
     // A backend asked for by name that this binary does not carry: say so,
     // or the run reads as "no devices".
     for (Backend b : opts.requestedButNotBuilt())
-        XPUPEAK_LOG(Warning, "xpupeak: the %s backend is not in this build",
-                    backendInfo(b).name);
+        XPUPEAK_LOG(Warning, "%s: the %s backend is not in this build",
+                    programName(), backendInfo(b).name);
 
     // --verbose: the file also carries what --list-devices would have shown
     // -- every device each backend saw, and why a backend had none -- since
