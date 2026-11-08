@@ -16,7 +16,7 @@ void purgeCoreMLCompileCache()
       return;
     // E5RT files the cache under the process name for a plain executable
     // (~/Library/Caches/xpupeak) and under the bundle identifier for an app
-    // (~/Library/Caches/kr.xpupeak for the unsandboxed macOS app); clear
+    // (~/Library/Caches/kr.XpuPeak for the unsandboxed macOS app); clear
     // whichever exists.  Inside an app container -- iOS, or a sandboxed
     // macOS app, whose Caches directory is private to the app -- the cache
     // may also sit at the Caches root, and only then is that root ours to

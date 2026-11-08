@@ -26,7 +26,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.xpupeak/notify")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.XpuPeak/notify")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "ask" -> askToNotify(result)
@@ -43,7 +43,7 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.xpupeak/process")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.XpuPeak/process")
             .setMethodCallHandler { call, result ->
                 val am = getSystemService(ActivityManager::class.java)
                 when (call.method) {

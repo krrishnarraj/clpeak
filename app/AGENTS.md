@@ -6,16 +6,19 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 ## Building / running
 
 - Desktop (canonical): `cmake -B build && cmake --build build --target xpupeak-gui`
-  → complete bundle at `build/xpupeak-gui/` (macOS: `xpupeak-gui.app` with
+  → complete bundle at `build/xpupeak-gui/` (macOS: `XpuPeak.app` with
   `xpupeak_ffi.framework` embedded + re-signed; Linux: bundle with
   `lib/libxpupeak_ffi.so`; Windows: flat dir with `xpupeak_ffi.dll`).
   GUI is skipped when the Flutter SDK isn't detectable or `-DXPUPEAK_ENABLE_GUI=OFF`.
-- The runner executable/bundle is named **xpupeak-gui**, never `xpupeak` — the
-  release zip puts it next to the CLI binary of that name. What the user sees
-  is "XpuPeak" on every platform: the Android label, iOS and macOS
-  `CFBundleName`/`CFBundleDisplayName`, the Linux and Windows window titles,
-  `Runner.rc`, and the app's own text. Lowercase `xpupeak` is for the
-  command, files and IDs.
+- The Windows and Linux runner executables are named **xpupeak-gui**, never
+  `xpupeak` or `XpuPeak` — the release zip puts them beside the CLI binary,
+  and a case-insensitive file system can't tell those apart. The macOS app is
+  `XpuPeak.app` at the zip root. What the user sees is "XpuPeak" on every
+  platform: the Android label, iOS `CFBundleName`/`CFBundleDisplayName`, the
+  macOS bundle, the Linux and Windows window titles, `Runner.rc`, and the
+  app's own text. Lowercase `xpupeak` is for commands, files and URLs; the
+  reverse-DNS IDs and method channels end in `XpuPeak` (`kr.XpuPeak`), except
+  Android's published `kr.clpeak`.
 - macOS disk image: `cmake --build build --target xpupeak-gui-dmg`
   (`tools/make_dmg.sh`; ad-hoc signed, so a downloaded copy is quarantined).
 - Desktop dev loop: build `xpupeak_ffi` and `xpupeak-engine` once, then
@@ -173,7 +176,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   line is what turns "Pausing" into "Paused"; it stays paused, wherever the
   app goes, until Resume
 - The "Run paused" notification? → `lib/src/services/run_notice.dart`, with
-  its platform halves in `MainActivity.kt` (channel `kr.xpupeak/notify`, the
+  its platform halves in `MainActivity.kt` (channel `kr.XpuPeak/notify`, the
   POST_NOTIFICATIONS request) and `ios/Runner/AppDelegate.swift`.  The
   permission is asked once, at the first run; `BenchmarkService` posts on
   `hidden` while a run is in flight, clears it on `resumed`, at the run's
@@ -313,13 +316,12 @@ Build screens from `ui/common/kit.dart` (`CPanel`, `CSection`, `CRow`,
 the platform dirs:
 
 - `linux/CMakeLists.txt`, `windows/CMakeLists.txt` — `BINARY_NAME xpupeak-gui`
-  (+ Linux `APPLICATION_ID kr.xpupeak`; `windows/runner/Runner.rc`
+  (+ Linux `APPLICATION_ID kr.XpuPeak`; `windows/runner/Runner.rc`
   InternalName/OriginalFilename);
-  `macos/Runner/Configs/AppInfo.xcconfig` — `PRODUCT_NAME = xpupeak-gui`,
-  `PRODUCT_BUNDLE_IDENTIFIER = kr.xpupeak`;
-  `macos/Runner/Info.plist` — `CFBundleName`/`CFBundleDisplayName` pinned to the
-  literal "XpuPeak" (not `$(PRODUCT_NAME)`), so the app is `xpupeak-gui.app` on
-  disk but still reads "XpuPeak" in the menu bar and Dock
+  `macos/Runner/Configs/AppInfo.xcconfig` — `PRODUCT_NAME = XpuPeak` (the
+  bundle, its executable, and the name in the menu bar and Dock),
+  `PRODUCT_BUNDLE_IDENTIFIER = kr.XpuPeak`; the RunnerTests `TEST_HOST` in
+  `macos/Runner.xcodeproj/project.pbxproj` follows `PRODUCT_NAME`
 - `macos/Runner/{DebugProfile,Release}.entitlements` — App Sandbox disabled
   (device probing, dlopen, real ~/.xpupeak)
 - `macos/Runner/MainFlutterWindow.swift`, `linux/runner/my_application.cc`,
@@ -330,7 +332,7 @@ the platform dirs:
   `data/xpupeak_icon.png` from the (relocatable) bundle at startup and the
   runner CMake installs it there. X11 only — Wayland ignores window icons and
   matches an installed `.desktop` file by application ID instead.
-- `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.xpupeak.ios` +
+- `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.XpuPeak.ios` +
   "Embed xpupeak native frameworks" script phase (consumes
   `ios/xpupeak_native/`, staged by `tools/build_ios_native.sh`)
 - `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters, the

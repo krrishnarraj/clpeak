@@ -43,7 +43,7 @@ if(APPLE)
     set_target_properties(xpupeak_ffi PROPERTIES
         FRAMEWORK TRUE
         FRAMEWORK_VERSION A
-        MACOSX_FRAMEWORK_IDENTIFIER kr.xpupeak.ffi
+        MACOSX_FRAMEWORK_IDENTIFIER kr.XpuPeak.ffi
         MACOSX_FRAMEWORK_BUNDLE_VERSION "${XPUPEAK_VERSION_STR}"
         MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${XPUPEAK_VERSION_STR}"
         INSTALL_NAME_DIR "@rpath"
@@ -107,15 +107,15 @@ if(NOT XPUPEAK_FFI_STANDALONE)
         add_custom_target(xpupeak-gui ALL
             DEPENDS xpupeak_ffi xpupeak-engine
             COMMAND ${FLUTTER_EXECUTABLE} build macos --release
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "${XPUPEAK_GUI_OUT}/xpupeak-gui.app"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${XPUPEAK_GUI_OUT}/XpuPeak.app"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${XPUPEAK_GUI_OUT}"
-            COMMAND ditto "${XPUPEAK_APP_DIR}/build/macos/Build/Products/Release/xpupeak-gui.app" "${XPUPEAK_GUI_OUT}/xpupeak-gui.app"
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${XPUPEAK_GUI_OUT}/xpupeak-gui.app/Contents/Frameworks"
-            COMMAND ditto "$<TARGET_BUNDLE_DIR:xpupeak_ffi>" "${XPUPEAK_GUI_OUT}/xpupeak-gui.app/Contents/Frameworks/xpupeak_ffi.framework"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:xpupeak-engine>" "${XPUPEAK_GUI_OUT}/xpupeak-gui.app/Contents/MacOS/"
-            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/xpupeak-gui.app/Contents/Frameworks/xpupeak_ffi.framework"
-            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/xpupeak-gui.app/Contents/MacOS/xpupeak-engine"
-            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/xpupeak-gui.app"
+            COMMAND ditto "${XPUPEAK_APP_DIR}/build/macos/Build/Products/Release/XpuPeak.app" "${XPUPEAK_GUI_OUT}/XpuPeak.app"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${XPUPEAK_GUI_OUT}/XpuPeak.app/Contents/Frameworks"
+            COMMAND ditto "$<TARGET_BUNDLE_DIR:xpupeak_ffi>" "${XPUPEAK_GUI_OUT}/XpuPeak.app/Contents/Frameworks/xpupeak_ffi.framework"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:xpupeak-engine>" "${XPUPEAK_GUI_OUT}/XpuPeak.app/Contents/MacOS/"
+            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/XpuPeak.app/Contents/Frameworks/xpupeak_ffi.framework"
+            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/XpuPeak.app/Contents/MacOS/xpupeak-engine"
+            COMMAND codesign --force --sign - "${XPUPEAK_GUI_OUT}/XpuPeak.app"
             WORKING_DIRECTORY "${XPUPEAK_APP_DIR}"
             COMMENT "xpupeak-gui: flutter build macos + bundle assembly"
             VERBATIM)
@@ -183,14 +183,14 @@ if(NOT XPUPEAK_FFI_STANDALONE)
         # symlinks and an ad-hoc code signature, and file(INSTALL) is not
         # guaranteed to keep the seal intact.
         install(CODE "
-            set(_src \"${XPUPEAK_GUI_OUT}/xpupeak-gui.app\")
-            set(_dst \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/xpupeak-gui.app\")
+            set(_src \"${XPUPEAK_GUI_OUT}/XpuPeak.app\")
+            set(_dst \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/XpuPeak.app\")
             message(STATUS \"Installing: \${_dst}\")
             file(REMOVE_RECURSE \"\${_dst}\")
             execute_process(COMMAND ditto \"\${_src}\" \"\${_dst}\"
                             RESULT_VARIABLE _xpupeak_ditto_rc)
             if(NOT _xpupeak_ditto_rc EQUAL 0)
-                message(FATAL_ERROR \"ditto of xpupeak-gui.app failed (\${_xpupeak_ditto_rc}) -- build the xpupeak-gui target first\")
+                message(FATAL_ERROR \"ditto of XpuPeak.app failed (\${_xpupeak_ditto_rc}) -- build the xpupeak-gui target first\")
             endif()
         ")
     else()
