@@ -1,6 +1,6 @@
 Privacy Policy
 
-This application is based on the open-source project "clpeak", a benchmarking tool for OpenCL-capable devices.
+This application is XpuPeak, an open-source benchmarking tool.
 
 Data Collection and Use:
 This app does not collect, store, transmit, or share any personal or sensitive user data.
@@ -15,7 +15,7 @@ This app does not use any third-party services (such as analytics, advertising, 
 
 Open Source:
 The source code for this application is publicly available at:
-https://github.com/krrishnarraj/clpeak
+https://github.com/krrishnarraj/xpupeak
 
 Changes to This Privacy Policy:
 This privacy policy may be updated in the future. Any changes will be reflected in this file.

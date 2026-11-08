@@ -43,7 +43,7 @@ if(APPLE)
     set_target_properties(xpupeak_ffi PROPERTIES
         FRAMEWORK TRUE
         FRAMEWORK_VERSION A
-        MACOSX_FRAMEWORK_IDENTIFIER kr.clpeak.ffi
+        MACOSX_FRAMEWORK_IDENTIFIER kr.xpupeak.ffi
         MACOSX_FRAMEWORK_BUNDLE_VERSION "${XPUPEAK_VERSION_STR}"
         MACOSX_FRAMEWORK_SHORT_VERSION_STRING "${XPUPEAK_VERSION_STR}"
         INSTALL_NAME_DIR "@rpath"
@@ -152,7 +152,7 @@ if(NOT XPUPEAK_FFI_STANDALONE)
     else()
         # Linux bundle layout: bundle/{xpupeak-gui, xpupeak-engine, data/,
         # lib/*.so}; the Dart resolver loads <exeDir>/lib/libxpupeak_ffi.so,
-        # and the runner loads data/clpeak_icon.png as its window icon (GTK
+        # and the runner loads data/xpupeak_icon.png as its window icon (GTK
         # has no .rc-style resource embedding, see
         # linux/runner/my_application.cc).
         add_custom_target(xpupeak-gui ALL

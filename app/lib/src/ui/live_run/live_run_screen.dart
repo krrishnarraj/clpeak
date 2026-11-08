@@ -161,7 +161,7 @@ class _StatusPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
               child: Text(
-                  'Leaving xpupeak pauses the run until you come back.',
+                  'Leaving XpuPeak pauses the run until you come back.',
                   style: t.monoSmallDim),
             ),
           ],

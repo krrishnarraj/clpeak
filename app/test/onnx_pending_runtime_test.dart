@@ -157,7 +157,7 @@ void main() {
     expect(find.text(_next), findsOneWidget);
     expect(find.text(r'Windows ML on · C:\winml\x64'), findsOneWidget);
     expect(find.text('Found by name on the system paths'), findsOneWidget);
-    expect(find.text('Takes effect the next time xpupeak starts.'),
+    expect(find.text('Takes effect the next time XpuPeak starts.'),
         findsNWidgets(2));
     // No relaunch from inside the app: the note is the whole story.
     expect(find.textContaining('RESTART'), findsNothing);

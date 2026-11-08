@@ -95,7 +95,7 @@ class _Masthead extends StatelessWidget {
       children: [
         const CAppMark(size: 30),
         const SizedBox(width: 12),
-        Expanded(child: Text('xpupeak', style: t.wordmark)),
+        Expanded(child: Text('XpuPeak', style: t.wordmark)),
         Text('v$version', style: t.micro.copyWith(letterSpacing: 0.6)),
       ],
     );

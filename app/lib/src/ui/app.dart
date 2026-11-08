@@ -19,7 +19,7 @@ class XpupeakApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsService>();
     return MaterialApp(
-      title: 'xpupeak',
+      title: 'XpuPeak',
       debugShowCheckedModeBanner: false,
       theme: XpupeakTheme.light(),
       darkTheme: XpupeakTheme.dark(),
@@ -138,7 +138,7 @@ class _Sidebar extends StatelessWidget {
               children: [
                 const CAppMark(size: 22),
                 const SizedBox(width: 9),
-                Text('xpupeak',
+                Text('XpuPeak',
                     style: t.title.copyWith(fontSize: 15, letterSpacing: -0.6)),
               ],
             ),

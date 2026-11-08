@@ -548,7 +548,7 @@ class _RuntimeView {
   static String _onnxRuntimeHint(bool perLaunch) {
     final once = perLaunch
         ? 'Set once per launch: after a runtime has loaded, a change takes '
-            'effect the next time xpupeak starts.'
+            'effect the next time XpuPeak starts.'
         : 'A change applies from the next device scan and run.';
     if (Platform.isAndroid) {
       return 'The engine ONNX runs on. A vendor NPU plugin (Qualcomm\'s QNN) '
@@ -710,7 +710,7 @@ class _RuntimePanel extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                            'Takes effect the next time xpupeak starts.',
+                            'Takes effect the next time XpuPeak starts.',
                             style: t.monoSmallDim),
                       ),
                     ],
@@ -958,7 +958,7 @@ class _WinmlPanel extends StatelessWidget {
           'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
           'the Microsoft Store on first use — a download — instead of you '
           'naming the library yourself. The catalog DLL comes with the '
-          'Microsoft.Windows.AI.MachineLearning package, not with xpupeak.'
+          'Microsoft.Windows.AI.MachineLearning package, not with XpuPeak.'
           '${perLaunch ? ' Part of the runtime setup above, so it too is set '
               'once per launch.' : ''}',
           style: t.micro.copyWith(color: t.dim),
@@ -992,7 +992,7 @@ class _DiagnosticsPanel extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   static final _issuesUrl =
-      Uri.parse('https://github.com/krrishnarraj/clpeak/issues/new');
+      Uri.parse('https://github.com/krrishnarraj/xpupeak/issues/new');
 
   @override
   Widget build(BuildContext context) {
@@ -1030,7 +1030,7 @@ class _DiagnosticsPanel extends StatelessWidget {
                         children: [
                           Text('Report an issue', style: t.mono),
                           const SizedBox(height: 3),
-                          Text('github.com/krrishnarraj/clpeak/issues',
+                          Text('github.com/krrishnarraj/xpupeak/issues',
                               style: t.monoSmallDim),
                         ],
                       ),

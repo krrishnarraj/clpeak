@@ -6,12 +6,12 @@
 
 // The application's name.  This drives the on-disk bundle name (xpupeak-gui.app)
 // and is deliberately NOT "xpupeak": release zips ship this bundle next to the
-// CLI binary of that name.  The user-visible name stays "xpupeak" via the
+// CLI binary of that name.  The user-visible name stays "XpuPeak" via the
 // CFBundleName / CFBundleDisplayName literals in Info.plist.
 PRODUCT_NAME = xpupeak-gui
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = kr.clpeak
+PRODUCT_BUNDLE_IDENTIFIER = kr.xpupeak
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 kr. All rights reserved.

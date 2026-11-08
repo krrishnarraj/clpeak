@@ -22,7 +22,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class RunNotice {
   const RunNotice._();
 
-  static const _channel = MethodChannel('kr.clpeak/notify');
+  static const _channel = MethodChannel('kr.xpupeak/notify');
   static const _askedKey = 'runNoticeAsked';
 
   static bool get _supported => Platform.isAndroid || Platform.isIOS;

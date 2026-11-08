@@ -1,11 +1,12 @@
-# xpupeak GUI
+# XpuPeak GUI
 
 One Flutter app for Android, iOS, macOS, Linux, and Windows, driving the
-xpupeak benchmark backends through the `src/ffi` C-ABI bridge (Dart FFI).
+XpuPeak benchmark backends through the `src/ffi` C-ABI bridge (Dart FFI).
 
 Features: system/device dashboard, standard and Custom runs (device, category,
 and time-budget selection), live streaming results with cancellation, and an
-auto-saved run history (canonical xpupeak XML) with rename/export/delete.
+auto-saved run history (the JSON result documents the CLI writes with `-o`)
+with rename/export/delete.
 
 See [AGENTS.md](AGENTS.md) for per-platform build instructions, the
 dev-loop `XPUPEAK_FFI_PATH` override, and the list of hand-edited generated

@@ -10,7 +10,7 @@ import '../common/kit.dart';
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
-  static final _repoUrl = Uri.parse('https://github.com/krrishnarraj/clpeak');
+  static final _repoUrl = Uri.parse('https://github.com/krrishnarraj/xpupeak');
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +21,7 @@ class AboutScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            const CHeader(title: 'About', subtitle: 'xpupeak'),
+            const CHeader(title: 'About', subtitle: 'XpuPeak'),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
@@ -38,7 +38,7 @@ class AboutScreen extends StatelessWidget {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('xpupeak', style: t.wordmark),
+                                Text('XpuPeak', style: t.wordmark),
                                 const SizedBox(height: 3),
                                 Text('v${service.version}',
                                     style: t.micro
@@ -77,7 +77,7 @@ class AboutScreen extends StatelessWidget {
                                   children: [
                                     Text('Source code', style: t.mono),
                                     const SizedBox(height: 3),
-                                    Text('github.com/krrishnarraj/clpeak',
+                                    Text('github.com/krrishnarraj/xpupeak',
                                         style: t.monoSmallDim),
                                   ],
                                 ),
@@ -91,7 +91,7 @@ class AboutScreen extends StatelessWidget {
                           rule: false,
                           onTap: () => showLicensePage(
                             context: context,
-                            applicationName: 'xpupeak',
+                            applicationName: 'XpuPeak',
                             applicationVersion: service.version,
                           ),
                           child: Row(

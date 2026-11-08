@@ -123,7 +123,7 @@ modules:
       - rm -f /app/share/clpeak/LICENSE
       - install -Dm644 packaging/flatpak/io.github.krrishnarraj.clpeak.metainfo.xml
           /app/share/metainfo/io.github.krrishnarraj.clpeak.metainfo.xml
-      - install -Dm644 app/linux/runner/resources/clpeak_icon.png
+      - install -Dm644 app/linux/runner/resources/xpupeak_icon.png
           /app/share/icons/hicolor/256x256/apps/io.github.krrishnarraj.clpeak.png
       - install -Dm644 docs/assets/img/icon.png
           /app/share/icons/hicolor/128x128/apps/io.github.krrishnarraj.clpeak.png
