@@ -227,17 +227,17 @@ time. oneAPI needs the DPC++ compiler (`-DCMAKE_CXX_COMPILER=icpx`).
 
 | CMake option | Default | When `OFF` |
 |---|---|---|
-| `CLPEAK_ENABLE_CUDA` | `ON` | no CUDA backend, even with the toolkit installed |
-| `CLPEAK_ENABLE_ROCM` | `ON` | no ROCm/HIP backend, even with the SDK installed |
-| `CLPEAK_ENABLE_METAL` | `ON` | no Metal backend on Apple platforms |
-| `CLPEAK_ENABLE_ONEAPI` | `ON` | no oneAPI/SYCL backend |
-| `CLPEAK_ENABLE_VULKAN` | `ON` | no Vulkan backend, even with the SDK installed |
-| `CLPEAK_ENABLE_OPENCL` | `ON` | no OpenCL backend |
-| `CLPEAK_ENABLE_CPU` | `ON` | no native CPU backend |
-| `CLPEAK_ENABLE_ONNX` | `ON` | no ONNX Runtime backend (otherwise always built; the runtime is loaded when clpeak runs) |
-| `CLPEAK_ENABLE_COREML` | `ON` | no Core ML backend (Apple only) |
-| `CLPEAK_ENABLE_LITERT` | `ON` | no LiteRT backend (otherwise always built; the runtime is loaded when clpeak runs) |
-| `CLPEAK_ENABLE_GUI` | `ON` | no desktop app (also skipped when no Flutter SDK is found) |
+| `XPUPEAK_ENABLE_CUDA` | `ON` | no CUDA backend, even with the toolkit installed |
+| `XPUPEAK_ENABLE_ROCM` | `ON` | no ROCm/HIP backend, even with the SDK installed |
+| `XPUPEAK_ENABLE_METAL` | `ON` | no Metal backend on Apple platforms |
+| `XPUPEAK_ENABLE_ONEAPI` | `ON` | no oneAPI/SYCL backend |
+| `XPUPEAK_ENABLE_VULKAN` | `ON` | no Vulkan backend, even with the SDK installed |
+| `XPUPEAK_ENABLE_OPENCL` | `ON` | no OpenCL backend |
+| `XPUPEAK_ENABLE_CPU` | `ON` | no native CPU backend |
+| `XPUPEAK_ENABLE_ONNX` | `ON` | no ONNX Runtime backend (otherwise always built; the runtime is loaded when clpeak runs) |
+| `XPUPEAK_ENABLE_COREML` | `ON` | no Core ML backend (Apple only) |
+| `XPUPEAK_ENABLE_LITERT` | `ON` | no LiteRT backend (otherwise always built; the runtime is loaded when clpeak runs) |
+| `XPUPEAK_ENABLE_GUI` | `ON` | no desktop app (also skipped when no Flutter SDK is found) |
 
 </div>
 

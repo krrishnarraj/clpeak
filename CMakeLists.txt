@@ -1,35 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
 
-# ---- 3.x option names (kept until 5.0) --------------------------------------
-# 4.x still takes every -DCLPEAK_* knob 3.x took (CLPEAK_ENABLE_*,
-# CLPEAK_PACKAGE_SUFFIX, CLPEAK_VERSION_OVERRIDE, CLPEAK_CUDA_ARCHS,
-# CLPEAK_CPU_ENABLE_WIN_SVE and the rest), so distribution build scripts keep
-# building.  Each one given sets its XPUPEAK_* name, with a deprecation
-# warning, and leaves the cache: it applies once, and a stale entry never
-# overrides a later -DXPUPEAK_*.  The type goes across as given (UNINITIALIZED
-# for a plain -D), so the option() or set(CACHE) that declares the new name
-# still types it and keeps the value.  A 3.x build dir's INTERNAL probe results
-# and NOTFOUND searches are dropped, to be probed again under the new name.
-# Runs first: the compiler pick below reads knobs too.
-get_cmake_property(_xpupeak_cache_vars CACHE_VARIABLES)
-foreach(_xpupeak_old IN LISTS _xpupeak_cache_vars)
-    if(NOT _xpupeak_old MATCHES "^CLPEAK_(.+)$")
-        continue()
-    endif()
-    set(_xpupeak_new "XPUPEAK_${CMAKE_MATCH_1}")
-    get_property(_xpupeak_type CACHE "${_xpupeak_old}" PROPERTY TYPE)
-    set(_xpupeak_value "${${_xpupeak_old}}")
-    if(NOT _xpupeak_type MATCHES "^(INTERNAL|STATIC)$"
-       AND NOT _xpupeak_value MATCHES "-NOTFOUND$")
-        message(DEPRECATION "-D${_xpupeak_old} is the 3.x spelling of "
-            "-D${_xpupeak_new} (here \"${_xpupeak_value}\"); it still works "
-            "in 4.x and goes away in 5.0.")
-        set(${_xpupeak_new} "${_xpupeak_value}" CACHE ${_xpupeak_type} "" FORCE)
-    endif()
-    unset(${_xpupeak_old} CACHE)
-endforeach()
-# ---- end of 3.x option names ------------------------------------------------
-
 # Prefer clang over the platform-default compiler when the user has not pinned
 # one.  Two reasons, both from the CPU backend:
 #  - codegen: the kernels keep 24 independent FMA accumulator chains in flight;

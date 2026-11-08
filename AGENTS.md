@@ -77,9 +77,7 @@ run and the result document all share.
 ## Build
 
 - Desktop: `cmake -B build && cmake --build build`
-- Each backend: `-DXPUPEAK_ENABLE_VULKAN=OFF`, etc.  Every option's 3.x name
-  still works in 4.x, with a deprecation warning: the block at the top of
-  `CMakeLists.txt` maps it, and goes in 5.0.
+- Each backend: `-DXPUPEAK_ENABLE_VULKAN=OFF`, etc.
 - GUI: built automatically as `xpupeak-gui` when the Flutter SDK is detected
   (disable with `-DXPUPEAK_ENABLE_GUI=OFF`); bundle lands in `build/xpupeak-gui/`.
   Mobile builds: see `app/AGENTS.md`.

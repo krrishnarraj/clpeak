@@ -43,9 +43,9 @@ class Clpeak < Formula
     # deterministic if a system SDK happens to be present on a Linuxbrew box).
     # Metal/OpenCL (macOS) and OpenCL (Linux) stay on and auto-detect.
     args = %w[
-      -DCLPEAK_ENABLE_CUDA=OFF
-      -DCLPEAK_ENABLE_ROCM=OFF
-      -DCLPEAK_ENABLE_ONEAPI=OFF
+      -DXPUPEAK_ENABLE_CUDA=OFF
+      -DXPUPEAK_ENABLE_ROCM=OFF
+      -DXPUPEAK_ENABLE_ONEAPI=OFF
     ]
 
     # Build with clang for the CPU-backend codegen.  macOS already uses

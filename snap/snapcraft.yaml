@@ -102,7 +102,7 @@ parts:
     cmake-parameters:
       # ON is the default; CMake still reports "GUI: disabled" and builds
       # CLI-only wherever no Flutter SDK was staged.
-      - -DCLPEAK_ENABLE_GUI=ON
+      - -DXPUPEAK_ENABLE_GUI=ON
     build-packages:
       - build-essential
       - clang

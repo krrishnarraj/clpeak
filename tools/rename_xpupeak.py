@@ -16,7 +16,11 @@ git-mv'd the same way.
 Some names have someone on the other end: result files and history already
 on users' disks, store and platform IDs, URLs, icons.  Each of those belongs
 to a later task (RENAME_PLAN.md, T2-T6), so the sweep never touches the
-protected paths and tokens below.  A name can be both an internal one and a
+protected paths and tokens below -- except the uppercase spelling.  CLPEAK
+only ever names a CMake option or variable, a macro or an env var, and 4.0
+keeps no 3.x spelling of any of them (the clpeak command is the one name
+that stays), so it is renamed in the protected paths too, all but the saved
+runs.  A name can be both an internal one and a
 persisted key (clpeak_version is the C function and also the run document's
 key).  The sweep renames the name, keeps the key, and the report lists each
 such pair.
@@ -75,13 +79,14 @@ PROTECTED_PATHS = [
     (SELF, 'stays', 'this script (deleted once 4.0.0 ships)'),
 ]
 
+# The protected paths whose uppercase CLPEAK stays too: data, and this script.
+UPPER_KEPT = ('results/', SELF)
+UPPER = re.compile(r'CLPEAK')
+
 # Protected tokens inside swept files.  An occurrence of the name inside a
 # match is kept.  The first rule that covers it names its owner in the report.
 # Owner '@app' means T4 inside app/ and T6 elsewhere.
 RULES = [
-    ('shim', 'stays', 'the 3.x CMake option names (until 5.0)',
-     re.compile(r'^[ \t]*# ---- 3\.x option names.*?^[ \t]*# ---- end of 3\.x option names[^\n]*',
-                re.MULTILINE | re.DOTALL)),
     ('url', '@app', 'URLs naming the repo, site or stores',
      re.compile(r'krrishnarraj/clpeak|github\.io/clpeak|snapcraft\.io/clpeak|id=kr\.clpeak')),
     ('flathub-id', 'T5', 'the Flathub app ID',
@@ -398,12 +403,16 @@ def read_text(path):
 def sweep(paths, write):
     changed, count = [], 0
     for path in paths:
-        if path_owner(path):
+        po = path_owner(path)
+        if po and po[2] in UPPER_KEPT:
             continue
         text = read_text(path)
         if text is None or not TOKEN.search(text):
             continue
-        renamed, _ = classify(text, protected_spans(text), override_spans(text))
+        if po:
+            renamed = [m.start() for m in UPPER.finditer(text)]
+        else:
+            renamed, _ = classify(text, protected_spans(text), override_spans(text))
         if not renamed:
             continue
         is_c = path.endswith(C_FAMILY)
@@ -457,7 +466,7 @@ def report(paths):
             total += 1
             files.add(path)
             a, b = m.start(), m.end()
-            if po:
+            if po and not (text[a:b] == 'CLPEAK' and po[2] not in UPPER_KEPT):
                 add(po[0], 'path:' + po[2], po[1], path, None)
                 continue
             if text[a:b] == 'clPeak':
@@ -471,14 +480,14 @@ def report(paths):
                 unexpected.append('%s:%d: %s' % (path, line, text[max(0, a - 30):b + 30].replace('\n', ' ')))
                 continue
             s, e, name, owner, what = rule
-            form = text[s:e] if name != 'shim' else None
-            if form and len(form) > 60:
+            form = text[s:e]
+            if len(form) > 60:
                 form = form[:57] + '...'
             add(resolve(owner, path), name, what, path, form)
             word = re.match(r'\w*', text[a:]).group(0)
             head = re.search(r'\w*$', text[:a]).group(0)
             ident = head + word
-            if ident.lower() != 'clpeak' and name not in ('shim', 'history'):
+            if ident.lower() != 'clpeak' and name != 'history':
                 dual.setdefault(ident, set()).add(path)
 
     # A kept identifier whose renamed spelling also exists is a name/key pair.

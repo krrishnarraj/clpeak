@@ -77,7 +77,7 @@ cmake --build build -j
 ./build/clpeak
 ```
 
-A backend is built when its SDK is found, and `-DCLPEAK_ENABLE_<BACKEND>=OFF`
+A backend is built when its SDK is found, and `-DXPUPEAK_ENABLE_<BACKEND>=OFF`
 leaves it out. The ONNX Runtime and LiteRT backends need no SDK: their
 runtimes are loaded when clpeak runs. The desktop app is built alongside the
 CLI when the Flutter SDK is on `PATH`, into `build/clpeak-gui/`. The

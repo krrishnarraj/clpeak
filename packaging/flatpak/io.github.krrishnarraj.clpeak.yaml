@@ -111,13 +111,13 @@ modules:
         - --share=network
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
-      - -DCLPEAK_ENABLE_CUDA=OFF
-      - -DCLPEAK_ENABLE_ROCM=OFF
-      - -DCLPEAK_ENABLE_ONEAPI=OFF
+      - -DXPUPEAK_ENABLE_CUDA=OFF
+      - -DXPUPEAK_ENABLE_ROCM=OFF
+      - -DXPUPEAK_ENABLE_ONEAPI=OFF
       # ON everywhere; on aarch64 no Flutter SDK is staged (see only-arches on
       # the source below), so CMake reports "GUI: disabled" and builds CLI-only
       # instead of failing -- the same CLI-only outcome as the arm64 CI jobs.
-      - -DCLPEAK_ENABLE_GUI=ON
+      - -DXPUPEAK_ENABLE_GUI=ON
     post-install:
       - install -Dm644 /app/share/clpeak/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
       - rm -f /app/share/clpeak/LICENSE
