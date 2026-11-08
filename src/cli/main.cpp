@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     RunDocument combined;
     if (!resuming)
     {
-        combined.meta.xpupeakVersion = XPUPEAK_VERSION_STR;
+        combined.meta.generator     = {RESULT_GENERATOR_NAME, XPUPEAK_VERSION_STR};
         combined.meta.generatedAt   = isoTimestampUtc();
         for (const auto &be : backends)
             combined.meta.build.backends.push_back(backendInfo(be.id).name);

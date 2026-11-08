@@ -544,8 +544,9 @@ void main() {
 
     test('builds from a saved document', () {
       final doc = RunDocument.fromJson({
-        'format_version': 3,
-        'clpeak_version': '3.0.0',
+        'schema': 'xpupeak/run',
+        'format_version': 4,
+        'generator': {'name': 'XpuPeak', 'version': '4.0.0'},
         'generated_at': '2026-08-29T14:03:11Z',
         'duration_s': 12.5,
         'cancelled': true,
@@ -669,7 +670,7 @@ void main() {
     });
 
     test('a document with no devices loads empty', () {
-      final doc = RunDocument.fromJson({'format_version': 3});
+      final doc = RunDocument.fromJson({'format_version': 4});
       expect(doc.isEmpty, isTrue);
     });
   });
@@ -684,7 +685,7 @@ void main() {
           .add(const MetricResult(id: 'm', value: 1));
       final summary = RunSummary.fromDocument(
         id: '20260712_094501',
-        fileName: '20260712_094501.clpeak.json',
+        fileName: '20260712_094501.xpupeak.json',
         doc: doc,
         startedAt: DateTime(2026, 7, 12, 9, 45, 1),
         durationMs: 100,

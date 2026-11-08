@@ -230,7 +230,7 @@ So (`include/common/coreml_cache.h`, shared with the ONNX backend, whose
   model plus a gigabyte, and refuses the session with the numbers instead.
 - The package is deleted as soon as the compiler has copied it, halving
   what sits in `$TMPDIR` during a session, and packages left by dead
-  processes (`clpeak-coreml-<pid>-*`) are swept before the first session.
+  processes (`xpupeak-coreml-<pid>-*`) are swept before the first session.
 
 ## The planner shapes three tests
 

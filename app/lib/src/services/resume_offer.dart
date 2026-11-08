@@ -40,7 +40,7 @@ class ResumeOffer {
   /// cancelled.
   final CrashLog? log;
 
-  /// What happened, in a sentence: "Android closed xpupeak during CPU ·
+  /// What happened, in a sentence: "Android closed XpuPeak during CPU ·
   /// Memory latency (pointer-chase)."  Empty for a cancelled run.
   final String headline;
 
@@ -49,7 +49,7 @@ class ResumeOffer {
   /// The devices are still being detected, so it cannot be told yet.
   final bool pending;
 
-  /// Why it cannot be continued, in a phrase: "xpupeak was updated since".
+  /// Why it cannot be continued, in a phrase: "XpuPeak was updated since".
   final String whyNot;
 
   /// The run died on screen -- a crash, not the phone or the user ending
@@ -148,15 +148,15 @@ class ResumeOffer {
     if (checkpoint == null) {
       return run._no('it saved nothing to continue from');
     }
-    if (checkpoint.xpupeakVersion != appVersion) {
-      return run._no('xpupeak was updated since it started');
+    if (checkpoint.generator.version != appVersion) {
+      return run._no('XpuPeak was updated since it started');
     }
     if (state != null && state.os.isNotEmpty && state.os != osVersion) {
       return run._no('the system was updated since it started');
     }
     if (catalog == null) return run._with(pending: true);
     if (state != null && state.catalog.isNotEmpty && state.catalog != catalog) {
-      return run._no('the devices or runtimes xpupeak finds have changed since');
+      return run._no('the devices or runtimes XpuPeak finds have changed since');
     }
     return run._with(canContinue: true);
   }
@@ -191,13 +191,13 @@ class ResumeOffer {
 
   /// Who ended the run, as the person reading the offer would put it.
   static String who(CrashLog log, String? reason) => switch (reason) {
-        'USER_REQUESTED' || 'USER_STOPPED' => 'You closed xpupeak',
-        'CRASH_NATIVE' || 'CRASH' => 'xpupeak crashed',
-        'ANR' => 'xpupeak stopped responding',
+        'USER_REQUESTED' || 'USER_STOPPED' => 'You closed XpuPeak',
+        'CRASH_NATIVE' || 'CRASH' => 'XpuPeak crashed',
+        'ANR' => 'XpuPeak stopped responding',
         'LOW_MEMORY' when !log.diedOffScreen =>
           'The phone ran out of memory',
-        null => log.diedOffScreen ? 'xpupeak was closed' : 'xpupeak stopped',
-        _ => log.diedOffScreen ? 'Android closed xpupeak' : 'xpupeak stopped',
+        null => log.diedOffScreen ? 'XpuPeak was closed' : 'XpuPeak stopped',
+        _ => log.diedOffScreen ? 'Android closed XpuPeak' : 'XpuPeak stopped',
       };
 
   /// " during CPU · Memory latency (pointer-chase)", when the log says.

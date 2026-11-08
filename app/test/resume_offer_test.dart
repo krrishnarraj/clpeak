@@ -17,19 +17,19 @@ import 'package:xpupeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _id = '20261017_201306';
-const _version = '3.0.2-1-gabc1234';
+const _version = '4.0.0-1-gabc1234';
 const _catalog = 'CPU||0:Qualcomm CPU (part 0x002)';
 const _os = 'Android 17';
 final _started = DateTime.utc(2026, 10, 17, 16, 13, 6);
 
 String _header() => jsonEncode({
-      'schema': 'clpeak/run-log',
-      'format_version': 3,
-      'clpeak_version': _version,
+      'schema': 'xpupeak/run-log',
+      'format_version': 4,
+      'generator': {'name': 'XpuPeak', 'version': _version},
       'generated_at': '2026-10-17T16:13:06Z',
       'host': {'os': 'Android', 'os_version': '17'},
       'invocation': {
-        'argv': ['xpupeak', '-o', '$_id.clpeak.json'],
+        'argv': ['xpupeak', '-o', '$_id.xpupeak.json'],
       },
     });
 
@@ -64,14 +64,14 @@ List<String> _run({bool leftScreen = false}) => [
     ];
 
 Map<String, dynamic> _checkpoint({String version = _version}) => {
-      'schema': 'clpeak/run-partial',
-      'format_version': 3,
-      'clpeak_version': version,
+      'schema': 'xpupeak/run-partial',
+      'format_version': 4,
+      'generator': {'name': 'XpuPeak', 'version': version},
       'generated_at': '2026-10-17T16:13:06Z',
       'duration_s': 6.0,
       'host': {'os': 'Android', 'os_version': '17'},
       'invocation': {
-        'argv': ['xpupeak', '-o', '$_id.clpeak.json'],
+        'argv': ['xpupeak', '-o', '$_id.xpupeak.json'],
       },
       'progress': {
         'backends_done': [],
@@ -131,15 +131,15 @@ void main() {
     Map<String, dynamic>? note,
     DateTime? checkpointAt,
   }) async {
-    await File('${dir.path}/$_id.clpeak.log')
+    await File('${dir.path}/$_id.xpupeak.log')
         .writeAsString('${[_header(), ...?lines].join('\n')}\n');
     if (!noCheckpoint) {
-      final f = File('${dir.path}/$_id.clpeak.partial.json');
+      final f = File('${dir.path}/$_id.xpupeak.partial.json');
       await f.writeAsString(jsonEncode(checkpoint ?? _checkpoint()));
       await f.setLastModified(
           checkpointAt ?? _started.add(const Duration(minutes: 5)));
     }
-    await File('${dir.path}/$_id.clpeak.resume.json')
+    await File('${dir.path}/$_id.xpupeak.resume.json')
         .writeAsString(jsonEncode(note ?? {'catalog': _catalog, 'os': _os}));
     final store =
         RunHistoryStore(directoryOverride: dir, processExits: () async => exits);
@@ -169,7 +169,7 @@ void main() {
       expect(offer.skipCrashed, isFalse);
       expect(offer.testsSaved, 1);
       expect(offer.headline,
-          'Android closed xpupeak during CPU · Memory latency (pointer-chase).');
+          'Android closed XpuPeak during CPU · Memory latency (pointer-chase).');
     });
 
     test('a swipe from Recents is the user ending it, wherever the app was',
@@ -178,7 +178,7 @@ void main() {
       final offer = decide(log);
       expect(offer.canContinue, isTrue);
       expect(offer.skipCrashed, isFalse);
-      expect(offer.headline, startsWith('You closed xpupeak during CPU'));
+      expect(offer.headline, startsWith('You closed XpuPeak during CPU'));
     });
 
     test('a crash on screen does not run the test it died in again',
@@ -188,7 +188,7 @@ void main() {
       final offer = decide(log);
       expect(offer.canContinue, isTrue);
       expect(offer.skipCrashed, isTrue);
-      expect(offer.headline, startsWith('xpupeak crashed during CPU'));
+      expect(offer.headline, startsWith('XpuPeak crashed during CPU'));
     });
 
     test('running out of memory on screen is not run again either', () async {
@@ -201,11 +201,11 @@ void main() {
 
     test('with no exit record (iOS), where the app was decides', () async {
       final off = await leave(lines: _run(leftScreen: true));
-      expect(decide(off).headline, startsWith('xpupeak was closed during'));
+      expect(decide(off).headline, startsWith('XpuPeak was closed during'));
       expect(decide(off).skipCrashed, isFalse);
 
       final on = await leave(lines: _run());
-      expect(decide(on).headline, startsWith('xpupeak stopped during'));
+      expect(decide(on).headline, startsWith('XpuPeak stopped during'));
       expect(decide(on).skipCrashed, isTrue);
     });
 
@@ -238,10 +238,10 @@ void main() {
       expect(offer.whyNot, 'it saved nothing to continue from');
     });
 
-    test('another build of xpupeak', () async {
-      final offer = decide(await leave(lines: _run()), version: '3.0.3');
+    test('another build of XpuPeak', () async {
+      final offer = decide(await leave(lines: _run()), version: '4.0.1');
       expect(offer.canContinue, isFalse);
-      expect(offer.whyNot, 'xpupeak was updated since it started');
+      expect(offer.whyNot, 'XpuPeak was updated since it started');
     });
 
     test('another OS release', () async {
@@ -253,7 +253,7 @@ void main() {
       final offer = decide(await leave(lines: _run()),
           catalog: '$_catalog\nONNX|1.24.4|0:Qualcomm QNN (HTP)');
       expect(offer.whyNot,
-          'the devices or runtimes xpupeak finds have changed since');
+          'the devices or runtimes XpuPeak finds have changed since');
     });
 
     test('devices still being detected: not yet told', () async {
@@ -290,13 +290,13 @@ void main() {
     Future<RunHistoryStore> cancelled() async {
       final result = _checkpoint()
         ..remove('progress')
-        ..['schema'] = 'clpeak/run'
+        ..['schema'] = 'xpupeak/run'
         ..['cancelled'] = true;
-      await File('${dir.path}/$_id.clpeak.json')
+      await File('${dir.path}/$_id.xpupeak.json')
           .writeAsString(jsonEncode(result));
-      await File('${dir.path}/$_id.clpeak.partial.json')
+      await File('${dir.path}/$_id.xpupeak.partial.json')
           .writeAsString(jsonEncode(_checkpoint()));
-      await File('${dir.path}/$_id.clpeak.resume.json')
+      await File('${dir.path}/$_id.xpupeak.resume.json')
           .writeAsString(jsonEncode({'catalog': _catalog, 'os': _os}));
       return RunHistoryStore(
           directoryOverride: dir, processExits: () async => const []);
@@ -321,22 +321,22 @@ void main() {
       expect(offer.testsSaved, 1);
       // A saved run, not one that did not finish.
       expect(await store.listCrashLogs(), isEmpty);
-      expect((await decideOn(store, run, version: '3.0.3')).whyNot,
-          'xpupeak was updated since it started');
+      expect((await decideOn(store, run, version: '4.0.1')).whyNot,
+          'XpuPeak was updated since it started');
     });
 
     test('goes whole when deleted', () async {
       final store = await cancelled();
       await store.delete((await store.list()).single);
       for (final suffix in ['.json', '.partial.json', '.resume.json']) {
-        expect(File('${dir.path}/$_id.clpeak$suffix').existsSync(), isFalse);
+        expect(File('${dir.path}/$_id.xpupeak$suffix').existsSync(), isFalse);
       }
     });
 
     test('continued and ended in turn, it did not finish', () async {
       final store = await cancelled();
       // The continuation's sidecar, beside the result its first part saved.
-      final sidecar = File('${dir.path}/$_id.clpeak.log');
+      final sidecar = File('${dir.path}/$_id.xpupeak.log');
       await sidecar.writeAsString('${[_header(), ..._run()].join('\n')}\n');
       final log = (await store.listCrashLogs()).single;
       expect(log.checkpoint?.tests, 1);
@@ -349,13 +349,13 @@ void main() {
           devices: const [],
           backends: const [],
           cancelled: true,
-          fileName: '$id.clpeak.json');
+          fileName: '$id.xpupeak.json');
       final own = at(_id, const Duration(milliseconds: 560));
       expect(ResumeOffer.newerRunThan(log, [own]), isNull);
       final other = at('20261017_211306', const Duration(hours: 1));
       expect(ResumeOffer.newerRunThan(log, [own, other]), other.startedAt);
       // Without the checkpoint, a saved run's sidecar is stale.
-      await File('${dir.path}/$_id.clpeak.partial.json').delete();
+      await File('${dir.path}/$_id.xpupeak.partial.json').delete();
       expect(await store.listCrashLogs(), isEmpty);
       expect(sidecar.existsSync(), isFalse);
     });
@@ -369,7 +369,7 @@ void main() {
     await leave(lines: _run(leftScreen: true), exits: [first]);
     final store = RunHistoryStore(
         directoryOverride: dir, processExits: () async => [first, second]);
-    final log = File('${dir.path}/$_id.clpeak.log');
+    final log = File('${dir.path}/$_id.xpupeak.log');
     await log.writeAsString(
         [for (var i = 0; i < 6000; i++) _entry(1900.0 + i, 'later line')]
             .join('\n'),

@@ -65,8 +65,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> _import() async {
     try {
       const typeGroup = XTypeGroup(
-        label: 'xpupeak results',
-        extensions: ['clpeak.json', 'json'],
+        label: 'XpuPeak results',
+        extensions: ['xpupeak.json', 'json'],
       );
       final file = await openFile(acceptedTypeGroups: [typeGroup]);
       if (file == null) return;
@@ -486,7 +486,8 @@ class _CrashLogTile extends StatelessWidget {
                   [
                     formatDate(log.startedAt),
                     '${log.entries} log lines',
-                    if (log.xpupeakVersion.isNotEmpty) 'v${log.xpupeakVersion}',
+                    if (log.generator.version.isNotEmpty)
+                      'v${log.generator.version}',
                   ].join('  ·  '),
                   style: t.micro,
                 ),
@@ -685,7 +686,7 @@ class _RunTile extends StatelessWidget {
                       context.read<BenchmarkService>().resume(offer),
                 ),
               ],
-              if (summary.xpupeakVersion.isNotEmpty ||
+              if (summary.generator.version.isNotEmpty ||
                   summary.hostOs.isNotEmpty ||
                   summary.hostArch.isNotEmpty) ...[
                 const SizedBox(height: 5),
@@ -699,8 +700,8 @@ class _RunTile extends StatelessWidget {
                           summary.hostOsVersion,
                         ].where((s) => s.isNotEmpty).join(' '),
                       if (summary.hostArch.isNotEmpty) summary.hostArch,
-                      if (summary.xpupeakVersion.isNotEmpty)
-                        'v${summary.xpupeakVersion}',
+                      if (summary.generator.version.isNotEmpty)
+                        'v${summary.generator.version}',
                     ].join('  ·  '),
                     style: t.monoSmallDim,
                     maxLines: 1,

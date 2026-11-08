@@ -250,7 +250,7 @@ enum LogLevel {
 }
 
 /// One line of the run's diagnostic stream (the document's `log` array,
-/// docs/format-v3.md): what xpupeak or a library it called had to say, at
+/// docs/format-v4.md): what XpuPeak or a library it called had to say, at
 /// what moment, inside which scope.  The whole stream in order is what a
 /// maintainer reads when a number from a device they cannot reach looks
 /// wrong; the warnings and errors in it are the only record of *why*
@@ -337,7 +337,7 @@ class RunPlace {
 
 /// One part of a run after its first: the process the run was in ended
 /// part-way and the run was continued from its checkpoint into the same
-/// document (`resumed` in docs/format-v3.md).
+/// document (`resumed` in docs/format-v4.md).
 class ResumedPart {
   const ResumedPart({
     this.at = '',
@@ -371,11 +371,34 @@ class ResumedPart {
       );
 }
 
+/// What wrote a document: its `generator` (docs/format-v4.md) -- the
+/// program, XpuPeak for every format 4 file, and the build's version.
+class GeneratorInfo {
+  const GeneratorInfo({this.name = '', this.version = ''});
+
+  final String name;
+  final String version;
+
+  bool get isEmpty => name.isEmpty && version.isEmpty;
+
+  factory GeneratorInfo.fromJson(Object? m) => m is Map<String, dynamic>
+      ? GeneratorInfo(
+          name: m['name'] as String? ?? '',
+          version: m['version'] as String? ?? '',
+        )
+      : const GeneratorInfo();
+
+  Map<String, dynamic> toJson() => {
+        if (name.isNotEmpty) 'name': name,
+        if (version.isNotEmpty) 'version': version,
+      };
+}
+
 /// How the run was invoked and what it ran on.  Present for a saved run;
 /// filled in only at the end of a live one, so null while it is in flight.
 class RunMeta {
   const RunMeta({
-    this.xpupeakVersion = '',
+    this.generator = const GeneratorInfo(),
     this.generatedAt = '',
     this.durationSeconds = 0,
     this.cancelled = false,
@@ -386,7 +409,8 @@ class RunMeta {
     this.resumed = const [],
   });
 
-  final String xpupeakVersion;
+  /// What wrote the file, and which version of it.
+  final GeneratorInfo generator;
   final String generatedAt;
 
   /// Seconds spent running; for a resumed run, its parts summed.
@@ -416,7 +440,7 @@ class RunMeta {
   final List<ResumedPart> resumed;
 
   factory RunMeta.fromJson(Map<String, dynamic> m) => RunMeta(
-        xpupeakVersion: m['clpeak_version'] as String? ?? '',
+        generator: GeneratorInfo.fromJson(m['generator']),
         generatedAt: m['generated_at'] as String? ?? '',
         durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
         cancelled: m['cancelled'] as bool? ?? false,
@@ -477,7 +501,7 @@ class RunDocument {
     return r;
   }
 
-  /// Build from a saved xpupeak run document (docs/format-v3.md).  A direct
+  /// Build from a saved XpuPeak run document (docs/format-v4.md).  A direct
   /// structural read: the file is already the shape the UI renders, so nothing
   /// is regrouped and no test-level field has to be recovered from its rows.
   factory RunDocument.fromJson(Map<String, dynamic> doc) {

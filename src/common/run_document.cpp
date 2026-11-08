@@ -431,6 +431,20 @@ void writeProgress(JsonWriter &w, const RunProgress &p)
     w.endObject();
 }
 
+const char kRunSchema[]     = "xpupeak/run";
+const char kRunLogSchema[]  = "xpupeak/run-log";
+const char kPartialSchema[] = "xpupeak/run-partial";
+
+// Every document says what wrote it; one with no generator of its own is
+// this build's.
+void writeGenerator(JsonWriter &w, const GeneratorInfo &g)
+{
+    w.beginObject("generator");
+    w.str("name", g.name.empty() ? std::string(RESULT_GENERATOR_NAME) : g.name);
+    w.str("version", g.version.empty() ? std::string(XPUPEAK_VERSION_STR) : g.version);
+    w.endObject();
+}
+
 // The result document, or with `progress` a run's checkpoint: the same meta
 // and devices on one line, and no log or inventory -- the sidecar holds the
 // log, and the checkpoint is rewritten whole at every boundary that adds to
@@ -440,11 +454,9 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
 {
     JsonWriter w(out, /*compact=*/progress != nullptr);
     w.beginObject();
-    w.str("schema", progress ? "clpeak/run-partial" : "clpeak/run");
+    w.str("schema", progress ? kPartialSchema : kRunSchema);
     w.integer("format_version", RESULT_FORMAT_VERSION);
-    w.str("clpeak_version", doc.meta.xpupeakVersion.empty()
-                                ? std::string(XPUPEAK_VERSION_STR)
-                                : doc.meta.xpupeakVersion);
+    writeGenerator(w, doc.meta.generator);
     w.strIf("generated_at", doc.meta.generatedAt);
     if (doc.meta.durationS > 0.0) w.num("duration_s", doc.meta.durationS);
     if (doc.meta.cancelled)       w.boolean("cancelled", true);
@@ -493,11 +505,9 @@ std::string runLogHeaderJson(const RunMeta &meta)
     std::ostringstream ss;
     JsonWriter w(ss);
     w.beginObjectInline();
-    w.str("schema", "clpeak/run-log");
+    w.str("schema", kRunLogSchema);
     w.integer("format_version", RESULT_FORMAT_VERSION);
-    w.str("clpeak_version", meta.xpupeakVersion.empty()
-                                ? std::string(XPUPEAK_VERSION_STR)
-                                : meta.xpupeakVersion);
+    writeGenerator(w, meta.generator);
     w.strIf("generated_at", meta.generatedAt);
     writeBuild(w, meta.build);
     writeHost(w, meta.host);
@@ -679,7 +689,11 @@ void readProgress(const JsonValue &v, RunProgress &p)
 void readDocument(const JsonValue &root, RunDocument &out)
 {
     out = RunDocument();
-    out.meta.xpupeakVersion = root.str("clpeak_version");
+    if (const JsonValue *g = root.find("generator"); g && g->isObject())
+    {
+        out.meta.generator.name    = g->str("name");
+        out.meta.generator.version = g->str("version");
+    }
     out.meta.generatedAt   = root.str("generated_at");
     out.meta.durationS     = root.num("duration_s");
     out.meta.cancelled     = root.flag("cancelled");
@@ -710,6 +724,19 @@ void readDocument(const JsonValue &root, RunDocument &out)
         for (const JsonValue &x : l->items()) out.log.push_back(readLogEntry(x));
 }
 
+// Every schema clpeak 3.x wrote starts clpeak/run.  4.0 reads none of
+// them -- no import, no converter -- and says which program wrote the file
+// rather than only that its version is not this one's.
+bool writtenBy3x(const JsonValue &root)
+{
+    return root.str("schema").rfind("clpeak/run", 0) == 0;
+}
+
+std::string refusal3x(const std::string &filename)
+{
+    return filename + " was written by clpeak 3.x, which this version does not read";
+}
+
 bool readFile(const std::string &filename, std::string &text)
 {
     std::ifstream f(filename, std::ios::binary);
@@ -735,11 +762,16 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     JsonValue   root = jsonParse(text, &error);
     if (!root.isObject())
     {
-        std::cerr << "xpupeak: " << filename << " is not a xpupeak result file"
+        std::cerr << "xpupeak: " << filename << " is not an XpuPeak result file"
                   << (error.empty() ? "" : " (" + error + ")") << "\n";
         return false;
     }
-    if (root.str("schema") == "clpeak/run-partial")
+    if (writtenBy3x(root))
+    {
+        std::cerr << "xpupeak: " << refusal3x(filename) << "\n";
+        return false;
+    }
+    if (root.str("schema") == kPartialSchema)
     {
         std::cerr << "xpupeak: " << filename << " is the checkpoint of a run that "
                   << "did not finish, not a result; continue the run with --resume\n";
@@ -751,7 +783,7 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     {
         std::cerr << "xpupeak: " << filename << " is format_version=" << version
                   << "; this build expects v" << RESULT_FORMAT_VERSION
-                  << ". Regenerate the file with this version of xpupeak.\n";
+                  << ". Regenerate the file with this version of XpuPeak.\n";
         return false;
     }
 
@@ -778,9 +810,14 @@ bool loadPartialJson(const std::string &filename, RunDocument &out,
     }
     std::string why;
     JsonValue   root = jsonParse(text, &why);
-    if (!root.isObject() || root.str("schema") != "clpeak/run-partial")
+    if (root.isObject() && writtenBy3x(root))
     {
-        error = filename + " is not a xpupeak run checkpoint" +
+        error = refusal3x(filename);
+        return false;
+    }
+    if (!root.isObject() || root.str("schema") != kPartialSchema)
+    {
+        error = filename + " is not an XpuPeak run checkpoint" +
                 (why.empty() ? "" : " (" + why + ")");
         return false;
     }

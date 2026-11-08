@@ -9,7 +9,7 @@ No backend-specific includes live here.
 - Looking for benchmark enums? → `benchmark_enums.h`
 - Looking for benchmark constants + calibration? → `common.h`
 - Looking for CLI options struct? → `options.h`
-- Looking for result output format? → `run_document.h` (model) / `docs/format-v3.md` (schema)
+- Looking for result output format? → `run_document.h` (model) / `docs/format-v4.md` (schema)
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Emitting a diagnostic? → `XPUPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `XPUPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
@@ -183,7 +183,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
 | `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
-| `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (a `clpeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, and before the run waits at a boundary between readings, so a run that dies, or is cancelled, can be continued |
+| `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (an `xpupeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, and before the run waits at a boundary between readings, so a run that dies, or is cancelled, can be continued |
 | `run_resume.h` | `--resume`: `loadResumePlan` / `resumeOptions` / `seedResume`, which both hosts call in that order to continue a run from its checkpoint (named by its own path or the result's) into the same document, then `RunCheckpoint::partRecord` for the part's `resumed` record |
 | `json_writer.h` | `JsonWriter` — the one streaming JSON emitter (pretty / one-line records / compact) behind the document, the inventory and the sidecar |
 | `logger_text.h` | `LoggerText` — indented/aligned text rendering to an injectable `std::ostream` + baseline deltas (CLI) |
@@ -196,11 +196,12 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 
 - If you change the `Peak` interface → update all backend `AGENTS.md` files.
 - If you add/remove a header → update this file's Key Files table.
-- If you change result format → update `docs/format-v3.md`, and bump
+- If you change result format → update `docs/format-v4.md`, and bump
   `RESULT_FORMAT_VERSION` in `run_document.h` only for a *breaking* change.
   Adding an optional field is not one: the loader ignores keys it doesn't know,
   and absent-means-default is the format's own convention. A bump makes every
   file already saved unreadable, the GUI's whole run history included, so it
   also means bumping `formatVersion` in
-  `app/lib/src/services/run_history_store.dart`.
+  `app/lib/src/services/run_history_store.dart`, whose schema strings mirror
+  `run_document.cpp`'s too.
 - If you change benchmark enums → make sure all backends handle the new enum values.

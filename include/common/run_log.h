@@ -96,8 +96,8 @@ public:
     // been saved.
     void closeSidecar(bool remove);
 
-    // The sidecar path for an output file: `run.clpeak.json` ->
-    // `run.clpeak.log`; a name without `.json` gets `.log` appended.
+    // The sidecar path for an output file: `run.xpupeak.json` ->
+    // `run.xpupeak.log`; a name without `.json` gets `.log` appended.
     static std::string sidecarPathFor(const std::string &outputFile);
 
     // ---- Recording -------------------------------------------------------

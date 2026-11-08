@@ -27,7 +27,7 @@ run from.
 - Looking for the Peak base class? → `peak.cpp` + `include/common/peak.h`
 - Understanding result recording API? → `include/common/logger.h` (header only)
 - Emitting a diagnostic? → `XPUPEAK_LOG(level, …)` / `XPUPEAK_VLOG(…)` in `include/common/common.h`; the levels and where each ends up are documented there, the run-level store in `include/common/run_log.h`
-- Understanding result output format? → `run_document.cpp` + `include/common/run_document.h`, schema in `docs/format-v3.md`
+- Understanding result output format? → `run_document.cpp` + `include/common/run_document.h`, schema in `docs/format-v4.md`
 - Understanding calibration? → `common.cpp` (`pickIters()`) + `include/common/common.h`
 - Understanding gating? → `peak.cpp` + `include/common/peak.h` (gating lives in Peak)
 - Adding a new backend? → The `Peak` interface is in `include/common/peak.h` (`kBackend` + `backend()`, `runAll()`, `admit()` -- the one gate per Benchmark per device, `if (auto run = admit(Benchmark::X)) runX(...)` -- with `isAllowed()` for asking, `isDeviceSelected()`); a `Backend` enum value in `include/common/benchmark_enums.h` (its position is the run order) and a row in the backend table in `options.cpp` give it its flags; `src/registry/backend_registry.cpp` and `cmake/backends.cmake` put it in both binaries
@@ -120,7 +120,7 @@ is the pattern), because a process that dies mid-session cleans nothing.
 
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.
 - If you add a utility function → update this file's Key Files table.
-- If you change the result format → update `docs/format-v3.md` and
+- If you change the result format → update `docs/format-v4.md` and
   `include/common/run_document.h`, and bump `RESULT_FORMAT_VERSION` only for a
   *breaking* change. The loader skips keys it doesn't recognise and
   absent-means-default is the format's own convention, so an optional field

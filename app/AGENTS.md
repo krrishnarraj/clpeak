@@ -131,7 +131,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   links to the issue tracker, which is how a problem on a phone reaches a
   maintainer
 - A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
-  streams `<id>.clpeak.log` while a run is in flight and removes it once the
+  streams `<id>.xpupeak.log` while a run is in flight and removes it once the
   document is written, so one left behind is a crashed run's only record.
   History lists it, marked "did not finish" (`_CrashLogTile`), among the
   saved runs in one list by start time, with export and delete; the
@@ -145,8 +145,8 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `BenchmarkService.runFailure` says how, the results screen shows it over
   the readings that arrived, and nothing is indexed -- there is no document
 - Continuing a run that stopped part-way? → beside its sidecar the native
-  side keeps `<id>.clpeak.partial.json`, what it finished
-  (`include/common/run_checkpoint.h`), and the app `<id>.clpeak.resume.json`,
+  side keeps `<id>.xpupeak.partial.json`, what it finished
+  (`include/common/run_checkpoint.h`), and the app `<id>.xpupeak.resume.json`,
   the device catalog and OS release it started on (`RunResumeState`).  A
   cancelled run keeps both beside the result it saved, and a cancelled run
   continued that died in turn is listed as one that did not finish
@@ -200,7 +200,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `axis` ("DATA TYPE"), expanded by default but collapsible to that header.
   A single-reading test collapses whatever its shape, since a one-row table
   says nothing the row does not.  `shape` is authored natively and cannot be
-  inferred — see `docs/format-v3.md`.
+  inferred — see `docs/format-v4.md`.
 - What do the meters mean? → `TestResult.barFraction`: a reading's size against
   the largest reading in its test, in every test, whichever direction is
   better.  The meter is a picture of the number printed beside it and nothing
@@ -215,14 +215,16 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   unsupported tests **and** the individual readings missing from tests that
   otherwise ran, so the tables above hold nothing but measurements.
 - History persistence? → `lib/src/services/run_history_store.dart`
-  (`<base>/runs/<id>.clpeak.json` written natively via `-o`, `index.json`
+  (`<base>/runs/<id>.xpupeak.json` written natively via `-o`, `index.json`
   sidecar).  Viewing is a plain `jsonDecode` — the saved document is already
   the shape the UI renders, so there is no native loader in the path and
   history stays readable when the native library cannot be loaded at all.
-  `<base>` is `$HOME/.clpeak` on desktop — never `~/Documents`, which costs a
+  `<base>` is `$HOME/.xpupeak` on desktop — never `~/Documents`, which costs a
   macOS TCC consent prompt — and `<app documents>/xpupeak` on Android/iOS,
   where that directory is inside the sandbox and is what the Files app shows.
-  Files from an older `format_version` are skipped, not half-parsed.
+  Files from another `format_version` are skipped, not half-parsed, and Open
+  file refuses one clpeak 3.x wrote, by its schema, with a message that says
+  so (`writtenBy3x`, the same words as the CLI's).
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
 - Which ONNX Runtime is loaded, and how a user changes it? →
   `lib/src/ui/settings/settings_screen.dart` + `SettingsService.onnxLibraryPath`.
