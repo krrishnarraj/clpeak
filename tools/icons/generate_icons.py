@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Regenerate every platform app icon from the original clpeak wordmark art.
+"""Regenerate every platform app icon from the XpuPeak wordmark art.
 
-The source (``clpeak_master_1024.png``) is the icon from the pre-Flutter native
-app: a white "clpeak" wordmark on a navy rounded rectangle with a drop shadow.
+The source (``xpupeak_master_1024.png``) keeps the look of the pre-Flutter
+native app's icon: a white wordmark, "XpuPeak" in Segoe UI Semibold, on a navy
+rounded rectangle with a drop shadow.  The word spans the same 779px as the
+mark it replaced (x 121-899), centred on the tile; that is how to redraw it.
 That rounded rectangle is a relic of pre-adaptive Android launchers -- modern
 platforms supply the container shape themselves -- so this script recovers just
 the wordmark as an alpha mask and re-composes it per platform:
@@ -27,7 +29,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parent.parent / "app"
-SOURCE = HERE / "clpeak_master_1024.png"
+SOURCE = HERE / "xpupeak_master_1024.png"
 
 # Brand colours, sampled from the original art.
 NAVY = (58, 79, 122)
@@ -44,7 +46,7 @@ MAC_RADIUS = 185.4 / 1024
 TEXT_ON_TILE = 0.78
 
 # Android adaptive icons must keep content inside a 66dp circle on a 108dp
-# canvas. The widest 2.98:1 rectangle that fits is 62.6dp; 0.52 backs off from
+# canvas. The widest 4.08:1 rectangle that fits is 64.1dp; 0.52 backs off from
 # that so the mark does not graze the mask on circular launchers.
 TEXT_ON_ADAPTIVE = 0.52
 
@@ -281,7 +283,7 @@ def build_android() -> None:
         status = round(24 * scale)
         write(
             render(status, background=None, text_frac=22 / 24),
-            res / f"drawable-{density}" / "ic_stat_clpeak.png",
+            res / f"drawable-{density}" / "ic_stat_xpupeak.png",
         )
 
     (res / "mipmap-anydpi-v26").mkdir(parents=True, exist_ok=True)
@@ -313,7 +315,7 @@ def build_linux() -> None:
     # GTK has no resource-embedding step like Windows' .rc, so the runner loads
     # this PNG from the bundle at startup (linux/runner/my_application.cc).  One
     # 256px master is enough -- GTK downscales for the titlebar and taskbar.
-    out = APP / "linux/runner/resources/clpeak_icon.png"
+    out = APP / "linux/runner/resources/xpupeak_icon.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     write(render(256, tile=0.94, radius=0.94 * 0.18), out)
 

@@ -44,12 +44,13 @@ shared library / Apple framework.
   arrive on another thread, which `NativeCallable.listener` is built for
 - Desktop build + `xpupeak-gui` target? → `CMakeLists.txt` (gated on
   `XPUPEAK_ENABLE_GUI` + detected Flutter SDK; assembles the final bundle at
-  `<build>/xpupeak-gui/` so Flutter-generated runner projects stay untouched,
+  `<build>/xpupeak-gui/` (macOS: `<build>/xpupeak-gui/XpuPeak.app`, named by
+  the runner's `PRODUCT_NAME`) so Flutter-generated runner projects stay untouched,
   `xpupeak-engine` beside the runner -- signed before the app is sealed on
   macOS -- and at the build root beside `xpupeak_ffi` for the dev loop)
 - Release layout of the GUI? → the `install()` block at the end of
   `CMakeLists.txt`: bundle → `gui/`, generated launcher → `bin/xpupeak-gui`;
-  macOS ditto's `xpupeak-gui.app` to the package root (keeps framework symlinks
+  macOS ditto's `XpuPeak.app` to the package root (keeps framework symlinks
   + ad-hoc signature). Windows staging dir is resolved at build time by
   `cmake/stage_windows_bundle.cmake` (arm64/x64 arch dir)
 - Android build? → `android/CMakeLists.txt` (standalone superproject used by

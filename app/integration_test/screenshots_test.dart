@@ -176,7 +176,7 @@ Future<void> _shoot(
       ],
       // XpupeakApp, with the theme pinned instead of read from settings.
       child: MaterialApp(
-        title: 'xpupeak',
+        title: 'XpuPeak',
         debugShowCheckedModeBanner: false,
         theme: XpupeakTheme.light(),
         darkTheme: XpupeakTheme.dark(),

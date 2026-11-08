@@ -29,7 +29,7 @@
          permission from Android 13, asked once, at the first run. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
-        android:label="xpupeak"
+        android:label="XpuPeak"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

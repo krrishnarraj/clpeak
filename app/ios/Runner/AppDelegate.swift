@@ -26,7 +26,7 @@ enum RunNotice {
   static let id = "run"
 
   static func register(with messenger: FlutterBinaryMessenger) {
-    let channel = FlutterMethodChannel(name: "kr.clpeak/notify", binaryMessenger: messenger)
+    let channel = FlutterMethodChannel(name: "kr.XpuPeak/notify", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
       let center = UNUserNotificationCenter.current()
       switch call.method {

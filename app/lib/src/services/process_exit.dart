@@ -21,7 +21,7 @@ import 'package:flutter/services.dart';
 class ProcessExit {
   const ProcessExit._();
 
-  static const _channel = MethodChannel('kr.clpeak/process');
+  static const _channel = MethodChannel('kr.XpuPeak/process');
 
   /// Stamp [runId] on this process, or clear the stamp with null.
   static Future<void> markRun(String? runId) async {

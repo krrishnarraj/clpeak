@@ -26,7 +26,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.clpeak/notify")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.XpuPeak/notify")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "ask" -> askToNotify(result)
@@ -43,7 +43,7 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.clpeak/process")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.XpuPeak/process")
             .setMethodCallHandler { call, result ->
                 val am = getSystemService(ActivityManager::class.java)
                 when (call.method) {
@@ -106,7 +106,7 @@ class MainActivity : FlutterActivity() {
             nm.createNotificationChannel(
                 NotificationChannel(RUN_CHANNEL, "Run status", NotificationManager.IMPORTANCE_LOW)
                     .apply {
-                        description = "A run waiting for xpupeak to be back on screen"
+                        description = "A run waiting for XpuPeak to be back on screen"
                         setShowBadge(false)
                     })
         }
@@ -118,7 +118,7 @@ class MainActivity : FlutterActivity() {
         val tap = PendingIntent.getActivity(
             this, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notice = Notification.Builder(this, RUN_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_clpeak)
+            .setSmallIcon(R.drawable.ic_stat_xpupeak)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))

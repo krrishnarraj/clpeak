@@ -4,14 +4,15 @@
 // future. If not, the values below would default to using the project name when this becomes a
 // 'flutter create' template.
 
-// The application's name.  This drives the on-disk bundle name (xpupeak-gui.app)
-// and is deliberately NOT "xpupeak": release zips ship this bundle next to the
-// CLI binary of that name.  The user-visible name stays "xpupeak" via the
-// CFBundleName / CFBundleDisplayName literals in Info.plist.
-PRODUCT_NAME = xpupeak-gui
+// The application's name: the bundle (XpuPeak.app), its executable, and, through
+// Info.plist's CFBundleName, the name in the menu bar and Dock.  Release zips put
+// the .app at their root, where it cannot collide with the CLI's bin/xpupeak;
+// the Windows and Linux runners, which share a directory with nothing but stay
+// beside the CLI on a case-insensitive file system, are xpupeak-gui instead.
+PRODUCT_NAME = XpuPeak
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = kr.clpeak
+PRODUCT_BUNDLE_IDENTIFIER = kr.XpuPeak
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 kr. All rights reserved.
