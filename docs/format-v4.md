@@ -1,12 +1,15 @@
 ---
-title: Result format v3
+title: Result format v4
 ---
 
-# clpeak result format v3
+# XpuPeak result format v4
 
-`clpeak -o run.clpeak.json` writes one JSON document describing one run. It is
-the only format clpeak writes and the only one it reads back (`--compare`, and
-the GUI's run history).
+> **Work in progress.** Format 4 stays open to change until XpuPeak 4.0.0 is
+> released. What has changed from v3 so far is listed at the end.
+
+`xpupeak -o run.xpupeak.json` writes one JSON document describing one run. It
+is the only format XpuPeak writes and the only one it reads back (`--compare`,
+`--resume`, and the GUI's run history).
 
 The document is a tree — **run → devices → tests → metrics** — which is the
 shape the CLI prints and the GUI renders, so nothing has to regroup a flat
@@ -25,9 +28,9 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 
 ```jsonc
 {
-  "schema": "clpeak/run",
-  "format_version": 3,
-  "clpeak_version": "3.0.0-12-gabc1234",
+  "schema": "xpupeak/run",
+  "format_version": 4,
+  "generator": { "name": "XpuPeak", "version": "4.0.0-12-gabc1234" },
   "generated_at": "2026-08-29T14:03:11Z",
   "duration_s": 148.24,
   "cancelled": false,
@@ -40,7 +43,7 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
   },
 
   "invocation": {
-    "argv": ["clpeak", "--verbose", "-o", "run.clpeak.json"],
+    "argv": ["xpupeak", "--verbose", "-o", "run.xpupeak.json"],
     "target_time_us": 500000, "target_time_us_ml_gpu": 1000000,
     "target_time_us_cpu": 2000000, "warmup": 2,
     "categories": ["compute", "bandwidth", "latency"],
@@ -98,15 +101,15 @@ Everything here is produced by `src/common/run_document.cpp` and modelled by
 
 | key | meaning |
 |---|---|
-| `schema` | always `"clpeak/run"` |
-| `format_version` | `3`. A reader rejects any other value outright rather than half-parsing it |
-| `clpeak_version` | the git-describe of the build that produced the file |
+| `schema` | always `"xpupeak/run"` |
+| `format_version` | `4`. A reader rejects any other value outright rather than half-parsing it |
+| `generator` | what wrote the file: `name`, which is `XpuPeak` (under either command name, `xpupeak` or `clpeak`), and `version`, the git-describe of the build that produced it |
 | `generated_at` | ISO-8601 UTC |
 | `duration_s` | seconds the run spent running, the time it was held or paused at a reading included; for a resumed run, its parts summed — the time between them is not the run's |
 | `cancelled` | present and `true` only for a run stopped part-way. **A cancelled run is a partial one** — without this flag every test it never reached would read as hardware that lacks the feature |
 | `build` | what the binary is made of: `backends` lists every backend compiled into it, in run order. The first question on a "backend X is missing" report is whether it was ever there. `config` is the CMake configuration it was built in (`Release`, `Debug`, ...) when the build stamped it: a debug build's host-side work runs unoptimised, and a slow run from one is not the device's fault |
 | `host` | the machine, not its owner: no hostname, username, serial or MAC |
-| `invocation` | how clpeak was asked to run. Every number is sensitive to it — a shorter `--max-time-gpu` measures a different thing, and a selective run is not a full one even though the file is the same shape |
+| `invocation` | how XpuPeak was asked to run. Every number is sensitive to it — a shorter `--max-time-gpu` measures a different thing, and a selective run is not a full one even though the file is the same shape |
 | `resumed` | present only for a run continued after its process ended part-way: one entry per part after the first (see *Resumed runs*) |
 | `devices` | one entry per benchmarked device |
 | `inventory` | `--verbose` only: what `--list-devices` would have shown (see *Inventory*) |
@@ -210,8 +213,8 @@ invented word for that pair would read worse than none.
 | `direction` | present only when this reading overrides its test's |
 
 The unit override is what lets one heterogeneous test hold both TFLOPS and
-TOPS readings, instead of being split into the `-fp` / `-int` twins that older
-clpeak emitted purely so the unit string could differ.  It is set on skipped
+TOPS readings, instead of being split into the `-fp` / `-int` twins that v2
+emitted purely so the unit string could differ.  It is set on skipped
 readings too: an unsupported int8 row still has to say it would have been ops
 and not flops, or it reads as its test's unit and claims something false.
 
@@ -232,25 +235,25 @@ ladder.
 `items_per_second`, `ratio`, `count`, `unknown`. The last three have no SI
 ladder to slide along, so a presenter prints them exactly as measured.
 
-The table mapping clpeak's internal unit tokens (`flops`, `bps`, `s`, `ppm`,
+The table mapping XpuPeak's internal unit tokens (`flops`, `bps`, `s`, `ppm`,
 …) to these fields is `src/common/units.cpp`; a token missing from it passes
 through as its own symbol with `quantity: "unknown"`, so a new unit
 appears correctly in the output before anyone adds it there.
 
 ## Log
 
-Everything clpeak had to say outside a reading, in emission order — the
+Everything XpuPeak had to say outside a reading, in emission order — the
 terminal transcript, as data. One JSON object per line in the pretty-printed
 file, so it reads and greps like a transcript while the rest of the document
 keeps one key per line;
-`jq -r '.log[] | "\(.elapsed_s) [\(.level)] \(.message)"' run.clpeak.json`
+`jq -r '.log[] | "\(.elapsed_s) [\(.level)] \(.message)"' run.xpupeak.json`
 reproduces what the CLI printed.
 
 | key | meaning |
 |---|---|
 | `elapsed_s` | seconds since the run started (`generated_at`) — across the gap of a resumed run too. Where the run stalled is visible from the gaps |
 | `level` | `error` \| `warning` \| `info` \| `debug` |
-| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for clpeak's own messages** |
+| `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
 | `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
 
@@ -281,12 +284,12 @@ the first 200 lines of a call and count the rest.
 ### The run-log sidecar
 
 With `-o`, every entry is also appended — and flushed — to a sidecar as it
-happens: the output path with `.json` swapped for `.log` (`run.clpeak.json` →
-`run.clpeak.log`), one JSON object per line under a header line naming the
+happens: the output path with `.json` swapped for `.log` (`run.xpupeak.json` →
+`run.xpupeak.log`), one JSON object per line under a header line naming the
 run:
 
 ```jsonc
-{"schema": "clpeak/run-log", "format_version": 3, "clpeak_version": "…", "generated_at": "…", "build": {…}, "host": {…}, "invocation": {…}}
+{"schema": "xpupeak/run-log", "format_version": 4, "generator": {"name": "XpuPeak", "version": "…"}, "generated_at": "…", "build": {…}, "host": {…}, "invocation": {…}}
 {"elapsed_s": 0.31, "level": "warning", "backend": "ONNX", "message": "…"}
 …
 ```
@@ -317,15 +320,15 @@ log lines. Its `elapsed_s` is when the process ended.
 ### The checkpoint
 
 With `-o`, a run also keeps what it has finished beside the output: the path
-with `.json` swapped for `.partial.json` (`run.clpeak.json` →
-`run.clpeak.partial.json`). It is this document as far as the run has got —
+with `.json` swapped for `.partial.json` (`run.xpupeak.json` →
+`run.xpupeak.partial.json`). It is this document as far as the run has got —
 the meta, and the devices with every Benchmark finished so far (one
 `--<test>` flag's worth of tests on a device) — without `log` or
 `inventory`, which the sidecar holds; on one line, with `"schema":
-"clpeak/run-partial"` and a `progress` object:
+"xpupeak/run-partial"` and a `progress` object:
 
 ```jsonc
-{"schema": "clpeak/run-partial", "format_version": 3, …, "progress": {
+{"schema": "xpupeak/run-partial", "format_version": 4, …, "progress": {
   "backends_done": ["Vulkan", "OpenCL"],
   "devices": [{"backend": "CPU", "device_index": 0, "benchmarks_done": ["single-precision-compute", …],
                "held_tests": ["integer_compute@NEON"]}]},
@@ -348,7 +351,7 @@ result — `--compare` refuses it — and `--resume` continues the run from it.
 
 A run whose process ended part-way — a phone closed the app off screen, the
 user swiped it away, a driver crashed it — or that was cancelled can be
-continued: `clpeak --resume run.clpeak.json` (or `run.clpeak.partial.json`)
+continued: `xpupeak --resume run.xpupeak.json` (or `run.xpupeak.partial.json`)
 runs, with the options the run started with, only what its checkpoint does
 not hold. The Benchmark the run was in when it stopped runs again
 from its start, or with `--skip-crashed`, for a crash that would repeat, is
@@ -405,23 +408,22 @@ Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
   fixed four decimals v2 used — it does not flatten the parts-per-million
   numeric-error readings to `0.0000`.
 
-## What changed from v2
+## What changed from v3
 
-v2 wrote three formats (XML, CSV, JSON) of one flat table of rows, and carried
-no notion of whether a test's readings were comparable to each other. v3 is one
-nested JSON document that says so.
+v4 is v3 under the program's new name, XpuPeak: every name in the format
+changed with it, and nothing else has yet. The rest of v4 is still being
+worked out, and this table grows with it until the release.
 
-There is no migration path and no compatibility shim: a v2 file is rejected
-with a message naming its version. Regenerate it.
+There is no migration path and no compatibility shim: 4.0 reads no file that
+clpeak 3.x wrote. `--compare`, `--resume` and the app's *Open file* refuse one
+by its schema, saying it "was written by clpeak 3.x, which this version does
+not read", and the app does not look for 3.x history. Run it again with
+XpuPeak.
 
-| v2 | v3 |
+| v3 | v4 |
 |---|---|
-| `--xml-file` / `--json-file` / `--csv-file` | `-o, --output` |
-| flat `entries[]` (JSON) / `run → category → test → metric` (XML) | `devices[] → tests[] → metrics[]` |
-| `unit: "gflops"` | `unit: "FLOPS"` + `quantity` |
-| direction inferred from the unit, in the GUI only | `direction`, per test, resolved natively |
-| — | `shape`, `axis`, `variant` |
-| — | `generated_at`, `duration_s`, `cancelled`, `build`, `host`, `invocation` |
-| `--verbose` to a terminal, or nowhere at all on a phone | `log` (every level, scoped and timed), `inventory`, per-test `duration_s`, the run-log sidecar |
-| ISA slugged into the test tag | `id` + `variant` |
-| `category: ""` for unknown | `category: "unknown"` |
+| `"schema": "clpeak/run"`, `"clpeak/run-log"`, `"clpeak/run-partial"` | `"xpupeak/run"`, `"xpupeak/run-log"`, `"xpupeak/run-partial"` |
+| `"format_version": 3` | `"format_version": 4` |
+| `"clpeak_version": "…"` | `"generator": {"name": "XpuPeak", "version": "…"}` |
+| `.clpeak.json` for a result (the app's files and these examples), with its `.clpeak.log` sidecar and `.clpeak.partial.json` checkpoint | `.xpupeak.json`, `.xpupeak.log`, `.xpupeak.partial.json` |
+| the app's history in `~/.clpeak` (`%USERPROFILE%\.clpeak`), or `<app documents>/clpeak` on a phone | `~/.xpupeak` (`%USERPROFILE%\.xpupeak`), or `<app documents>/xpupeak` |

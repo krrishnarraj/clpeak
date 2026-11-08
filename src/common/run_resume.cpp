@@ -129,7 +129,7 @@ RunCheckpoint::Crash crashSite(const ResumePlan &plan)
             break;
         }
     }
-    crash.reason = "xpupeak ended here before the run was resumed";
+    crash.reason = "XpuPeak ended here before the run was resumed";
     if (!plan.after.empty()) crash.reason += " (" + plan.after + ")";
     crash.reason += ", so this was not run again";
     return crash;
@@ -186,9 +186,9 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
     const std::string &outputFile = plan.outputFile;
 
     const RunMeta &meta = plan.seed.meta;
-    if (meta.xpupeakVersion != XPUPEAK_VERSION_STR)
+    if (meta.generator.version != XPUPEAK_VERSION_STR)
     {
-        error = "xpupeak: " + outputFile + " was started by xpupeak " + meta.xpupeakVersion +
+        error = "xpupeak: " + outputFile + " was started by XpuPeak " + meta.generator.version +
                 ", and a run is continued only by the build that started it; this is " +
                 XPUPEAK_VERSION_STR;
         return false;

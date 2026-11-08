@@ -26,9 +26,9 @@ Widget _host(RunDocument doc) => MaterialApp(
     );
 
 String _header({bool verbose = false}) => jsonEncode({
-      'schema': 'clpeak/run-log',
-      'format_version': 3,
-      'clpeak_version': '3.0.0',
+      'schema': 'xpupeak/run-log',
+      'format_version': 4,
+      'generator': {'name': 'XpuPeak', 'version': '4.0.0'},
       'generated_at': '2026-09-15T06:05:57Z',
       'invocation': {
         'argv': ['xpupeak', if (verbose) '--verbose'],
@@ -163,7 +163,7 @@ void main() {
     tearDown(() => dir.deleteSync(recursive: true));
 
     test('a sidecar without its document is a crashed run', () async {
-      await File('${dir.path}/20260915_120000.clpeak.log').writeAsString([
+      await File('${dir.path}/20260915_120000.xpupeak.log').writeAsString([
         _header(verbose: true),
         _line('debug', 'Vulkan: working set 512 MB', backend: 'Vulkan'),
         _line('warning', 'query timeout', backend: 'Vulkan', source: 'vulkan'),
@@ -176,8 +176,8 @@ void main() {
       expect(logs, hasLength(1));
       final log = logs.single;
       expect(log.id, '20260915_120000');
-      expect(log.fileName, '20260915_120000.clpeak.log');
-      expect(log.xpupeakVersion, '3.0.0');
+      expect(log.fileName, '20260915_120000.xpupeak.log');
+      expect(log.generator.version, '4.0.0');
       expect(log.verbose, isTrue);
       expect(log.entries, 2);
       expect(log.backends, ['Vulkan']);
@@ -192,21 +192,21 @@ void main() {
     });
 
     test('the in-flight run and a stale sidecar are not crashes', () async {
-      await File('${dir.path}/live.clpeak.log').writeAsString(_header());
-      await File('${dir.path}/done.clpeak.log').writeAsString(_header());
-      await File('${dir.path}/done.clpeak.json')
-          .writeAsString(jsonEncode({'format_version': 3, 'devices': []}));
+      await File('${dir.path}/live.xpupeak.log').writeAsString(_header());
+      await File('${dir.path}/done.xpupeak.log').writeAsString(_header());
+      await File('${dir.path}/done.xpupeak.json')
+          .writeAsString(jsonEncode({'format_version': 4, 'devices': []}));
 
       final store = RunHistoryStore(directoryOverride: dir);
       final logs = await store.listCrashLogs(inFlightId: 'live');
       expect(logs, isEmpty);
       // A sidecar whose run did finish is cleaned up; the live one is left.
-      expect(File('${dir.path}/done.clpeak.log').existsSync(), isFalse);
-      expect(File('${dir.path}/live.clpeak.log').existsSync(), isTrue);
+      expect(File('${dir.path}/done.xpupeak.log').existsSync(), isFalse);
+      expect(File('${dir.path}/live.xpupeak.log').existsSync(), isTrue);
     });
 
     test('a file that is not a run log is ignored', () async {
-      await File('${dir.path}/junk.clpeak.log').writeAsString('not json');
+      await File('${dir.path}/junk.xpupeak.log').writeAsString('not json');
       final store = RunHistoryStore(directoryOverride: dir);
       expect(await store.listCrashLogs(), isEmpty);
     });
@@ -229,15 +229,15 @@ void main() {
 
     test('how Android says the process ended is appended to its run, once',
         () async {
-      final log = File('${dir.path}/20260915_060557.clpeak.log');
+      final log = File('${dir.path}/20260915_060557.xpupeak.log');
       await log.writeAsString([
         _header(),
         _line('info', 'Backend: ONNX', backend: 'ONNX'),
         '{"elapsed_s": 9.1, "level": "info", "mes',
       ].join('\n'));
-      await File('${dir.path}/done.clpeak.log').writeAsString(_header());
-      await File('${dir.path}/done.clpeak.json')
-          .writeAsString(jsonEncode({'format_version': 3, 'devices': []}));
+      await File('${dir.path}/done.xpupeak.log').writeAsString(_header());
+      await File('${dir.path}/done.xpupeak.json')
+          .writeAsString(jsonEncode({'format_version': 4, 'devices': []}));
 
       final store = RunHistoryStore(
         directoryOverride: dir,

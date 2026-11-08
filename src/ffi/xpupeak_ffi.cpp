@@ -360,7 +360,7 @@ int xpupeakLaunch(int argc, const char **argv, XpupeakEventCallback on_event,
     }
     else
     {
-        combined.meta.xpupeakVersion = XPUPEAK_VERSION_STR;
+        combined.meta.generator     = {RESULT_GENERATOR_NAME, XPUPEAK_VERSION_STR};
         combined.meta.generatedAt   = isoTimestampUtc();
         for (const auto &be : backendRegistry())
             combined.meta.build.backends.push_back(backendInfo(be.id).name);

@@ -4,14 +4,15 @@ import 'dart:io';
 import 'package:xpupeak/src/services/run_history_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-String v3Doc() => jsonEncode({
-      'format_version': 3,
+String v4Doc() => jsonEncode({
+      'schema': 'xpupeak/run',
+      'format_version': 4,
       'devices': [],
     });
 
-String v2Doc() => jsonEncode({
-      'format_version': 2,
-      'entries': [],
+String v3Doc() => jsonEncode({
+      'format_version': 3,
+      'devices': [],
     });
 
 Map<String, dynamic> indexRow(String id, String fileName) => {
@@ -25,30 +26,30 @@ Map<String, dynamic> indexRow(String id, String fileName) => {
     };
 
 Future<Directory> makeStore() async {
-  final tmp = Directory.systemTemp.createTempSync('xpupeak_hist_v3');
+  final tmp = Directory.systemTemp.createTempSync('xpupeak_hist_v4');
   return tmp;
 }
 
 void main() {
-  test('list() shows only v3 documents, pruning the rest', () async {
+  test('list() shows only v4 documents, pruning the rest', () async {
     final dir = await makeStore();
     addTearDown(() => dir.deleteSync(recursive: true));
 
-    // On-disk files: one v3, one v2-in-v3-clothing, one legacy xml.
-    await File('${dir.path}/good.clpeak.json').writeAsString(v3Doc());
-    await File('${dir.path}/oldver.clpeak.json').writeAsString(v2Doc());
+    // On-disk files: one v4, one v3-in-v4-clothing, one legacy xml.
+    await File('${dir.path}/good.xpupeak.json').writeAsString(v4Doc());
+    await File('${dir.path}/oldver.xpupeak.json').writeAsString(v3Doc());
     await File('${dir.path}/legacy.xml').writeAsString('<run/>');
-    // Orphan v3 file (in index nowhere) must be adopted; orphan junk ignored.
-    await File('${dir.path}/orphan.clpeak.json').writeAsString(v3Doc());
-    await File('${dir.path}/orphan_junk.clpeak.json')
-        .writeAsString(v2Doc());
+    // Orphan v4 file (in index nowhere) must be adopted; orphan junk ignored.
+    await File('${dir.path}/orphan.xpupeak.json').writeAsString(v4Doc());
+    await File('${dir.path}/orphan_junk.xpupeak.json')
+        .writeAsString(v3Doc());
 
     await File('${dir.path}/index.json').writeAsString(jsonEncode({
       'runs': [
-        indexRow('good', 'good.clpeak.json'),
-        indexRow('oldver', 'oldver.clpeak.json'),
+        indexRow('good', 'good.xpupeak.json'),
+        indexRow('oldver', 'oldver.xpupeak.json'),
         indexRow('legacy', 'legacy.xml'),
-        indexRow('gone', 'gone.clpeak.json'),
+        indexRow('gone', 'gone.xpupeak.json'),
       ],
     }));
 
@@ -56,11 +57,11 @@ void main() {
     final runs = await store.list();
     final names = {for (final r in runs) r.fileName};
 
-    expect(names, contains('good.clpeak.json'));
-    expect(names, contains('orphan.clpeak.json'));
-    expect(names, isNot(contains('oldver.clpeak.json')));
+    expect(names, contains('good.xpupeak.json'));
+    expect(names, contains('orphan.xpupeak.json'));
+    expect(names, isNot(contains('oldver.xpupeak.json')));
     expect(names, isNot(contains('legacy.xml')));
-    expect(names, isNot(contains('gone.clpeak.json')));
+    expect(names, isNot(contains('gone.xpupeak.json')));
 
     // The index was pruned so the hidden rows stay hidden.
     final index = jsonDecode(
@@ -68,7 +69,7 @@ void main() {
     final indexed =
         [(index['runs'] as List).map((r) => (r as Map)['fileName'])].expand((e) => e).toSet();
     expect(indexed, isNot(contains('legacy.xml')));
-    expect(indexed, isNot(contains('oldver.clpeak.json')));
-    expect(indexed, isNot(contains('gone.clpeak.json')));
+    expect(indexed, isNot(contains('oldver.xpupeak.json')));
+    expect(indexed, isNot(contains('gone.xpupeak.json')));
   });
 }

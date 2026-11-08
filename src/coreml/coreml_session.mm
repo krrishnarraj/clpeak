@@ -63,10 +63,10 @@ MLMultiArrayDataType mlDataType(int dtype)
 
 std::atomic<unsigned> g_packageSeq{0};
 
-// Every session's files carry this process's pid: clpeak-coreml-<pid>-<n>.
+// Every session's files carry this process's pid: xpupeak-coreml-<pid>-<n>.
 NSString *packagePrefix()
 {
-  return [NSString stringWithFormat:@"clpeak-coreml-%d-", (int)getpid()];
+  return [NSString stringWithFormat:@"xpupeak-coreml-%d-", (int)getpid()];
 }
 
 // Bytes free on the volume holding the temporary directory, or 0 when it
@@ -97,9 +97,9 @@ void sweepStalePackages()
       NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:tmp error:nil];
       for (NSString *name in entries)
       {
-        if (![name hasPrefix:@"clpeak-coreml-"])
+        if (![name hasPrefix:@"xpupeak-coreml-"])
           continue;
-        // clpeak-coreml-<pid>-<n>.<ext>
+        // xpupeak-coreml-<pid>-<n>.<ext>
         NSArray<NSString *> *parts = [[name stringByDeletingPathExtension] componentsSeparatedByString:@"-"];
         if (parts.count < 4)
           continue;

@@ -66,7 +66,7 @@ OWNERS = OrderedDict([
 # wins, so a file comes before its directory.
 PROTECTED_PATHS = [
     ('results/', 'stays', 'saved reference runs (data; the format redesign converts them)'),
-    ('docs/format-v3.md', 'T3', 'the v3 format doc (becomes format-v4.md)'),
+    ('docs/format-v4.md', 'stays', 'the format doc, whose changes from v3 name the 3.x keys'),
     ('docs/', 'T6', 'the site'),
     ('README.md', 'T6', 'README'),
     ('.github/ISSUE_TEMPLATE/', 'T6', 'issue templates'),
@@ -111,6 +111,9 @@ RULES = [
      re.compile(r'\bclpeak-coreml-')),
     ('history', 'stays', 'old version numbers and asset names',
      re.compile(r'\bclpeak[ -]v?\d+\.\d+(?:\.\d+)*')),
+    # With the schema rule above, what 4.0 needs to refuse a 3.x file by name.
+    ('refusal', 'stays', 'the 3.x refusal: a file clpeak 3.x wrote is refused by name',
+     re.compile(r'\bclpeak 3\.x\b')),
 ]
 
 # Spans renamed even inside a protected token: the Dart FFI lookups, whose

@@ -44,7 +44,7 @@ void main() {
     test('cpu quick run streams events and saves a document',
         timeout: const Timeout(Duration(minutes: 5)), () async {
       final out = File(
-          '${Directory.systemTemp.path}/xpupeak_dart_ffi_test.clpeak.json');
+          '${Directory.systemTemp.path}/xpupeak_dart_ffi_test.xpupeak.json');
       if (out.existsSync()) out.deleteSync();
 
       final run = XpupeakRunner(bindings)

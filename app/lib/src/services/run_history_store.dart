@@ -9,19 +9,19 @@ import '../model/run_summary.dart';
 import 'process_exit.dart';
 
 /// Persists every run under `<base>/runs/`:
-///   `<id>.clpeak.json`  the run document, written by the NATIVE side
+///   `<id>.xpupeak.json` the run document, written by the NATIVE side
 ///                       (xpupeak_launch -o) — also the export artifact
-///   `<id>.clpeak.log`   the run's diagnostic stream, streamed line by line
+///   `<id>.xpupeak.log`  the run's diagnostic stream, streamed line by line
 ///                       by the native side WHILE the run is in flight and
 ///                       removed once the document is written.  One that
 ///                       outlives its run is the record of a run the
 ///                       process died in — see [listCrashLogs]
-///   `<id>.clpeak.partial.json`
+///   `<id>.xpupeak.partial.json`
 ///                       the run's checkpoint, rewritten by the native side
 ///                       as each benchmark finishes and removed with the
 ///                       log: what such a run finished, which `--resume`
 ///                       continues (include/common/run_checkpoint.h)
-///   `<id>.clpeak.resume.json`
+///   `<id>.xpupeak.resume.json`
 ///                       the app's own note on a run in flight: the device
 ///                       catalog it started on, and whether its Continue
 ///                       offer was dismissed ([RunResumeState])
@@ -48,18 +48,18 @@ class RunHistoryStore {
   /// Suffix rather than plain `.json`: it names the format at a glance in a
   /// directory a user is expected to browse, and keeps the index sidecar
   /// (index.json) out of the orphan scan.
-  static const fileSuffix = '.clpeak.json';
+  static const fileSuffix = '.xpupeak.json';
 
   /// The sidecar the native side derives from `-o`: `.json` -> `.log`
   /// (RunLog::sidecarPathFor in include/common/run_log.h).
-  static const logSuffix = '.clpeak.log';
+  static const logSuffix = '.xpupeak.log';
 
   /// The checkpoint the native side derives from `-o`: `.json` ->
   /// `.partial.json` (RunCheckpoint::pathFor in
   /// include/common/run_checkpoint.h).
-  static const partialSuffix = '.clpeak.partial.json';
+  static const partialSuffix = '.xpupeak.partial.json';
 
-  static const resumeSuffix = '.clpeak.resume.json';
+  static const resumeSuffix = '.xpupeak.resume.json';
 
   static String fileNameFor(String id) => '$id$fileSuffix';
   static String logFileNameFor(String id) => '$id$logSuffix';
@@ -75,7 +75,7 @@ class RunHistoryStore {
     return dir;
   }
 
-  /// Desktop: `$HOME/.clpeak` (`%USERPROFILE%\.clpeak` on Windows). The
+  /// Desktop: `$HOME/.xpupeak` (`%USERPROFILE%\.xpupeak` on Windows). The
   /// documents directory is deliberately not used there — on macOS the first
   /// touch of `~/Documents` raises a TCC consent dialog, and a benchmark tool
   /// has no business asking for the user's documents.
@@ -86,12 +86,12 @@ class RunHistoryStore {
   static Future<Directory> baseDirectory() async {
     if (Platform.isAndroid || Platform.isIOS) {
       final docs = await getApplicationDocumentsDirectory();
-      return Directory(p.join(docs.path, 'clpeak'));
+      return Directory(p.join(docs.path, 'xpupeak'));
     }
     final env = Platform.environment;
     final home = env['HOME'] ?? env['USERPROFILE'];
     if (home != null && home.isNotEmpty) {
-      return Directory(p.join(home, '.clpeak'));
+      return Directory(p.join(home, '.xpupeak'));
     }
     // No home directory (odd service/CI environments) — fall back to the
     // platform's per-app support dir, which never needs consent either.
@@ -126,11 +126,9 @@ class RunHistoryStore {
 
   /// History rows, newest first, adopting any orphan documents.
   ///
-  /// Only v3 documents are listed: the index may still hold pre-v3 rows
-  /// (v2 tracked `<id>.xml`), which this build can no longer open, so such
-  /// rows are hidden — and pruned from the index — rather than listed only
-  /// to fail on tap. The same goes for rows whose file went missing or no
-  /// longer parses as the current version.
+  /// Only documents in this build's format are listed: a row whose file
+  /// went missing, or no longer parses as the current version, is hidden —
+  /// and pruned from the index — rather than listed only to fail on tap.
   Future<List<RunSummary>> list() async {
     final dir = await runsDirectory();
     var runs = await _readIndex(dir);
@@ -384,7 +382,7 @@ class RunHistoryStore {
     try {
       final f = File(p.join(dir.path, partialFileNameFor(id)));
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      if (doc['schema'] != 'clpeak/run-partial' ||
+      if (doc['schema'] != partialSchema ||
           (doc['format_version'] as num?)?.toInt() != formatVersion) {
         return null;
       }
@@ -446,7 +444,7 @@ class RunHistoryStore {
   }
 
   /// Parse one saved document, or null when it is unreadable, not JSON, or
-  /// written by a xpupeak whose format this build does not know.
+  /// written by an XpuPeak whose format this build does not know.
   Future<RunDocument?> _readDocument(File f) async {
     try {
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
@@ -500,7 +498,8 @@ class RunHistoryStore {
 
   /// Import a run document from outside the runs directory.
   ///
-  /// Validates the JSON, checks `format_version`, copies the file into the
+  /// Validates the JSON, refuses a file clpeak 3.x wrote (its schema says
+  /// so) and any other `format_version`, copies the file into the
   /// store and updates the index.  When [overwrite] is false and a file with
   /// the same name already exists a [FileSystemException] is thrown so the
   /// caller can prompt the user (overwrite vs. rename).
@@ -528,11 +527,12 @@ class RunHistoryStore {
     } catch (e) {
       throw FormatException('Not valid JSON: $e');
     }
+    if (writtenBy3x(json)) throw const FormatException(refusal3x);
     if ((json['format_version'] as num?)?.toInt() != formatVersion) {
       throw FormatException(
           'Unsupported format version ${json['format_version']} – expected $formatVersion');
     }
-    if (json['schema'] == 'clpeak/run-partial') {
+    if (json['schema'] == partialSchema) {
       throw const FormatException(
           'This is the checkpoint of a run that did not finish, not a result');
     }
@@ -582,7 +582,7 @@ class CrashLog {
     required this.id,
     required this.fileName,
     required this.startedAt,
-    required this.xpupeakVersion,
+    required this.generator,
     required this.verbose,
     required this.entries,
     required this.backends,
@@ -600,7 +600,7 @@ class CrashLog {
   final String id;
   final String fileName;
   final DateTime startedAt;
-  final String xpupeakVersion;
+  final GeneratorInfo generator;
   final bool verbose;
 
   /// Lines after the header.
@@ -663,7 +663,7 @@ class CrashLog {
           } catch (_) {
             return null;
           }
-          if (header['schema'] != 'clpeak/run-log' ||
+          if (header['schema'] != runLogSchema ||
               (header['format_version'] as num?)?.toInt() != formatVersion) {
             return null;
           }
@@ -725,7 +725,7 @@ class CrashLog {
       startedAt: DateTime.tryParse(h['generated_at'] as String? ?? '')
               ?.toLocal() ??
           stat.modified,
-      xpupeakVersion: h['clpeak_version'] as String? ?? '',
+      generator: GeneratorInfo.fromJson(h['generator']),
       verbose: (h['invocation'] as Map<String, dynamic>?)?['verbose']
               as bool? ??
           false,
@@ -753,7 +753,7 @@ class RunCheckpointInfo {
   const RunCheckpointInfo({
     required this.writtenAt,
     required this.tests,
-    required this.xpupeakVersion,
+    required this.generator,
     required this.hostOs,
     required this.hostOsVersion,
     required this.argv,
@@ -764,7 +764,7 @@ class RunCheckpointInfo {
 
   /// Tests it holds, over every device.
   final int tests;
-  final String xpupeakVersion;
+  final GeneratorInfo generator;
   final String hostOs;
   final String hostOsVersion;
 
@@ -775,7 +775,7 @@ class RunCheckpointInfo {
     try {
       if (!await f.exists()) return null;
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      if (doc['schema'] != 'clpeak/run-partial' ||
+      if (doc['schema'] != partialSchema ||
           (doc['format_version'] as num?)?.toInt() != formatVersion) {
         return null;
       }
@@ -788,7 +788,7 @@ class RunCheckpointInfo {
       return RunCheckpointInfo(
         writtenAt: (await f.stat()).modified,
         tests: tests,
-        xpupeakVersion: meta.xpupeakVersion,
+        generator: meta.generator,
         hostOs: meta.host['os']?.toString() ?? '',
         hostOsVersion: meta.host['os_version']?.toString() ?? '',
         argv: meta.argv,
@@ -838,4 +838,21 @@ class RunResumeState {
 /// Dump-format version this build reads — must match RESULT_FORMAT_VERSION in
 /// include/common/run_document.h.  A file from another version is skipped
 /// rather than half-parsed.
-const int formatVersion = 3;
+const int formatVersion = 4;
+
+/// The schemas of the run-log sidecar's header and of the checkpoint, which
+/// the native side writes beside a run's document (docs/format-v4.md).
+const runLogSchema = 'xpupeak/run-log';
+const partialSchema = 'xpupeak/run-partial';
+
+/// Every schema clpeak 3.x wrote starts clpeak/run.  4.0 reads none of
+/// them -- no import, no converter -- and says which program wrote the file
+/// rather than only that its version is not this one's.  The CLI refuses
+/// with the same words (run_document.cpp).
+bool writtenBy3x(Map<String, dynamic> doc) {
+  final schema = doc['schema'];
+  return schema is String && schema.startsWith('clpeak/run');
+}
+
+const refusal3x =
+    'This file was written by clpeak 3.x, which this version does not read';

@@ -65,26 +65,26 @@ class _StubBindings implements XpupeakBindings {
   LitertStatus litertStatus() => const LitertStatus.unavailable('test');
 }
 
-/// One `<id>.clpeak.log` sidecar: a JSON header line plus NDJSON entries.
+/// One `<id>.xpupeak.log` sidecar: a JSON header line plus NDJSON entries.
 Future<void> _writeSidecar(
   Directory dir,
   String id, {
-  String version = '3.0.0-36-gabcdef1234567890',
+  String version = '4.0.0-36-gabcdef1234567890',
   bool verbose = false,
   List<Map<String, dynamic>> entries = const [],
 }) async {
   final header = jsonEncode({
-    'schema': 'clpeak/run-log',
-    'format_version': 3,
+    'schema': 'xpupeak/run-log',
+    'format_version': 4,
     'generated_at': '2026-09-16T15:18:00',
-    'clpeak_version': version,
+    'generator': {'name': 'XpuPeak', 'version': version},
     'invocation': {'verbose': verbose},
   });
   final lines = [
     header,
     for (final e in entries) jsonEncode(e),
   ];
-  await File('${dir.path}/$id.clpeak.log').writeAsString('${lines.join('\n')}\n');
+  await File('${dir.path}/$id.xpupeak.log').writeAsString('${lines.join('\n')}\n');
 }
 
 Map<String, dynamic> _entry(String backend, String message) => {
@@ -122,8 +122,8 @@ void main() {
       );
       // A finished run with a long device name and two backends, so the
       // saved-run footer (same row pattern) is covered too.
-      await File('${dir.path}/20260918_151958.clpeak.json')
-          .writeAsString(jsonEncode({'format_version': 3}));
+      await File('${dir.path}/20260918_151958.xpupeak.json')
+          .writeAsString(jsonEncode({'format_version': 4}));
       await File('${dir.path}/index.json').writeAsString(jsonEncode({
         'runs': [
           {
@@ -135,8 +135,11 @@ void main() {
             ],
             'backends': ['LiteRT', 'ONNX'],
             'cancelled': true,
-            'fileName': '20260918_151958.clpeak.json',
-            'clpeakVersion': '3.0.0-36-gabcdef1234567890',
+            'fileName': '20260918_151958.xpupeak.json',
+            'generator': {
+              'name': 'XpuPeak',
+              'version': '4.0.0-36-gabcdef1234567890',
+            },
             'hostOs': 'Android',
             'hostOsVersion': '16',
             'hostArch': 'arm64-v8a',

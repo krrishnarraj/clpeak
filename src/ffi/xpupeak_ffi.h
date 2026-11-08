@@ -190,7 +190,7 @@ XPUPEAK_FFI_EXPORT char *xpupeak_copy_litert_status_json(void);
 //   done          {status, cancelled, duration_s}   // ALWAYS the last event of a launch
 //
 // `log` is one line of the run's diagnostic stream -- the same entry the
-// saved document holds in its `log` array (docs/format-v3.md): `level` is
+// saved document holds in its `log` array (docs/format-v4.md): `level` is
 // error | warning | info | debug, `source` names the library a message was
 // relayed from ("onnxruntime", "vulkan", "opencl", "console") or is empty
 // for xpupeak's own, `elapsed_s` is seconds since the run started, and the
@@ -297,7 +297,7 @@ XPUPEAK_FFI_EXPORT int xpupeak_engine_main(int argc, const char **argv);
 // ---- Saved results ------------------------------------------------------------------
 //
 // There is no loader here.  Result files are JSON in exactly the shape a
-// consumer wants (docs/format-v3.md), so the GUI reads them directly rather
+// consumer wants (docs/format-v4.md), so the GUI reads them directly rather
 // than round-tripping a file through this library -- which also means run
 // history stays readable when the native library cannot be loaded at all.
 

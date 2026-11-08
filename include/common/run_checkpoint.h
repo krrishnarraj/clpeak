@@ -14,8 +14,8 @@
 // user swipes it away, a driver crashes the process -- and a run can take
 // most of an hour.  So with -o the finished part of the run is kept on disk
 // as it goes: `<output>.partial.json` (`.json` swapped for `.partial.json`),
-// a v3 document of every Benchmark finished so far with schema
-// "clpeak/run-partial", no log (the sidecar keeps that, run_log.h), and the
+// a v4 document of every Benchmark finished so far with schema
+// "xpupeak/run-partial", no log (the sidecar keeps that, run_log.h), and the
 // run's progress: the backends finished, and per device the whole device or
 // the Benchmarks finished on it.
 //
@@ -45,7 +45,7 @@ public:
     // The run's checkpoint, or nullptr outside a run.
     static RunCheckpoint *current();
 
-    // `run.clpeak.json` -> `run.clpeak.partial.json`; a name without `.json`
+    // `run.xpupeak.json` -> `run.xpupeak.partial.json`; a name without `.json`
     // gets `.partial.json` appended.
     static std::string pathFor(const std::string &outputFile);
 

@@ -132,10 +132,13 @@ Map<String, dynamic> _readJson(String path) =>
     jsonDecode(File('$_repo/$path').readAsStringSync()) as Map<String, dynamic>;
 
 /// A saved run as the app holds it once it finishes.  The runs in results/
-/// were produced by the release candidate; the document's version is
-/// relabelled to the release the screenshots ship with.
+/// were produced by the release candidate; the document's generator is
+/// relabelled to the release the screenshots ship with.  They are still
+/// format 3 until they are run again in format 4; RunDocument.fromJson reads
+/// their devices and tests all the same, since only the names changed.
 ({RunDocument document, RunSummary summary}) _run(String path, String id) {
-  final json = _readJson(path)..['clpeak_version'] = _version;
+  final generator = GeneratorInfo(name: 'XpuPeak', version: _version);
+  final json = _readJson(path)..['generator'] = generator.toJson();
   final doc = RunDocument.fromJson(json);
   final summary = RunSummary(
     id: id,
@@ -144,8 +147,8 @@ Map<String, dynamic> _readJson(String path) =>
     devices: [for (final r in doc.runs) r.device],
     backends: {for (final r in doc.runs) r.backend}.toList(),
     cancelled: false,
-    fileName: '$id.clpeak.json',
-    xpupeakVersion: _version,
+    fileName: '$id.xpupeak.json',
+    generator: generator,
   );
   return (document: doc, summary: summary);
 }

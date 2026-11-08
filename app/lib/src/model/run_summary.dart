@@ -1,6 +1,7 @@
 import 'run_document.dart';
 
-/// One row of the history index (documents/clpeak/runs/index.json).
+/// One row of the history index (`<base>/runs/index.json`, where `<base>` is
+/// RunHistoryStore.baseDirectory()).
 class RunSummary {
   const RunSummary({
     required this.id,
@@ -11,7 +12,7 @@ class RunSummary {
     required this.cancelled,
     required this.fileName,
     this.name = '',
-    this.xpupeakVersion = '',
+    this.generator = const GeneratorInfo(),
     this.hostOs = '',
     this.hostOsVersion = '',
     this.hostArch = '',
@@ -30,7 +31,7 @@ class RunSummary {
 
   /// Where the run was produced — persisted for history list preview so an
   /// imported run from another machine is distinguishable without opening it.
-  final String xpupeakVersion;
+  final GeneratorInfo generator;
   final String hostOs;
   final String hostOsVersion;
   final String hostArch;
@@ -50,7 +51,7 @@ class RunSummary {
         cancelled: cancelled,
         fileName: fileName,
         name: newName,
-        xpupeakVersion: xpupeakVersion,
+        generator: generator,
         hostOs: hostOs,
         hostOsVersion: hostOsVersion,
         hostArch: hostArch,
@@ -65,7 +66,7 @@ class RunSummary {
         'cancelled': cancelled,
         'fileName': fileName,
         if (name.isNotEmpty) 'name': name,
-        if (xpupeakVersion.isNotEmpty) 'clpeakVersion': xpupeakVersion,
+        if (!generator.isEmpty) 'generator': generator.toJson(),
         if (hostOs.isNotEmpty) 'hostOs': hostOs,
         if (hostOsVersion.isNotEmpty) 'hostOsVersion': hostOsVersion,
         if (hostArch.isNotEmpty) 'hostArch': hostArch,
@@ -81,7 +82,7 @@ class RunSummary {
         cancelled: m['cancelled'] as bool? ?? false,
         fileName: m['fileName'] as String? ?? '',
         name: m['name'] as String? ?? '',
-        xpupeakVersion: m['clpeakVersion'] as String? ?? '',
+        generator: GeneratorInfo.fromJson(m['generator']),
         hostOs: m['hostOs'] as String? ?? '',
         hostOsVersion: m['hostOsVersion'] as String? ?? '',
         hostArch: m['hostArch'] as String? ?? '',
@@ -111,7 +112,7 @@ class RunSummary {
       backends: backends.toList(),
       cancelled: cancelled,
       fileName: fileName,
-      xpupeakVersion: meta?.xpupeakVersion ?? '',
+      generator: meta?.generator ?? const GeneratorInfo(),
       hostOs: (meta?.host['os']?.toString() ?? '').trim(),
       hostOsVersion: (meta?.host['os_version']?.toString() ?? '').trim(),
       hostArch: (meta?.host['arch']?.toString() ?? '').trim(),

@@ -134,7 +134,7 @@ class _ResultsBodyState extends State<ResultsBody> {
     final rows = <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
       if (meta != null &&
-          (meta.xpupeakVersion.isNotEmpty ||
+          (meta.generator.version.isNotEmpty ||
               meta.generatedAt.isNotEmpty ||
               meta.host.isNotEmpty))
         _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
@@ -462,8 +462,14 @@ class _RunMetaPanel extends StatelessWidget {
     final t = CP.of(context);
     final entries = <({String key, String value})>[];
 
-    if (meta.xpupeakVersion.isNotEmpty) {
-      entries.add((key: 'XPUPEAK VERSION', value: meta.xpupeakVersion));
+    // Named by the file's own generator: "XPUPEAK VERSION".
+    final generator = meta.generator;
+    if (generator.version.isNotEmpty) {
+      final by = generator.name.toUpperCase();
+      entries.add((
+        key: by.isEmpty ? 'VERSION' : '$by VERSION',
+        value: generator.version,
+      ));
     }
     if (meta.durationSeconds > 0) {
       entries.add((

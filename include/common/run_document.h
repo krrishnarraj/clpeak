@@ -23,12 +23,17 @@
 // CSV are gone: XML's only advantage was nesting, which JSON has, and CSV
 // could not carry device metadata or documentation at all.
 //
-// Schema and vocabulary are documented in docs/format-v3.md.
+// Schema and vocabulary are documented in docs/format-v4.md.
 
-// Dump-file schema version.  Loaders reject any other version outright --
-// v3 restructured the document, so there is nothing an older reader could
-// salvage from it and nothing this reader can salvage from a v2 file.
-constexpr int RESULT_FORMAT_VERSION = 3;
+// Dump-file schema version.  Loaders reject any other version outright.
+// v4 is the format under the program's own names (schemas `xpupeak/...`,
+// `generator`), and 4.0 reads no file an earlier version wrote: a file
+// clpeak 3.x wrote is refused by its schema, with a message that says so.
+constexpr int RESULT_FORMAT_VERSION = 4;
+
+// The writer every document names (`generator.name`).  The same under the
+// second command name: that is this program too, and writes the same file.
+constexpr const char RESULT_GENERATOR_NAME[] = "XpuPeak";
 
 // A reading may carry no measurement when it could not be taken.  `value` is
 // meaningful only for `Ok`; every other status carries a human-readable
@@ -300,8 +305,14 @@ struct RunProgress {
     bool    backendDone(const std::string &backend) const;
 };
 
+// What wrote the document: `generator` in the file.
+struct GeneratorInfo {
+    std::string name;               // RESULT_GENERATOR_NAME
+    std::string version;            // the build's XPUPEAK_VERSION_STR
+};
+
 struct RunMeta {
-    std::string xpupeakVersion;
+    GeneratorInfo generator;
     std::string generatedAt;        // ISO-8601 UTC, "2026-08-29T14:03:11Z"
 
     // Seconds spent running.  For a resumed run, the parts summed: the time
@@ -396,17 +407,18 @@ bool saveRunJson(const RunDocument &doc, const std::string &filename);
 std::string runDocumentToJson(const RunDocument &doc);
 
 // Read a document back.  Returns false (after a stderr message) for a missing
-// file, malformed JSON, a format_version this build does not write, or a
-// run's checkpoint, which is not a result.
+// file, malformed JSON, a file clpeak 3.x wrote, a format_version this build
+// does not write, or a run's checkpoint, which is not a result.
 bool loadRunJson(const std::string &filename, RunDocument &out);
 
 // A run's checkpoint (include/common/run_checkpoint.h): the document so far
 // -- meta and devices, no log or inventory -- with schema
-// "clpeak/run-partial" and its `progress`, on one line.
+// "xpupeak/run-partial" and its `progress`, on one line.
 std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress);
 
 // Read one back.  false with `error` set for a missing file, malformed JSON,
-// or a schema or format_version this build does not write.
+// a checkpoint clpeak 3.x wrote, or a schema or format_version this build
+// does not write.
 bool loadPartialJson(const std::string &filename, RunDocument &out,
                      RunProgress &progress, std::string &error);
 

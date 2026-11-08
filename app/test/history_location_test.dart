@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  test('desktop history lives in \$HOME/.clpeak, not the documents dir',
+  test('desktop history lives in \$HOME/.xpupeak, not the documents dir',
       () async {
     final home =
         Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
@@ -15,7 +15,7 @@ void main() {
 
     // Resolves without path_provider — no plugin channel in a pure-Dart test.
     final base = await RunHistoryStore.baseDirectory();
-    expect(base.path, p.join(home!, '.clpeak'));
+    expect(base.path, p.join(home!, '.xpupeak'));
   },
       skip: Platform.isAndroid || Platform.isIOS
           ? 'mobile keeps the sandboxed app documents dir'

@@ -24,7 +24,7 @@ class RunCheckpoint;
 // start -- or with --skip-crashed, for a process that crashed rather than
 // being ended, is recorded as where it died and not run, since a crash is
 // likely to repeat.  The parts end in one document under the same name, with
-// a `resumed` record per part after the first (docs/format-v3.md), and one
+// a `resumed` record per part after the first (docs/format-v4.md), and one
 // log: the sidecar is continued, and the document's log starts with the part
 // before's.
 //
