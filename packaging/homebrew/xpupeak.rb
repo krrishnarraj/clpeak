@@ -1,16 +1,17 @@
-# Why a git URL instead of a release tarball: clpeak derives its version from
+# Why a git URL instead of a release tarball: XpuPeak derives its version from
 # `git describe` (src/common/cmake/version.cmake).  A GitHub source tarball has
 # no .git, so the build would report its version as "unknown".  Passing
 # `tag:` makes Homebrew fetch that tag, so git-describe reports the real version.
-class Clpeak < Formula
+class Xpupeak < Formula
   desc "Peak compute, bandwidth and latency benchmark for CPUs, GPUs and NPUs"
-  homepage "https://github.com/krrishnarraj/clpeak"
-  # TODO: add `revision:` with 2.1.0's commit sha once the tag is pushed —
-  # homebrew-core requires it alongside `tag:`.
-  url "https://github.com/krrishnarraj/clpeak.git",
-      tag: "2.1.0"
+  homepage "https://github.com/krrishnarraj/xpupeak"
+  # TODO: add `revision:` with 4.0.0's commit sha once the tag is pushed —
+  # homebrew-core requires it alongside `tag:`.  The URLs name the repo as it
+  # is renamed just before 4.0.0.
+  url "https://github.com/krrishnarraj/xpupeak.git",
+      tag: "4.0.0"
   license "Apache-2.0"
-  head "https://github.com/krrishnarraj/clpeak.git", branch: "master"
+  head "https://github.com/krrishnarraj/xpupeak.git", branch: "master"
 
   livecheck do
     url :stable
@@ -32,8 +33,8 @@ class Clpeak < Formula
     # CPU-backend codegen needs clang: GCC<=14 serialises the kernels' FMA
     # accumulator chains, ~halving fp32/fp64 (see CMakeLists.txt top comment).
     # macOS already builds with AppleClang; on Linuxbrew the default is GCC, and
-    # Homebrew exports CC/CXX which suppresses clpeak's own clang auto-detection,
-    # so pull in LLVM and force clang in `install`.
+    # Homebrew exports CC/CXX which suppresses the build's own clang
+    # auto-detection, so pull in LLVM and force clang in `install`.
     depends_on "llvm" => :build
   end
 
@@ -41,11 +42,14 @@ class Clpeak < Formula
     # CUDA/ROCm/oneAPI need vendor toolkits + drivers Homebrew can't provide, so
     # disable them explicitly (they would auto-disable, but this keeps the build
     # deterministic if a system SDK happens to be present on a Linuxbrew box).
+    # The desktop app needs a Flutter SDK, which no formula provides, so it is
+    # off for the same reason: only the command-line tool is installed.
     # Metal/OpenCL (macOS) and OpenCL (Linux) stay on and auto-detect.
     args = %w[
       -DXPUPEAK_ENABLE_CUDA=OFF
       -DXPUPEAK_ENABLE_ROCM=OFF
       -DXPUPEAK_ENABLE_ONEAPI=OFF
+      -DXPUPEAK_ENABLE_GUI=OFF
     ]
 
     # Build with clang for the CPU-backend codegen.  macOS already uses
@@ -59,13 +63,17 @@ class Clpeak < Formula
     system "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
                     "-DCMAKE_BUILD_TYPE=Release", *args, *std_cmake_args
     system "cmake", "--build", "build"
+    # Installs bin/xpupeak and, beside it, bin/clpeak: the 3.x command, a
+    # link to the same program.
     system "cmake", "--install", "build"
   end
 
   test do
-    # CI runners have no GPU; clpeak must still run and exit cleanly with no
-    # devices.  --version exercises the git-describe version wiring.
-    system bin/"clpeak", "--help"
-    assert_match version.to_s, shell_output("#{bin}/clpeak --version")
+    # CI runners have no GPU; both commands must still run and exit cleanly
+    # with no devices.  --version exercises the git-describe version wiring,
+    # and its line starts with the name the command was started as.
+    system bin/"xpupeak", "--help"
+    assert_match "xpupeak version: #{version}", shell_output("#{bin}/xpupeak --version")
+    assert_match "clpeak version: #{version}", shell_output("#{bin}/clpeak --version")
   end
 end

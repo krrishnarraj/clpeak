@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.krrishnarraj.clpeak</id>
+  <id>io.github.krrishnarraj.XpuPeak</id>
   <metadata_license>FSFAP</metadata_license>
   <project_license>Apache-2.0</project_license>
-  <name>clpeak</name>
+  <name>XpuPeak</name>
   <summary>Measure peak compute, bandwidth and latency of GPUs and CPUs</summary>
 
   <description>
     <p>
-      clpeak (compute latency peak) measures the peak compute throughput,
-      memory bandwidth and latency that a machine's GPUs and CPUs actually
-      reach. It uses small, tight kernels alongside each vendor's own tuned
-      libraries, and runs the same tests through every API that exposes a
-      device, so the results line up side by side.
+      XpuPeak measures the peak compute throughput, memory bandwidth and
+      latency that a machine's GPUs and CPUs actually reach. It uses small,
+      tight kernels alongside each vendor's own tuned libraries, and runs the
+      same tests through every API that exposes a device, so the results line
+      up side by side.
     </p>
     <p>
       It has two front-ends over the same benchmark engine: a desktop app for
@@ -40,22 +40,23 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">io.github.krrishnarraj.clpeak.desktop</launchable>
+  <launchable type="desktop-id">io.github.krrishnarraj.XpuPeak.desktop</launchable>
 
-  <!-- The desktop entry launches clpeak-gui; a plain `flatpak run` with no
+  <!-- The desktop entry launches xpupeak-gui; a plain `flatpak run` with no
        command override still lands on the CLI, the manifest's default. -->
   <provides>
-    <binary>clpeak</binary>
-    <binary>clpeak-gui</binary>
+    <binary>xpupeak</binary>
+    <binary>xpupeak-gui</binary>
   </provides>
 
+  <!-- These resolve once the repo is renamed and docs/ is on master. -->
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-cpu-light.png</image>
+      <image>https://raw.githubusercontent.com/krrishnarraj/xpupeak/master/docs/assets/img/results-cpu-light.png</image>
       <caption>Native CPU results: detected ISA and caches, then compute rates per instruction set</caption>
     </screenshot>
     <screenshot environment="gnome:dark">
-      <image>https://raw.githubusercontent.com/krrishnarraj/clpeak/master/docs/assets/img/results-cpu-dark.png</image>
+      <image>https://raw.githubusercontent.com/krrishnarraj/xpupeak/master/docs/assets/img/results-cpu-dark.png</image>
       <caption>Native CPU results: detected ISA and caches, then compute rates per instruction set</caption>
     </screenshot>
   </screenshots>
@@ -74,9 +75,9 @@
     <keyword>bandwidth</keyword>
   </keywords>
 
-  <url type="homepage">https://github.com/krrishnarraj/clpeak</url>
-  <url type="bugtracker">https://github.com/krrishnarraj/clpeak/issues</url>
-  <url type="vcs-browser">https://github.com/krrishnarraj/clpeak</url>
+  <url type="homepage">https://github.com/krrishnarraj/xpupeak</url>
+  <url type="bugtracker">https://github.com/krrishnarraj/xpupeak/issues</url>
+  <url type="vcs-browser">https://github.com/krrishnarraj/xpupeak</url>
 
   <developer id="io.github.krrishnarraj">
     <name>Krishnaraj Bhat</name>
@@ -85,9 +86,19 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <!-- TODO at release: set the date the 4.0.0 tag is made, and match the
+         description to the release notes. -->
+    <release version="4.0.0" date="2026-11-09">
+      <description>
+        <p>
+          The first release named XpuPeak, with a new icon. Runs are saved in
+          result format 4, and files saved by earlier versions are not read.
+        </p>
+      </description>
+    </release>
     <release version="2.1.0" date="2026-08-16">
       <description>
-        <p>Adds the clpeak desktop app alongside the command-line tool.</p>
+        <p>Adds the desktop app alongside the command-line tool.</p>
       </description>
     </release>
     <release version="2.0.19" date="2026-08-15" />
