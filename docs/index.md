@@ -1,9 +1,9 @@
 ---
 layout: default
-title: clpeak — compute latency peak
+title: XpuPeak — CPU, GPU and NPU peaks
 ---
 
-clpeak measures the **peak compute throughput, memory bandwidth and latency**
+XpuPeak measures the **peak compute throughput, memory bandwidth and latency**
 that CPUs, GPUs and NPUs actually reach. It uses small, tight kernels alongside
 each vendor's own tuned libraries, reaches a device through every API that
 exposes it, and runs the same tests on each, so the numbers from one machine
@@ -15,7 +15,7 @@ can be compared side by side.
     <source media="(prefers-color-scheme: dark)"
             srcset="{{ '/assets/img/results-npu-dark.png' | relative_url }}">
     <img src="{{ '/assets/img/results-npu-light.png' | relative_url }}"
-         alt="clpeak app showing Apple M1 Pro results: eleven devices across seven backends, with the Neural Engine selected and its matmul and convolution rates per weight format.">
+         alt="XpuPeak app showing Apple M1 Pro results: eleven devices across seven backends, with the Neural Engine selected and its matmul and convolution rates per weight format.">
   </picture>
   <figcaption>
     One run on an Apple M1 Pro. Every device the machine exposes gets its own
@@ -49,7 +49,7 @@ can be compared side by side.
 
 Every test and every reading carries a short description of what it measures
 and how to read it: the info glyph beside it in the app, and
-`clpeak --describe` on the command line.
+`xpupeak --describe` on the command line.
 
 ### Backends
 
@@ -70,7 +70,7 @@ and how to read it: the info glyph beside it in the app, and
 
 </div>
 
-The ONNX Runtime and LiteRT libraries are loaded when clpeak runs rather than
+The ONNX Runtime and LiteRT libraries are loaded when XpuPeak runs rather than
 linked, so neither needs installing to build. `--onnx-lib` and `--litert-lib`
 point at a specific build, and `--onnx-ep` adds a plugin execution provider
 such as Qualcomm's QNN.
@@ -80,7 +80,7 @@ such as Qualcomm's QNN.
 A reading is only published for the device it names. When an AI runtime
 cannot place a whole graph on the requested NPU or GPU, the row reports
 `unsupported` with the reason instead of quietly measuring a CPU fallback. On
-Apple hardware clpeak reads Core ML's compute plan for each timed model to
+Apple hardware XpuPeak reads Core ML's compute plan for each timed model to
 check, per operation, which unit ran it. A reading that cannot be taken on a
 device is listed with the reason, never left blank.
 
@@ -159,7 +159,7 @@ SmartScreen may warn on first run.
 </p>
 
 <div class="store-links">
-  <a href="https://snapcraft.io/clpeak">
+  <a href="https://snapcraft.io/xpupeak">
     <svg viewBox="0 0 24 24" aria-hidden="true" width="22" height="22">
       <path d="M12 2.6 21 7v10l-9 4.4L3 17V7z"/>
       <path d="M3 7l9 4.4L21 7M12 11.4v10"/>
@@ -181,7 +181,7 @@ The snap uses classic confinement so it can reach the GPU drivers and device
 nodes the benchmarks need:
 
 ```console
-sudo snap install clpeak --classic
+sudo snap install xpupeak --classic
 ```
 
 ### <a id="unsigned"></a>Running the release binaries
@@ -196,28 +196,28 @@ your PC", choose **More info** → **Run anyway**. From PowerShell, this unblock
 a folder that was already extracted:
 
 ```powershell
-Get-ChildItem -Recurse .\clpeak-* | Unblock-File
+Get-ChildItem -Recurse .\xpupeak-* | Unblock-File
 ```
 
-**macOS:** open the `.dmg` and drag clpeak to Applications. macOS refuses the
+**macOS:** open the `.dmg` and drag XpuPeak to Applications. macOS refuses the
 first launch; open **System Settings** → **Privacy & Security** and click
-**Open Anyway** next to clpeak. Right-click → *Open* no longer does this on
+**Open Anyway** next to XpuPeak. Right-click → *Open* no longer does this on
 macOS 15 and later. Or clear the quarantine flag from a terminal, which is also
 the way to run the CLI from the zip:
 
 ```console
-xattr -dr com.apple.quarantine /Applications/clpeak-gui.app
-xattr -dr com.apple.quarantine ~/Downloads/clpeak-*-macos-arm64
+xattr -dr com.apple.quarantine /Applications/XpuPeak.app
+xattr -dr com.apple.quarantine ~/Downloads/xpupeak-*-macos-arm64
 ```
 
 ## <a id="build"></a>Build from source
 
 ```console
-git clone --recursive https://github.com/krrishnarraj/clpeak
-cd clpeak
+git clone --recursive https://github.com/krrishnarraj/xpupeak
+cd xpupeak
 cmake -S . -B build
 cmake --build build -j
-./build/clpeak
+./build/xpupeak
 ```
 
 A backend is built when its SDK is found; each can be left out at configure
@@ -234,15 +234,15 @@ time. oneAPI needs the DPC++ compiler (`-DCMAKE_CXX_COMPILER=icpx`).
 | `XPUPEAK_ENABLE_VULKAN` | `ON` | no Vulkan backend, even with the SDK installed |
 | `XPUPEAK_ENABLE_OPENCL` | `ON` | no OpenCL backend |
 | `XPUPEAK_ENABLE_CPU` | `ON` | no native CPU backend |
-| `XPUPEAK_ENABLE_ONNX` | `ON` | no ONNX Runtime backend (otherwise always built; the runtime is loaded when clpeak runs) |
+| `XPUPEAK_ENABLE_ONNX` | `ON` | no ONNX Runtime backend (otherwise always built; the runtime is loaded when XpuPeak runs) |
 | `XPUPEAK_ENABLE_COREML` | `ON` | no Core ML backend (Apple only) |
-| `XPUPEAK_ENABLE_LITERT` | `ON` | no LiteRT backend (otherwise always built; the runtime is loaded when clpeak runs) |
+| `XPUPEAK_ENABLE_LITERT` | `ON` | no LiteRT backend (otherwise always built; the runtime is loaded when XpuPeak runs) |
 | `XPUPEAK_ENABLE_GUI` | `ON` | no desktop app (also skipped when no Flutter SDK is found) |
 
 </div>
 
 With the Flutter SDK on `PATH`, the desktop app is built alongside the CLI into
-`build/clpeak-gui/` (`cmake --build build --target clpeak-gui`). Android and
+`build/xpupeak-gui/` (`cmake --build build --target xpupeak-gui`). Android and
 iOS builds are described in
 [`app/AGENTS.md`](https://github.com/{{ site.repo }}/blob/master/app/AGENTS.md).
 
@@ -253,27 +253,27 @@ applies to every backend that has the test, and `--no-<x>` takes anything
 away.
 
 ```console
-clpeak                            # every test on every device
-clpeak --list-devices             # every device, named as --devices takes it
-clpeak --devices cuda:0,vulkan:1  # only these devices
-clpeak --devices coreml:0         # Core ML on the Neural Engine
-clpeak --metal --cpu              # only these backends
-clpeak --no-opencl                # everything except OpenCL
-clpeak --compute                  # one category: --compute, --bandwidth, --latency, --ai, …
-clpeak --single-precision-compute # one test, on every backend that has it
-clpeak --gemm                     # the vendor's tuned matmul, everywhere
-clpeak --onnx --transformer-block # the decoder block on every ONNX provider
-clpeak --describe                 # what each test and each reading measures
-clpeak -o run.clpeak.json         # save the run as JSON
-clpeak --compare run.clpeak.json  # run again and compare with a saved run
-clpeak --max-time-gpu 250         # keep a GPU busy at most 250 ms at a time
-clpeak --max-time-ml-gpu 500      # the same for one ONNX / LiteRT / Core ML run
+xpupeak                            # every test on every device
+xpupeak --list-devices             # every device, named as --devices takes it
+xpupeak --devices cuda:0,vulkan:1  # only these devices
+xpupeak --devices coreml:0         # Core ML on the Neural Engine
+xpupeak --metal --cpu              # only these backends
+xpupeak --no-opencl                # everything except OpenCL
+xpupeak --compute                  # one category: --compute, --bandwidth, --latency, --ai, …
+xpupeak --single-precision-compute # one test, on every backend that has it
+xpupeak --gemm                     # the vendor's tuned matmul, everywhere
+xpupeak --onnx --transformer-block # the decoder block on every ONNX provider
+xpupeak --describe                 # what each test and each reading measures
+xpupeak -o run.xpupeak.json        # save the run as JSON
+xpupeak --compare run.xpupeak.json # run again and compare with a saved run
+xpupeak --max-time-gpu 250         # keep a GPU busy at most 250 ms at a time
+xpupeak --max-time-ml-gpu 500      # the same for one ONNX / LiteRT / Core ML run
 ```
 
-`clpeak --help` lists every flag. Every flag parses in every build, so a
+`xpupeak --help` lists every flag. Every flag parses in every build, so a
 script can say `--no-cuda` on a Mac. Runs saved with `-o` use the
-[result format](format-v3.html) that the app's history and `--compare` read
-back.
+[result format](format-v4.html) that the app's history and `--compare` read
+back. `clpeak` still works too: the same command under its 3.x name.
 
 ## <a id="bugs"></a>Reporting a bug
 
@@ -281,9 +281,9 @@ Numbers that look wrong, missing devices and crashes are all worth reporting.
 Attach a verbose run, which records every diagnostic and the device inventory,
 so the report can be debugged without access to your machine.
 
-- **CLI:** run `clpeak --verbose -o report.clpeak.json` and attach
-  `report.clpeak.json`. If clpeak crashed before finishing, attach
-  `report.clpeak.log` from the same folder instead: it is written as the run
+- **CLI:** run `xpupeak --verbose -o report.xpupeak.json` and attach
+  `report.xpupeak.json`. If XpuPeak crashed before finishing, attach
+  `report.xpupeak.log` from the same folder instead: it is written as the run
   goes, and its last lines are usually where it stopped.
 - **App:** turn on **Settings** → **Diagnostics** → **Verbose diagnostics**,
   run again, then use **Export JSON** on the results page. A run the app did

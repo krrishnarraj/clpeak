@@ -7,7 +7,7 @@ body:
       value: |
         A verbose run records every diagnostic and the device inventory, which is usually enough to debug a report without access to your machine.
 
-        - **CLI:** `clpeak --verbose -o report.clpeak.json`, then attach `report.clpeak.json`. If clpeak crashed before finishing, attach `report.clpeak.log` from the same folder instead.
+        - **CLI:** `xpupeak --verbose -o report.xpupeak.json`, then attach `report.xpupeak.json`. If XpuPeak crashed before finishing, attach `report.xpupeak.log` from the same folder instead.
         - **App:** Settings → Diagnostics → **Verbose diagnostics** on, run again, then **Export JSON** on the results page. A run the app did not survive is under History → "Runs that did not finish".
   - type: textarea
     id: what
@@ -29,8 +29,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: clpeak version
-      description: "`clpeak --version`, or the version in the app's sidebar / About page."
+      label: XpuPeak version
+      description: "`xpupeak --version`, or the version in the app's sidebar / About page."
     validations:
       required: true
   - type: input
@@ -42,6 +42,6 @@ body:
     id: report
     attributes:
       label: Verbose run
-      description: Drag `report.clpeak.json` (or the `.log` of a run that crashed) into this box.
+      description: Drag `report.xpupeak.json` (or the `.log` of a run that crashed) into this box.
     validations:
       required: true

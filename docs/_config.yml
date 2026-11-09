@@ -1,21 +1,21 @@
-# GitHub Pages site for clpeak.  Served by GitHub's native Jekyll build from
+# GitHub Pages site for XpuPeak.  Served by GitHub's native Jekyll build from
 # the /docs folder on the default branch, so this stays inside the plugin
 # allowlist: no theme gem, no plugins, just a layout and a stylesheet.
-title: clpeak
+title: XpuPeak
 description: >-
   Measures the peak compute throughput, memory bandwidth and latency that
   CPUs, GPUs and NPUs actually reach, through each API that exposes them.
 url: https://krrishnarraj.github.io
-baseurl: /clpeak
+baseurl: /xpupeak
 
-repo: krrishnarraj/clpeak
+repo: krrishnarraj/xpupeak
 
 # Nothing here needs Jekyll's blogging machinery.
 exclude:
   - README.md
 plugins: []
 
-# Every page gets the site chrome (format-v3.md sets no layout of its own).
+# Every page gets the site chrome (format-v4.md sets no layout of its own).
 defaults:
   - scope:
       path: ""
