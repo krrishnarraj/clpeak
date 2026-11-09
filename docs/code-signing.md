@@ -11,10 +11,11 @@ certificate by [SignPath Foundation](https://signpath.org/).
 
 The Windows release zips on the
 [releases page](https://github.com/{{ site.repo }}/releases). In each zip the
-binaries built from this repository are signed: `bin\clpeak.exe`,
-`gui\clpeak-gui.exe`, `gui\clpeak-engine.exe` and `gui\clpeak_ffi.dll`. The
-Flutter engine and plugin DLLs next to them are third-party code and ship as
-their authors built them.
+binaries built from this repository are signed: `bin\xpupeak.exe`,
+`bin\clpeak.exe` (the same program under its 3.x name), `gui\xpupeak-gui.exe`,
+`gui\xpupeak-engine.exe` and `gui\xpupeak_ffi.dll`. The Flutter engine and
+plugin DLLs next to them are third-party code and ship as their authors built
+them.
 
 Every signed binary is built from this repository's source by its
 [GitHub Actions workflow](https://github.com/{{ site.repo }}/blob/master/.github/workflows/build.yml),
@@ -35,6 +36,6 @@ This program will not transfer any information to other networked systems
 unless specifically requested by the user or the person installing or
 operating it.
 
-clpeak's results stay on the machine they were measured on. The app opens a
+XpuPeak's results stay on the machine they were measured on. The app opens a
 web page only when you click a link (the project page, or "report a bug"),
 and shares a result only when you choose to.

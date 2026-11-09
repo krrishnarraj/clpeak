@@ -1,5 +1,5 @@
 name: xpupeak
-description: "XpuPeak (compute latency peak): peak compute, memory bandwidth and latency of CPUs, GPUs and NPUs."
+description: "XpuPeak (CPU, GPU and NPU peaks): peak compute, memory bandwidth and latency."
 publish_to: 'none'
 
 # versionName / versionCode

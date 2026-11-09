@@ -44,7 +44,7 @@ flatpak uninstall -y io.github.krrishnarraj.XpuPeak
 - The icon is the app's own Linux icon (`app/linux/runner/resources/xpupeak_icon.png`,
   256 px, generated from the XpuPeak master by `tools/icons/generate_icons.py`),
   installed at that one size; AppStream compose renders the catalog sizes.
-- `--share=network` on the xpupeak module is for `flutter pub get` and the engine
+- `--share=network` on the `xpupeak` module is for `flutter pub get` and the engine
   artifact download. `HOME`/`PUB_CACHE` are redirected into the module build dir
   so nothing the Flutter tool writes escapes it.
 - Install layout comes from the root CMake install rules: `/app/bin/xpupeak`,

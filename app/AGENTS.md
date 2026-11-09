@@ -228,9 +228,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `<base>` is `$HOME/.xpupeak` on desktop — never `~/Documents`, which costs a
   macOS TCC consent prompt — and `<app documents>/xpupeak` on Android/iOS,
   where that directory is inside the sandbox and is what the Files app shows.
-  Files from another `format_version` are skipped, not half-parsed, and Open
-  file refuses one clpeak 3.x wrote, by its schema, with a message that says
-  so (`writtenBy3x`, the same words as the CLI's).
+  Files from another `format_version` are skipped, not half-parsed, and Import
+  (History) refuses one clpeak 3.x wrote, by its schema, with a message that
+  says so (`writtenBy3x`, the same words as the CLI's).
 - Run lifecycle state? → `lib/src/services/benchmark_service.dart`
 - Which ONNX Runtime is loaded, and how a user changes it? →
   `lib/src/ui/settings/settings_screen.dart` + `SettingsService.onnxLibraryPath`.

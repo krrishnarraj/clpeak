@@ -9,7 +9,7 @@
   'use strict';
 
   var script = document.currentScript;
-  var repo = (script && script.dataset.repo) || 'krrishnarraj/clpeak';
+  var repo = (script && script.dataset.repo) || 'krrishnarraj/xpupeak';
   var mount = document.getElementById('release-list');
   if (!mount) return;
 
@@ -25,10 +25,11 @@
     return mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
   }
 
-  // "clpeak-2.0.19-linux-x86_64-cuda.zip" -> "x86_64 · cuda"
+  // "xpupeak-4.0.0-linux-x86_64-cuda.zip" -> "x86_64 · cuda", and the same
+  // for a release from before the rename, whose assets start "clpeak-".
   function prettyName(name, tag) {
     var stem = name
-      .replace(/^clpeak-/, '')
+      .replace(/^(xpupeak|clpeak)-/, '')
       .replace(/\.(zip|dmg|tar\.gz|apk)$/i, '')
       .replace(tag + '-', '');
     PLATFORMS.forEach(function (p) {
