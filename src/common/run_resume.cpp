@@ -169,17 +169,18 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
     std::error_code ec;
     if (!std::filesystem::exists(partial, ec))
     {
-        error = byCheckpoint ? "xpupeak: nothing to resume at " + path + ": there is no such file"
-                : std::filesystem::exists(path, ec)
-                    ? "xpupeak: " + path + " is a finished run; there is nothing to resume"
-                    : "xpupeak: nothing to resume at " + path + ": a run that did not "
-                      "finish leaves " + partial + " beside it, and there is none";
+        error = std::string(programName()) + ": " +
+                (byCheckpoint ? "nothing to resume at " + path + ": there is no such file"
+                 : std::filesystem::exists(path, ec)
+                     ? path + " is a finished run; there is nothing to resume"
+                     : "nothing to resume at " + path + ": a run that did not finish leaves " +
+                           partial + " beside it, and there is none");
         return false;
     }
     std::string why;
     if (!loadPartialJson(partial, plan.seed, plan.progress, why))
     {
-        error = "xpupeak: cannot resume " + path + ": " + why;
+        error = std::string(programName()) + ": cannot resume " + path + ": " + why;
         return false;
     }
     plan.outputFile = byCheckpoint ? resultPathOf(path, plan.seed.meta) : path;
@@ -188,22 +189,23 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
     const RunMeta &meta = plan.seed.meta;
     if (meta.generator.version != XPUPEAK_VERSION_STR)
     {
-        error = "xpupeak: " + outputFile + " was started by XpuPeak " + meta.generator.version +
-                ", and a run is continued only by the build that started it; this is " +
-                XPUPEAK_VERSION_STR;
+        error = std::string(programName()) + ": " + outputFile + " was started by XpuPeak " +
+                meta.generator.version + ", and a run is continued only by the build that "
+                "started it; this is " + XPUPEAK_VERSION_STR;
         return false;
     }
     const HostInfo host = probeHost();
     if (meta.host.os != host.os || meta.host.osVersion != host.osVersion)
     {
-        error = "xpupeak: " + outputFile + " was started on " + meta.host.os + " " +
-                meta.host.osVersion + ", and a run is continued only on the release it "
-                "started on; this is " + host.os + " " + host.osVersion;
+        error = std::string(programName()) + ": " + outputFile + " was started on " +
+                meta.host.os + " " + meta.host.osVersion + ", and a run is continued only on "
+                "the release it started on; this is " + host.os + " " + host.osVersion;
         return false;
     }
     if (meta.invocation.argv.empty())
     {
-        error = "xpupeak: cannot resume " + outputFile + ": its checkpoint records no options";
+        error = std::string(programName()) + ": cannot resume " + outputFile +
+                ": its checkpoint records no options";
         return false;
     }
 
@@ -237,8 +239,8 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
     if (!parseCliOptionsNoExit(static_cast<int>(argv.size()), argv.data(), opts, why))
     {
         while (!why.empty() && why.back() == '\n') why.pop_back();
-        error = "xpupeak: cannot resume " + plan.outputFile + ": its options do not parse (" +
-                why + ")";
+        error = std::string(programName()) + ": cannot resume " + plan.outputFile +
+                ": its options do not parse (" + why + ")";
         return false;
     }
 
@@ -250,8 +252,8 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
     opts.skipCrashed  = given.skipCrashed;
     if (opts.skipCrashed && plan.cancelled)
     {
-        error = "xpupeak: " + plan.outputFile + " was cancelled, not ended by a crash; "
-                "resume it without --skip-crashed";
+        error = std::string(programName()) + ": " + plan.outputFile +
+                " was cancelled, not ended by a crash; resume it without --skip-crashed";
         return false;
     }
 
