@@ -404,7 +404,7 @@ class RunMeta {
     this.cancelled = false,
     this.verbose = false,
     this.builtBackends = const [],
-    this.host = const {},
+    this.system = const {},
     this.argv = const [],
     this.resumed = const [],
   });
@@ -427,10 +427,21 @@ class RunMeta {
   /// reached would read as hardware that lacks the feature.
   final bool cancelled;
 
-  /// Free-form host facts (os, os_version, arch, cpu, logical_cores,
-  /// memory_bytes) — shown as-is rather than modelled field by field, since
-  /// which of them a platform can answer varies.
-  final Map<String, dynamic> host;
+  /// The machine the run happened on (`system`, docs/format-v4.md): its
+  /// OS, architecture, model and the rest, as the file has them — every
+  /// field optional, since which a platform can answer varies.
+  final Map<String, dynamic> system;
+
+  /// The OS's name and version, and the binary's architecture, from
+  /// [system]; empty where the file has none.
+  String get osName => _osField('name');
+  String get osVersion => _osField('version');
+  String get arch => (system['arch']?.toString() ?? '').trim();
+
+  String _osField(String key) {
+    final os = system['os'];
+    return os is Map ? (os[key]?.toString() ?? '').trim() : '';
+  }
 
   /// The command line the run was started with (`invocation.argv`).
   final List<String> argv;
@@ -448,11 +459,16 @@ class RunMeta {
                 as bool? ??
             false,
         builtBackends: [
-          ...((m['build'] as Map<String, dynamic>?)?['backends'] as List? ??
-                  const [])
-              .cast<String>(),
+          // Each `{name, kind, portable}`.
+          for (final b in ((m['build'] as Map<String, dynamic>?)?['backends']
+                  as List? ??
+              const []))
+            if (b is Map && b['name'] is String)
+              b['name'] as String
+            else if (b is String)
+              b,
         ],
-        host: (m['host'] as Map<String, dynamic>?) ?? const {},
+        system: (m['system'] as Map<String, dynamic>?) ?? const {},
         argv: [
           ...((m['invocation'] as Map<String, dynamic>?)?['argv'] as List? ??
                   const [])

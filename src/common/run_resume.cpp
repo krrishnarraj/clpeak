@@ -194,12 +194,13 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
                 "started it; this is " + XPUPEAK_VERSION_STR;
         return false;
     }
-    const HostInfo host = probeHost();
-    if (meta.host.os != host.os || meta.host.osVersion != host.osVersion)
+    const SystemInfo here = probeSystem();
+    if (meta.system.os.name != here.os.name || meta.system.os.version != here.os.version)
     {
         error = std::string(programName()) + ": " + outputFile + " was started on " +
-                meta.host.os + " " + meta.host.osVersion + ", and a run is continued only on "
-                "the release it started on; this is " + host.os + " " + host.osVersion;
+                meta.system.os.name + " " + meta.system.os.version +
+                ", and a run is continued only on the release it started on; this is " +
+                here.os.name + " " + here.os.version;
         return false;
     }
     if (meta.invocation.argv.empty())
@@ -290,9 +291,13 @@ bool resumeOptions(const ResumePlan &plan, const CliOptions &given, CliOptions &
 void seedResume(const ResumePlan &plan, const CliOptions &opts, RunDocument &doc,
                 RunLog &log, RunCheckpoint &checkpoint)
 {
-    // The run's own: when it started, how it was asked to run, its parts.
-    doc.meta    = plan.seed.meta;
-    doc.devices = plan.seed.devices;
+    // The run's own: when it started, how it was asked to run, its parts --
+    // its id and evidence key among them, so the parts are one run and their
+    // devices' tokens agree -- and what it had measured, on what hardware.
+    doc.meta       = plan.seed.meta;
+    doc.packages   = plan.seed.packages;
+    doc.processors = plan.seed.processors;
+    doc.devices    = plan.seed.devices;
 
     // The document's log starts with the parts before, as the sidecar holds
     // them -- less the reading lines a run without --verbose keeps off its

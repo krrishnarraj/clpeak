@@ -113,7 +113,10 @@ makes two readings incomparable (bf16 on AMX vs on SME is different hardware;
 bf16 vs fp16 on one AMX is not), and a row this host cannot run still appears
 as a skip, so the reader sees which formats the engine lacks. A row measured in
 another unit carries it (`FamilyRow::unit`) — that is how `cpu_matrix`'s int8
-row shares the test with its floating-point rows.
+row shares the test with its floating-point rows. Rows of two Benchmarks in
+one test are emitted each under its own `admit()`, the second reopening the
+test: the integer dot product's int8 rows under `ComputeInt8DP` and its int16
+rows under `ComputeInt16DP`, so each reading names its family in the file.
 
 TU tags (`cpu_tu_registry.h`):
 

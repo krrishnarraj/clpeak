@@ -551,9 +551,15 @@ void main() {
         'duration_s': 12.5,
         'cancelled': true,
         'build': {
-          'backends': ['CPU', 'ONNX']
+          'backends': [
+            {'name': 'CPU', 'kind': 'cpu'},
+            {'name': 'ONNX', 'kind': 'ai', 'portable': true},
+          ]
         },
-        'host': {'os': 'Macintosh', 'cpu': 'Apple M1 Pro'},
+        'system': {
+          'os': {'name': 'Macintosh'},
+          'soc': 'Apple M1 Pro',
+        },
         'invocation': {
           'argv': ['xpupeak', '--verbose'],
           'verbose': true,
@@ -615,7 +621,8 @@ void main() {
 
       final run = doc.runs.single;
       expect(doc.meta!.cancelled, isTrue);
-      expect(doc.meta!.host['cpu'], 'Apple M1 Pro');
+      expect(doc.meta!.system['soc'], 'Apple M1 Pro');
+      expect(doc.meta!.osName, 'Macintosh');
       expect(doc.log.single.message, 'QNN EP not found');
       expect(doc.log.single.level, LogLevel.warning);
       expect(doc.log.single.backend, 'ONNX');

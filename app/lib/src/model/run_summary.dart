@@ -113,9 +113,9 @@ class RunSummary {
       cancelled: cancelled,
       fileName: fileName,
       generator: meta?.generator ?? const GeneratorInfo(),
-      hostOs: (meta?.host['os']?.toString() ?? '').trim(),
-      hostOsVersion: (meta?.host['os_version']?.toString() ?? '').trim(),
-      hostArch: (meta?.host['arch']?.toString() ?? '').trim(),
+      hostOs: meta?.osName ?? '',
+      hostOsVersion: meta?.osVersion ?? '',
+      hostArch: meta?.arch ?? '',
     );
   }
 }

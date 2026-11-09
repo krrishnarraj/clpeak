@@ -1,4 +1,5 @@
 #include <common/logger.h>
+#include <common/options.h>   // benchmarkFlag
 #include <common/run_checkpoint.h>
 #include <common/run_log.h>
 #include <common/thermal.h>
@@ -48,6 +49,21 @@ std::string trimmed(const std::string &s)
     const size_t b = s.find_first_not_of(ws);
     if (b == std::string::npos) return "";
     return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
+// The part of a device's identity a document may hold as it is: whether it
+// runs on the host, is the SoC's NPU or GPU, is the default GPU.  The raw
+// identifiers are not copied -- a document holds only tokens of them
+// (DeviceEvidence::tokens), never the values.
+DeviceEvidence evidenceOf(const logger::Identity &id)
+{
+    DeviceEvidence e;
+    e.host       = id.host;
+    e.soc        = id.socNpu ? xpupeak::toString(xpupeak::ProcessorKind::Npu)
+                 : id.socGpu ? xpupeak::toString(xpupeak::ProcessorKind::Gpu)
+                             : "";
+    e.defaultGpu = id.defaultGpu;
+    return e;
 }
 
 } // namespace
@@ -107,6 +123,9 @@ LogEvent logger::makeEvent(LogEvent::Kind kind) const
         e.direction       = t->direction;
         e.unit            = t->unit;
         e.quantity        = t->quantity;
+        e.testBenchmark   = t->benchmark;
+        e.testDims        = t->dims;
+        e.testRevision    = t->revision;
     }
     return e;
 }
@@ -115,6 +134,16 @@ MetricResult &logger::record(MetricResult m)
 {
     TestResult *t = openTest();
     assert(t && "record() outside an open test");
+    // A reading measured under another Benchmark than its test was opened
+    // under says so; one in a test opened with none open names it for both.
+    if (curBenchmark != Benchmark::COUNT)
+    {
+        const std::string open = benchmarkFlag(curBenchmark);
+        if (t->benchmark.empty())
+            t->benchmark = open;
+        else if (open != t->benchmark)
+            m.benchmark = open;
+    }
     t->metrics.push_back(std::move(m));
     return t->metrics.back();
 }
@@ -411,6 +440,10 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
     fresh.platformIndex = spec.platform_index;
     fresh.deviceIndex   = spec.device_index;
     fresh.properties    = spec.props;
+    fresh.facts         = spec.facts;
+    fresh.evidence      = evidenceOf(spec.identity);
+    fresh.runtime       = spec.runtime;
+    fresh.ext           = extFromJson(spec.ext);
 
     // Re-opening the same device (a backend that enumerates it twice) must
     // append to the block already recorded, not start a second one.
@@ -419,6 +452,10 @@ logger::DeviceScope::DeviceScope(logger *log, const DeviceSpec &spec)
         known->properties = fresh.properties;
         known->driver     = fresh.driver;
         if (known->type == DeviceType::Unknown) known->type = fresh.type;
+        if (!fresh.facts.empty())    known->facts    = fresh.facts;
+        if (!fresh.evidence.empty()) known->evidence = fresh.evidence;
+        if (!fresh.runtime.empty())  known->runtime  = fresh.runtime;
+        if (!fresh.ext.empty())      known->ext      = fresh.ext;
         log->curDeviceIdx = static_cast<std::size_t>(known - &log->doc.devices[0]);
     }
     else
@@ -518,6 +555,12 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
     fresh.axis        = spec.axis;
     fresh.description = oneLine(spec.description);
     fresh.shape       = spec.shape;
+    fresh.dims        = spec.dims;
+    fresh.revision    = spec.revision > 1 ? spec.revision : 1;
+    fresh.ext         = extFromJson(spec.ext);
+    // The family it measures: the Benchmark whose admission is open.
+    if (log->curBenchmark != Benchmark::COUNT)
+        fresh.benchmark = benchmarkFlag(log->curBenchmark);
 
     // Resolve the authored unit token exactly once.  Everything downstream --
     // the CLI header, the GUI's SI scaling, the direction of a compare delta
@@ -540,6 +583,7 @@ logger::TestScope::TestScope(logger *log, const TestSpec &spec)
         // EmitOptions::unit.
         reopened        = true;
         log->curTestIdx = static_cast<std::size_t>(known - &dev.tests[0]);
+        if (known->benchmark.empty()) known->benchmark = fresh.benchmark;
     }
     else
     {
@@ -582,6 +626,8 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
     m.value       = value;
     m.description = oneLine(opts.description);
     m.direction   = opts.direction;
+    m.dims        = std::move(opts.dims);
+    m.ext         = extFromJson(opts.ext);
     if (!opts.unit.empty())
     {
         const UnitInfo u = unitInfo(opts.unit);
@@ -605,6 +651,15 @@ void logger::TestScope::emit(std::string metric, float value,
 {
     EmitOptions opts;
     if (description) opts.description = description;
+    emit(std::move(metric), value, std::move(opts));
+}
+
+void logger::TestScope::emit(std::string metric, float value,
+                             const char *description, Dims dims)
+{
+    EmitOptions opts;
+    if (description) opts.description = description;
+    opts.dims = std::move(dims);
     emit(std::move(metric), value, std::move(opts));
 }
 
@@ -638,6 +693,8 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
     m.description = oneLine(opts.description);
     m.label       = opts.label;
     m.direction   = opts.direction;
+    m.dims        = std::move(opts.dims);
+    m.ext         = extFromJson(opts.ext);
     // A reading that never ran still records the unit it would have been in:
     // that is what tells a reader an unsupported int8 row was never going to
     // be flops, and what keeps the row honest when the test it sits in
@@ -654,6 +711,15 @@ void logger::TestScope::skip(std::string metric, ResultStatus status,
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);
     e.metric   = log->record(std::move(m));
     log->dispatchEvent(e);
+}
+
+void logger::TestScope::skip(std::string metric, ResultStatus status,
+                             std::string reason, std::string description, Dims dims)
+{
+    EmitOptions opts;
+    opts.description = std::move(description);
+    opts.dims        = std::move(dims);
+    skip(std::move(metric), status, std::move(reason), std::move(opts));
 }
 
 void logger::TestScope::skipAll(std::initializer_list<std::string> metrics,

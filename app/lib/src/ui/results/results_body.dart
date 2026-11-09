@@ -136,7 +136,7 @@ class _ResultsBodyState extends State<ResultsBody> {
       if (meta != null &&
           (meta.generator.version.isNotEmpty ||
               meta.generatedAt.isNotEmpty ||
-              meta.host.isNotEmpty))
+              meta.system.isNotEmpty))
         _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
       if (runs.length > 1)
         _WidgetRow(
@@ -478,13 +478,12 @@ class _RunMetaPanel extends StatelessWidget {
             Duration(milliseconds: (meta.durationSeconds * 1000).round()))
       ));
     }
-    const skipHostKeys = {'cpu', 'logical_cores', 'memory_bytes'};
-    for (final e in meta.host.entries) {
-      final k = e.key.toString().trim();
-      if (skipHostKeys.contains(k)) continue;
-      final v = e.value?.toString().trim() ?? '';
-      if (k.isEmpty || v.isEmpty) continue;
-      entries.add((key: k.toUpperCase(), value: v));
+    for (final e in [
+      (key: 'OS', value: meta.osName),
+      (key: 'OS_VERSION', value: meta.osVersion),
+      (key: 'ARCH', value: meta.arch),
+    ]) {
+      if (e.value.isNotEmpty) entries.add(e);
     }
 
     if (entries.isEmpty) return const SizedBox.shrink();

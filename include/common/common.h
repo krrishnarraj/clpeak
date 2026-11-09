@@ -552,7 +552,7 @@ inline double gpuRunCapUs(DeviceType type, const benchmark_config_t &cfg)
 // size.
 inline bool mlLadderScouts(DeviceType type)
 {
-  return type != DeviceType::Accelerator;
+  return type != DeviceType::Accelerator && type != DeviceType::Npu;
 }
 
 // ---------------------------------------------------------------------------

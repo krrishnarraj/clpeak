@@ -39,14 +39,15 @@ run from.
 |------|---------|
 | `peak.cpp` | `Peak` base class: `applyOptions()` copies CLI state (gating, the `--devices` items that name `backend()`, and what a resumed run's part before finished); `admit()`'s guard tells the run's checkpoint a Benchmark finished, and on a `--skip-crashed` resume records the first one reached instead of running it |
 | `common.cpp` | `benchmark_config_t::forDevice()`, `pickIters()` calibration, and `xpupeak::requestCancel()/cancelRequested()` — cooperative cancellation observed in `Peak::isAllowed()` and the backend device loops |
-| `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): devices, the `--verbose` inventory, and the `log` stream one entry per line. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, and `runLogHeaderJson()` for the sidecar's first line |
+| `run_document.cpp` | The result tree + its single JSON serialization (through `include/common/json_writer.h`): system, conditions, annotations, packages and processors, devices with their facts and evidence, tests and readings with their dims, the `--verbose` inventory, and the `log` stream one entry per line. The loader reads any `format_minor` of format 4 and passes over what it does not know; `ext` objects round-trip whole. Also `RunDocument::append`, which folds each backend's logger into the document a host saves, `runLogHeaderJson()` for the sidecar's first line, and `newRunId()` / `newEvidenceKey()`, which both hosts stamp a new run with |
+| `vocabulary.cpp` | The vocabulary's tables (`include/common/vocabulary.h`): one string per enum value, each list append-only and checked against its enum at compile time; the dim keys' classes and defaults, the family table, the vendor id tables |
 | `run_log.cpp` | `RunLog` — the run's `xpupeak::LogSink`: records entries on `doc.log` with the open logger's scope, streams them to the `<output>.log` sidecar as they happen (the record a native crash leaves), caps Debug alone (64 MiB in the document, 128 MiB in the sidecar), and renders through the attached logger or the host's fallback.  A resumed run continues the sidecar and the log's clock |
 | `run_checkpoint.cpp` | `RunCheckpoint` — the run's progress (backends, devices and Benchmarks finished) and the `<output>.partial.json` checkpoint, rewritten through a rename at each of those boundaries (`Peak::admit`'s guard, the logger's scope ends) and before the run waits at a boundary between readings (`held`: the Benchmark in flight's tests, whose readings a resumed run keeps), carrying a resumed part's own `resumed` record, and removed once the document is saved unless the run was cancelled |
 | `run_resume.cpp` | `--resume`: reads the checkpoint (by its path or the result's) and the sidecar -- or a cancelled run's saved document, whose sidecar went -- refuses another build or OS release, re-parses the run's own argv with the skip sets, and seeds the document, log, checkpoint and the part's `resumed` record |
 | `units.cpp` | The unit table: token → symbol, quantity, default direction (+ `formatScaledValue()` — SI prefix for display). Keyed by the tokens backends already pass, so adding these fields cost no backend churn |
 | `json.cpp` | Recursive-descent JSON parser, classic-locale numbers. Hand-rolled: it is the only parser XpuPeak needs, and it is smaller than the XML/CSV line scanners it replaced |
-| `host_info.cpp` | `probeHost()`. Deliberately records no hostname, username or serial — result files get shared |
-| `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook; `log()` / `note()` stamp a diagnostic with the open scope, hand it to the `RunLog`, and dispatch it as a `Log` event; `TestEnd` stamps the test's `duration_s`. Also whitespace-collapses the documentation strings to one line |
+| `host_info.cpp` | `probeHost()`, and `probeSystem()`, the document's `system` from it. Deliberately records no hostname, username or serial — result files get shared |
+| `logger.cpp` | Base `logger` class: result-scope API (`emit()`/`skip()`/`skipAll()`) dispatching `LogEvent`s to the single `onEvent()` hook; `log()` / `note()` stamp a diagnostic with the open scope, hand it to the `RunLog`, and dispatch it as a `Log` event; `TestEnd` stamps the test's `duration_s`. A test is stamped with the Benchmark `Peak::admit()` has open (`openBenchmark()`), and a reading recorded under another names its own; a device's identity reaches the document only as evidence that identifies nothing. Also whitespace-collapses the documentation strings to one line |
 | `logger_text.cpp` | `LoggerText` — renders the event stream as indented/aligned text with per-row units + baseline deltas, and under `--describe` the wrapped test/reading documentation (desktop CLI). Its own warnings/errors print inline; debug and library-sourced lines go to stderr under `--verbose` only, through `xpupeak::stderrWrite()` so a console capture never re-captures them |
 | `inventory.cpp` | `inventoryToJson()` — device inventory JSON serializer for the GUI catalog; `printInventory()` — the one `--list-devices` format for every backend, each device line starting with its `backend:index` token |
 | `options.cpp` | `parseCliOptions()` (CLI, exits on error) + `parseCliOptionsNoExit()` (embedded, used by `src/ffi`); `programName()`, which the usage line and every message prefix print; the backend table (`backendInfo()`: name, flag, built-in), the category and test flag tables, and `--help` generated from them |
@@ -121,11 +122,16 @@ is the pattern), because a process that dies mid-session cleans nothing.
 - If you change the `Peak` interface → update `include/common/peak.h` + all backend `AGENTS.md` files.
 - If you add a utility function → update this file's Key Files table.
 - If you change the result format → update `docs/format-v4.md` and
-  `include/common/run_document.h`, and bump `RESULT_FORMAT_VERSION` only for a
-  *breaking* change. The loader skips keys it doesn't recognise and
-  absent-means-default is the format's own convention, so an optional field
-  round-trips without a bump — and a bump makes every file a user has already
-  saved unreadable, the GUI's whole run history included.
+  `include/common/run_document.h`, and follow the spec's *Compatibility*
+  rules: from the 4.0.0 release an addition raises `RESULT_FORMAT_MINOR`,
+  and `RESULT_FORMAT_VERSION` changes only for a break, which they exist to
+  prevent. The loader skips keys it doesn't recognise and absent-means-default
+  is the format's own convention, so an optional field round-trips without a
+  bump — and a major bump makes every file a user has already saved
+  unreadable, the GUI's whole run history included.
+- If you add a word to the vocabulary → append it to its enum in
+  `include/common/vocabulary.h` and its table in `vocabulary.cpp` (the
+  static_asserts hold them in step), and to the spec's *Vocabulary* tables.
 - If you change `LogEvent` or the event kinds → update `src/ffi/logger_ffi.cpp` (JSON mirror) and the Dart decoder `app/lib/src/ffi/xpupeak_events.dart`.
 - If you change `LogEntry` → it is serialized in one place (`logEntryToJson`) for the document, the sidecar and the loader, but the FFI event (`logger_ffi.cpp`) and the Dart `LogEntry` (`app/lib/src/model/run_document.dart`) mirror it by hand.
 - If you add/remove a file → update `src/common/CMakeLists.txt` and this file.

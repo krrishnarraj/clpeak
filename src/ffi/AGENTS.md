@@ -20,8 +20,10 @@ shared library / Apple framework.
 - Test documentation (`desc` / `minfo`)? → authored natively, the test's at its
   `beginTest()` and each reading's at its own `emit()`
   (`include/common/AGENTS.md`).  The test's arrives once on `test_begin`, with
-  the rest of the resolved header (`shape`, `axis`, `direction`, `unit`);
-  each reading's rides the reading
+  the rest of the resolved header (`shape`, `axis`, `direction`, `unit`, and
+  the `benchmark`, `revision` and `dims` the document records);
+  each reading's rides the reading, with its `dims` and any `benchmark` of
+  its own
 - Where the desktop app runs things? → not in its own process: every catalog
   and run is a `xpupeak-engine` process (`engine_host.cpp`, a loader for
   `xpupeak_engine_main` in `engine.cpp`; protocol in `xpupeak_ffi.h`, Dart side

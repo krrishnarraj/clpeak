@@ -107,12 +107,14 @@ int main(int argc, char **argv)
     {
         combined.meta.generator     = {RESULT_GENERATOR_NAME, XPUPEAK_VERSION_STR};
         combined.meta.generatedAt   = isoTimestampUtc();
+        combined.meta.runId         = newRunId();
+        combined.meta.evidenceKey   = newEvidenceKey();
         for (const auto &be : backends)
-            combined.meta.build.backends.push_back(backendInfo(be.id).name);
+            combined.meta.build.backends.push_back(buildBackendFor(be.id));
 #ifdef XPUPEAK_BUILD_CONFIG
         combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
-        combined.meta.host          = probeHost();
+        combined.meta.system        = probeSystem();
         combined.meta.invocation    = invocationFrom(opts, argc, argv);
     }
 
