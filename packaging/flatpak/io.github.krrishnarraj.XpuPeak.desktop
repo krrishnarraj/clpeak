@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=XpuPeak
+GenericName=Compute Benchmark
+Comment=Measure peak compute, bandwidth and latency of GPU and CPU devices
+# Exported by flatpak as `flatpak run --command=xpupeak-gui io.github.krrishnarraj.XpuPeak`,
+# so the launcher starts the Flutter app while the Flatpak's default `command`
+# stays the CLI.
+Exec=xpupeak-gui
+Icon=io.github.krrishnarraj.XpuPeak
+Terminal=false
+# The runner sets its program name to its application ID
+# (app/linux/runner/my_application.cc), so GTK reports kr.XpuPeak as the
+# Wayland app_id and the X11 WM_CLASS, not the Flatpak's ID or the
+# executable's name.
+StartupWMClass=kr.XpuPeak
+StartupNotify=true
+Categories=System;Monitor;Utility;
+Keywords=benchmark;GPU;OpenCL;Vulkan;compute;bandwidth;latency;

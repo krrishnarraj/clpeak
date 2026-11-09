@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Application
+Name=XpuPeak
+GenericName=Compute Benchmark
+Comment=Measure peak compute, bandwidth and latency of GPU and CPU devices
+# snapd only rewrites an Exec line that names one of the snap's commands, so
+# this is the qualified <snap>.<app> form, not a bare xpupeak-gui.  The snap's
+# default command stays the CLI.
+Exec=xpupeak.xpupeak-gui
+Icon=${SNAP}/meta/gui/xpupeak-gui.png
+Terminal=false
+# The runner sets its program name to its application ID
+# (app/linux/runner/my_application.cc), so GTK reports kr.XpuPeak as the
+# Wayland app_id and the X11 WM_CLASS, not the executable's name.  snapd
+# installs this entry as xpupeak_xpupeak-gui.desktop, so the desktop matches
+# the window to it by this key alone.
+StartupWMClass=kr.XpuPeak
+StartupNotify=true
+Categories=System;Monitor;Utility;
+Keywords=benchmark;GPU;OpenCL;Vulkan;compute;bandwidth;latency;

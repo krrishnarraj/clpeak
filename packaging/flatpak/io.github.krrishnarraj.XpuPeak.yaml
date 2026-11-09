@@ -1,8 +1,8 @@
-# Flatpak manifest for clpeak — Flathub submission.
+# Flatpak manifest for XpuPeak — Flathub submission.
 #
 # Ships both front-ends from one build:
-#   * clpeak      -> the CLI (the Flatpak's default `command`)
-#   * clpeak-gui  -> the Flutter desktop app (what the .desktop entry launches)
+#   * xpupeak      -> the CLI (the Flatpak's default `command`)
+#   * xpupeak-gui  -> the Flutter desktop app (what the .desktop entry launches)
 #
 # Scope: only the backends that can work inside the sandbox are enabled —
 # Vulkan, OpenCL, and the native CPU backend.  CUDA / ROCm / oneAPI need vendor
@@ -22,20 +22,20 @@
 # Local build / test:
 #   flatpak install flathub org.gnome.Sdk//49 org.gnome.Platform//49 org.freedesktop.Sdk.Extension.llvm22/x86_64/25.08
 #   flatpak run org.flatpak.Builder --force-clean --user --install \
-#       build-dir packaging/flatpak/io.github.krrishnarraj.clpeak.yaml
-#   flatpak run io.github.krrishnarraj.clpeak --list-devices
-#   flatpak run --command=clpeak-gui io.github.krrishnarraj.clpeak
-id: io.github.krrishnarraj.clpeak
+#       build-dir packaging/flatpak/io.github.krrishnarraj.XpuPeak.yaml
+#   flatpak run io.github.krrishnarraj.XpuPeak --list-devices
+#   flatpak run --command=xpupeak-gui io.github.krrishnarraj.XpuPeak
+id: io.github.krrishnarraj.XpuPeak
 runtime: org.gnome.Platform
 runtime-version: '49'
 sdk: org.gnome.Sdk
-command: clpeak
+command: xpupeak
 
-# Build-time only: clpeak's CMake auto-prefers clang over gcc for the CPU
+# Build-time only: XpuPeak's CMake auto-prefers clang over gcc for the CPU
 # backend (GCC<=14 serialises the FMA accumulator chains, ~halving fp32/fp64);
 # see the find_program(clang) block at the top of CMakeLists.txt.  The base SDK
 # only ships gcc, so pull in the LLVM SDK extension and put it on PATH for the
-# clpeak module (below).  llvm22 is the 25.08-branch extension; bump it together
+# xpupeak module (below).  llvm22 is the 25.08-branch extension; bump it together
 # with runtime-version.
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.llvm22
@@ -43,7 +43,7 @@ sdk-extensions:
 finish-args:
   - --device=dri          # GPU access for Vulkan / OpenCL
   - --share=ipc           # required alongside DRI on some drivers
-  # GUI (clpeak-gui).  Saving/sharing a result and opening the project URL all
+  # GUI (xpupeak-gui).  Saving/sharing a result and opening the project URL all
   # go through portals, so no --filesystem or --share=network is needed.
   - --socket=wayland
   - --socket=fallback-x11
@@ -88,8 +88,8 @@ modules:
         commit: ad9184e76a66b1001c29db9b0a3e87f646c64de0
         dest: third_party/spirv-headers
 
-  # --- clpeak (CLI + GUI) ------------------------------------------------
-  - name: clpeak
+  # --- xpupeak (CLI + GUI) -----------------------------------------------
+  - name: xpupeak
     buildsystem: cmake-ninja
     build-options:
       # Put the LLVM extension's clang on PATH so CMake's find_program(clang)
@@ -102,9 +102,9 @@ modules:
         # the module build dir.  HOME and PUB_CACHE keep everything the Flutter
         # tool writes (config, downloaded engine artifacts, pub packages)
         # inside that same throwaway dir.
-        FLUTTER_HOME: /run/build/clpeak/flutter-sdk
-        HOME: /run/build/clpeak
-        PUB_CACHE: /run/build/clpeak/.pub-cache
+        FLUTTER_HOME: /run/build/xpupeak/flutter-sdk
+        HOME: /run/build/xpupeak
+        PUB_CACHE: /run/build/xpupeak/.pub-cache
         FLUTTER_SUPPRESS_ANALYTICS: '1'
       build-args:
         # `flutter pub get` and the engine-artifact download need the network.
@@ -119,33 +119,36 @@ modules:
       # instead of failing -- the same CLI-only outcome as the arm64 CI jobs.
       - -DXPUPEAK_ENABLE_GUI=ON
     post-install:
-      - install -Dm644 /app/share/clpeak/LICENSE /app/share/licenses/io.github.krrishnarraj.clpeak/LICENSE
-      - rm -f /app/share/clpeak/LICENSE
-      - install -Dm644 packaging/flatpak/io.github.krrishnarraj.clpeak.metainfo.xml
-          /app/share/metainfo/io.github.krrishnarraj.clpeak.metainfo.xml
+      - install -Dm644 /app/share/xpupeak/LICENSE /app/share/licenses/io.github.krrishnarraj.XpuPeak/LICENSE
+      - rm -f /app/share/xpupeak/LICENSE
+      - install -Dm644 packaging/flatpak/io.github.krrishnarraj.XpuPeak.metainfo.xml
+          /app/share/metainfo/io.github.krrishnarraj.XpuPeak.metainfo.xml
+      # The app's own Linux icon, generated with every platform's from the
+      # XpuPeak master (tools/icons/generate_icons.py).  256 px is the one
+      # size installed: AppStream compose renders the 64 and 128 px catalog
+      # icons from it.
       - install -Dm644 app/linux/runner/resources/xpupeak_icon.png
-          /app/share/icons/hicolor/256x256/apps/io.github.krrishnarraj.clpeak.png
-      - install -Dm644 docs/assets/img/icon.png
-          /app/share/icons/hicolor/128x128/apps/io.github.krrishnarraj.clpeak.png
+          /app/share/icons/hicolor/256x256/apps/io.github.krrishnarraj.XpuPeak.png
       # One desktop entry, two possible bodies.  Where the GUI was built it
-      # launches clpeak-gui; on a CLI-only arch it falls back to running the
+      # launches xpupeak-gui; on a CLI-only arch it falls back to running the
       # CLI in a terminal, so the MetaInfo's desktop-id launchable always
       # resolves and AppStream validation passes on every arch.
       - >-
-        if [ -x /app/bin/clpeak-gui ]; then
-          src=packaging/flatpak/io.github.krrishnarraj.clpeak.desktop;
+        if [ -x /app/bin/xpupeak-gui ]; then
+          src=packaging/flatpak/io.github.krrishnarraj.XpuPeak.desktop;
         else
-          src=packaging/flatpak/clpeak-cli.desktop;
+          src=packaging/flatpak/xpupeak-cli.desktop;
         fi;
-        install -Dm644 "$src" /app/share/applications/io.github.krrishnarraj.clpeak.desktop
+        install -Dm644 "$src" /app/share/applications/io.github.krrishnarraj.XpuPeak.desktop
     sources:
-      # 2.1.0 is the first release carrying the Flutter GUI; the post-install
-      # steps read app/ and docs/ out of this checkout.
-      # TODO: add `commit:` with 2.1.0's sha once the tag is pushed — Flathub
-      # requires tag and commit to be pinned together.
+      # 4.0.0 is the first release under the XpuPeak name; the post-install
+      # steps read app/ and packaging/flatpak/ out of this checkout.
+      # TODO at release: add `commit:` with 4.0.0's sha once the tag is pushed
+      # (Flathub requires tag and commit pinned together).  The URL names the
+      # repo as it is renamed just before 4.0.0.
       - type: git
-        url: https://github.com/krrishnarraj/clpeak.git
-        tag: '2.1.0'
+        url: https://github.com/krrishnarraj/xpupeak.git
+        tag: '4.0.0'
       # Flutter ships a Linux desktop SDK for x86_64 only -- there is no
       # linux-arm64 tarball -- so aarch64 gets no SDK and builds CLI-only.
       # Bump `url` + `sha256` together from
