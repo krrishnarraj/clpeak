@@ -1,7 +1,7 @@
 #ifndef XPUPEAK_COREML_MODEL_H
 #define XPUPEAK_COREML_MODEL_H
 
-// In-memory Core ML model construction.  The graphs xpupeak benchmarks are a
+// In-memory Core ML model construction.  The graphs XpuPeak benchmarks are a
 // handful of operations, so it emits the ML Program (MIL) protobuf wire
 // format and the weight blob directly -- no protobuf library, no coremltools,
 // no .mlpackage shipped as an asset, and byte-identical models on every

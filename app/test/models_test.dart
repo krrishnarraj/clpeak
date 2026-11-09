@@ -186,7 +186,7 @@ void main() {
         };
 
     test('test_begin carries the resolved header', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'test_begin',
         'backend': 'CPU',
         'platform': 'CPU',
@@ -216,7 +216,7 @@ void main() {
     });
 
     test('an undocumented test decodes with empty documentation', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'test_begin',
         'backend': 'CPU',
         'device': 'M1',
@@ -226,7 +226,7 @@ void main() {
     });
 
     test('metric event carries the reading and its note', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'metric',
         'backend': 'CPU',
         'platform': 'CPU',
@@ -247,7 +247,7 @@ void main() {
     });
 
     test('a reading with a variant keys off id@variant', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'metric',
         'backend': 'CPU',
         'test': 'single_precision_compute',
@@ -259,7 +259,7 @@ void main() {
     });
 
     test('a reading that overrides its unit keeps its own', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'metric',
         'backend': 'CUDA',
         'test': 'cublas_gemm',
@@ -275,7 +275,7 @@ void main() {
     });
 
     test('a failed reading carries status and reason, not a value', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'metric',
         'backend': 'Metal',
         'test': 'mps_gemm',
@@ -290,14 +290,14 @@ void main() {
     });
 
     test('done event', () {
-      final e = XpupeakEvent.fromJson(
+      final e = XpuPeakEvent.fromJson(
           {'t': 'done', 'status': -2, 'cancelled': true});
       expect(e, isA<DoneEvent>());
       expect((e as DoneEvent).cancelled, isTrue);
     });
 
     test('test_skipped names every reading it stands in for', () {
-      final e = XpupeakEvent.fromJson({
+      final e = XpuPeakEvent.fromJson({
         't': 'test_skipped',
         'backend': 'Metal',
         'platform': 'Metal',

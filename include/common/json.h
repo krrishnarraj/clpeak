@@ -7,8 +7,8 @@
 
 // ── Minimal JSON DOM ───────────────────────────────────────────────────────
 //
-// Just enough to read a xpupeak result document back (run_document.cpp) and
-// nothing more.  Hand-rolled on purpose: it is the only parser xpupeak needs,
+// Just enough to read an XpuPeak result document back (run_document.cpp) and
+// nothing more.  Hand-rolled on purpose: it is the only parser XpuPeak needs,
 // it is smaller than the XML/CSV line scanners it replaces, and it lets the
 // classic-locale rule for numbers live in one place -- the GUI hosts this
 // code inside toolkits that call setlocale(LC_ALL, "") (GTK's gtk_init does),

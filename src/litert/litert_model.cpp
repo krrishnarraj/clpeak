@@ -998,7 +998,7 @@ TfOptions conv1x1Options()
 
 std::string describe(const LitertPlan &p, const char *what)
 {
-  return std::string("xpupeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
+  return std::string("XpuPeak ") + what + " " + tfliteTypeName(p.act) + "/" + tfliteTypeName(p.weight) +
          (litertIoType(p) != p.act ? " float I/O" : "");
 }
 

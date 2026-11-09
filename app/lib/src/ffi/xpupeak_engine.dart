@@ -12,7 +12,7 @@ import 'xpupeak_runner.dart';
 /// [EngineRun.result] when the engine process ended without finishing the
 /// run: it crashed, or never started.  App-side only -- the XPUPEAK_RUN_*
 /// codes xpupeak_launch returns are in src/ffi/xpupeak_ffi.h.
-const int xpupeakRunEngineFailed = -4;
+const int xpuPeakRunEngineFailed = -4;
 
 /// Where the device catalog is enumerated and runs execute.
 ///
@@ -24,14 +24,14 @@ const int xpupeakRunEngineFailed = -4;
 /// loads the runtime setup afresh every time, and a native crash there ends
 /// the run, not the app.  On Android and iOS -- and on a desktop build
 /// without the engine host -- everything runs in this process over FFI.
-abstract interface class XpupeakEngine {
+abstract interface class XpuPeakEngine {
   /// The engine process on desktop when its host and the library are both
   /// found, this process otherwise.
-  static XpupeakEngine forPlatform(XpupeakBindings bindings) {
+  static XpuPeakEngine forPlatform(XpuPeakBindings bindings) {
     final desktop = Platform.isMacOS || Platform.isLinux || Platform.isWindows;
     if (desktop) {
-      final host = xpupeakEngineHostPath();
-      final library = xpupeakLibraryPath();
+      final host = xpuPeakEngineHostPath();
+      final library = xpuPeakLibraryPath();
       if (host != null && library != null) {
         return ChildProcessEngine(host: host, library: library);
       }
@@ -52,7 +52,7 @@ abstract interface class XpupeakEngine {
   OnnxStatus onnxStatus();
   LitertStatus litertStatus();
 
-  // The runtime setup, as XpupeakBindings documents each; between runs only.
+  // The runtime setup, as XpuPeakBindings documents each; between runs only.
   void setOnnxLibrary(String path);
   void setOnnxEpLibraries(List<OnnxEpLibrary> libs);
   void setOnnxWinml({required bool enabled, required String path});
@@ -69,10 +69,10 @@ abstract interface class XpupeakEngine {
 }
 
 /// Everything in this process, over the xpupeak_ffi C ABI.
-class InProcessEngine implements XpupeakEngine {
+class InProcessEngine implements XpuPeakEngine {
   InProcessEngine(this._bindings);
 
-  final XpupeakBindings _bindings;
+  final XpuPeakBindings _bindings;
 
   @override
   bool get runtimeFixedOnceLoaded => true;
@@ -86,7 +86,7 @@ class InProcessEngine implements XpupeakEngine {
   // Static so the Isolate.run closure captures only sendable values; the
   // worker reopens the library there (the same pattern as runs).
   static Map<String, dynamic> _fetchCatalog() =>
-      XpupeakBindings.open().backendCatalog();
+      XpuPeakBindings.open().backendCatalog();
 
   @override
   OnnxStatus onnxStatus() => _bindings.onnxStatus();
@@ -112,7 +112,7 @@ class InProcessEngine implements XpupeakEngine {
   void setLitertNpuStageDir(String dir) => _bindings.setLitertNpuStageDir(dir);
 
   @override
-  EngineRun start(List<String> args) => XpupeakRunner(_bindings).start(args);
+  EngineRun start(List<String> args) => XpuPeakRunner(_bindings).start(args);
 
   @override
   void setOnScreen(bool onScreen) => _bindings.setOnScreen(onScreen);
@@ -122,7 +122,7 @@ class InProcessEngine implements XpupeakEngine {
 /// and handed to each process as it starts, through the same xpupeak_set_*
 /// calls the in-process engine makes -- not as run flags, which the saved
 /// document would record.
-class ChildProcessEngine implements XpupeakEngine {
+class ChildProcessEngine implements XpuPeakEngine {
   ChildProcessEngine({required this.host, required this.library});
 
   /// The engine host executable, and the xpupeak_ffi library it loads.
@@ -231,13 +231,13 @@ class ChildRun implements EngineRun {
         if (!_events.isClosed) {
           _fail('xpupeak-engine: $e', 'The benchmark engine stopped unexpectedly');
         }
-        _rc.complete(xpupeakRunEngineFailed);
+        _rc.complete(xpuPeakRunEngineFailed);
       }
       if (!_events.isClosed) unawaited(_events.close());
     }));
   }
 
-  final _events = StreamController<XpupeakEvent>();
+  final _events = StreamController<XpuPeakEvent>();
   final _rc = Completer<int>();
   Process? _process;
   bool _cancelRequested = false;
@@ -246,7 +246,7 @@ class ChildRun implements EngineRun {
   String? _failure;
 
   @override
-  Stream<XpupeakEvent> get events => _events.stream;
+  Stream<XpuPeakEvent> get events => _events.stream;
 
   @override
   Future<int> get result => _rc.future;
@@ -283,7 +283,7 @@ class ChildRun implements EngineRun {
     } catch (e) {
       _fail('xpupeak-engine did not start: $e',
           'The benchmark engine did not start');
-      _rc.complete(xpupeakRunEngineFailed);
+      _rc.complete(xpuPeakRunEngineFailed);
       await _events.close();
       return;
     }
@@ -317,16 +317,16 @@ class ChildRun implements EngineRun {
       _fail('xpupeak-engine $how${detail.isEmpty ? '' : ': $detail'}',
           'The benchmark engine $how before the run finished');
     }
-    _rc.complete(_done?.status ?? xpupeakRunEngineFailed);
+    _rc.complete(_done?.status ?? xpuPeakRunEngineFailed);
     await _events.close();
   }
 
   void _onLine(String line) {
     // Nothing after `done` belongs to the run: a late relayed log line.
     if (line.isEmpty || _done != null) return;
-    XpupeakEvent event;
+    XpuPeakEvent event;
     try {
-      event = XpupeakEvent.fromJson(jsonDecode(line) as Map<String, dynamic>);
+      event = XpuPeakEvent.fromJson(jsonDecode(line) as Map<String, dynamic>);
     } catch (_) {
       event = LogEntryEvent(LogEntry(
           level: LogLevel.warning, message: 'undecodable event: $line'));
@@ -341,7 +341,7 @@ class ChildRun implements EngineRun {
     _failure = failure;
     _events.add(LogEntryEvent(LogEntry(level: LogLevel.error, message: log)));
     _events.add(
-        const DoneEvent(status: xpupeakRunEngineFailed, cancelled: false));
+        const DoneEvent(status: xpuPeakRunEngineFailed, cancelled: false));
   }
 }
 

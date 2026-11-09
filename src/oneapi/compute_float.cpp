@@ -70,7 +70,7 @@ float    computeFlops(uint64_t totalThreads, uint32_t workPerWI, float meanUs);
 // where oneAPI parts company with the other two: their fp16 pinned to 16 runs
 // at its fp32 rate, but here the pinned build read 9.50 against 9.75 at the
 // compiler's width and won at half8, 9.37 against 7.79, so nothing on that
-// card drops it.  The widths race as a xpupeak::FormRace that drops only a
+// card drops it.  The widths race as an xpupeak::FormRace that drops only a
 // clear loser (include/common/form_race.h), as in those two backends.
 template <int W> struct AffineChains { static constexpr int N = (W == 1) ? 4 : (W == 2) ? 2 : 1; };
 

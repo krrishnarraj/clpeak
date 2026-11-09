@@ -5,7 +5,7 @@
 #   update_litert_headers.sh --check      report the pinned tag and the latest
 #                                         upstream release, then exit
 #
-# The LiteRT backend dlopens the runtime, so xpupeak needs only the C headers
+# The LiteRT backend dlopens the runtime, so XpuPeak needs only the C headers
 # to build — see src/litert/AGENTS.md.  They come from the `litert_cc_sdk.zip`
 # asset of a GitHub release (280 KB) rather than a clone of the repository
 # (the whole runtime and converter, over a gigabyte).  Only the transitive

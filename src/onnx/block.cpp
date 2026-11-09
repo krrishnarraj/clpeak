@@ -238,7 +238,7 @@ namespace
   // DirectML devices (an RTX 4060, a UHD 630, an Adreno X1-45, the DirectML
   // CPU) run this block, so the fault wants that provider *and* this graph
   // *and* -- as far as anyone has seen -- that GPU.  Only the first two can
-  // be keyed on: xpupeak registers DirectML with no device id and ORT picks
+  // be keyed on: XpuPeak registers DirectML with no device id and ORT picks
   // the adapter, so which GPU is behind this device is not something the
   // backend can ask.  Naming one would be a guess, and a guess that is
   // wrong on a two-GPU box takes the run down.  So the row is withheld on
@@ -775,7 +775,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   double refDecodeUs = 0.0, refDecodeBytes = 0.0;
 
   // What this provider demonstrably streams, measured (see onnxStreamBps).
-  // The decode rows count the bytes the model *declares*, which is all xpupeak
+  // The decode rows count the bytes the model *declares*, which is all XpuPeak
   // can know: a provider is free to store them narrower than asked, and no
   // vendor publishes which do.  A row implying more traffic than the device
   // has been seen to move is that happening, and it is caught by measurement

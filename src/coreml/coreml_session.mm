@@ -81,7 +81,7 @@ uint64_t tempFreeBytes()
   return (uint64_t)st.f_bavail * (uint64_t)st.f_frsize;
 }
 
-// Remove packages and compiled models left by xpupeak processes that are no
+// Remove packages and compiled models left by XpuPeak processes that are no
 // longer running.  A session cleans up after itself, but a process that
 // died mid-session -- a compiler abort, a kill -- leaves up to two
 // gigabytes behind, and enough of those fill a volume.  Runs once per

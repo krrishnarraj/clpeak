@@ -13,7 +13,7 @@ enum class DeviceType : unsigned int {
     Unknown     = 0
 };
 
-// Every backend xpupeak can be built with.  This order is THE order: --help
+// Every backend XpuPeak can be built with.  This order is THE order: --help
 // lists backends in it, --list-devices and the GUI catalog enumerate in it,
 // a run executes in it, and the result document records devices in it.
 // Nothing else holds an order -- the registry (src/registry) sorts by this

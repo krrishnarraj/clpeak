@@ -445,7 +445,7 @@ static std::vector<uint64_t> collectMidrs()
 // ---------------------------------------------------------------------------
 // Per-CPU topology: which CPU is fastest, and which cache instance every CPU
 // reads at each level.  The OS ranks the cores -- Linux `cpu_capacity`, else
-// the highest maximum clock; Windows `EfficiencyClass` -- and xpupeak only
+// the highest maximum clock; Windows `EfficiencyClass` -- and XpuPeak only
 // orders them.  Ties keep the lowest id, so a homogeneous machine still runs
 // its single-thread rows on cpu0.  macOS has no hard affinity to pin with and
 // describes its cores by performance level instead (detectCpuInfo).

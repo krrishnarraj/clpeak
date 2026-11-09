@@ -242,7 +242,7 @@ namespace
 // debug: a target with no hardware behind it (OpenVINO NPU with no NPU)
 // reports the refusal at ERROR severity, and with no LogSink installed
 // (--list-devices, the GUI catalog) every Error reaches the terminal --
-// past ScopedConsoleMute, which deliberately lets xpupeak's own diagnostics
+// past ScopedConsoleMute, which deliberately lets XpuPeak's own diagnostics
 // through.  The probe already keeps the refusal reason from the returned
 // status, so nothing is lost.  Nesting-safe; the latch in ortLogMessage
 // stays first so a loss announced mid-probe is still caught.
@@ -280,7 +280,7 @@ void ORT_API_CALL ortLogMessage(void *, OrtLoggingLevel severity,
     return;
   // The optimizer narrates every pass over every session -- forty
   // "GraphTransformer X modified: 0" lines per session, none of them about
-  // the device -- and xpupeak creates sessions by the hundred.  The TensorRT
+  // the device -- and XpuPeak creates sessions by the hundred.  The TensorRT
   // for RTX plugin's pool allocator does the same per *run*: a
   // "CudaMempoolAllocator::DoAlloc" and a "::DoFree" at INFO for every
   // Run(), which over a ladder is tens of thousands of lines saying the
@@ -575,7 +575,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
   // The string-keyed append below knows the built-in names only and
   // answers "not supported in this build" for a plugin, however it was
   // registered.  The options are the same table: a plugin QNN takes the
-  // HTP options a built-in one does.  A plugin xpupeak has no wiring for
+  // HTP options a built-in one does.  A plugin XpuPeak has no wiring for
   // runs with the provider's own defaults -- the person naming the library
   // asked for exactly that, and the fallback guard still fails a session
   // the provider does not take whole.
@@ -659,7 +659,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
     // None of that search can help here.  Every session in this backend runs
     // with CPU fallback disabled, so a partition TensorRT only partly claims
     // fails the session exactly as a rejected one does.  One attempt answers
-    // the only question xpupeak asks: all of it, or none.
+    // the only question XpuPeak asks: all of it, or none.
     {
       const char *keys[] = {"trt_max_partition_iterations"};
       const char *vals[] = {"1"};
@@ -698,7 +698,7 @@ std::string appendProvider(const OrtRuntime &rt, OrtSessionOptions *so,
         rt, api->SessionOptionsAppendExecutionProvider_MIGraphX(so, &mgx));
   }
 
-  return "xpupeak has no session wiring for " + providerKey + " yet";
+  return "XpuPeak has no session wiring for " + providerKey + " yet";
 }
 
 } // namespace

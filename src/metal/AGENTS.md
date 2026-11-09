@@ -24,7 +24,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 | File | Purpose |
 |------|---------|
 | `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()` |
-| `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyXpupeakMetalDevices()` helper |
+| `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyXpuPeakMetalDevices()` helper |
 | `mtl_utils.mm` | `mtlGetLibrary()`, `mtlGetPipeline()` — Metal library/pipeline caching |
 | `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
 | `mtl_internal.h` | Internal header: ObjC imports, pimpl definitions, helper declarations — included by all `.mm` files |

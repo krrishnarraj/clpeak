@@ -16,7 +16,7 @@ import 'package:path/path.dart' as p;
 /// Development override: set XPUPEAK_FFI_PATH to the full path of the built
 /// library (e.g. .../build-gui/xpupeak_ffi.framework/xpupeak_ffi) to run the
 /// app before the native artifact is staged into the runner.
-DynamicLibrary openXpupeakLibrary() {
+DynamicLibrary openXpuPeakLibrary() {
   final override = Platform.environment['XPUPEAK_FFI_PATH'];
   if (override != null && override.isNotEmpty) {
     return DynamicLibrary.open(override);
@@ -50,7 +50,7 @@ DynamicLibrary openXpupeakLibrary() {
 /// it by path: XPUPEAK_FFI_PATH, else where the release layout above puts it.
 /// Null on Android and iOS (loaded from the app package) and when the file is
 /// not there.
-String? xpupeakLibraryPath() {
+String? xpuPeakLibraryPath() {
   final override = Platform.environment['XPUPEAK_FFI_PATH'];
   if (override != null && override.isNotEmpty) return override;
   final exeDir = p.dirname(Platform.resolvedExecutable);
@@ -73,7 +73,7 @@ String? xpupeakLibraryPath() {
 /// leaves it at the build root, beside the library XPUPEAK_FFI_PATH names in
 /// the dev loop -- so that one is looked for first, matching the library.
 /// XPUPEAK_ENGINE_PATH names it outright.  Null when there is none.
-String? xpupeakEngineHostPath() {
+String? xpuPeakEngineHostPath() {
   final explicit = Platform.environment['XPUPEAK_ENGINE_PATH'];
   if (explicit != null && explicit.isNotEmpty) {
     return File(explicit).existsSync() ? explicit : null;

@@ -18,10 +18,10 @@ import 'src/ui/app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final bindings = XpupeakBindings.open();
+  final bindings = XpuPeakBindings.open();
   // On desktop, enumeration and runs happen in an engine process of their
-  // own (XpupeakEngine explains why); on mobile, here.
-  final engine = XpupeakEngine.forPlatform(bindings);
+  // own (XpuPeakEngine explains why); on mobile, here.
+  final engine = XpuPeakEngine.forPlatform(bindings);
 
   // Settings first, and specifically before BenchmarkService's first
   // enumeration, which is what loads the ONNX Runtime -- in-process, a saved
@@ -79,6 +79,6 @@ Future<void> main() async {
       ChangeNotifierProvider.value(value: settings),
       ChangeNotifierProvider.value(value: service),
     ],
-    child: const XpupeakApp(),
+    child: const XpuPeakApp(),
   ));
 }

@@ -1,7 +1,7 @@
 # xpupeak_link_backends(<target>)
 #
-# Wires a binary that runs benchmarks -- the xpupeak executable, the
-# xpupeak_ffi library behind the GUI -- to every backend in this build: it
+# Wires a binary that runs benchmarks -- the `xpupeak` executable, the
+# `xpupeak_ffi` library behind the GUI -- to every backend in this build: it
 # adds the backend registry (src/registry/backend_registry.cpp) to the
 # target's sources, links each backend library whose target exists, and
 # defines the matching ENABLE_* macro so the registry and the binary's own

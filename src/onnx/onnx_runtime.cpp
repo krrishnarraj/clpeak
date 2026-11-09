@@ -99,7 +99,7 @@ static void searchBesideRuntime(const std::string &path)
   const size_t slash = path.find_last_of("/\\");
   if (slash == std::string::npos)
     return;
-  // Absolute, so a directory given relative to where xpupeak was started
+  // Absolute, so a directory given relative to where XpuPeak was started
   // still names the same place after the current directory changes.
   std::error_code ec;
   const std::filesystem::path dir =

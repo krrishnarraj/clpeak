@@ -10,10 +10,10 @@ import '../model/run_document.dart';
 import 'xpupeak_events.dart';
 
 /// One in-flight benchmark run, wherever it executes: in this process
-/// ([XpupeakRun]) or in the engine process (`ChildRun`, xpupeak_engine.dart).
+/// ([XpuPeakRun]) or in the engine process (`ChildRun`, xpupeak_engine.dart).
 abstract interface class EngineRun {
   /// Decoded run events, ending with [DoneEvent].
-  Stream<XpupeakEvent> get events;
+  Stream<XpuPeakEvent> get events;
 
   /// The xpupeak_launch return code (XPUPEAK_RUN_* / OR'd backend status).
   Future<int> get result;
@@ -38,9 +38,9 @@ abstract interface class EngineRun {
 /// delivers on the main isolate in emission order.  The final native `done`
 /// event is the drain barrier — the listener is closed only after both the
 /// done event has been consumed and the launch call has returned.
-class XpupeakRun implements EngineRun {
-  XpupeakRun._(this._bindings, List<String> args) {
-    _callable = NativeCallable<XpupeakEventCallbackNative>.listener(_onNative);
+class XpuPeakRun implements EngineRun {
+  XpuPeakRun._(this._bindings, List<String> args) {
+    _callable = NativeCallable<XpuPeakEventCallbackNative>.listener(_onNative);
     _spawn(_callable.nativeFunction.address, args).then((rc) {
       _launchReturned = true;
       _rc.complete(rc);
@@ -53,16 +53,16 @@ class XpupeakRun implements EngineRun {
     });
   }
 
-  final XpupeakBindings _bindings;
-  final _events = StreamController<XpupeakEvent>();
+  final XpuPeakBindings _bindings;
+  final _events = StreamController<XpuPeakEvent>();
   final _rc = Completer<int>();
-  late final NativeCallable<XpupeakEventCallbackNative> _callable;
+  late final NativeCallable<XpuPeakEventCallbackNative> _callable;
   bool _doneSeen = false;
   bool _launchReturned = false;
   bool _finished = false;
 
   @override
-  Stream<XpupeakEvent> get events => _events.stream;
+  Stream<XpuPeakEvent> get events => _events.stream;
 
   @override
   Future<int> get result => _rc.future;
@@ -80,9 +80,9 @@ class XpupeakRun implements EngineRun {
   void _onNative(Pointer<Void> userData, Pointer<Utf8> eventJson) {
     final json = _bindings.takeString(eventJson);
     if (json == null || _finished) return;
-    XpupeakEvent event;
+    XpuPeakEvent event;
     try {
-      event = XpupeakEvent.fromJson(jsonDecode(json) as Map<String, dynamic>);
+      event = XpuPeakEvent.fromJson(jsonDecode(json) as Map<String, dynamic>);
     } catch (_) {
       event = LogEntryEvent(LogEntry(
           level: LogLevel.warning, message: 'undecodable event: $json'));
@@ -110,20 +110,20 @@ class XpupeakRun implements EngineRun {
 }
 
 /// Launches benchmark runs over the xpupeak_ffi C ABI.
-class XpupeakRunner {
-  XpupeakRunner(this._bindings);
+class XpuPeakRunner {
+  XpuPeakRunner(this._bindings);
 
-  final XpupeakBindings _bindings;
+  final XpuPeakBindings _bindings;
 
   /// Start a run with CLI-grammar arguments (without the leading program
   /// name — it is prepended here).
-  XpupeakRun start(List<String> args) => XpupeakRun._(_bindings, args);
+  XpuPeakRun start(List<String> args) => XpuPeakRun._(_bindings, args);
 }
 
 /// Runs in the worker isolate: reopens the library, marshals argv, and makes
 /// the blocking launch call against the listener's native function pointer.
 int _launchBlocking(int callbackAddress, List<String> args) {
-  final bindings = XpupeakBindings.open();
+  final bindings = XpuPeakBindings.open();
   final argv = ['xpupeak', ...args];
   final argvPtrs = calloc<Pointer<Utf8>>(argv.length);
   final allocated = <Pointer<Utf8>>[];
@@ -134,7 +134,7 @@ int _launchBlocking(int callbackAddress, List<String> args) {
       argvPtrs[i] = s;
     }
     final callback =
-        Pointer<NativeFunction<XpupeakEventCallbackNative>>.fromAddress(
+        Pointer<NativeFunction<XpuPeakEventCallbackNative>>.fromAddress(
             callbackAddress);
     return bindings.launch(argv.length, argvPtrs, callback, nullptr);
   } finally {

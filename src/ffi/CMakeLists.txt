@@ -1,4 +1,4 @@
-# xpupeak_ffi — the C-ABI shared library behind every xpupeak GUI.
+# xpupeak_ffi — the C-ABI shared library behind every XpuPeak GUI.
 #
 # Built in two contexts:
 #  - Desktop: from the root CMakeLists when XPUPEAK_ENABLE_GUI is ON and the
@@ -199,14 +199,14 @@ if(NOT XPUPEAK_FFI_STANDALONE)
             set(_xpupeak_gui_wrapper "${CMAKE_BINARY_DIR}/gui-wrapper/xpupeak-gui.cmd")
             file(WRITE "${_xpupeak_gui_wrapper}"
 "@echo off\r\n\
-rem xpupeak GUI launcher -- the Flutter bundle in ..\\gui needs its sibling\r\n\
+rem XpuPeak GUI launcher -- the Flutter bundle in ..\\gui needs its sibling\r\n\
 rem data\\ and DLLs, so it stays there and this wrapper starts it.\r\n\
 start \"\" \"%~dp0..\\gui\\xpupeak-gui.exe\" %*\r\n")
         else()
             set(_xpupeak_gui_wrapper "${CMAKE_BINARY_DIR}/gui-wrapper/xpupeak-gui")
             file(WRITE "${_xpupeak_gui_wrapper}"
 "#!/bin/sh
-# xpupeak GUI launcher -- the Flutter bundle in ../gui needs its sibling data/
+# XpuPeak GUI launcher -- the Flutter bundle in ../gui needs its sibling data/
 # and lib/, so it stays there and this wrapper exec's it.
 here=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)
 exec \"$here/../gui/xpupeak-gui\" \"$@\"

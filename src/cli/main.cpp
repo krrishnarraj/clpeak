@@ -26,7 +26,7 @@
 
 int main(int argc, char **argv)
 {
-    // clpeak (the 3.x command) and xpupeak are one program; its messages
+    // `clpeak` (the 3.x command) and `xpupeak` are one program; its messages
     // use the name it was started as.
     setProgramName(argc > 0 ? argv[0] : nullptr);
     CliOptions opts;

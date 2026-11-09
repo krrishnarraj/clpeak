@@ -28,7 +28,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     final settings = await SettingsService.load();
-    final bindings = XpupeakBindings.open();
+    final bindings = XpuPeakBindings.open();
     final tmp = Directory.systemTemp.createTempSync('xpupeak_smoke');
     addTearDown(() => tmp.deleteSync(recursive: true));
     final history = RunHistoryStore(directoryOverride: tmp);
@@ -41,7 +41,7 @@ void main() {
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider.value(value: service),
       ],
-      child: const XpupeakApp(),
+      child: const XpuPeakApp(),
     ));
     // Catalog loads on a worker isolate: spawn it inside runAsync, since
     // testWidgets runs in fake async and an isolate spawned outside it

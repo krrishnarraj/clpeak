@@ -1,7 +1,7 @@
 #ifndef XPUPEAK_LITERT_RUNTIME_H
 #define XPUPEAK_LITERT_RUNTIME_H
 
-// Load-on-demand LiteRT.  libLiteRt is dlopen'd so xpupeak ships with no hard
+// Load-on-demand LiteRT.  libLiteRt is dlopen'd so XpuPeak ships with no hard
 // dependency, exactly as the ONNX backend treats onnxruntime: a machine
 // without it gets a one-line "library not found" and no rows, the shape a
 // missing GPU driver produces.  Unlike ONNX Runtime there is no single entry

@@ -179,7 +179,7 @@ HMODULE loadCatalogDll(const OrtRuntime *rt, const std::string &hint,
       return h;
     }
     error = std::string(kDllName) +
-            " not found beside the loaded onnxruntime, beside xpupeak or on the "
+            " not found beside the loaded onnxruntime, beside XpuPeak or on the "
             "DLL search path (tools/fetch_winml.ps1 fetches it, or name it "
             "with --onnx-winml)";
   }

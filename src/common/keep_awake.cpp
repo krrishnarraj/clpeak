@@ -45,7 +45,7 @@ struct KeepAwake::Impl
 KeepAwake::KeepAwake() : impl_(new Impl)
 {
     // What `powercfg /requests` prints under the process; the call copies it.
-    wchar_t reason[] = L"xpupeak benchmark run in progress";
+    wchar_t reason[] = L"XpuPeak benchmark run in progress";
     REASON_CONTEXT context = {};
     context.Version                   = POWER_REQUEST_CONTEXT_VERSION;
     context.Flags                     = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
@@ -119,7 +119,7 @@ KeepAwake::KeepAwake() : impl_(new Impl)
     // sleep on its own timeout.  The name is what `pmset -g assertions` lists.
     const IOReturn r = IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep, kIOPMAssertionLevelOn,
-        CFSTR("xpupeak benchmark run in progress"), &impl_->assertion);
+        CFSTR("XpuPeak benchmark run in progress"), &impl_->assertion);
     if (r != kIOReturnSuccess)
     {
         impl_->assertion = kIOPMNullAssertionID;
@@ -200,7 +200,7 @@ const SdBus &sdBus()
     return api;
 }
 
-const char *const kWho = "xpupeak";
+const char *const kWho = "XpuPeak";
 const char *const kWhy = "benchmark run in progress";
 constexpr unsigned kInhibitSuspend = 4;  // the GNOME session and portal flag
 

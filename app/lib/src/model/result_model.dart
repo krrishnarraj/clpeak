@@ -134,7 +134,7 @@ class Units {
 /// SI prefixes, smallest first.  A unit symbol is `<prefix><base>`, so
 /// rescaling is a matter of swapping the prefix — which works for FLOPS →
 /// GFLOPS → TFLOPS, B/s → GB/s → TB/s, Texel/s → GTexel/s and s →
-/// ms/µs/ns alike, without a table of every unit xpupeak might one day report.
+/// ms/µs/ns alike, without a table of every unit XpuPeak might one day report.
 const List<(int, String)> _siPrefixes = [
   (-9, 'n'),
   (-6, 'µ'),

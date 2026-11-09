@@ -68,7 +68,7 @@ public:
   }
 
   // ---- vectors ----------------------------------------------------------
-  // Scalars are little-endian on every target xpupeak builds for, so a
+  // Scalars are little-endian on every target XpuPeak builds for, so a
   // vector of them is one block copy.
   template <class T> uint32_t createVector(const T *data, size_t n, size_t forceAlign = 0)
   {

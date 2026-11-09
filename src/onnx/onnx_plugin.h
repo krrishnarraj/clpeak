@@ -88,7 +88,7 @@ std::string onnxAppendPluginDevice(
 std::string onnxEpLibraryPath(const std::string &registrationName);
 
 // kEpTable lookup (onnx_peak.cpp): the display name, type label and device
-// class xpupeak gives a provider it knows.  False for a provider it does not.
+// class XpuPeak gives a provider it knows.  False for a provider it does not.
 bool onnxEpTableEntry(const std::string &providerKey, std::string &display,
                       std::string &typeStr, DeviceType &deviceType);
 

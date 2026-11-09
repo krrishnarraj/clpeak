@@ -5,7 +5,7 @@
 // platform's fonts exactly as in the app.  (flutter_tester's font manager
 // answers every family name with its test font, which swallows the theme's
 // monospace fallback walk -- CP.monoStack -- on any span that sets no family
-// of its own.)  Each shot is the real app shell (XpupeakShell and the screens
+// of its own.)  Each shot is the real app shell (XpuPeakShell and the screens
 // under it) fed a saved run document from results/ and a device catalog
 // captured from the machine that produced it
 // (tools/screenshots/m1_pro_catalog.json: the `inventory` of a --verbose run),
@@ -50,16 +50,16 @@ final _version = _env['XPUPEAK_SHOTS_VERSION'] ?? '3.0.1';
 const _desktop = Size(1280, 860);
 const _pixelRatio = 2.0;
 
-class _StubBindings implements XpupeakBindings {
+class _StubBindings implements XpuPeakBindings {
   _StubBindings(this._catalog);
 
   final Map<String, dynamic> _catalog;
 
   @override
-  XpupeakLaunch get launch => (_, _, _, _) => 0;
+  XpuPeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  XpupeakRequestCancel get requestCancel => () {};
+  XpuPeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -174,14 +174,14 @@ Future<void> _shoot(
         ChangeNotifierProvider.value(value: settings),
         ChangeNotifierProvider<BenchmarkService>.value(value: service),
       ],
-      // XpupeakApp, with the theme pinned instead of read from settings.
+      // XpuPeakApp, with the theme pinned instead of read from settings.
       child: MaterialApp(
         title: 'XpuPeak',
         debugShowCheckedModeBanner: false,
-        theme: XpupeakTheme.light(),
-        darkTheme: XpupeakTheme.dark(),
+        theme: XpuPeakTheme.light(),
+        darkTheme: XpuPeakTheme.dark(),
         themeMode: theme,
-        home: home ?? const XpupeakShell(),
+        home: home ?? const XpuPeakShell(),
       ),
     ),
   ));

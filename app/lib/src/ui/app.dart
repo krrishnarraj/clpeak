@@ -12,8 +12,8 @@ import 'live_run/live_run_screen.dart';
 import 'results/results_screen.dart';
 import 'settings/settings_screen.dart';
 
-class XpupeakApp extends StatelessWidget {
-  const XpupeakApp({super.key});
+class XpuPeakApp extends StatelessWidget {
+  const XpuPeakApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -21,10 +21,10 @@ class XpupeakApp extends StatelessWidget {
     return MaterialApp(
       title: 'XpuPeak',
       debugShowCheckedModeBanner: false,
-      theme: XpupeakTheme.light(),
-      darkTheme: XpupeakTheme.dark(),
+      theme: XpuPeakTheme.light(),
+      darkTheme: XpuPeakTheme.dark(),
       themeMode: settings.themeMode,
-      home: const XpupeakShell(),
+      home: const XpuPeakShell(),
     );
   }
 }
@@ -32,14 +32,14 @@ class XpupeakApp extends StatelessWidget {
 /// Adaptive navigation shell: a console sidebar on wide layouts, a hairline
 /// tab strip on phones.  The first tab hosts the whole run lifecycle
 /// (dashboard → live run → results) so a run survives tab switches.
-class XpupeakShell extends StatefulWidget {
-  const XpupeakShell({super.key});
+class XpuPeakShell extends StatefulWidget {
+  const XpuPeakShell({super.key});
 
   @override
-  State<XpupeakShell> createState() => _XpupeakShellState();
+  State<XpuPeakShell> createState() => _XpuPeakShellState();
 }
 
-class _XpupeakShellState extends State<XpupeakShell> {
+class _XpuPeakShellState extends State<XpuPeakShell> {
   int _tab = 0;
 
   /// A run was in flight at the last build: a run that starts while another

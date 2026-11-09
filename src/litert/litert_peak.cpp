@@ -505,7 +505,7 @@ static std::string pendingNote()
   if (!litertPendingLibrary(path))
     return std::string();
   return (path.empty() ? std::string("the library the default search finds") : path) +
-         " takes effect the next time xpupeak starts: one process keeps the "
+         " takes effect the next time XpuPeak starts: one process keeps the "
          "LiteRT it loaded first";
 }
 

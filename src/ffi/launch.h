@@ -8,7 +8,7 @@
 // to the launch it was aimed at.  The engine process (engine.cpp) does not,
 // since its app may send them before the launch has begun and a reset would
 // lose them.
-int xpupeakLaunch(int argc, const char **argv, XpupeakEventCallback on_event,
+int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
                   void *user_data, bool resetControls);
 
 #endif // XPUPEAK_FFI_LAUNCH_H

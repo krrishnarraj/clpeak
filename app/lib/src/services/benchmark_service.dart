@@ -30,18 +30,18 @@ enum BenchmarkState { idle, running, cancelling, finished }
 /// [ready] completes for anyone that must wait (run start, AUTORUN).  Runs
 /// never see a partial catalog — [start] refuses while loading.
 ///
-/// Enumeration and runs go through [XpupeakEngine]: on desktop a process of
+/// Enumeration and runs go through [XpuPeakEngine]: on desktop a process of
 /// their own, in this one when none is given (tests, and mobile).
 class BenchmarkService extends ChangeNotifier {
-  BenchmarkService(this._bindings, this._history, {XpupeakEngine? engine})
+  BenchmarkService(this._bindings, this._history, {XpuPeakEngine? engine})
       : _engine = engine ?? InProcessEngine(_bindings) {
     _catalog = BackendCatalog(const []);
     _config = RunConfig.allDevices(_catalog);
     version = _bindings.version();
   }
 
-  final XpupeakBindings _bindings;
-  final XpupeakEngine _engine;
+  final XpuPeakBindings _bindings;
+  final XpuPeakEngine _engine;
   final RunHistoryStore _history;
 
   late BackendCatalog _catalog;
@@ -212,7 +212,7 @@ class BenchmarkService extends ChangeNotifier {
   LitertStatus litertStatus() => _engine.litertStatus();
 
   /// Whether a runtime choice waits for the next launch once a runtime has
-  /// loaded ([XpupeakEngine.runtimeFixedOnceLoaded]); on desktop it applies
+  /// loaded ([XpuPeakEngine.runtimeFixedOnceLoaded]); on desktop it applies
   /// to the next enumeration and run instead.
   bool get runtimeFixedOnceLoaded => _engine.runtimeFixedOnceLoaded;
 
@@ -459,9 +459,9 @@ class BenchmarkService extends ChangeNotifier {
     _run = run;
     run.events.listen(_onEvent, onDone: () async {
       exitCode = await run.result.catchError((_) => 1);
-      cancelled = exitCode == xpupeakRunCancelled;
+      cancelled = exitCode == xpuPeakRunCancelled;
       runFailure = run.failure;
-      if (runFailure == null && exitCode == xpupeakRunBadArgs) {
+      if (runFailure == null && exitCode == xpuPeakRunBadArgs) {
         // Refused before anything ran -- a continuation the native side
         // will not resume says why on the log.
         final why = _document.log.lastWhere(
@@ -574,7 +574,7 @@ class BenchmarkService extends ChangeNotifier {
   /// App-lifecycle hook: the engine is told whether the app is on screen,
   /// and a run in this process waits at its next boundary between readings
   /// while it is not.  On a phone an app off screen runs on background cores
-  /// at background clocks until it is frozen: a Galaxy Z Fold8 froze xpupeak
+  /// at background clocks until it is frozen: a Galaxy Z Fold8 froze XpuPeak
   /// about 45 and 70 s after it left, once inside a test, and its CPU
   /// backend, which started as the app came back, ran on four of eight
   /// cores.  The run's log records each change.  Desktop runs live in the
@@ -618,7 +618,7 @@ class BenchmarkService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onEvent(XpupeakEvent event) {
+  void _onEvent(XpuPeakEvent event) {
     switch (event) {
       case BackendBeginEvent(:final backend):
         currentBackend = backend;

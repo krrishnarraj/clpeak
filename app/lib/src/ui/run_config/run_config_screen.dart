@@ -194,7 +194,7 @@ class _BackendSelector extends StatelessWidget {
         children: [
           CPanelHead(
             title: backend.name,
-            icon: XpupeakTheme.backendIcon(backend.name),
+            icon: XpuPeakTheme.backendIcon(backend.name),
             trailing: CSwitch(
               value: selectedCount > 0,
               onChanged: (on) => service.updateConfig((c) {
@@ -266,7 +266,7 @@ class _CategoryChips extends StatelessWidget {
               CChip(
                 label: category.label,
                 selected: config.categories.contains(category),
-                color: XpupeakTheme.categoryColor(category,
+                color: XpuPeakTheme.categoryColor(category,
                     brightness: brightness),
                 onTap: () => service.updateConfig((c) =>
                     c.categories.contains(category)

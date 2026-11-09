@@ -1,7 +1,7 @@
 #ifndef XPUPEAK_ONNX_RUNTIME_H
 #define XPUPEAK_ONNX_RUNTIME_H
 
-// Load-on-demand ONNX Runtime.  The library is dlopen'd so xpupeak ships with
+// Load-on-demand ONNX Runtime.  The library is dlopen'd so XpuPeak ships with
 // no hard dependency: only one symbol (OrtGetApiBase) is ever resolved by
 // name -- every other entry point comes through the OrtApi function-pointer
 // table that call returns.  When no usable runtime is found the backend

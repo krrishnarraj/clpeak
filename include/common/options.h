@@ -176,7 +176,7 @@ struct CliOptions {
   std::vector<Backend> requestedButNotBuilt() const;
 };
 
-// Describe how xpupeak was asked to run, for the result document's `invocation`
+// Describe how XpuPeak was asked to run, for the result document's `invocation`
 // block.  Every number in a run is sensitive to this -- a shorter --max-time-gpu
 // measures a different thing, and a selective run is not a full one even though
 // the file looks the same shape -- so it is recorded rather than inferred.
@@ -184,8 +184,8 @@ struct CliOptions {
 Invocation invocationFrom(const CliOptions &opts, int argc, char **argv);
 
 // The name help, usage and error messages give the program: the one it was
-// started as (argv[0]'s file name, less .exe), so `clpeak` says clpeak and
-// `xpupeak` says xpupeak.  The CLI sets it before parsing; anything that
+// started as (argv[0]'s file name, less .exe), so `clpeak` says `clpeak` and
+// `xpupeak` says `xpupeak`.  The CLI sets it before parsing; anything that
 // never does, xpupeak_ffi among them, keeps "xpupeak".
 void setProgramName(const char *argv0);
 const char *programName();

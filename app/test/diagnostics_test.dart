@@ -21,7 +21,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _host(RunDocument doc) => MaterialApp(
-      theme: XpupeakTheme.dark(),
+      theme: XpuPeakTheme.dark(),
       home: Scaffold(body: ResultsBody(document: doc)),
     );
 
@@ -76,7 +76,7 @@ Uint8List _pb(Map<int, Object> fields) {
 void main() {
   group('log events', () {
     test('decode into the entry the file records', () {
-      final event = XpupeakEvent.fromJson({
+      final event = XpuPeakEvent.fromJson({
         't': 'log',
         'backend': 'Vulkan',
         'platform': 'Vulkan',
@@ -101,7 +101,7 @@ void main() {
     });
 
     test('a variant joins the test key, as on metric events', () {
-      final event = XpupeakEvent.fromJson({
+      final event = XpuPeakEvent.fromJson({
         't': 'log',
         'level': 'debug',
         'test': 'single_precision_compute',
@@ -113,7 +113,7 @@ void main() {
     });
 
     test('an unknown event kind becomes a warning, not a crash', () {
-      final event = XpupeakEvent.fromJson({'t': 'brand_new'}) as LogEntryEvent;
+      final event = XpuPeakEvent.fromJson({'t': 'brand_new'}) as LogEntryEvent;
       expect(event.entry.level, LogLevel.warning);
       expect(event.entry.message, contains('unknown event'));
     });

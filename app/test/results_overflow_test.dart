@@ -49,7 +49,7 @@ void _add(
 }
 
 Widget _host(RunDocument doc) => MaterialApp(
-      theme: XpupeakTheme.dark(),
+      theme: XpuPeakTheme.dark(),
       home: Scaffold(body: ResultsBody(document: doc)),
     );
 

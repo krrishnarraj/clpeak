@@ -1,4 +1,4 @@
-/// The xpupeak widget kit.
+/// The XpuPeak widget kit.
 ///
 /// Deliberately built on raw Flutter primitives (`Container`, `GestureDetector`,
 /// `MouseRegion`) rather than Material's `Card` / `Chip` / `Switch` /

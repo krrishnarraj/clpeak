@@ -551,7 +551,7 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
     const int nth = ++seen[ep.providerKey + '\x1f' + ep.typeStr];
     ep.epDevice = ep.typeStr + (nth > 1 ? "#" + std::to_string(nth) : "");
 
-    // Named as xpupeak names the provider when it knows it and the device
+    // Named as XpuPeak names the provider when it knows it and the device
     // is the one its table means (QNN's HTP row is "Hexagon NPU", not its
     // GPU backend); otherwise from what the runtime reported, which is
     // exact if less pretty: "QNN (Qualcomm GPU)".

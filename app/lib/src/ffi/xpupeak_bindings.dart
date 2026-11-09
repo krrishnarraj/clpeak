@@ -6,14 +6,14 @@ import 'package:ffi/ffi.dart';
 import 'xpupeak_library.dart';
 
 /// Return codes of xpupeak_launch (see src/ffi/xpupeak_ffi.h).
-const int xpupeakRunOk = 0;
-const int xpupeakRunBadArgs = -1;
-const int xpupeakRunCancelled = -2;
-const int xpupeakRunBusy = -3;
+const int xpuPeakRunOk = 0;
+const int xpuPeakRunBadArgs = -1;
+const int xpuPeakRunCancelled = -2;
+const int xpuPeakRunBusy = -3;
 
 /// The native event callback signature:
-///   void (*XpupeakEventCallback)(void *user_data, char *event_json)
-typedef XpupeakEventCallbackNative = Void Function(
+///   void (*XpuPeakEventCallback)(void *user_data, char *event_json)
+typedef XpuPeakEventCallbackNative = Void Function(
     Pointer<Void> userData, Pointer<Utf8> eventJson);
 
 typedef _VersionNative = Pointer<Utf8> Function();
@@ -21,13 +21,13 @@ typedef _CatalogNative = Pointer<Utf8> Function();
 typedef _FreeStringNative = Void Function(Pointer<Utf8>);
 typedef _FreeString = void Function(Pointer<Utf8>);
 typedef _LaunchNative = Int32 Function(Int32 argc, Pointer<Pointer<Utf8>> argv,
-    Pointer<NativeFunction<XpupeakEventCallbackNative>> onEvent,
+    Pointer<NativeFunction<XpuPeakEventCallbackNative>> onEvent,
     Pointer<Void> userData);
-typedef XpupeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
-    Pointer<NativeFunction<XpupeakEventCallbackNative>> onEvent,
+typedef XpuPeakLaunch = int Function(int argc, Pointer<Pointer<Utf8>> argv,
+    Pointer<NativeFunction<XpuPeakEventCallbackNative>> onEvent,
     Pointer<Void> userData);
 typedef _RequestCancelNative = Void Function();
-typedef XpupeakRequestCancel = void Function();
+typedef XpuPeakRequestCancel = void Function();
 typedef _SetOnScreenNative = Void Function(Int32 onScreen);
 typedef _SetOnScreen = void Function(int onScreen);
 typedef _SetPausedNative = Void Function(Int32 paused);
@@ -46,8 +46,8 @@ typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
 typedef _LitertStatusNative = Pointer<Utf8> Function();
 
 /// Thin, manual dart:ffi bindings over the 14 xpupeak_* symbols.
-class XpupeakBindings {
-  XpupeakBindings._(DynamicLibrary lib)
+class XpuPeakBindings {
+  XpuPeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
             'xpupeak_version'),
         _catalog = lib.lookupFunction<_CatalogNative, _CatalogNative>(
@@ -55,9 +55,9 @@ class XpupeakBindings {
         _freeString = lib.lookupFunction<_FreeStringNative, _FreeString>(
             'xpupeak_free_string'),
         launch =
-            lib.lookupFunction<_LaunchNative, XpupeakLaunch>('xpupeak_launch'),
+            lib.lookupFunction<_LaunchNative, XpuPeakLaunch>('xpupeak_launch'),
         requestCancel =
-            lib.lookupFunction<_RequestCancelNative, XpupeakRequestCancel>(
+            lib.lookupFunction<_RequestCancelNative, XpuPeakRequestCancel>(
                 'xpupeak_request_cancel'),
         _setOnScreen = lib.lookupFunction<_SetOnScreenNative, _SetOnScreen>(
             'xpupeak_set_on_screen'),
@@ -82,13 +82,13 @@ class XpupeakBindings {
             lib.lookupFunction<_LitertStatusNative, _LitertStatusNative>(
                 'xpupeak_copy_litert_status_json');
 
-  factory XpupeakBindings.open() => XpupeakBindings._(openXpupeakLibrary());
+  factory XpuPeakBindings.open() => XpuPeakBindings._(openXpuPeakLibrary());
 
   final _VersionNative _version;
   final _CatalogNative _catalog;
   final _FreeString _freeString;
-  final XpupeakLaunch launch;
-  final XpupeakRequestCancel requestCancel;
+  final XpuPeakLaunch launch;
+  final XpuPeakRequestCancel requestCancel;
   final _SetOnScreen _setOnScreen;
   final _SetPaused _setPaused;
   final _SetOnnxLib _setOnnxLibrary;
@@ -108,7 +108,7 @@ class XpupeakBindings {
   /// it go on (xpupeak_set_paused).  Each change is recorded on its log.
   void setPaused(bool paused) => _setPaused(paused ? 1 : 0);
 
-  /// xpupeak version string, e.g. "2.1.0-3-gabc1234".
+  /// XpuPeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();
 
   /// Consume a malloc'd native string: decode then free.
@@ -222,7 +222,7 @@ class XpupeakBindings {
 
 }
 
-/// One plugin execution-provider library, as [XpupeakBindings.setOnnxEpLibraries]
+/// One plugin execution-provider library, as [XpuPeakBindings.setOnnxEpLibraries]
 /// takes it: the registration name the provider expects and the library.
 class OnnxEpLibrary {
   const OnnxEpLibrary(
@@ -278,7 +278,7 @@ class OnnxEpLibraryStatus {
 }
 
 /// A runtime setup chosen after the runtime loaded: it loads the next time
-/// xpupeak starts (see [OnnxStatus.pendingRuntime]).
+/// XpuPeak starts (see [OnnxStatus.pendingRuntime]).
 class OnnxPendingRuntime {
   const OnnxPendingRuntime(
       {required this.path, required this.winml, required this.winmlPath});
@@ -349,7 +349,7 @@ class OnnxStatus {
 
   /// The runtime setup -- library and Windows ML -- chosen since this
   /// runtime loaded.  One process keeps the runtime it loaded first
-  /// (src/onnx/onnx_runtime.h), so the choice loads the next time xpupeak
+  /// (src/onnx/onnx_runtime.h), so the choice loads the next time XpuPeak
   /// starts.  Null when nothing waits.
   final OnnxPendingRuntime? pendingRuntime;
 
@@ -399,7 +399,7 @@ class LitertStatus {
   final String error; // populated only when !available
 
   /// A library chosen since this one loaded, which loads the next time
-  /// xpupeak starts ('' = the default search); null when nothing waits.
+  /// XpuPeak starts ('' = the default search); null when nothing waits.
   final String? pendingPath;
 
   factory LitertStatus.fromJson(Map<String, dynamic> m) {

@@ -32,7 +32,7 @@ struct OnnxSessionResult
 };
 
 // Build a session for `ep` from in-memory model bytes.  For non-CPU EPs the
-// EP is appended with xpupeak's default options for that provider and CPU
+// EP is appended with XpuPeak's default options for that provider and CPU
 // fallback is disabled.  On failure `error` carries a one-line reason
 // suitable for a skip row.
 // `keepConstantsUnfolded` stops ORT evaluating a subgraph of constants at
@@ -188,7 +188,7 @@ bool onnxProviderHasOwnMemory(const onnx_ep_info_t &ep);
 
 // Attach `ep` to throwaway session options: the provider-registration half
 // of session creation, with no model and no session.  Empty when the
-// provider accepts xpupeak's options for this target (an OpenVINO target
+// provider accepts XpuPeak's options for this target (an OpenVINO target
 // with no hardware behind it fails here, fast, with nothing compiled);
 // otherwise the one-line refusal.  The viability probe tries this before
 // building any graph.

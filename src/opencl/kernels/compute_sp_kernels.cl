@@ -12,7 +12,7 @@ MSTRINGIFY(
 // builtin as a slow precise path and never lower it to the hardware FMA:
 // Apple's deprecated CL-on-Metal compiler halves peak fp32 that way.  This
 // also matches the integer/char/short kernels here and the explicit fma
-// intrinsics every other xpupeak backend uses.  Do not "restore" mad().
+// intrinsics every other XpuPeak backend uses.  Do not "restore" mad().
 
 \n#undef MAD_4
 \n#undef MAD_16

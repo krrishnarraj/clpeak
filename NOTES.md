@@ -1,6 +1,6 @@
 # Crash gates
 
-Every place xpupeak withholds work, or does it differently, because a runtime
+Every place XpuPeak withholds work, or does it differently, because a runtime
 **crashes the process** (or corrupts its heap) instead of declining -- and
 nothing else.  A refusal the runtime speaks is learned by asking and needs no
 list here; so does a format a runtime is too old to have.  These are the
@@ -104,7 +104,7 @@ stay measured.  Lifting either is deleting its `if`.
 - **Wider than the fault, and why**: it needs this provider *and* this graph
   *and* that GPU -- the `int8_weight` matmul ladder runs on the same A380,
   and an RTX 4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run
-  this block.  xpupeak cannot key on the third: DirectML is registered with no
+  this block.  XpuPeak cannot key on the third: DirectML is registered with no
   device id, ORT picks the adapter, and a built-in provider's
   `onnx_ep_info_t` carries no hardware identity.  Keying on a guess that is
   wrong on a two-GPU box would take the run down, so the row is withheld on
@@ -147,7 +147,7 @@ Metal residency leak and the crash without OpenCL; those gates now stand
 only for an older runtime handed in with `--litert-lib`
 (`LitertRuntime::abi11` false: no
 `LiteRtCompiledModelIsNonCpuFullyAccelerated`, ABI 1.0.0), and go when
-xpupeak stops running those.
+XpuPeak stops running those.
 
 ### int16x8 is never sent to the GPU
 
@@ -308,7 +308,7 @@ xpupeak stops running those.
 - **Fault**: `vkCreateComputePipelines` ends the process with a SIGSEGV
   (SEGV_MAPERR at 0x8, a null pointer) in the driver's shader compiler,
   `libllvm-qgl.so` +0xcbc240, under `runCoopMatrix`.  The backtrace does
-  not name the row; isolating it outside xpupeak does.  fp16 x fp16 + fp16
+  not name the row; isolating it outside XpuPeak does.  fp16 x fp16 + fp16
   at the 64x64x16 tile the device advertises crashes the compiler only
   when the accumulator reaches `OpCooperativeMatrixMulAddKHR` through an
   `OpPhi`, which is how the loop carries it once `glslc -O`

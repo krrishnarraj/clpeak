@@ -65,7 +65,7 @@ public:
 
   // Whether this build carries code for the device's gfx arch at all.  False
   // for a GPU missing from the arch list the kernels were compiled for, or
-  // newer than it: none of xpupeak's own kernels can run on such a GPU.
+  // newer than it: none of XpuPeak's own kernels can run on such a GPU.
   bool archCovered = true;
 
   // Why init() returned false: the HIP call and its error.

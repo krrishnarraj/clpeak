@@ -1,5 +1,5 @@
 // Stand-in for the build_config.h LiteRT's own CMake generates at configure
-// time (litert/build_common/build_config.h.in).  xpupeak never builds LiteRT:
+// time (litert/build_common/build_config.h.in).  XpuPeak never builds LiteRT:
 // it compiles against these headers and dlopens the runtime, and the two
 // toggles below only trim declarations from the headers, so both stay off.
 #ifndef LITERT_BUILD_COMMON_BUILD_CONFIG_H_

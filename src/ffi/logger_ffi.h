@@ -13,7 +13,7 @@
 class LoggerFfi : public logger
 {
 public:
-    LoggerFfi(XpupeakEventCallback onEventCb, void *userData,
+    LoggerFfi(XpuPeakEventCallback onEventCb, void *userData,
               bool mirrorToRunLog = false)
         : logger("", mirrorToRunLog), onEventCb(onEventCb), userData(userData) {}
 
@@ -21,7 +21,7 @@ protected:
     void onEvent(const LogEvent &e) override;
 
 private:
-    XpupeakEventCallback onEventCb;
+    XpuPeakEventCallback onEventCb;
     void               *userData;
 };
 
@@ -30,6 +30,6 @@ private:
 std::string ffiEventToJson(const LogEvent &e);
 
 // malloc-copy a string and hand it to the callback (no-op when cb is null).
-void ffiEmitJson(XpupeakEventCallback cb, void *userData, const std::string &json);
+void ffiEmitJson(XpuPeakEventCallback cb, void *userData, const std::string &json);
 
 #endif // LOGGER_FFI_H

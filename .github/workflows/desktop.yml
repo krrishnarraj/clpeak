@@ -297,10 +297,10 @@ jobs:
         shell: bash
         run: cd build && cpack -G ZIP -C Release
 
-      # The zip as a user unpacks it.  bin/ holds both commands: clpeak is the
-      # same program under its 3.x name -- a link to xpupeak on Unix, which the
+      # The zip as a user unpacks it.  bin/ holds both commands: `clpeak` is the
+      # same program under its 3.x name -- a link to `xpupeak` on Unix, which the
       # zip has to keep as a link, and a copy of the exe on Windows -- and each
-      # prints the same version line under its own name.  A packaged xpupeak
+      # prints the same version line under its own name.  A packaged `xpupeak`
       # that cannot start fails the rows the Run step is strict on; on the
       # others the runner lacks the GPU runtime the binary loads.
       - name: Verify package

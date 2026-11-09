@@ -52,7 +52,7 @@ void LoggerText::onEvent(const LogEvent &e)
 
 void LoggerText::renderLog(const LogEntry &l)
 {
-    // Library diagnostics and xpupeak's own debug/info lines are the --verbose
+    // Library diagnostics and XpuPeak's own debug/info lines are the --verbose
     // channel: stderr, flushed per line, so the last one before a driver-side
     // crash is on screen -- and written past any console capture in progress,
     // or the line would be captured again.
@@ -63,7 +63,7 @@ void LoggerText::renderLog(const LogEntry &l)
         xpupeak::stderrWrite(l.message + "\n");
         return;
     }
-    // xpupeak's own warnings and errors print inline with the results, as
+    // XpuPeak's own warnings and errors print inline with the results, as
     // notes always have -- before the message, or it would appear above rows
     // that were measured before it.
     flushMetrics();

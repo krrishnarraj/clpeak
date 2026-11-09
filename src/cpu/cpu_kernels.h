@@ -142,7 +142,7 @@ struct MissingKernel {
   enum Why {
     NotBuilt,          // CMake skipped the TU, or the TU compiled without it
     TileStateRefused,  // AMX: the OS did not grant the tile state
-    NotWritten,        // xpupeak has no kernel for it on this architecture
+    NotWritten,        // XpuPeak has no kernel for it on this architecture
   } why;
   const char *feature;   // "FEAT_SME", "AMX-FP16", "SHA512"
 };
