@@ -37,6 +37,14 @@ description: |
 
   Source, issues and reference results: https://github.com/krrishnarraj/xpupeak
 
+# The store page's links.  The repo is renamed to xpupeak just before 4.0.0,
+# and the site follows it.
+license: Apache-2.0
+contact: https://github.com/krrishnarraj/xpupeak/issues
+issues: https://github.com/krrishnarraj/xpupeak/issues
+source-code: https://github.com/krrishnarraj/xpupeak
+website: https://krrishnarraj.github.io/xpupeak/
+
 grade: stable
 confinement: classic
 
