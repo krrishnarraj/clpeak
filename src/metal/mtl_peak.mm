@@ -24,7 +24,7 @@ MetalPeak::~MetalPeak() { delete impl; impl = nullptr; }
 int MetalPeak::runAll()
 {
     impl = new MetalPeakImpl();
-    impl->allDevices = copyXpupeakMetalDevices();
+    impl->allDevices = copyXpuPeakMetalDevices();
     if (impl->allDevices.count == 0)
     {
         log->note("Metal: no devices found\n");
@@ -111,7 +111,7 @@ BackendInventory MetalPeak::enumerate()
     BackendInventory inv;
     inv.id = kBackend;
 
-    NSArray<id<MTLDevice>> *devs = copyXpupeakMetalDevices();
+    NSArray<id<MTLDevice>> *devs = copyXpuPeakMetalDevices();
     if (devs.count == 0)
     {
         inv.unavailableReason = "no devices found";

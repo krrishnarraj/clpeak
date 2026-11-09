@@ -7,7 +7,7 @@ This backend exists to reach **NPUs**.  Vendor neural accelerators (Qualcomm
 Hexagon, Intel AI Boost, AMD XDNA, Apple Neural Engine) expose no ISA, no
 kernel language, and no dispatch API — the vendor's AI runtime *is* the
 lowest reachable level.  ONNX Runtime is the one layer that fronts all of
-them on all five OSes xpupeak targets, so an execution provider (EP) is
+them on all five OSes XpuPeak targets, so an execution provider (EP) is
 treated as a device here, exactly as a `cl_device_id` is in the OpenCL
 backend.
 
@@ -223,7 +223,7 @@ place:
   HTP options a built-in one does, with the backend chosen by the device's
   type (`backend_type` htp/gpu/cpu) -- or `backend_path` naming the
   `QnnHtp.dll` beside the plugin outright when it is there, so nothing is
-  left to a loader search.  A plugin xpupeak has no wiring for runs with
+  left to a loader search.  A plugin XpuPeak has no wiring for runs with
   the provider's own defaults: the person naming the library asked for
   exactly that, and the fallback guard still fails any session the
   provider does not take whole.
@@ -258,7 +258,7 @@ registered under -- so the CLI and the GUI, whose registration dialog
 suggests the catalog's names, list the same devices (`onnxSyncEpLibraries`
 says why one copy).  The replacing library's status carries `replaces`;
 the listing's info line and a run's notes say it, and the GUI shows it on
-that library's row.  The DLL is not shipped with xpupeak:
+that library's row.  The DLL is not shipped with XpuPeak:
 `tools/fetch_winml.ps1` downloads Microsoft's NuGet package and stages its
 `runtimes/win-<arch>/native/` DLLs under `build/winml/<arch>/`, and with a
 directory given to `--onnx-winml` and no `--onnx-lib`, the `onnxruntime.dll`
@@ -357,7 +357,7 @@ for one float8 E5M2 graph it was never going to accept.
 None of that search can help here. Every session in this backend disables CPU
 fallback, so a partition TensorRT only partly claims fails the session exactly
 as a rejected one does. `onnx_session.cpp` sets the limit to **1**, which
-answers the only question xpupeak asks — all of it, or none. Measured on the
+answers the only question XpuPeak asks — all of it, or none. Measured on the
 same E5M2 graph that produced the flood: **four seconds and dozens of identical
 errors became one millisecond and two lines.**
 
@@ -394,7 +394,7 @@ toggle `--verbose` between runs of one process.
 ## Models are emitted as protobuf bytes, not files
 
 `onnx_model.cpp` writes the ONNX wire format by hand (varint + length-
-delimited fields are all a single-op `ModelProto` needs).  This keeps xpupeak
+delimited fields are all a single-op `ModelProto` needs).  This keeps XpuPeak
 free of a protobuf dependency and of any `.onnx` asset to ship or embed, and
 guarantees byte-identical models on every platform — which is what makes the
 cross-vendor comparison meaningful.  Weights are embedded as an initializer
@@ -496,7 +496,7 @@ graph the EP cannot take **fails session creation** and the row reports
 
 Limits worth knowing: the guard is enforced at the ORT partitioning level.
 An EP that accepts a node and then falls back *internally* (QNN dropping
-from HTP to the DSP) is invisible to ORT and to xpupeak.  Two cross-checks
+from HTP to the DSP) is invisible to ORT and to XpuPeak.  Two cross-checks
 narrow that gap: the CPU EP row — always enumerated, always last — should
 be far below any accelerator row, and the `onnx-numeric-error` fp32 row
 exposes an EP that took an fp32 graph and computed it at lower precision
@@ -742,7 +742,7 @@ twenty times the quantization noise the same recipe costs everywhere else.
 The cause is the x86 U8S8 kernel: without VNNI, MLAS multiplies uint8 by int8
 into int16 accumulators, which saturate when the weights use the full int8
 range. It is the reason ONNX Runtime's quantizer offers `reduce_range` for
-pre-VNNI x86. xpupeak deliberately does **not** reduce the range — the point
+pre-VNNI x86. XpuPeak deliberately does **not** reduce the range — the point
 is to report what full-range int8 actually costs on that hardware, and a
 throughput row alone would have called it a win.
 
@@ -854,7 +854,7 @@ which the provider registers with no support query.
 keyed on.** The `int8_weight` matmul ladder runs on the same Arc A380 that
 dies on the block, so the format is fatal only in this graph; and an RTX
 4060, a UHD 630, an Adreno X1-45 and the DirectML CPU all run this graph, so
-it wants that GPU too. But xpupeak registers DirectML with no device id, ORT
+it wants that GPU too. But XpuPeak registers DirectML with no device id, ORT
 picks the adapter, and nothing in `onnx_ep_info_t` says which GPU answered —
 so `variantFence` in `block.cpp` withholds the row on every DirectML device
 and says why, while gemm, conv and the accuracy rows go on measuring the
@@ -1061,7 +1061,7 @@ too (3918 and 4377). A kernel that unpacks into a 16-bit multiply reads near
 its fp16 row instead (Core ML's GPU: 272 and 279). `int8_qdq_conv1x1` reads 9362
 against `int8_qdq`'s 9463, QLinearConv against QLinearMatMul.
 
-**TensorRT reaches float8 and xpupeak's own numbers say what it costs.** RTX 5060,
+**TensorRT reaches float8 and XpuPeak's own numbers say what it costs.** RTX 5060,
 ONNX Runtime 1.30: fp8_e4m3 fuses into a `TRTKernel_...` at **75.4 TFLOPS**,
 against 66.5 for fp16, 38.1 for bf16, 19.2 for fp32 and 124.6 TOPS for int8.
 Read against the accuracy rows that is a coherent picture of one card: fp16 at
@@ -1096,7 +1096,7 @@ which is what makes an int8 row an int8 row — but `QLinearMatMul` is an intege
 operator with no float8 type constraint, so on a float8 graph the rewrite turns
 a valid model into one that fails its own type check: *"Type
 'tensor(float8e4m3fn)' of input parameter (A_q) of operator (QLinearMatMul) in
-node (n2) is invalid"*. The message reads like xpupeak emitted a broken graph and
+node (n2) is invalid"*. The message reads like XpuPeak emitted a broken graph and
 it did not; the graph was correct until ORT changed it. `onnxCreateSession`
 takes `keepQdqUnfused` for exactly this, adding
 `QDQSelectorActionTransformer` to the disabled list, and only float8 graphs ask
@@ -1198,7 +1198,7 @@ that is valid — right up until ORT rewrites it. The QDQ selector fuses
 DequantizeLinear/MatMul/QuantizeLinear into `QLinearMatMul`, which carries fp32
 scales and nothing else, and the rewritten graph then fails its own type check:
 *"Type 'tensor(float16)' of input parameter (U_cs) of operator (QLinearMatMul)
-is invalid"*. The message reads as though xpupeak emitted a broken graph. It did
+is invalid"*. The message reads as though XpuPeak emitted a broken graph. It did
 not. This is the float8 trap from the opposite direction, and the same lesson:
 **check what ORT rewrote the graph into before believing anything.**
 
@@ -1514,7 +1514,7 @@ kernel ran at a TOPS and answered 2.5 million ppm):
 ## The decode rows declare bytes; two providers do not move them
 
 `onnx-block-decode`'s numerator is what the *model declares* -- that is all
-xpupeak can know, and a provider is free to store the weights narrower than
+XpuPeak can know, and a provider is free to store the weights narrower than
 asked.  Two of them do, from opposite directions, and both land in the same
 place: a row reading twice its neighbour off the same wall clock.
 

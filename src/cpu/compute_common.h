@@ -162,7 +162,7 @@
       out += std::string("the OS refused ") + (one ? "its" : "their") + " tile state";
       break;
     case MissingKernel::NotWritten:
-      out += std::string("xpupeak has no ") + arch + " kernel for " + it + " yet";
+      out += std::string("XpuPeak has no ") + arch + " kernel for " + it + " yet";
       break;
     }
   }

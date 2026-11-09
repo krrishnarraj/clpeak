@@ -49,7 +49,7 @@ char *copyString(const std::string &value)
 
 // A log entry recorded outside any backend's logger (the RunLog's fallback):
 // forwarded as the same `log` event a logger would have sent.
-void emitLogEntry(XpupeakEventCallback cb, void *userData, const LogEntry &entry)
+void emitLogEntry(XpuPeakEventCallback cb, void *userData, const LogEntry &entry)
 {
     LogEvent e;
     e.kind        = LogEvent::Kind::Log;
@@ -62,7 +62,7 @@ void emitLogEntry(XpupeakEventCallback cb, void *userData, const LogEntry &entry
 
 // `durationS` is the saved document's `duration_s`, negative when there is
 // none: for a resumed run only the native side knows the parts' time.
-void emitDone(XpupeakEventCallback cb, void *userData, int status, bool cancelled,
+void emitDone(XpuPeakEventCallback cb, void *userData, int status, bool cancelled,
               double durationS = -1.0)
 {
     std::string json = "{\"t\":\"done\",\"status\":" + std::to_string(status) +
@@ -267,12 +267,12 @@ void xpupeak_set_paused(int paused)
 }
 
 int xpupeak_launch(int argc, const char **argv,
-                   XpupeakEventCallback on_event, void *user_data)
+                   XpuPeakEventCallback on_event, void *user_data)
 {
-    return xpupeakLaunch(argc, argv, on_event, user_data, /*resetControls=*/true);
+    return xpuPeakLaunch(argc, argv, on_event, user_data, /*resetControls=*/true);
 }
 
-int xpupeakLaunch(int argc, const char **argv, XpupeakEventCallback on_event,
+int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
                   void *user_data, bool resetControls)
 {
     bool expected = false;

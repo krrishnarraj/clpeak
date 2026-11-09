@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the xpupeak_ffi iOS framework (device + simulator) and stages the
-# artifacts the Flutter Runner's "Embed xpupeak native frameworks" build
+# artifacts the Flutter Runner's "Embed XpuPeak native frameworks" build
 # phase consumes:
 #
 #   app/ios/xpupeak_native/xpupeak_ffi.xcframework       (both platforms)

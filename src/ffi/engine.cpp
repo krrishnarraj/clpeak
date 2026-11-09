@@ -255,7 +255,7 @@ int xpupeak_engine_main(int argc, const char **argv)
     std::vector<const char *> run{"xpupeak"};
     for (; i < argc; i++)
         run.push_back(argv[i]);
-    const int rc = xpupeakLaunch(static_cast<int>(run.size()), run.data(),
+    const int rc = xpuPeakLaunch(static_cast<int>(run.size()), run.data(),
                                  &onEvent, &sink, /*resetControls=*/false);
     // The status itself travels on the `done` event; the exit code only says
     // whether there was one worth reading.

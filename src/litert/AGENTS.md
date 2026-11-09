@@ -12,7 +12,7 @@ first-party API with on-device compilation for all of them, LiteRT's
 `CompiledModel`.  The same runtime carries a GPU accelerator on every OS
 (OpenCL on Android, Metal on Apple, WebGPU on Linux and Windows) and XNNPACK
 on the CPU, so it also answers what the mainstream mobile ML runtime gets
-out of silicon xpupeak already measures raw.  Each accelerator slot -- NPU,
+out of silicon XpuPeak already measures raw.  Each accelerator slot -- NPU,
 GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 
 ## Quick Lookups
@@ -234,7 +234,7 @@ kernel name from one profiled run says which kernel it was.
   the reason, when no form answers right -- and the accuracy row is an
   `Error` carrying the figure.  A figure near 2.5 million ppm
   says little by itself: any full-range int8 output uncorrelated with the
-  product reads that against xpupeak's operands (a right one reads 9,300 to
+  product reads that against XpuPeak's operands (a right one reads 9,300 to
   10,500).  What says more is the marker: the check fills the output with
   0x80 bytes before the run, an answer still holding it after two runs was
   never written, and one that holds it only after the first landed after
@@ -609,7 +609,7 @@ budgets.
   `com.google.ai.edge.litert` AARs, `litert` (arm64: `libLiteRt.so`, 5.6 MB)
   and `litert-gpu` (`libLiteRtClGlAccelerator.so`, 3.3 MB), without the
   `litert-api` both depend on -- its Kotlin surface, a JNI library, Guava
-  and Play's AI delivery client, none of which xpupeak calls.  That AAR also
+  and Play's AI delivery client, none of which XpuPeak calls.  That AAR also
   carries LiteRT's `uses-native-library` list (OpenCL, FastRPC, the Tensor
   and MediaTek NPU system libraries), so the app's manifest repeats it,
   plus `libneuronusdk_adapter.10.mtk.so`, which LiteRT opens on a
@@ -656,7 +656,7 @@ budgets.
   Maven package has no `libQnnIr.so` / `libQnnSaver.so`, and none is
   needed: `QnnManager` opens libQnnIr only for the IR backend
   (`qnn_backend`, or a `dlc_dir`) and libQnnSaver only for
-  `saver_output_dir`, none of which xpupeak sets.  (2.2.0's Android compiler
+  `saver_output_dir`, none of which XpuPeak sets.  (2.2.0's Android compiler
   plugin was linked against both, and bionic refuses a library one of whose
   DT_NEEDED entries is missing; 2.3.0's links no QNN library, and on an
   arm64 emulator it loads without them.)

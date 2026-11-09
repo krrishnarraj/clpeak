@@ -187,7 +187,7 @@ if(XPUPEAK_ENABLE_ONEAPI)
 
     # SYCL device code must be compiled AND linked by a SYCL-aware compiler
     # (CMAKE_CXX_COMPILER_ID == "IntelLLVM").  The kernels live in a static
-    # lib that is link-resolved into the xpupeak executable, so the *whole*
+    # lib that is link-resolved into the `xpupeak` executable, so the *whole*
     # binary must be built with icpx/icx -- MSVC and GCC cannot embed device
     # images.
     #   Linux:   cmake -B build -DCMAKE_CXX_COMPILER=icpx -DCMAKE_C_COMPILER=icx
@@ -230,7 +230,7 @@ add_subdirectory(src/ffi)
 
 # ---- Backend status summary ------------------------------------------------
 # Print a single block at the end of configure so the user can see at a
-# glance which backends will be built into the resulting xpupeak binary.
+# glance which backends will be built into the resulting `xpupeak` binary.
 set(_xpupeak_summary "")
 if(XPUPEAK_ENABLE_OPENCL)
     string(APPEND _xpupeak_summary "  OpenCL : ENABLED\n")
@@ -336,7 +336,7 @@ else()
 endif()
 message(STATUS "")
 message(STATUS "===============================================================")
-message(STATUS "xpupeak components summary")
+message(STATUS "XpuPeak components summary")
 message(STATUS "")
 # Derived at configure time, so re-running cmake is what refreshes it.
 message(STATUS "  Version: ${XPUPEAK_VERSION_STR}")

@@ -2,6 +2,7 @@
 #include <common/common.h>
 #include <common/json.h>
 #include <common/json_writer.h>
+#include <common/options.h>
 #include <version.h>
 
 #include <algorithm>
@@ -521,7 +522,7 @@ bool saveRunJson(const RunDocument &doc, const std::string &filename)
     std::ofstream f(filename);
     if (!f.is_open())
     {
-        std::cerr << "xpupeak: cannot open output file: " << filename << "\n";
+        std::cerr << programName() << ": cannot open output file: " << filename << "\n";
         return false;
     }
     writeDocument(doc, f);
@@ -754,7 +755,7 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     std::string text;
     if (!readFile(filename, text))
     {
-        std::cerr << "xpupeak: cannot open result file: " << filename << "\n";
+        std::cerr << programName() << ": cannot open result file: " << filename << "\n";
         return false;
     }
 
@@ -762,18 +763,18 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     JsonValue   root = jsonParse(text, &error);
     if (!root.isObject())
     {
-        std::cerr << "xpupeak: " << filename << " is not an XpuPeak result file"
+        std::cerr << programName() << ": " << filename << " is not an XpuPeak result file"
                   << (error.empty() ? "" : " (" + error + ")") << "\n";
         return false;
     }
     if (writtenBy3x(root))
     {
-        std::cerr << "xpupeak: " << refusal3x(filename) << "\n";
+        std::cerr << programName() << ": " << refusal3x(filename) << "\n";
         return false;
     }
     if (root.str("schema") == kPartialSchema)
     {
-        std::cerr << "xpupeak: " << filename << " is the checkpoint of a run that "
+        std::cerr << programName() << ": " << filename << " is the checkpoint of a run that "
                   << "did not finish, not a result; continue the run with --resume\n";
         return false;
     }
@@ -781,7 +782,7 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
     const int version = static_cast<int>(root.num("format_version", 0));
     if (version != RESULT_FORMAT_VERSION)
     {
-        std::cerr << "xpupeak: " << filename << " is format_version=" << version
+        std::cerr << programName() << ": " << filename << " is format_version=" << version
                   << "; this build expects v" << RESULT_FORMAT_VERSION
                   << ". Regenerate the file with this version of XpuPeak.\n";
         return false;

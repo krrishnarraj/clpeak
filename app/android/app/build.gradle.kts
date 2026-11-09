@@ -103,7 +103,7 @@ android {
     // With AAB delivery Play serves a split APK per ABI, so per-device
     // download size stays bounded; x86/armeabi-v7a are excluded as legacy
     // 32-bit ABIs (minSdk 33 makes a 32-bit-only handset a rounding error).
-    // The Java API that came with the AAR goes too -- xpupeak talks to the C
+    // The Java API that came with the AAR goes too -- XpuPeak talks to the C
     // API through the FFI library.
     //
     // On the excluded ABIs the backend simply reports itself unavailable, and
@@ -149,13 +149,13 @@ android {
 
 dependencies {
     // Packaged for its jni/<abi>/libonnxruntime.so; the Java API that comes
-    // with it is unused (xpupeak talks to the C API through the FFI library).
+    // with it is unused (XpuPeak talks to the C API through the FFI library).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.0")
 
     // LiteRT: jni/<abi>/libLiteRt.so from `litert` and its OpenCL GPU
     // accelerator (libLiteRtClGlAccelerator.so) from `litert-gpu`, which
     // has shipped apart since 2.3.0; 8.9 MB for arm64-v8a.  Both depend on
-    // `litert-api`, the Kotlin surface xpupeak never calls (the C API is
+    // `litert-api`, the Kotlin surface XpuPeak never calls (the C API is
     // reached through the FFI library): with it would come its JNI library,
     // Guava, coroutines and Play's AI delivery client, so it is left out --
     // and with it the `uses-native-library` declarations it carries, which

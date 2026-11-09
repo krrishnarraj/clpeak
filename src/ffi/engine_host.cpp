@@ -65,7 +65,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
                      utf8(wargv[1]).c_str());
         return 69;
     }
-    // xpupeak takes UTF-8, as it does from the app's own FFI calls.
+    // XpuPeak takes UTF-8, as it does from the app's own FFI calls.
     std::vector<std::string> args;
     for (int i = 2; i < argc; i++)
         args.push_back(utf8(wargv[i]));

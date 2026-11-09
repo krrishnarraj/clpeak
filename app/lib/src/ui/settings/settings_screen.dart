@@ -630,7 +630,7 @@ class _RuntimePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final s = view;
-    final tint = XpupeakTheme.categoryColor(BenchCategory.ai,
+    final tint = XpuPeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     final fixed = s.fixed;
     final next = s.next;
@@ -782,7 +782,7 @@ class _EpLibrariesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final tint = XpupeakTheme.categoryColor(BenchCategory.ai,
+    final tint = XpuPeakTheme.categoryColor(BenchCategory.ai,
         brightness: Theme.of(context).brightness);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -214,12 +214,12 @@ std::string wrongRowReason(const LitertPeak::AnswerCheck &c)
   {
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
     return "this accelerator never wrote its answer" + figure + ": after two runs, " + pct +
-           " of the output still held what xpupeak wrote there before the first -- a runtime that does not "
+           " of the output still held what XpuPeak wrote there before the first -- a runtime that does not "
            "return the result, not one that loses precision -- " + kRowConsequence;
   }
   if (missOf(c) == Miss::Late)
     return "this accelerator's answer landed only after the run that computed it had returned" + figure +
-           ": the output still held what xpupeak wrote there before the run, and a second run's read was "
+           ": the output still held what XpuPeak wrote there before the run, and a second run's read was "
            "right -- its timings would not cover the work, " + kRowConsequence;
   return xpupeak::wrongAnswerRowReason(c, kWords, kRowConsequence);
 }
@@ -447,17 +447,17 @@ std::string LitertPeak::wrongAnswer(const LitertRuntime &rt, const litert_device
     return std::string();
   const std::string what = std::string(litertFormatLabel(f)) + formWords(form);
   char pct[32];
-  // The marker xpupeak wrote before the run said where the answer went.
+  // The marker XpuPeak wrote before the run said where the answer went.
   if (missOf(c) == Miss::Never)
   {
     std::snprintf(pct, sizeof pct, "%.0f%%", 100.0 * std::min(c.unwritten, c.unwrittenRerun));
     return "this accelerator never wrote its answer for " + what + ": after two runs, " + pct +
-           " of the output still held what xpupeak wrote there before the first -- a runtime that does "
+           " of the output still held what XpuPeak wrote there before the first -- a runtime that does "
            "not return the result, not one that loses precision -- so its rate is not reported";
   }
   if (missOf(c) == Miss::Late)
     return "this accelerator's answer for " + what + " landed only after the run that computed it had "
-           "returned: the output still held what xpupeak wrote there before the run, and a second run's "
+           "returned: the output still held what XpuPeak wrote there before the run, and a second run's "
            "read was right -- its timings would not cover the work, so its rate is not reported";
   return xpupeak::wrongAnswerReason(c, kWords, what);
 }

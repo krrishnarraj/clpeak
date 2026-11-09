@@ -169,11 +169,11 @@ int RocmPeak::runAll()
     });
     currentDeviceScope = &deviceScope;
 
-    // Said once here, since every test of xpupeak's own kernels below will skip
+    // Said once here, since every test of XpuPeak's own kernels below will skip
     // with the same reason.
     if (!dev.archCovered)
       XPUPEAK_LOG(Warning,
-                  "ROCm %s: this xpupeak build has no %s code, so its own kernels "
+                  "ROCm %s: this XpuPeak build has no %s code, so its own kernels "
                   "cannot run on this GPU; the rocBLAS and hipBLASLt tests still can",
                   dev.info.deviceName.c_str(),
                   dev.info.archName.substr(0, dev.info.archName.find(':')).c_str());

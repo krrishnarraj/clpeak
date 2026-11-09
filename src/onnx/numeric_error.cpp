@@ -18,7 +18,7 @@
 // refused and this row is suppressed with it (see onnxGemmFolded), even
 // though this test's non-resident graph would still run.
 //
-// The fp32 row does a second job.  xpupeak's CPU-fallback guard works at
+// The fp32 row does a second job.  XpuPeak's CPU-fallback guard works at
 // ORT's partitioning level, so it cannot see an EP that accepts a node and
 // then quietly computes it at lower precision internally -- Core ML running
 // an fp32 graph on the fp16 Neural Engine is the standard example.  An fp32

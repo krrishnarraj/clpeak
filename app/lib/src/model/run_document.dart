@@ -273,7 +273,7 @@ class LogEntry {
 
   /// The library a message was relayed from ("onnxruntime", "vulkan",
   /// "opencl", "console"), or "android" for how the OS says the process
-  /// ended (ProcessExit); empty for xpupeak's own.
+  /// ended (ProcessExit); empty for XpuPeak's own.
   final String source;
 
   /// The scope the line fired in; empty where no such scope was open.

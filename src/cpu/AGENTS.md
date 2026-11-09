@@ -53,7 +53,7 @@ local memory, DRAM ↔ global memory.
 | `cpu_tu_registry.h` | `XPUPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `xpupeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
 | `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels, reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or xpupeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or XpuPeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -302,7 +302,7 @@ Numbers to sanity-check a change against; anything far off is a bug, not a win.
   to be ≥ `pipes × latency`. NACC=16 left M1 Pro fp32 at ~62% of peak. Re-sweep
   when validating on a new x86 host or on real SVE silicon.
 - Expect write MT to scale far worse than read MT on Apple (~3–4× vs ~8× on
-  an M1 Pro): the store path has a shared ceiling, reproduced outside xpupeak.
+  an M1 Pro): the store path has a shared ceiling, reproduced outside XpuPeak.
 - **DRAM `read` above the memory's rated peak is always a sizing bug**, never a
   win — the arrays are partly cache-resident. `--verbose` prints the array size
   and the total cache it has to clear. `copy`/`triad` landing well *below*

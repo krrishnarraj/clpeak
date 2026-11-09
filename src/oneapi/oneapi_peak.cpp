@@ -82,7 +82,7 @@ static std::vector<sycl::platform> syclPlatforms()
   return out;
 }
 
-// Pick the SYCL devices to benchmark.  xpupeak is primarily a GPU tool, so we
+// Pick the SYCL devices to benchmark.  XpuPeak is primarily a GPU tool, so we
 // prefer GPUs and (on a typical machine) leave the SYCL CPU device out so it
 // doesn't clutter the matrix alongside the iGPU.  But SYCL kernels also run
 // fine on the CPU/accelerator runtime, so if there is NO GPU visible (e.g.

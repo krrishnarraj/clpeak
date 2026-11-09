@@ -10,7 +10,7 @@ import 'run_history_store.dart';
 /// ([CrashLog]), and when it is cancelled, which keeps its checkpoint beside
 /// the result it saved.
 ///
-/// A run is continued only as the same run: by the xpupeak that started it,
+/// A run is continued only as the same run: by the XpuPeak that started it,
 /// on the same OS release, devices and runtimes.  The native side refuses
 /// another build or OS release itself; the devices and runtimes are what the
 /// app noted beside the run when it started it ([RunResumeState]).  History

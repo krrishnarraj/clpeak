@@ -108,7 +108,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Native bindings / event decoding? → `lib/src/ffi/` (`xpupeak_bindings.dart`,
   `xpupeak_events.dart`; threading contract in `xpupeak_runner.dart` —
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
-- Where do the catalog and runs execute? → `XpupeakEngine`
+- Where do the catalog and runs execute? → `XpuPeakEngine`
   (`lib/src/ffi/xpupeak_engine.dart`).  Desktop: a `xpupeak-engine` process
   per catalog and per run (`ChildProcessEngine` / `ChildRun`; one JSON event
   per stdout line, a "cancel" line on stdin, the runtime setup passed as the
@@ -158,7 +158,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   continued that died in turn is listed as one that did not finish
   (`RunHistoryStore.listCrashLogs`).  `ResumeOffer`
   (`lib/src/services/resume_offer.dart`) says whether a run can be
-  continued -- same xpupeak, OS release, devices and runtimes -- and how to
+  continued -- same XpuPeak, OS release, devices and runtimes -- and how to
   word what happened; a run that died on screen, unless the user ended it,
   is continued with `--skip-crashed`.  History offers Continue on every run
   that can be, the dead ones' tiles with "View what's saved"
@@ -335,7 +335,7 @@ the platform dirs:
   runner CMake installs it there. X11 only — Wayland ignores window icons and
   matches an installed `.desktop` file by application ID instead.
 - `ios/Runner.xcodeproj/project.pbxproj` — bundle id `kr.XpuPeak.ios` +
-  "Embed xpupeak native frameworks" script phase (consumes
+  "Embed XpuPeak native frameworks" script phase (consumes
   `ios/xpupeak_native/`, staged by `tools/build_ios_native.sh`)
 - `android/app/build.gradle.kts` — `kr.clpeak`, minSdk 33, abiFilters, the
   NDK pin (`ndkVersion`), `externalNativeBuild` → `src/ffi/android/CMakeLists.txt`.

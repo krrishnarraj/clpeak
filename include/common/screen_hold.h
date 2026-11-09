@@ -7,7 +7,7 @@
 // On a phone a run is the app's own process, and an app off screen is not
 // left to run as it was: Android and iOS move it to background cores at
 // background clocks, then freeze it, and end it when memory is wanted.  A
-// Galaxy Z Fold8 froze xpupeak about 45 and 70 s after it left the screen,
+// Galaxy Z Fold8 froze XpuPeak about 45 and 70 s after it left the screen,
 // once inside a test, and a CPU backend that started as the app came back
 // ran on four of the eight cores.  A reading taken off screen measures the
 // background; one a freeze lands inside measures the freeze.  So at every

@@ -717,7 +717,7 @@ const CpuKernelMenu &kernelMenu()
     if (f.vaes && f.avx512f)
       add(m.aes, TU(vaes)->aes, "VAES-512", "VAES");
     if (f.sha256) add(m.sha256, TU(sha)->sha256, "SHA-NI", "SHA-NI");
-    // The SHA512 EVEX extension (Arrow/Lunar Lake) is detected, but xpupeak
+    // The SHA512 EVEX extension (Arrow/Lunar Lake) is detected, but XpuPeak
     // has no x86 kernel for it yet.
     if (f.sha512) miss(m.sha512, MissingKernel::NotWritten, "SHA512");
 #elif defined(XPUPEAK_ARM)

@@ -230,7 +230,7 @@ public:
   /// One diagnostic at an explicit level, scoped to whatever is open.
   /// Recorded on the run's log (when a RunLog is live) and dispatched as a
   /// Log event.  `source` names the library the message was relayed from;
-  /// empty for xpupeak's own.  Free functions with no logger in reach use
+  /// empty for XpuPeak's own.  Free functions with no logger in reach use
   /// XPUPEAK_LOG / XPUPEAK_VLOG, which arrive here through the RunLog.
   void log(xpupeak::LogLevel level, std::string message, std::string source = "");
 

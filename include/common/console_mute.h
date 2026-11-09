@@ -9,7 +9,7 @@
 // Silence stdout+stderr at the file-descriptor level for a scope.
 //
 // Vendor runtimes print diagnostics straight to the console, below any log
-// level or callback xpupeak can set: hipBLASLt's Tensile/rocRoller internals
+// level or callback XpuPeak can set: hipBLASLt's Tensile/rocRoller internals
 // walk instruction tables out loud, and loading an ONNX Runtime execution
 // provider can emit hundreds of "Schema error: ... already registered" lines
 // from the bundled ONNX library.  None of it is actionable -- the returned

@@ -13,7 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// back, which lets the run go on -- or, when the phone ended the app
 /// meanwhile, opens it on the offer to continue the run.  It is posted the
 /// moment the app is hidden, while the process still runs: a Galaxy Z Fold8
-/// froze xpupeak 45 to 70 s after it left.
+/// froze XpuPeak 45 to 70 s after it left.
 ///
 /// Android and iOS only, and best effort: without the permission nothing is
 /// shown, and the run behaves the same.  The platform halves are

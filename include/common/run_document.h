@@ -218,7 +218,7 @@ struct DeviceResult {
 
 // ---- Run ------------------------------------------------------------------
 
-// One line of the run's diagnostic stream: what xpupeak (or a library it
+// One line of the run's diagnostic stream: what XpuPeak (or a library it
 // called) had to say, at what moment, inside which scope.  The whole stream
 // in emission order is the document's `log`; it is what a maintainer reads
 // when a number from a machine they cannot reach looks wrong, so it carries
@@ -229,7 +229,7 @@ struct DeviceResult {
 struct LogEntry {
     double           elapsedS = 0.0;     // seconds since the run started
     xpupeak::LogLevel level    = xpupeak::LogLevel::Info;
-    std::string      source;             // "" = xpupeak; else the library relayed
+    std::string      source;             // "" = XpuPeak; else the library relayed
     std::string      backend;
     std::string      device;
     int              deviceIndex = -1;
@@ -244,7 +244,7 @@ struct BuildInfo {
     std::string config;                  // CMake configuration ("Release", "Debug"), when the build stamped it
 };
 
-// How xpupeak was asked to run.  Recorded because every number here is
+// How XpuPeak was asked to run.  Recorded because every number here is
 // sensitive to it: a shorter --max-time-gpu measures a different thing, and a
 // selective run is not a full one even though the file looks the same shape.
 struct Invocation {

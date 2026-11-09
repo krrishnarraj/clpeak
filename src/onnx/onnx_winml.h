@@ -13,7 +13,7 @@
 // (onnx_plugin.h).  That is the one route to those NPUs that needs no
 // vendor download and no matching of package versions by hand.
 //
-// The DLL is Microsoft's and is not shipped with xpupeak: it is loaded from
+// The DLL is Microsoft's and is not shipped with XpuPeak: it is loaded from
 // the path `--onnx-winml` names, or found beside the loaded onnxruntime
 // (the NuGet package carries both in one directory) or the executable.
 // Everything here is dlopen'd, like the runtime itself; a build needs no

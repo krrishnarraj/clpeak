@@ -42,17 +42,17 @@ Map<String, dynamic> _litertJson({String? pendingPath}) => {
       if (pendingPath != null) 'pendingRuntime': {'path': pendingPath},
     };
 
-class _StubBindings implements XpupeakBindings {
+class _StubBindings implements XpuPeakBindings {
   _StubBindings(this.onnx, this.litert);
 
   final OnnxStatus onnx;
   final LitertStatus litert;
 
   @override
-  XpupeakLaunch get launch => (_, _, _, _) => 0;
+  XpuPeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  XpupeakRequestCancel get requestCancel => () {};
+  XpuPeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -104,7 +104,7 @@ Future<void> _pumpSettings(
         ChangeNotifierProvider.value(value: service),
       ],
       child: MaterialApp(
-        theme: XpupeakTheme.dark(),
+        theme: XpuPeakTheme.dark(),
         home: const SettingsScreen(),
       ),
     ),

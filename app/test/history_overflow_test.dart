@@ -21,12 +21,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
-class _StubBindings implements XpupeakBindings {
+class _StubBindings implements XpuPeakBindings {
   @override
-  XpupeakLaunch get launch => (_, _, _, _) => 0;
+  XpuPeakLaunch get launch => (_, _, _, _) => 0;
 
   @override
-  XpupeakRequestCancel get requestCancel => () {};
+  XpuPeakRequestCancel get requestCancel => () {};
 
   @override
   void setOnScreen(bool onScreen) {}
@@ -159,7 +159,7 @@ void main() {
           ChangeNotifierProvider.value(value: service),
         ],
         child: MaterialApp(
-          theme: XpupeakTheme.dark(),
+          theme: XpuPeakTheme.dark(),
           home: const Scaffold(body: HistoryScreen()),
         ),
       ),

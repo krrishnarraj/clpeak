@@ -98,7 +98,7 @@ void judgeAnswer(AnswerCheck &c, const G *got, const R *ref, size_t n, const Ans
   }
   // A NaN or an infinity anywhere in the answer makes the figure one too.
   // That is no error figure, and it cannot be recorded either: the document
-  // would spell it `nan`, which no JSON reader -- xpupeak's own included --
+  // would spell it `nan`, which no JSON reader -- XpuPeak's own included --
   // will load.
   if (!std::isfinite(ppm))
   {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../model/result_model.dart';
 
-/// xpupeak's design language — an *instrument console*, not a Material app.
+/// XpuPeak's design language — an *instrument console*, not a Material app.
 ///
 /// The rules, in short:
 ///   * **Monochrome chrome, colour only in the data.**  Every frame, rule,
@@ -189,7 +189,7 @@ class CP {
 /// Material glue.  The app's look lives in [CP] and `ui/common/kit.dart`; this
 /// only neutralizes the framework bits that still show through — dialog
 /// barriers, text selection, scrollbars, snack bars.
-class XpupeakTheme {
+class XpuPeakTheme {
   static ThemeData dark() => _base(CP._darkTokens, Brightness.dark);
   static ThemeData light() => _base(CP._lightTokens, Brightness.light);
 

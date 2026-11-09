@@ -110,7 +110,7 @@ ScopedConsoleMute::ScopedConsoleMute(Capture mode, std::vector<std::string> watc
     if (savedOut >= 0 && !stderrOnly) (void)XPUPEAK_DUP2(XPUPEAK_FILENO(nul), XPUPEAK_FILENO(stdout));
     if (savedErr >= 0) (void)XPUPEAK_DUP2(XPUPEAK_FILENO(nul), XPUPEAK_FILENO(stderr));
     (void)fclose(nul);
-    // Even while discarding the library's console, xpupeak's own diagnostics
+    // Even while discarding the library's console, XpuPeak's own diagnostics
     // must still reach the real stderr rather than the bit bucket -- the same
     // bypass the capture path installs, so a warning emitted inside a muted
     // scope is not lost with the noise.

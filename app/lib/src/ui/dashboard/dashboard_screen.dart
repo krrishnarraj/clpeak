@@ -250,7 +250,7 @@ class _BackendPanel extends StatelessWidget {
         children: [
           CPanelHead(
             title: backend.name,
-            icon: XpupeakTheme.backendIcon(backend.name),
+            icon: XpuPeakTheme.backendIcon(backend.name),
             trailing: Text(
               backend.deviceCount == 1
                   ? '1 DEVICE'

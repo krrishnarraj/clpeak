@@ -211,7 +211,7 @@ static const unsigned int IMAGE_FETCH_PER_WI = 16;
 // precision 3.44-3.55, 3.98-4.88 and 3.89 against 4.60-4.80, 4.68-4.89 and
 // 4.60.  fp16 read 9.48-9.56 at SIMD32 in Vulkan and OpenCL against 4.92-4.95
 // at 16 -- but 9.50 at 16 in oneAPI, whose compiler keeps the packed rate
-// there.  The two widths race as a xpupeak::FormRace (form_race.h) that drops
+// there.  The two widths race as an xpupeak::FormRace (form_race.h) that drops
 // only a clear loser: a tie at one vector width does not predict the next,
 // because the allocator lays each width out afresh.
 //
@@ -319,7 +319,7 @@ static const unsigned int COOPMAT_MMA_PER_TRIP = 16;
 // and at localSize=1024 it exceeded the SM register file on e.g. RTX 5060
 // (65536 regs/SM), causing clEnqueueNDRangeKernel to fail with
 // CL_OUT_OF_RESOURCES.  The single-accumulator chain roughly halves that, but
-// the cap stays at 256: it matches xpupeak's historical cap, leaves broad
+// the cap stays at 256: it matches XpuPeak's historical cap, leaves broad
 // headroom across all devices, and the higher setting has not been re-tested
 // on the hardware that originally failed.
 static const unsigned int MAX_WG_SIZE = 256;
@@ -556,7 +556,7 @@ inline bool mlLadderScouts(DeviceType type)
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostics.  Everything xpupeak has to say outside a reading -- a missing
+// Diagnostics.  Everything XpuPeak has to say outside a reading -- a missing
 // library, a failed kernel build, a calibration decision -- is one message
 // at one level, routed through xpupeak::logMessage():
 //
@@ -573,9 +573,9 @@ inline bool mlLadderScouts(DeviceType type)
 // the emitting sites include free functions and error macros in the
 // *_device.cpp files that have no access to the Peak object or the logger.
 //
-// `source` names the library a message came from when xpupeak merely relayed
+// `source` names the library a message came from when XpuPeak merely relayed
 // it: "onnxruntime", "vulkan", "opencl", or "console" for output captured
-// off stdout/stderr.  Empty for xpupeak's own messages.
+// off stdout/stderr.  Empty for XpuPeak's own messages.
 // ---------------------------------------------------------------------------
 namespace xpupeak {
 bool verboseEnabled();

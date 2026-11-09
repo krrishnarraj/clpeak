@@ -16,7 +16,7 @@
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
 // NSProcessInfo.thermalState as an int (thermal_ios.mm).
-int xpupeakIosThermalState();
+int xpuPeakIosThermalState();
 #endif
 
 namespace xpupeak {
@@ -74,7 +74,7 @@ int readHeat()
   const int s = status(manager);
   return s < kNone ? kUnknown : std::min(s, (int)kShutdown);
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
-  switch (xpupeakIosThermalState())
+  switch (xpuPeakIosThermalState())
   {
   case 0: return kNone;      // nominal
   case 1: return kLight;     // fair
@@ -90,7 +90,7 @@ int readHeat()
 std::atomic<bool> watching{false};
 int lastHeat = kUnknown;   // the run's thread is the only one at a boundary
 
-// xpupeak's own lines, so the CLI prints the pause inline like any warning.
+// XpuPeak's own lines, so the CLI prints the pause inline like any warning.
 // Each starts "thermal status ", which is how the app tells a pause
 // (a warning) from its end (BenchmarkService.coolingDown).
 void note(LogLevel level, const std::string &message)

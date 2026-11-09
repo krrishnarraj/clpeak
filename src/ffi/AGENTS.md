@@ -1,6 +1,6 @@
 # src/ffi — C-ABI Bridge for the Flutter GUI
 
-The single native bridge every xpupeak GUI platform (macOS/Linux/Windows
+The single native bridge every XpuPeak GUI platform (macOS/Linux/Windows
 desktop, Android, iOS) consumes via Dart FFI. Builds the `xpupeak_ffi`
 shared library / Apple framework.
 
@@ -68,7 +68,7 @@ shared library / Apple framework.
 |------|---------|
 | `xpupeak_ffi.h` | `extern "C"` surface + event schema + `XPUPEAK_RUN_*` codes |
 | `xpupeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory |
-| `launch.h` | `xpupeakLaunch()`: `xpupeak_launch()` with a choice of whether to clear a pending cancel and pause (the engine does not) |
+| `launch.h` | `xpuPeakLaunch()`: `xpupeak_launch()` with a choice of whether to clear a pending cancel and pause (the engine does not) |
 | `engine.cpp` | `xpupeak_engine_main`: the desktop engine process's catalog / launch modes, events one JSON line per stdout line, cancel, pause and resume on stdin |
 | `engine_host.cpp` | `xpupeak-engine` executable: dlopens the library path the app passes and calls `xpupeak_engine_main`; beside the runner in every desktop bundle |
 | `logger_ffi.{h,cpp}` | `LoggerFfi : logger` — `LogEvent` → malloc'd JSON → callback (ownership transfers to the callee) |

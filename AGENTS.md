@@ -1,4 +1,4 @@
-# xpupeak — "compute latency peak"
+# XpuPeak — "compute latency peak"
 
 Cross-API compute benchmark tool. Measures compute, bandwidth, and latency
 across OpenCL, Vulkan, CUDA, ROCm/HIP, Metal, and oneAPI/SYCL GPU backends —

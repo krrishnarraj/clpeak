@@ -16,11 +16,11 @@
 // ---------------------------------------------------------------------------
 // Execution-provider table
 // ---------------------------------------------------------------------------
-// Maps ORT registration names to how xpupeak presents them.  Providers not in
+// Maps ORT registration names to how XpuPeak presents them.  Providers not in
 // this table are still listed (name passed through) so a new EP shows up
 // rather than being silently hidden; it just carries Unknown type until the
 // table learns it.  The Azure EP is the one deliberate exclusion: it proxies
-// inference to a remote service, and xpupeak measures local silicon only.
+// inference to a remote service, and XpuPeak measures local silicon only.
 
 struct EpTableEntry
 {
@@ -141,7 +141,7 @@ static void pluginNotes(const OrtRuntime &rt,
                              : std::string(", Windows ML off");
     loud.push_back("the runtime setup chosen since ONNX Runtime " + rt.versionString +
                    " loaded (" + setup +
-                   ") takes effect the next time xpupeak starts: one process keeps "
+                   ") takes effect the next time XpuPeak starts: one process keeps "
                    "the runtime it loaded first");
   }
 }
@@ -529,7 +529,7 @@ int OnnxPeak::runAll()
     // Registering a plugin library makes ORT create a shared allocator for
     // each of its devices on the OrtEnv (ORT 1.23+), from the factory's own
     // implementation -- for a GPU provider a device-memory pool -- and that
-    // allocator outlives every session.  Sessions are what xpupeak releases;
+    // allocator outlives every session.  Sessions are what XpuPeak releases;
     // the pool is what a provider that runs after it sees.  On an RTX 5060
     // (ORT 1.30, the CUDA provider as a plugin), every TensorRT graph with a
     // matmul or a convolution failed to build after the plugin's tests, and

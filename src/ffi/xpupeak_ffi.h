@@ -1,9 +1,9 @@
 #ifndef XPUPEAK_FFI_H
 #define XPUPEAK_FFI_H
 
-// ── xpupeak C ABI ────────────────────────────────────────────────────────────
+// ── XpuPeak C ABI ────────────────────────────────────────────────────────────
 //
-// The single native bridge for every xpupeak GUI (Flutter desktop, Android,
+// The single native bridge for every XpuPeak GUI (Flutter desktop, Android,
 // iOS — all consume this via Dart FFI).  Exposes device enumeration, a
 // blocking benchmark launch with a streaming event callback, cooperative
 // cancellation, and saved-result loading.
@@ -24,7 +24,7 @@ extern "C" {
 
 // ---- Version / catalog ------------------------------------------------------
 
-// xpupeak version string (e.g. "2.0.18-3-gabc1234").  Static; do not free.
+// XpuPeak version string (e.g. "2.0.18-3-gabc1234").  Static; do not free.
 XPUPEAK_FFI_EXPORT const char *xpupeak_version(void);
 
 // Device catalog for every backend compiled into this library, as the
@@ -193,7 +193,7 @@ XPUPEAK_FFI_EXPORT char *xpupeak_copy_litert_status_json(void);
 // saved document holds in its `log` array (docs/format-v4.md): `level` is
 // error | warning | info | debug, `source` names the library a message was
 // relayed from ("onnxruntime", "vulkan", "opencl", "console") or is empty
-// for xpupeak's own, `elapsed_s` is seconds since the run started, and the
+// for XpuPeak's own, `elapsed_s` is seconds since the run started, and the
 // scope fields say where it fired.  Debug entries arrive only when argv has
 // --verbose.  The scope fields are empty for a message outside any backend
 // (a rejected argument, a backend not in this build).
@@ -202,7 +202,7 @@ XPUPEAK_FFI_EXPORT char *xpupeak_copy_litert_status_json(void);
 // events relayed from a vendor runtime's own logging callback or a console
 // capture, which fire on whatever thread produced them.  The Dart listener
 // (NativeCallable.listener) is built for exactly that.
-typedef void (*XpupeakEventCallback)(void *user_data, char *event_json);
+typedef void (*XpuPeakEventCallback)(void *user_data, char *event_json);
 
 // ---- Run -----------------------------------------------------------------------
 
@@ -229,7 +229,7 @@ typedef void (*XpupeakEventCallback)(void *user_data, char *event_json);
 // (run_resume.h).
 // Never calls exit().
 XPUPEAK_FFI_EXPORT int xpupeak_launch(int argc, const char **argv,
-                                      XpupeakEventCallback on_event,
+                                      XpuPeakEventCallback on_event,
                                       void *user_data);
 
 // ---- Cancellation ----------------------------------------------------------------

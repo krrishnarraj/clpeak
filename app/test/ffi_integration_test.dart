@@ -21,10 +21,10 @@ void main() {
       : false;
 
   group('xpupeak_ffi', () {
-    late XpupeakBindings bindings;
+    late XpuPeakBindings bindings;
 
     setUpAll(() {
-      bindings = XpupeakBindings.open();
+      bindings = XpuPeakBindings.open();
     });
 
     test('version and catalog', () {
@@ -47,12 +47,12 @@ void main() {
           '${Directory.systemTemp.path}/xpupeak_dart_ffi_test.xpupeak.json');
       if (out.existsSync()) out.deleteSync();
 
-      final run = XpupeakRunner(bindings)
+      final run = XpuPeakRunner(bindings)
           .start(['--cpu', '-i', '1', '--verbose', '-o', out.path]);
       final events = await run.events.toList();
       final rc = await run.result;
 
-      expect(rc, xpupeakRunOk);
+      expect(rc, xpuPeakRunOk);
       expect(events.last, isA<DoneEvent>());
       final metrics = events.whereType<MetricEvent>().toList();
       expect(metrics, isNotEmpty);
@@ -118,15 +118,15 @@ void main() {
     });
 
     test('bad args are rejected without side effects', () async {
-      final run = XpupeakRunner(bindings).start(['--bogus-flag']);
+      final run = XpuPeakRunner(bindings).start(['--bogus-flag']);
       final rc = await run.result;
       // A busy launch emits no events at all, so the drain below would hang
       // until this test's own timeout and blame the wrong run.  Say plainly
       // that an earlier run is still holding the process-global guard.
-      expect(rc, isNot(xpupeakRunBusy),
+      expect(rc, isNot(xpuPeakRunBusy),
           reason: 'a previous run is still in flight (XPUPEAK_RUN_BUSY) — it '
               'overran its timeout rather than this test misbehaving');
-      expect(rc, xpupeakRunBadArgs);
+      expect(rc, xpuPeakRunBadArgs);
       final events = await run.events.toList();
       // The rejection reaches the stream as an error-level log entry, not a
       // silent failure code.
@@ -134,16 +134,16 @@ void main() {
       expect(rejected, isNotEmpty);
       expect(rejected.first.entry.level, LogLevel.error);
       final done = events.last as DoneEvent;
-      expect(done.status, xpupeakRunBadArgs);
+      expect(done.status, xpuPeakRunBadArgs);
     });
 
     test('cancel stops a long run early', () async {
-      final run = XpupeakRunner(bindings).start(['--cpu']);
+      final run = XpuPeakRunner(bindings).start(['--cpu']);
       final sw = Stopwatch()..start();
       Future.delayed(const Duration(seconds: 2), run.cancel);
       final events = await run.events.toList();
       sw.stop();
-      expect(await run.result, xpupeakRunCancelled);
+      expect(await run.result, xpuPeakRunCancelled);
       expect((events.last as DoneEvent).cancelled, isTrue);
       expect(sw.elapsed.inSeconds, lessThan(30));
     });

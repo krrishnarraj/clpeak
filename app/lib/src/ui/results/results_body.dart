@@ -226,7 +226,7 @@ class _SectionRow extends _Row {
         padding: const EdgeInsets.only(top: 22, bottom: 9),
         child: _CategoryCSection(
           label: group.category.label,
-          color: XpupeakTheme.categoryColor(group.category,
+          color: XpuPeakTheme.categoryColor(group.category,
               brightness: brightness),
           count: group.supported.length,
           expanded: expanded,
@@ -330,7 +330,7 @@ class _TestRow extends _Row {
         // the index and land on the wrong test.
         key: ValueKey(test.key),
         test: test,
-        color: XpupeakTheme.categoryColor(group.category,
+        color: XpuPeakTheme.categoryColor(group.category,
             brightness: brightness),
         first: identical(test, group.supported.first),
         last: last,

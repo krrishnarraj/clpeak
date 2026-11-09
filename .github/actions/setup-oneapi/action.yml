@@ -29,7 +29,7 @@ inputs:
     description: >
       Colon-separated component IDs to install on Windows -- the counterpart of
       linux-packages.  Installing the full toolkit would cost
-      tens of GB for components xpupeak never touches.
+      tens of GB for components XpuPeak never touches.
     required: false
     default: intel.oneapi.win.cpp-dpcpp-common:intel.oneapi.win.mkl.devel
 
