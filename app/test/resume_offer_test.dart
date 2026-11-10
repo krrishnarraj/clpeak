@@ -27,7 +27,9 @@ String _header() => jsonEncode({
       'format_version': 4,
       'generator': {'name': 'XpuPeak', 'version': _version},
       'generated_at': '2026-10-17T16:13:06Z',
-      'host': {'os': 'Android', 'os_version': '17'},
+      'system': {
+        'os': {'name': 'Android', 'version': '17'},
+      },
       'invocation': {
         'argv': ['xpupeak', '-o', '$_id.xpupeak.json'],
       },
@@ -69,7 +71,9 @@ Map<String, dynamic> _checkpoint({String version = _version}) => {
       'generator': {'name': 'XpuPeak', 'version': version},
       'generated_at': '2026-10-17T16:13:06Z',
       'duration_s': 6.0,
-      'host': {'os': 'Android', 'os_version': '17'},
+      'system': {
+        'os': {'name': 'Android', 'version': '17'},
+      },
       'invocation': {
         'argv': ['xpupeak', '-o', '$_id.xpupeak.json'],
       },

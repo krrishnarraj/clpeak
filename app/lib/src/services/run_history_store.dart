@@ -717,7 +717,9 @@ class CrashLog {
     final h = header;
     if (h == null) return null;
     final stat = await file.stat();
-    final host = h['host'] as Map<String, dynamic>? ?? const {};
+    final os = (h['system'] as Map<String, dynamic>?)?['os']
+            as Map<String, dynamic>? ??
+        const {};
     return CrashLog(
       id: id,
       fileName: p.basename(file.path),
@@ -733,8 +735,8 @@ class CrashLog {
       backends: backends,
       lastEntry: last,
       processExit: exit,
-      hostOs: host['os'] as String? ?? '',
-      hostOsVersion: host['os_version'] as String? ?? '',
+      hostOs: os['name'] as String? ?? '',
+      hostOsVersion: os['version'] as String? ?? '',
       lastTestTitle: testTitle,
       lastTestBackend: testBackend,
       diedOffScreen: offScreen,
@@ -789,8 +791,8 @@ class RunCheckpointInfo {
         writtenAt: (await f.stat()).modified,
         tests: tests,
         generator: meta.generator,
-        hostOs: meta.host['os']?.toString() ?? '',
-        hostOsVersion: meta.host['os_version']?.toString() ?? '',
+        hostOs: meta.osName,
+        hostOsVersion: meta.osVersion,
         argv: meta.argv,
       );
     } catch (_) {

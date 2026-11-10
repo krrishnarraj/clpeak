@@ -5,11 +5,15 @@
 // Neutral enums shared by every backend.  No backend-specific includes.
 // --------------------------------------------------------------------------
 
-// Neutral device type — replaces cl_device_type / VkPhysicalDeviceType.
+// Neutral device type — replaces cl_device_type / VkPhysicalDeviceType.  The
+// document's `type`, in the strings ProcessorKind uses (vocabulary.h): an ML
+// runtime's NPU is Npu, and Accelerator is for every other kind of device
+// that is neither CPU nor GPU.
 enum class DeviceType : unsigned int {
     Cpu         = 1 << 0,
     Gpu         = 1 << 1,
     Accelerator = 1 << 2,
+    Npu         = 1 << 3,
     Unknown     = 0
 };
 

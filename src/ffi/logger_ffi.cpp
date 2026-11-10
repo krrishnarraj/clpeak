@@ -66,6 +66,10 @@ void appendTestHeader(std::ostringstream &ss, const LogEvent &e)
     appendStr(ss, "quantity",  quantityString(e.quantity));
     appendStr(ss, "unit",      e.unit);
     appendStr(ss, "desc", e.testDescription);
+    // The family and coordinates the document records (docs/format-v4.md).
+    if (!e.testBenchmark.empty()) appendStr(ss, "benchmark", e.testBenchmark);
+    if (e.testRevision > 1) ss << ",\"revision\":" << e.testRevision;
+    if (!e.testDims.empty()) ss << ",\"dims\":" << dimsToJson(e.testDims);
 }
 
 } // namespace
@@ -133,6 +137,8 @@ std::string ffiEventToJson(const LogEvent &e)
         if (e.metric.direction != Direction::FromUnit)
             appendStr(ss, "direction", directionString(e.metric.direction));
         appendStr(ss, "minfo", e.metric.description);
+        if (!e.metric.benchmark.empty()) appendStr(ss, "benchmark", e.metric.benchmark);
+        if (!e.metric.dims.empty()) ss << ",\"dims\":" << dimsToJson(e.metric.dims);
         break;
 
     case LogEvent::Kind::TestSkippedAll:

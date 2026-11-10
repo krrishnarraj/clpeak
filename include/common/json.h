@@ -63,4 +63,9 @@ public:
 // is non-null, fills it with a human-readable message including the offset.
 JsonValue jsonParse(const std::string &text, std::string *error = nullptr);
 
+// A value back to compact JSON text, numbers in the classic locale with
+// enough digits to round-trip a double.  What keeps a field this build does
+// not interpret -- an `ext` object -- whole across a read and a write.
+std::string jsonSerialize(const JsonValue &v);
+
 #endif  // XPUPEAK_JSON_H

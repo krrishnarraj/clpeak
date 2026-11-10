@@ -45,9 +45,9 @@ public:
 
     // What the run was asked for -- the category and test flags -- and
     // nothing else: blind to a cancel and to a resume.  For a test that asks
-    // whether another one measures its family (the CPU's int16 dot product
-    // shares the int8 test), where "already measured by the part of the run
-    // this one resumes" must read as measured, not as deselected.
+    // whether another one measures its family, where "already measured by
+    // the part of the run this one resumes" must read as measured, not as
+    // deselected.
     bool isSelected(Benchmark b) const {
         return isCategoryEnabled(categoryOf(b)) && isTestEnabled(b);
     }
@@ -72,6 +72,11 @@ public:
     // checkpoint skips it (include/common/run_checkpoint.h).  A cancel or an
     // exception that cuts it short leaves it unfinished.
     //
+    // While it lives, the backend's logger knows the Benchmark is open
+    // (logger::openBenchmark): every test the runner opens is that family's
+    // -- the document's `benchmark` -- with no call site saying so, and a
+    // reading it adds to a test another Benchmark opened names its own.
+    //
     // isAllowed() stays the question a backend asks without starting
     // anything -- which kernels to build, whether a shared probe is needed.
     // A Benchmark measured by several runners takes one guard around all of
@@ -92,6 +97,7 @@ public:
         Benchmark bench;
         bool      admitted;
         int       exceptionsAtEntry;
+        Benchmark outer = Benchmark::COUNT;   // the logger's open Benchmark before this one
     };
 
     Admission admit(Benchmark b);

@@ -1,4 +1,5 @@
 #include <common/json.h>
+#include <common/common.h>   // jsonEscape
 
 #include <cstdio>
 #include <locale>
@@ -274,4 +275,66 @@ JsonValue jsonParse(const std::string &text, std::string *error)
     if (p.parse(root)) return root;
     if (error) *error = p.error;
     return JsonValue();
+}
+
+// ── Serializer ─────────────────────────────────────────────────────────────
+
+namespace {
+
+void serializeInto(const JsonValue &v, std::ostringstream &out)
+{
+    switch (v.t)
+    {
+    case JsonValue::Type::Null:   out << "null"; break;
+    case JsonValue::Type::Bool:   out << (v.b ? "true" : "false"); break;
+    case JsonValue::Type::Number:
+    {
+        // A whole number prints as one, and anything else with the 17
+        // significant digits that bring a double back unchanged.
+        std::ostringstream n;
+        n.imbue(std::locale::classic());
+        n.precision(17);
+        n << v.n;
+        out << n.str();
+        break;
+    }
+    case JsonValue::Type::String: out << "\"" << jsonEscape(v.s) << "\""; break;
+    case JsonValue::Type::Array:
+    {
+        out << "[";
+        bool first = true;
+        for (const JsonValue &x : v.arr)
+        {
+            if (!first) out << ",";
+            first = false;
+            serializeInto(x, out);
+        }
+        out << "]";
+        break;
+    }
+    case JsonValue::Type::Object:
+    {
+        out << "{";
+        bool first = true;
+        for (const auto &kv : v.obj)
+        {
+            if (!first) out << ",";
+            first = false;
+            out << "\"" << jsonEscape(kv.first) << "\":";
+            serializeInto(kv.second, out);
+        }
+        out << "}";
+        break;
+    }
+    }
+}
+
+} // namespace
+
+std::string jsonSerialize(const JsonValue &v)
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    serializeInto(v, out);
+    return out.str();
 }

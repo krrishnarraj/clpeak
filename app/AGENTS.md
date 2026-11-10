@@ -183,7 +183,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   end and on cancel -- or swaps it for "Run finished" when the run ends off
   screen -- and `main()` clears a stale one at launch.  Its status-bar icon
   is generated with the rest (`tools/icons/generate_icons.py`)
-- Run grouping / formatting? → `lib/src/model/run_document.dart`
+- Run grouping / formatting? → `lib/src/model/run_document.dart`; the run's
+  `system` (OS, architecture, model) is `RunMeta.system`, its OS line
+  `osName` / `osVersion` / `arch`
+- Headline measures (a processor's peaks)? → `assets/measures.json`, the
+  starter catalog, which nothing reads yet; its format is
+  `docs/format-v4.md` § The headline catalog
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
   explanation per dialog: `_InfoGlyph` → `_showInfoDialog()` in

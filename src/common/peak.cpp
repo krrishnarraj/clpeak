@@ -48,9 +48,12 @@ Peak::Admission Peak::admit(Benchmark b)
             if (checkpoint->takeCrashSkip())
             {
                 // Where the part of the run before this one died: say so in
-                // its place, and finish it, so that a later resume does not
-                // come back to it either.
+                // its place, under its own family, and finish it, so that a
+                // later resume does not come back to it either.
+                const Benchmark outer = log ? log->openBenchmark() : Benchmark::COUNT;
+                if (log) log->setOpenBenchmark(b);
                 recordCrashed(b);
+                if (log) log->setOpenBenchmark(outer);
                 benchmarkFinished(b);
                 admitted = false;
             }
@@ -107,11 +110,17 @@ Peak::Admission::Admission(Peak *peak, Benchmark b, bool admitted)
     : peak(peak), bench(b), admitted(admitted),
       exceptionsAtEntry(std::uncaught_exceptions())
 {
+    // The family every test the runner opens belongs to.
+    if (admitted && peak && peak->log)
+    {
+        outer = peak->log->openBenchmark();
+        peak->log->setOpenBenchmark(b);
+    }
 }
 
 Peak::Admission::Admission(Admission &&other) noexcept
     : peak(other.peak), bench(other.bench), admitted(other.admitted),
-      exceptionsAtEntry(other.exceptionsAtEntry)
+      exceptionsAtEntry(other.exceptionsAtEntry), outer(other.outer)
 {
     other.peak     = nullptr;
     other.admitted = false;
@@ -120,6 +129,7 @@ Peak::Admission::Admission(Admission &&other) noexcept
 Peak::Admission::~Admission()
 {
     if (!admitted || !peak) return;
+    if (peak->log) peak->log->setOpenBenchmark(outer);
     // Cut short: a cancel stops a runner at its next test boundary, and an
     // exception unwinding through here never let it finish.
     if (xpupeak::cancelRequested() || std::uncaught_exceptions() > exceptionsAtEntry)

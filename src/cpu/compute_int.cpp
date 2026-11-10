@@ -23,21 +23,29 @@ int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 // a CPU either has the VNNI family or it has neither -- so which of them exist
 // is one fact about the chip, not two tests.
 //
-// Both entry points below run the same family; whichever the run reaches first
-// opens the test and the other reopens it.  int16 is x86-only (NEON and SVE
-// have no 16-bit dot), so on ARM the family is the int8 row alone rather than
-// a permanently unsupported int16 row nobody can fix.
+// Each width is measured under its own Benchmark, int8 under
+// --int8-dot-product-compute and int16 under --int16-dot-product-compute:
+// whichever the run reaches first opens the test, the other reopens it, and
+// each reading names the family it belongs to (docs/format-v4.md).  int16 is
+// x86-only (NEON and SVE have no 16-bit dot), so on ARM the family is the
+// int8 row alone rather than a permanently unsupported int16 row nobody can
+// fix.
 namespace {
 
-std::vector<FamilyRow> intDotRows()
+std::vector<FamilyRow> int8DotRows()
 {
-  std::vector<FamilyRow> rows = {
+  return {
       { "int8_dp",
         "Four 8-bit products summed in one instruction -- the workhorse of "
         "quantized (compressed) neural networks running on the CPU.",
         "no int8 dot instruction on this CPU",
         &xpupeak_cpu::kernelMenu().int8dp },
   };
+}
+
+std::vector<FamilyRow> int16DotRows()
+{
+  std::vector<FamilyRow> rows;
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
   // VPDPWSSD is in every VNNI CPU since Cascade Lake; AVX-VNNI-INT16 adds the
   // mixed-sign forms on Diamond Rapids / Nova Lake.
@@ -64,19 +72,15 @@ const logger::TestSpec kIntDotSpec = {
 
 int CpuPeak::runComputeInt8DP(benchmark_config_t &cfg)
 {
-  emitFamily(*this, kIntDotSpec, intDotRows(), cfg);
+  emitFamily(*this, kIntDotSpec, int8DotRows(), cfg);
   return 0;
 }
 
 int CpuPeak::runComputeInt16DP(benchmark_config_t &cfg)
 {
-  // Same family, same test.  Reached only when --int8-dot-product-compute was
-  // deselected and this one was not; otherwise the call above ran it -- in
-  // this part of the run or, resumed, the one before -- and running it twice
-  // would double every reading.
-  if (isSelected(Benchmark::ComputeInt8DP))
-    return 0;
-  emitFamily(*this, kIntDotSpec, intDotRows(), cfg);
+  const std::vector<FamilyRow> rows = int16DotRows();
+  if (!rows.empty())
+    emitFamily(*this, kIntDotSpec, rows, cfg);
   return 0;
 }
 

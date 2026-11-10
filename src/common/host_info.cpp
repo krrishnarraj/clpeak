@@ -147,3 +147,18 @@ HostInfo probeHost()
 
     return h;
 }
+
+SystemInfo probeSystem()
+{
+    const HostInfo h = probeHost();
+    SystemInfo s;
+    s.os.name    = h.os;
+    s.os.version = h.osVersion;
+    s.arch       = h.arch;
+    // The SoC's name where the OS gives one is the CPU brand on every OS this
+    // probe reads today: Apple's brand string is the SoC's ("Apple M1 Pro"),
+    // and a PC's SoC is its CPU (docs/format-v4.md, System).
+    s.soc         = h.cpu;
+    s.memoryBytes = h.memoryBytes;
+    return s;
+}

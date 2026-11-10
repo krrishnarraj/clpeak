@@ -55,6 +55,14 @@ public:
         out << "{";
         open();
     }
+    // The same as the value of key `k`.
+    void beginObjectInline(const char *k)
+    {
+        key(k);
+        if (inlineFrom < 0) inlineFrom = depth;
+        out << "{";
+        open();
+    }
 
     void num(const char *k, double v)         { key(k); out << fmtNum(v); }
     void uint(const char *k, std::uint64_t v) { key(k); out << v; }
@@ -73,6 +81,14 @@ public:
     {
         punctuate();
         out << "\"" << jsonEscape(v) << "\"";
+    }
+
+    // A value that is already JSON text (jsonSerialize), written as it is,
+    // on one line: a field kept whole across a read and a write.
+    void raw(const char *k, const std::string &json)
+    {
+        key(k);
+        out << json;
     }
 
     // Seven significant digits: enough to round-trip a float's worth of

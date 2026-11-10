@@ -6,9 +6,17 @@
 #include <version.h>
 
 #include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <locale>
+#include <mutex>
+#include <random>
+#include <set>
 #include <sstream>
 
 // ── Enum <-> string ────────────────────────────────────────────────────────
@@ -80,6 +88,7 @@ const char *deviceTypeString(DeviceType t)
     case DeviceType::Cpu:         return "cpu";
     case DeviceType::Gpu:         return "gpu";
     case DeviceType::Accelerator: return "accelerator";
+    case DeviceType::Npu:         return "npu";
     case DeviceType::Unknown:     break;
     }
     return "unknown";
@@ -90,7 +99,188 @@ DeviceType deviceTypeFromString(const std::string &s)
     if (s == "cpu")         return DeviceType::Cpu;
     if (s == "gpu")         return DeviceType::Gpu;
     if (s == "accelerator") return DeviceType::Accelerator;
+    if (s == "npu")         return DeviceType::Npu;
     return DeviceType::Unknown;
+}
+
+// ── Dims ───────────────────────────────────────────────────────────────────
+
+DimValue DimValue::ofText(std::string s)
+{
+    DimValue v;
+    v.text = std::move(s);
+    return v;
+}
+
+DimValue DimValue::ofNumber(double n)
+{
+    DimValue v;
+    v.isNumber = true;
+    v.number   = n;
+    return v;
+}
+
+namespace {
+
+bool isWholeNumber(double n)
+{
+    return std::isfinite(n) && std::floor(n) == n && std::fabs(n) < 9.007199254740992e15;
+}
+
+std::string numberText(double n)
+{
+    if (isWholeNumber(n)) return std::to_string(static_cast<long long>(n));
+    std::ostringstream ss;
+    ss.imbue(std::locale::classic());
+    ss.precision(17);
+    ss << n;
+    return ss.str();
+}
+
+// A producer's value of the wrong kind for its key: a data type for
+// `level`, a word of another key's list.  Debug builds stop there, since
+// every such pairing is a slip at a call site that no reader could repair.
+void checkDim(bool ok, const char *what)
+{
+    (void)what;
+    assert(ok && what);
+}
+
+} // namespace
+
+std::string DimValue::str() const
+{
+    return isNumber ? numberText(number) : text;
+}
+
+bool DimValue::operator==(const DimValue &o) const
+{
+    if (isNumber != o.isNumber) return false;
+    return isNumber ? number == o.number : text == o.text;
+}
+
+DimEntry::DimEntry(xpupeak::Dim k, xpupeak::DType v)
+    : key(xpupeak::toString(k)), value(DimValue::ofText(xpupeak::toString(v)))
+{
+    checkDim(xpupeak::dimInfo(k).kind == xpupeak::DimKind::DataType,
+             "a data type for a key that takes none");
+}
+
+DimEntry::DimEntry(xpupeak::Dim k, const char *text)
+    : key(xpupeak::toString(k)), value(DimValue::ofText(text ? text : ""))
+{
+    // Text keys take any string; a Word key one of its words, and a data
+    // type key a data type's name, for code that walks a table of strings.
+    switch (xpupeak::dimInfo(k).kind)
+    {
+    case xpupeak::DimKind::Text:
+        break;
+    case xpupeak::DimKind::Word:
+    {
+        bool known = false;
+        for (unsigned i = 0; i < xpupeak::dimWordCount(k); i++)
+            if (value.text == xpupeak::dimWord(k, i)) known = true;
+        checkDim(known, "a word that is not in the key's list");
+        break;
+    }
+    case xpupeak::DimKind::DataType:
+    {
+        xpupeak::DType t;
+        checkDim(xpupeak::fromString(value.text, t), "a data type the vocabulary does not have");
+        break;
+    }
+    case xpupeak::DimKind::Integer:
+        checkDim(false, "text for a key that takes a number");
+        break;
+    }
+}
+
+DimEntry::DimEntry(xpupeak::Dim k, const std::string &text) : DimEntry(k, text.c_str()) {}
+
+DimEntry DimEntry::integer(xpupeak::Dim k, double v)
+{
+    checkDim(xpupeak::dimInfo(k).kind == xpupeak::DimKind::Integer,
+             "a number for a key that takes none");
+    return DimEntry(xpupeak::toString(k), DimValue::ofNumber(v));
+}
+
+DimEntry DimEntry::word(xpupeak::Dim k, xpupeak::Dim owner, unsigned index)
+{
+    checkDim(k == owner, "a word of another key's list");
+    const char *w = xpupeak::dimWord(owner, index);
+    return DimEntry(xpupeak::toString(k), DimValue::ofText(w ? w : ""));
+}
+
+Dims::Dims(std::initializer_list<DimEntry> list)
+{
+    for (const DimEntry &e : list) set(e);
+}
+
+void Dims::set(DimEntry e)
+{
+    for (DimEntry &have : entries)
+        if (have.key == e.key)
+        {
+            have.value = std::move(e.value);
+            return;
+        }
+    entries.push_back(std::move(e));
+}
+
+const DimValue *Dims::find(const std::string &key) const
+{
+    for (const DimEntry &e : entries)
+        if (e.key == key) return &e.value;
+    return nullptr;
+}
+
+bool Dims::operator==(const Dims &o) const
+{
+    if (entries.size() != o.entries.size()) return false;
+    for (const DimEntry &e : entries)
+    {
+        const DimValue *v = o.find(e.key);
+        if (!v || *v != e.value) return false;
+    }
+    return true;
+}
+
+Dims effectiveDims(const Dims &test, const Dims &reading)
+{
+    Dims out = test;
+    for (const DimEntry &e : reading) out.set(e);
+    return out;
+}
+
+// ── Hardware facts ─────────────────────────────────────────────────────────
+
+bool CpuFacts::empty() const
+{
+    return isa.empty() && !cores && !threads && !sockets && clusters.empty() &&
+           caches.empty() && cpuidVendor.empty() && cpuidFamily < 0 && cpuidModel < 0 &&
+           cpuidStepping < 0 && engines.empty() && features.empty();
+}
+
+bool HardwareFacts::empty() const
+{
+    return vendorId.empty() && deviceId.empty() && arch.empty() && !computeUnits &&
+           computeUnit.empty() && !clockMhz && !memoryBytes && integrated < 0 && cpu.empty();
+}
+
+BuildBackend buildBackendFor(Backend b)
+{
+    BuildBackend out;
+    out.name     = backendInfo(b).name;
+    out.kind     = xpupeak::toString(xpupeak::backendKind(b));
+    out.portable = xpupeak::backendPortable(b);
+    return out;
+}
+
+std::string extFromJson(const std::string &json)
+{
+    if (json.empty()) return "";
+    const JsonValue v = jsonParse(json);
+    return v.isObject() ? jsonSerialize(v) : std::string();
 }
 
 // ── Lookup / merge ─────────────────────────────────────────────────────────
@@ -137,6 +327,10 @@ void RunDocument::append(const RunDocument &other)
             }
         }
         if (existing->properties.empty()) existing->properties = d.properties;
+        if (existing->facts.empty())      existing->facts      = d.facts;
+        if (existing->evidence.empty())   existing->evidence   = d.evidence;
+        if (existing->runtime.empty())    existing->runtime    = d.runtime;
+        if (existing->ext.empty())        existing->ext        = d.ext;
     }
 }
 
@@ -200,6 +394,55 @@ std::string isoTimestampUtc()
     return std::string(buf);
 }
 
+namespace {
+
+// Bytes for an id or a key.  random_device is mixed with the clock through a
+// generator, so a runtime whose random_device is deterministic (some MinGW
+// builds) still gives each run its own.  Nothing here is a secret that has to
+// withstand an attacker: the run id identifies a run, and the evidence key
+// only keeps one file's tokens from matching another's.
+std::vector<unsigned char> randomBytes(size_t n)
+{
+    std::random_device rd;
+    const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::seed_seq seed{rd(), rd(), rd(), rd(), static_cast<unsigned>(now),
+                       static_cast<unsigned>(static_cast<unsigned long long>(now) >> 32)};
+    std::mt19937_64 gen(seed);
+    std::vector<unsigned char> out(n);
+    for (unsigned char &b : out)
+        b = static_cast<unsigned char>((gen() >> 56) ^ (rd() & 0xffu));
+    return out;
+}
+
+std::string hexOf(const std::vector<unsigned char> &bytes, size_t from, size_t count)
+{
+    static const char digits[] = "0123456789abcdef";
+    std::string out;
+    for (size_t i = from; i < from + count && i < bytes.size(); i++)
+    {
+        out += digits[bytes[i] >> 4];
+        out += digits[bytes[i] & 0xf];
+    }
+    return out;
+}
+
+} // namespace
+
+std::string newRunId()
+{
+    std::vector<unsigned char> b = randomBytes(16);
+    b[6] = static_cast<unsigned char>((b[6] & 0x0f) | 0x40);   // version 4
+    b[8] = static_cast<unsigned char>((b[8] & 0x3f) | 0x80);   // RFC 4122 variant
+    return hexOf(b, 0, 4) + "-" + hexOf(b, 4, 2) + "-" + hexOf(b, 6, 2) + "-" +
+           hexOf(b, 8, 2) + "-" + hexOf(b, 10, 6);
+}
+
+std::string newEvidenceKey()
+{
+    const std::vector<unsigned char> b = randomBytes(32);
+    return hexOf(b, 0, b.size());
+}
+
 bool parseIsoTimestampUtc(const std::string &iso, long long &secondsSinceEpoch)
 {
     int y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0;
@@ -223,15 +466,64 @@ bool parseIsoTimestampUtc(const std::string &iso, long long &secondsSinceEpoch)
 
 namespace {
 
-void writeHost(JsonWriter &w, const HostInfo &h)
+void writeExt(JsonWriter &w, const std::string &ext)
 {
-    w.beginObject("host");
-    w.strIf("os",         h.os);
-    w.strIf("os_version", h.osVersion);
-    w.strIf("arch",       h.arch);
-    w.strIf("cpu",        h.cpu);
-    if (h.logicalCores) w.uint("logical_cores", h.logicalCores);
-    if (h.memoryBytes)  w.uint("memory_bytes",  h.memoryBytes);
+    if (!ext.empty()) w.raw("ext", ext);
+}
+
+// The machine.  Every field is optional; what the platform cannot answer is
+// absent rather than empty.
+void writeSystem(JsonWriter &w, const SystemInfo &s)
+{
+    w.beginObject("system");
+    w.strIf("form_factor",        s.formFactor);
+    w.strIf("form_factor_detail", s.formFactorDetail);
+    w.strIf("form_factor_from",   s.formFactorFrom);
+    if (s.isVirtual)  w.boolean("virtual", true);
+    if (s.translated) w.boolean("translated", true);
+    w.strIf("manufacturer", s.manufacturer);
+    w.strIf("model",        s.model);
+    w.strIf("name",         s.name);
+    w.strIf("family",       s.family);
+    w.strIf("board",        s.board);
+    w.strIf("soc",          s.soc);
+    const OsInfo &os = s.os;
+    if (!os.name.empty() || !os.version.empty() || !os.build.empty() || !os.kernel.empty() ||
+        !os.distribution.empty())
+    {
+        w.beginObject("os");
+        w.strIf("name",         os.name);
+        w.strIf("version",      os.version);
+        w.strIf("build",        os.build);
+        w.strIf("kernel",       os.kernel);
+        w.strIf("distribution", os.distribution);
+        w.endObject();
+    }
+    w.strIf("arch", s.arch);
+    if (s.memoryBytes) w.uint("memory_bytes", s.memoryBytes);
+    writeExt(w, s.ext);
+    w.endObject();
+}
+
+void writeConditions(JsonWriter &w, const RunConditions &c)
+{
+    if (c.empty()) return;
+    w.beginObject("conditions");
+    w.strIf("power_source", c.powerSource);
+    if (c.lowPowerMode >= 0) w.boolean("low_power_mode", c.lowPowerMode != 0);
+    w.strIf("power_profile", c.powerProfile);
+    w.strIf("cpu_governor",  c.cpuGovernor);
+    w.strIf("thermal_start", c.thermalStart);
+    w.strIf("thermal_end",   c.thermalEnd);
+    writeExt(w, c.ext);
+    w.endObject();
+}
+
+void writeAnnotations(JsonWriter &w, const std::map<std::string, std::string> &a)
+{
+    if (a.empty()) return;
+    w.beginObject("annotations");
+    for (const auto &kv : a) w.str(kv.first.c_str(), kv.second);
     w.endObject();
 }
 
@@ -265,6 +557,7 @@ void writeInvocation(JsonWriter &w, const Invocation &inv)
         w.endArray();
     }
     if (inv.verbose) w.boolean("verbose", true);
+    if (inv.standard) w.boolean("standard", true);
     w.endObject();
 }
 
@@ -273,7 +566,14 @@ void writeBuild(JsonWriter &w, const BuildInfo &b)
     if (b.backends.empty()) return;
     w.beginObject("build");
     w.beginArray("backends");
-    for (const std::string &name : b.backends) w.rawString(name);
+    for (const BuildBackend &be : b.backends)
+    {
+        w.beginObjectInline();
+        w.str("name", be.name);
+        w.strIf("kind", be.kind);
+        if (be.portable) w.boolean("portable", true);
+        w.endObject();
+    }
     w.endArray();
     w.strIf("config", b.config);
     w.endObject();
@@ -295,11 +595,37 @@ void writeLogEntry(JsonWriter &w, const LogEntry &e)
     w.endObject();
 }
 
+// A dims object's entries.  A number is a whole number by the format's rule,
+// and written as one.
+void writeDimEntries(JsonWriter &w, const Dims &dims)
+{
+    for (const DimEntry &e : dims)
+    {
+        if (!e.value.isNumber)
+            w.str(e.key.c_str(), e.value.text);
+        else if (isWholeNumber(e.value.number))
+            w.integer(e.key.c_str(), static_cast<long long>(e.value.number));
+        else
+            w.raw(e.key.c_str(), numberText(e.value.number));
+    }
+}
+
+// Dims on one line: a reading's coordinates read as one record.
+void writeDimsKey(JsonWriter &w, const Dims &dims)
+{
+    if (dims.empty()) return;
+    w.beginObjectInline("dims");
+    writeDimEntries(w, dims);
+    w.endObject();
+}
+
 void writeMetric(JsonWriter &w, const MetricResult &m)
 {
     w.beginObject();
     w.str("id", m.id);
     w.strIf("label", m.label);
+    w.strIf("benchmark", m.benchmark);
+    writeDimsKey(w, m.dims);
     if (m.status == ResultStatus::Ok)
     {
         // An omitted "status" means ok.  Every reading in a healthy file is
@@ -319,6 +645,7 @@ void writeMetric(JsonWriter &w, const MetricResult &m)
     if (m.direction != Direction::FromUnit)
         w.str("direction", directionString(m.direction));
     w.strIf("description", m.description);
+    writeExt(w, m.ext);
     w.endObject();
 }
 
@@ -328,6 +655,10 @@ void writeTest(JsonWriter &w, const TestResult &t)
     w.str("id", t.id);
     w.str("title", t.title);
     w.strIf("variant", t.variant);
+    w.strIf("benchmark", t.benchmark);
+    // Absent means 1, the first.
+    if (t.revision > 1) w.integer("revision", t.revision);
+    writeDimsKey(w, t.dims);
     w.str("category", categoryString(t.category));
     w.str("shape", shapeString(t.shape));
     w.strIf("axis", t.axis);
@@ -336,10 +667,156 @@ void writeTest(JsonWriter &w, const TestResult &t)
     w.str("unit", t.unit);
     w.strIf("description", t.description);
     if (t.durationS > 0.0) w.num("duration_s", t.durationS);
+    writeExt(w, t.ext);
     w.beginArray("metrics");
     for (const MetricResult &m : t.metrics) writeMetric(w, m);
     w.endArray();
     w.endObject();
+}
+
+void writeCaches(JsonWriter &w, const std::vector<CacheInfo> &caches)
+{
+    if (caches.empty()) return;
+    w.beginArray("caches");
+    for (const CacheInfo &c : caches)
+    {
+        w.beginObjectInline();
+        w.str("level", c.level);
+        if (c.sizeBytes) w.uint("size_bytes", c.sizeBytes);
+        if (c.instances) w.uint("instances", c.instances);
+        if (c.lineBytes) w.uint("line_bytes", c.lineBytes);
+        w.endObject();
+    }
+    w.endArray();
+}
+
+// A CPU's facts, as keys of the object open: the processor's, or a device's
+// `facts`.
+void writeCpuFacts(JsonWriter &w, const CpuFacts &c)
+{
+    w.strIf("isa", c.isa);
+    if (c.cores)   w.uint("cores", c.cores);
+    if (c.threads) w.uint("threads", c.threads);
+    if (c.sockets) w.uint("sockets", c.sockets);
+    if (!c.cpuidVendor.empty() || c.cpuidFamily >= 0 || c.cpuidModel >= 0 || c.cpuidStepping >= 0)
+    {
+        w.beginObjectInline("cpuid");
+        w.strIf("vendor", c.cpuidVendor);
+        if (c.cpuidFamily >= 0)   w.integer("family", c.cpuidFamily);
+        if (c.cpuidModel >= 0)    w.integer("model", c.cpuidModel);
+        if (c.cpuidStepping >= 0) w.integer("stepping", c.cpuidStepping);
+        w.endObject();
+    }
+    if (!c.clusters.empty())
+    {
+        w.beginArray("clusters");
+        for (const CpuCluster &k : c.clusters)
+        {
+            w.beginObject();
+            w.strIf("kind", k.kind);
+            if (k.cores)          w.uint("cores", k.cores);
+            if (k.threadsPerCore) w.uint("threads_per_core", k.threadsPerCore);
+            if (k.maxMhz)         w.uint("max_mhz", k.maxMhz);
+            w.strIf("microarch", k.microarch);
+            w.strIf("midr", k.midr);
+            writeCaches(w, k.caches);
+            w.endObject();
+        }
+        w.endArray();
+    }
+    writeCaches(w, c.caches);
+    if (!c.engines.empty())
+    {
+        w.beginArray("engines");
+        for (const CpuEngine &e : c.engines)
+        {
+            w.beginObjectInline();
+            w.strIf("kind", e.kind);
+            w.strIf("name", e.name);
+            w.strIf("scope", e.scope);
+            w.strIf("reached_by", e.reachedBy);
+            w.endObject();
+        }
+        w.endArray();
+    }
+    if (!c.features.empty())
+    {
+        w.beginArray("features");
+        for (const std::string &f : c.features) w.rawString(f);
+        w.endArray();
+    }
+}
+
+// Typed facts, as keys of the object open.
+void writeFacts(JsonWriter &w, const HardwareFacts &f)
+{
+    w.strIf("vendor_id", f.vendorId);
+    w.strIf("device_id", f.deviceId);
+    w.strIf("arch", f.arch);
+    if (f.integrated >= 0) w.boolean("integrated", f.integrated != 0);
+    if (f.computeUnits) w.uint("compute_units", f.computeUnits);
+    w.strIf("compute_unit", f.computeUnit);
+    if (f.clockMhz) w.uint("clock_mhz", f.clockMhz);
+    if (f.memoryBytes) w.uint("memory_bytes", f.memoryBytes);
+    writeCpuFacts(w, f.cpu);
+}
+
+void writeEvidence(JsonWriter &w, const DeviceEvidence &e)
+{
+    if (e.empty()) return;
+    w.beginObjectInline("evidence");
+    for (const auto &kv : e.tokens) w.str(kv.first.c_str(), kv.second);
+    if (e.host) w.boolean("host", true);
+    w.strIf("soc", e.soc);
+    if (e.defaultGpu) w.boolean("default_gpu", true);
+    w.endObject();
+}
+
+void writeRuntime(JsonWriter &w, const RuntimeInfo &r)
+{
+    if (r.empty()) return;
+    w.beginObjectInline("runtime");
+    w.strIf("provider", r.provider);
+    w.strIf("accelerator", r.accelerator);
+    w.strIf("version", r.version);
+    w.endObject();
+}
+
+void writePackages(JsonWriter &w, const std::vector<PackageInfo> &packages)
+{
+    if (packages.empty()) return;
+    w.beginArray("packages");
+    for (const PackageInfo &p : packages)
+    {
+        w.beginObject();
+        w.str("id", p.id);
+        w.strIf("kind", p.kind);
+        w.strIf("vendor", p.vendor);
+        w.strIf("name", p.name);
+        writeExt(w, p.ext);
+        w.endObject();
+    }
+    w.endArray();
+}
+
+void writeProcessors(JsonWriter &w, const std::vector<ProcessorInfo> &processors)
+{
+    if (processors.empty()) return;
+    w.beginArray("processors");
+    for (const ProcessorInfo &p : processors)
+    {
+        w.beginObject();
+        w.str("id", p.id);
+        w.strIf("kind", p.kind);
+        w.strIf("package", p.package);
+        w.strIf("vendor", p.vendor);
+        w.strIf("vendor_name", p.vendorName);
+        w.strIf("name", p.name);
+        writeFacts(w, p.facts);
+        writeExt(w, p.ext);
+        w.endObject();
+    }
+    w.endArray();
 }
 
 void writeDevice(JsonWriter &w, const DeviceResult &d)
@@ -352,6 +829,17 @@ void writeDevice(JsonWriter &w, const DeviceResult &d)
     w.str("type", deviceTypeString(d.type));
     if (d.platformIndex >= 0) w.integer("platform_index", d.platformIndex);
     if (d.deviceIndex   >= 0) w.integer("device_index",   d.deviceIndex);
+    w.strIf("processor", d.processor);
+    w.strIf("link", d.link);
+    writeRuntime(w, d.runtime);
+    if (!d.facts.empty())
+    {
+        w.beginObject("facts");
+        writeFacts(w, d.facts);
+        w.endObject();
+    }
+    writeEvidence(w, d.evidence);
+    writeExt(w, d.ext);
     if (!d.properties.empty())
     {
         w.beginArray("properties");
@@ -455,18 +943,33 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
 {
     JsonWriter w(out, /*compact=*/progress != nullptr);
     w.beginObject();
+    const RunMeta &meta = doc.meta;
     w.str("schema", progress ? kPartialSchema : kRunSchema);
     w.integer("format_version", RESULT_FORMAT_VERSION);
-    writeGenerator(w, doc.meta.generator);
-    w.strIf("generated_at", doc.meta.generatedAt);
-    if (doc.meta.durationS > 0.0) w.num("duration_s", doc.meta.durationS);
-    if (doc.meta.cancelled)       w.boolean("cancelled", true);
+    w.integer("format_minor", RESULT_FORMAT_MINOR);
+    w.strIf("run_id", meta.runId);
+    writeGenerator(w, meta.generator);
+    w.strIf("generated_at", meta.generatedAt);
+    if (meta.durationS > 0.0) w.num("duration_s", meta.durationS);
+    if (meta.cancelled)       w.boolean("cancelled", true);
 
-    writeBuild(w, doc.meta.build);
-    writeHost(w, doc.meta.host);
-    writeInvocation(w, doc.meta.invocation);
-    writeResumed(w, doc.meta.resumed);
-    if (progress) writeProgress(w, *progress);
+    writeBuild(w, meta.build);
+    writeInvocation(w, meta.invocation);
+    writeSystem(w, meta.system);
+    writeConditions(w, meta.conditions);
+    writeAnnotations(w, meta.annotations);
+    writeResumed(w, meta.resumed);
+    writeExt(w, meta.ext);
+    if (progress)
+    {
+        writeProgress(w, *progress);
+        // The checkpoint's alone: a resumed run's tokens must match the part
+        // before's, and the result must never carry what made them.
+        w.strIf("evidence_key", meta.evidenceKey);
+    }
+
+    writePackages(w, doc.packages);
+    writeProcessors(w, doc.processors);
 
     w.beginArray("devices");
     for (const DeviceResult &d : doc.devices) writeDevice(w, d);
@@ -493,6 +996,16 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
 
 } // namespace
 
+std::string dimsToJson(const Dims &dims)
+{
+    std::ostringstream ss;
+    JsonWriter w(ss, /*compact=*/true);
+    w.beginObject();
+    writeDimEntries(w, dims);
+    w.endObject();
+    return ss.str();
+}
+
 std::string logEntryToJson(const LogEntry &entry)
 {
     std::ostringstream ss;
@@ -508,11 +1021,13 @@ std::string runLogHeaderJson(const RunMeta &meta)
     w.beginObjectInline();
     w.str("schema", kRunLogSchema);
     w.integer("format_version", RESULT_FORMAT_VERSION);
+    w.integer("format_minor", RESULT_FORMAT_MINOR);
+    w.strIf("run_id", meta.runId);
     writeGenerator(w, meta.generator);
     w.strIf("generated_at", meta.generatedAt);
     writeBuild(w, meta.build);
-    writeHost(w, meta.host);
     writeInvocation(w, meta.invocation);
+    writeSystem(w, meta.system);
     w.endObject();
     return ss.str();
 }
@@ -547,15 +1062,198 @@ std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress
 
 namespace {
 
-void readHost(const JsonValue &v, HostInfo &h)
+// Everything below reads what it knows and passes over the rest: a key,
+// a value or a dim a newer build wrote is never an error (docs/format-v4.md,
+// Compatibility).  Vocabulary values are kept as written.
+
+std::string readExt(const JsonValue &v)
+{
+    const JsonValue *e = v.find("ext");
+    return (e && e->isObject()) ? jsonSerialize(*e) : std::string();
+}
+
+unsigned readUint(const JsonValue &v, const char *key)
+{
+    const double n = v.num(key);
+    return n > 0.0 ? static_cast<unsigned>(n) : 0u;
+}
+
+std::uint64_t readBytes(const JsonValue &v, const char *key)
+{
+    const double n = v.num(key);
+    return n > 0.0 ? static_cast<std::uint64_t>(n) : 0u;
+}
+
+int readTri(const JsonValue &v, const char *key)
+{
+    const JsonValue *b = v.find(key);
+    return (b && b->type() == JsonValue::Type::Bool) ? (b->asBool() ? 1 : 0) : -1;
+}
+
+// Strings and whole numbers; a value of another type is not a dim.
+Dims readDims(const JsonValue &v)
+{
+    Dims out;
+    const JsonValue *d = v.find("dims");
+    if (!d || !d->isObject()) return out;
+    for (const auto &kv : d->obj)
+    {
+        if (kv.second.type() == JsonValue::Type::String)
+            out.entries.emplace_back(kv.first, DimValue::ofText(kv.second.asString()));
+        else if (kv.second.type() == JsonValue::Type::Number)
+            out.entries.emplace_back(kv.first, DimValue::ofNumber(kv.second.asNumber()));
+    }
+    return out;
+}
+
+void readSystem(const JsonValue &v, SystemInfo &s)
 {
     if (!v.isObject()) return;
-    h.os           = v.str("os");
-    h.osVersion    = v.str("os_version");
-    h.arch         = v.str("arch");
-    h.cpu          = v.str("cpu");
-    h.logicalCores = static_cast<unsigned>(v.num("logical_cores"));
-    h.memoryBytes  = static_cast<std::uint64_t>(v.num("memory_bytes"));
+    s.formFactor       = v.str("form_factor");
+    s.formFactorDetail = v.str("form_factor_detail");
+    s.formFactorFrom   = v.str("form_factor_from");
+    s.isVirtual        = v.flag("virtual");
+    s.translated       = v.flag("translated");
+    s.manufacturer     = v.str("manufacturer");
+    s.model            = v.str("model");
+    s.name             = v.str("name");
+    s.family           = v.str("family");
+    s.board            = v.str("board");
+    s.soc              = v.str("soc");
+    if (const JsonValue *os = v.find("os"); os && os->isObject())
+    {
+        s.os.name         = os->str("name");
+        s.os.version      = os->str("version");
+        s.os.build        = os->str("build");
+        s.os.kernel       = os->str("kernel");
+        s.os.distribution = os->str("distribution");
+    }
+    s.arch        = v.str("arch");
+    s.memoryBytes = readBytes(v, "memory_bytes");
+    s.ext         = readExt(v);
+}
+
+void readConditions(const JsonValue &v, RunConditions &c)
+{
+    if (!v.isObject()) return;
+    c.powerSource  = v.str("power_source");
+    c.lowPowerMode = readTri(v, "low_power_mode");
+    c.powerProfile = v.str("power_profile");
+    c.cpuGovernor  = v.str("cpu_governor");
+    c.thermalStart = v.str("thermal_start");
+    c.thermalEnd   = v.str("thermal_end");
+    c.ext          = readExt(v);
+}
+
+std::vector<CacheInfo> readCaches(const JsonValue &v)
+{
+    std::vector<CacheInfo> out;
+    if (const JsonValue *cs = v.find("caches"))
+        for (const JsonValue &c : cs->items())
+        {
+            CacheInfo info;
+            info.level     = c.str("level");
+            info.sizeBytes = readBytes(c, "size_bytes");
+            info.instances = readUint(c, "instances");
+            info.lineBytes = readUint(c, "line_bytes");
+            out.push_back(std::move(info));
+        }
+    return out;
+}
+
+// Facts from the keys of `v`: a processor's own, or a device's `facts`.
+void readFacts(const JsonValue &v, HardwareFacts &f)
+{
+    if (!v.isObject()) return;
+    f.vendorId     = v.str("vendor_id");
+    f.deviceId     = v.str("device_id");
+    f.arch         = v.str("arch");
+    f.integrated   = readTri(v, "integrated");
+    f.computeUnits = readUint(v, "compute_units");
+    f.computeUnit  = v.str("compute_unit");
+    f.clockMhz     = readUint(v, "clock_mhz");
+    f.memoryBytes  = readBytes(v, "memory_bytes");
+
+    CpuFacts &c = f.cpu;
+    c.isa     = v.str("isa");
+    c.cores   = readUint(v, "cores");
+    c.threads = readUint(v, "threads");
+    c.sockets = readUint(v, "sockets");
+    if (const JsonValue *id = v.find("cpuid"); id && id->isObject())
+    {
+        c.cpuidVendor   = id->str("vendor");
+        c.cpuidFamily   = static_cast<int>(id->num("family", -1));
+        c.cpuidModel    = static_cast<int>(id->num("model", -1));
+        c.cpuidStepping = static_cast<int>(id->num("stepping", -1));
+    }
+    if (const JsonValue *ks = v.find("clusters"))
+        for (const JsonValue &k : ks->items())
+        {
+            CpuCluster cl;
+            cl.kind           = k.str("kind");
+            cl.cores          = readUint(k, "cores");
+            cl.threadsPerCore = readUint(k, "threads_per_core");
+            cl.maxMhz         = readUint(k, "max_mhz");
+            cl.microarch      = k.str("microarch");
+            cl.midr           = k.str("midr");
+            cl.caches         = readCaches(k);
+            c.clusters.push_back(std::move(cl));
+        }
+    c.caches = readCaches(v);
+    if (const JsonValue *es = v.find("engines"))
+        for (const JsonValue &e : es->items())
+            c.engines.push_back({e.str("kind"), e.str("name"), e.str("scope"), e.str("reached_by")});
+    if (const JsonValue *fs = v.find("features"))
+        for (const JsonValue &x : fs->items())
+            if (x.type() == JsonValue::Type::String) c.features.push_back(x.asString());
+}
+
+// The weak evidence by name; every other string is a token, a kind a newer
+// build added included.
+void readEvidence(const JsonValue &v, DeviceEvidence &e)
+{
+    if (!v.isObject()) return;
+    for (const auto &kv : v.obj)
+    {
+        if (kv.first == "host")
+            e.host = kv.second.asBool();
+        else if (kv.first == "default_gpu")
+            e.defaultGpu = kv.second.asBool();
+        else if (kv.first == "soc")
+            e.soc = kv.second.asString();
+        else if (kv.second.type() == JsonValue::Type::String)
+            e.tokens[kv.first] = kv.second.asString();
+    }
+}
+
+void readRuntime(const JsonValue &v, RuntimeInfo &r)
+{
+    if (!v.isObject()) return;
+    r.provider    = v.str("provider");
+    r.accelerator = v.str("accelerator");
+    r.version     = v.str("version");
+}
+
+void readBuild(const JsonValue &v, BuildInfo &b)
+{
+    if (!v.isObject()) return;
+    if (const JsonValue *names = v.find("backends"))
+        for (const JsonValue &x : names->items())
+        {
+            BuildBackend be;
+            if (x.type() == JsonValue::Type::String)
+            {
+                be.name = x.asString();
+            }
+            else
+            {
+                be.name     = x.str("name");
+                be.kind     = x.str("kind");
+                be.portable = x.flag("portable");
+            }
+            if (!be.name.empty()) b.backends.push_back(std::move(be));
+        }
+    b.config = v.str("config");
 }
 
 void readInvocation(const JsonValue &v, Invocation &inv)
@@ -572,7 +1270,8 @@ void readInvocation(const JsonValue &v, Invocation &inv)
         for (const JsonValue &x : c->items()) inv.categories.push_back(x.asString());
     if (const JsonValue *t = v.find("tests"))
         for (const JsonValue &x : t->items()) inv.tests.push_back(x.asString());
-    inv.verbose = v.flag("verbose");
+    inv.verbose  = v.flag("verbose");
+    inv.standard = v.flag("standard");
 }
 
 LogEntry readLogEntry(const JsonValue &v)
@@ -615,6 +1314,9 @@ MetricResult readMetric(const JsonValue &v)
     }
     if (v.has("direction"))
         m.direction = directionFromString(v.str("direction"));
+    m.dims      = readDims(v);
+    m.benchmark = v.str("benchmark");
+    m.ext       = readExt(v);
     return m;
 }
 
@@ -632,6 +1334,10 @@ TestResult readTest(const JsonValue &v)
     t.quantity    = quantityFromString(v.str("quantity"));
     t.unit        = v.str("unit");
     t.durationS   = v.num("duration_s");
+    t.benchmark   = v.str("benchmark");
+    t.dims        = readDims(v);
+    t.revision    = std::max(1, static_cast<int>(v.num("revision", 1)));
+    t.ext         = readExt(v);
     if (const JsonValue *ms = v.find("metrics"))
         for (const JsonValue &m : ms->items()) t.metrics.push_back(readMetric(m));
     return t;
@@ -650,6 +1356,12 @@ DeviceResult readDevice(const JsonValue &v)
     if (const JsonValue *ps = v.find("properties"))
         for (const JsonValue &p : ps->items())
             d.properties.push_back({p.str("key"), p.str("value")});
+    d.processor = v.str("processor");
+    d.link      = v.str("link");
+    if (const JsonValue *f = v.find("facts"))    readFacts(*f, d.facts);
+    if (const JsonValue *e = v.find("evidence")) readEvidence(*e, d.evidence);
+    if (const JsonValue *r = v.find("runtime"))  readRuntime(*r, d.runtime);
+    d.ext = readExt(v);
     if (const JsonValue *ts = v.find("tests"))
         for (const JsonValue &t : ts->items()) d.tests.push_back(readTest(t));
     return d;
@@ -698,14 +1410,17 @@ void readDocument(const JsonValue &root, RunDocument &out)
     out.meta.generatedAt   = root.str("generated_at");
     out.meta.durationS     = root.num("duration_s");
     out.meta.cancelled     = root.flag("cancelled");
-    if (const JsonValue *b = root.find("build")) {
-        if (const JsonValue *names = b->find("backends"))
-            for (const JsonValue &x : names->items())
-                out.meta.build.backends.push_back(x.asString());
-        out.meta.build.config = b->str("config");
-    }
-    if (const JsonValue *h = root.find("host"))       readHost(*h, out.meta.host);
+    out.meta.runId         = root.str("run_id");
+    out.meta.formatMinor   = std::max(0, static_cast<int>(root.num("format_minor", 0)));
+    if (const JsonValue *b = root.find("build"))      readBuild(*b, out.meta.build);
+    if (const JsonValue *s = root.find("system"))     readSystem(*s, out.meta.system);
+    if (const JsonValue *c = root.find("conditions")) readConditions(*c, out.meta.conditions);
     if (const JsonValue *i = root.find("invocation")) readInvocation(*i, out.meta.invocation);
+    if (const JsonValue *a = root.find("annotations"); a && a->isObject())
+        for (const auto &kv : a->obj)
+            if (kv.second.type() == JsonValue::Type::String)
+                out.meta.annotations[kv.first] = kv.second.asString();
+    out.meta.ext = readExt(root);
     if (const JsonValue *rs = root.find("resumed"))
         for (const JsonValue &r : rs->items())
         {
@@ -716,6 +1431,31 @@ void readDocument(const JsonValue &root, RunDocument &out)
             rec.from     = readPlace(r.find("from"));
             rec.skipped  = readPlace(r.find("skipped"));
             out.meta.resumed.push_back(std::move(rec));
+        }
+    if (const JsonValue *ps = root.find("packages"))
+        for (const JsonValue &p : ps->items())
+        {
+            PackageInfo pkg;
+            pkg.id     = p.str("id");
+            pkg.kind   = p.str("kind");
+            pkg.vendor = p.str("vendor");
+            pkg.name   = p.str("name");
+            pkg.ext    = readExt(p);
+            out.packages.push_back(std::move(pkg));
+        }
+    if (const JsonValue *ps = root.find("processors"))
+        for (const JsonValue &p : ps->items())
+        {
+            ProcessorInfo proc;
+            proc.id         = p.str("id");
+            proc.kind       = p.str("kind");
+            proc.package    = p.str("package");
+            proc.vendor     = p.str("vendor");
+            proc.vendorName = p.str("vendor_name");
+            proc.name       = p.str("name");
+            readFacts(p, proc.facts);
+            proc.ext        = readExt(p);
+            out.processors.push_back(std::move(proc));
         }
     if (const JsonValue *ds = root.find("devices"))
         for (const JsonValue &d : ds->items()) out.devices.push_back(readDevice(d));
@@ -750,6 +1490,45 @@ bool readFile(const std::string &filename, std::string &text)
 
 } // namespace
 
+bool parseRunJson(const std::string &text, const std::string &name, RunDocument &out,
+                  std::string &error, bool &newerMinor)
+{
+    newerMinor = false;
+    std::string why;
+    JsonValue   root = jsonParse(text, &why);
+    if (!root.isObject())
+    {
+        error = name + " is not an XpuPeak result file" + (why.empty() ? "" : " (" + why + ")");
+        return false;
+    }
+    if (writtenBy3x(root))
+    {
+        error = refusal3x(name);
+        return false;
+    }
+    if (root.str("schema") == kPartialSchema)
+    {
+        error = name + " is the checkpoint of a run that did not finish, not a result; "
+                "continue the run with --resume";
+        return false;
+    }
+
+    // The major is the promise: every minor of it is read, and what a newer
+    // one added is passed over.
+    const int version = static_cast<int>(root.num("format_version", 0));
+    if (version != RESULT_FORMAT_VERSION)
+    {
+        error = name + " is format_version=" + std::to_string(version) + "; this build expects v" +
+                std::to_string(RESULT_FORMAT_VERSION) +
+                ". Regenerate the file with this version of XpuPeak.";
+        return false;
+    }
+
+    readDocument(root, out);
+    newerMinor = out.meta.formatMinor > RESULT_FORMAT_MINOR;
+    return true;
+}
+
 bool loadRunJson(const std::string &filename, RunDocument &out)
 {
     std::string text;
@@ -758,37 +1537,24 @@ bool loadRunJson(const std::string &filename, RunDocument &out)
         std::cerr << programName() << ": cannot open result file: " << filename << "\n";
         return false;
     }
-
     std::string error;
-    JsonValue   root = jsonParse(text, &error);
-    if (!root.isObject())
+    bool        newer = false;
+    if (!parseRunJson(text, filename, out, error, newer))
     {
-        std::cerr << programName() << ": " << filename << " is not an XpuPeak result file"
-                  << (error.empty() ? "" : " (" + error + ")") << "\n";
+        std::cerr << programName() << ": " << error << "\n";
         return false;
     }
-    if (writtenBy3x(root))
+    // Said once per file: each backend's logger reads a --compare baseline.
+    static std::mutex            saidLock;
+    static std::set<std::string> said;
+    if (newer)
     {
-        std::cerr << programName() << ": " << refusal3x(filename) << "\n";
-        return false;
+        std::lock_guard<std::mutex> lock(saidLock);
+        if (said.insert(filename).second)
+            std::cerr << programName() << ": " << filename << " was written by a newer XpuPeak "
+                      << "(format " << RESULT_FORMAT_VERSION << "." << out.meta.formatMinor
+                      << "); some details aren't shown\n";
     }
-    if (root.str("schema") == kPartialSchema)
-    {
-        std::cerr << programName() << ": " << filename << " is the checkpoint of a run that "
-                  << "did not finish, not a result; continue the run with --resume\n";
-        return false;
-    }
-
-    const int version = static_cast<int>(root.num("format_version", 0));
-    if (version != RESULT_FORMAT_VERSION)
-    {
-        std::cerr << programName() << ": " << filename << " is format_version=" << version
-                  << "; this build expects v" << RESULT_FORMAT_VERSION
-                  << ". Regenerate the file with this version of XpuPeak.\n";
-        return false;
-    }
-
-    readDocument(root, out);
     return true;
 }
 
@@ -830,6 +1596,7 @@ bool loadPartialJson(const std::string &filename, RunDocument &out,
         return false;
     }
     readDocument(root, out);
+    out.meta.evidenceKey = root.str("evidence_key");
     progress = RunProgress();
     if (const JsonValue *p = root.find("progress")) readProgress(*p, progress);
     return true;

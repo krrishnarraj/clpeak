@@ -2,34 +2,49 @@
 #define XPUPEAK_RUN_DOCUMENT_H
 
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <common/benchmark_enums.h>
 #include <common/common.h>     // xpupeak::LogLevel
-#include <common/host_info.h>
+#include <common/host_info.h>  // SystemInfo, RunConditions
 #include <common/inventory.h>
 #include <common/units.h>
+#include <common/vocabulary.h>
 
 // ── The result document ────────────────────────────────────────────────────
 //
 // One run, as a tree: run -> devices -> tests -> metrics.  This is the shape
 // the CLI prints, the shape the GUI renders, and the shape the file on disk
 // holds, so nothing has to regroup a flat table into a hierarchy and guess at
-// what belonged together.
+// what belonged together.  Beside the tree, the hardware it ran on: the
+// system, its packages and processors, which each device names
+// (`processor`) -- one processor seen through several backends is one key.
 //
 // The single serialization is JSON (`saveRunJson` / `loadRunJson`).  XML and
 // CSV are gone: XML's only advantage was nesting, which JSON has, and CSV
 // could not carry device metadata or documentation at all.
 //
-// Schema and vocabulary are documented in docs/format-v4.md.
+// Schema and vocabulary are documented in docs/format-v4.md, with the rules
+// that let the format change without breaking a file already shared
+// (Compatibility): a minor only adds, a reader ignores what it does not
+// know, and the model keeps vocabulary values as strings so a newer file's
+// values survive a read.
 
 // Dump-file schema version.  Loaders reject any other version outright.
 // v4 is the format under the program's own names (schemas `xpupeak/...`,
 // `generator`), and 4.0 reads no file an earlier version wrote: a file
 // clpeak 3.x wrote is refused by its schema, with a message that says so.
+// It stays 4 for the life of the compatibility promise.
 constexpr int RESULT_FORMAT_VERSION = 4;
+
+// The additive revision this build writes (`format_minor`; absent means 0).
+// A minor may add optional keys, enum values, dim keys, families, quantities
+// and sections, and nothing else; a reader accepts every minor of its major.
+constexpr int RESULT_FORMAT_MINOR = 0;
 
 // The writer every document names (`generator.name`).  The same under the
 // second command name: that is this program too, and writes the same file.
@@ -83,6 +98,81 @@ TestShape    shapeFromString(const std::string &s);
 const char  *deviceTypeString(DeviceType t);
 DeviceType   deviceTypeFromString(const std::string &s);
 
+// ---- Dims -----------------------------------------------------------------
+//
+// A reading's coordinates, from the vocabulary (include/common/vocabulary.h):
+// `{dtype: fp16, acc: fp16}`, `{level: l1, scope: core}`.  A test's dims are
+// what all its readings share; a reading's add to them and override them.
+// Keys are strings, so a key a newer build wrote is kept -- a reader treats
+// it as identity -- and values are a string or a whole number, and stay so.
+
+struct DimValue {
+    bool        isNumber = false;
+    double      number   = 0.0;
+    std::string text;
+
+    static DimValue ofText(std::string s);
+    static DimValue ofNumber(double n);
+
+    // The value as one string -- "fp16", "4", "134217728" -- the form a
+    // measure key and a default compare.
+    std::string str() const;
+
+    bool operator==(const DimValue &o) const;
+    bool operator!=(const DimValue &o) const { return !(*this == o); }
+};
+
+// One key and its value.  The producer's forms check that the value suits
+// the key -- a data type for `dtype`, a dim::Level for `level`, a number for
+// `width` -- in a debug build.  The loader's takes any key.
+struct DimEntry {
+    std::string key;
+    DimValue    value;
+
+    DimEntry() = default;
+    DimEntry(std::string k, DimValue v) : key(std::move(k)), value(std::move(v)) {}
+
+    DimEntry(xpupeak::Dim k, xpupeak::DType v);
+    DimEntry(xpupeak::Dim k, const char *text);
+    DimEntry(xpupeak::Dim k, const std::string &text);
+
+    template <class T, std::enable_if_t<std::is_integral<T>::value &&
+                                        !std::is_same<T, bool>::value, int> = 0>
+    DimEntry(xpupeak::Dim k, T v) : DimEntry(integer(k, static_cast<double>(v))) {}
+
+    template <class E, std::enable_if_t<xpupeak::dim::IsWord<E>::value, int> = 0>
+    DimEntry(xpupeak::Dim k, E v)
+        : DimEntry(word(k, xpupeak::dim::WordOf<E>::key, static_cast<unsigned>(v))) {}
+
+private:
+    static DimEntry integer(xpupeak::Dim k, double v);
+    static DimEntry word(xpupeak::Dim k, xpupeak::Dim owner, unsigned index);
+};
+
+struct Dims {
+    std::vector<DimEntry> entries;   // in the order authored
+
+    Dims() = default;
+    Dims(std::initializer_list<DimEntry> list);
+
+    bool   empty() const { return entries.empty(); }
+    size_t size() const { return entries.size(); }
+
+    // Add or replace one key.
+    void set(DimEntry e);
+    const DimValue *find(const std::string &key) const;
+
+    std::vector<DimEntry>::const_iterator begin() const { return entries.begin(); }
+    std::vector<DimEntry>::const_iterator end() const { return entries.end(); }
+
+    bool operator==(const Dims &o) const;
+    bool operator!=(const Dims &o) const { return !(*this == o); }
+};
+
+// A reading's dims as a consumer reads them: its test's, with its own added
+// and winning.
+Dims effectiveDims(const Dims &test, const Dims &reading);
+
 // ---- Metric ---------------------------------------------------------------
 
 // One reading.  Unit fields are overrides: they are set only when this
@@ -108,6 +198,18 @@ struct MetricResult {
 
     // Direction override.  FromUnit means "inherit the test's".
     Direction   direction = Direction::FromUnit;
+
+    // This reading's coordinates, over its test's (effectiveDims).
+    Dims        dims;
+
+    // The family this reading measures, when it is not its test's: a test
+    // that holds readings of two Benchmarks -- the CPU's integer dot
+    // product, int8 and int16 -- names the one it was opened under, and a
+    // reading recorded while the other was open names that one.  A
+    // Benchmark's flag name; empty means "its test's".
+    std::string benchmark;
+
+    std::string ext;           // experimental fields, raw JSON; "" for none
 
     const std::string &displayLabel() const { return label.empty() ? id : label; }
 };
@@ -142,6 +244,23 @@ struct TestResult {
     // Resolved from the authored unit token exactly once, at beginTest().
     std::string unit;                             // display symbol: "FLOPS"
     Quantity    quantity = Quantity::Unknown;
+
+    // The family -- a Benchmark's flag name, "matrix-compute" -- that the
+    // test measures: the one admit() had open when the test was opened.
+    // What makes `cublas_gemm` and `coreml_gemm` the same measurement.
+    std::string benchmark;
+
+    // What every reading shares: a vector test's data type, a CPU test's
+    // ISA.  A reading's own dims add to them.
+    Dims        dims;
+
+    // The test's methodology version: it goes up whenever a change moves the
+    // numbers for a reason other than the hardware (a kernel fix, a counting
+    // rule, a problem size), and readings of two revisions are not compared.
+    // 1 is the first, and what an absent `revision` means.
+    int         revision = 1;
+
+    std::string ext;           // experimental fields, raw JSON; "" for none
 
     std::vector<MetricResult> metrics;
 
@@ -180,10 +299,100 @@ std::string deviceKey(const std::string &name, int deviceIndex);
 
 // Free-form per-device fact (compute units, VRAM, clocks, driver internals)
 // captured once when the device is opened.  Not fields of a reading: they
-// describe the device, not a measurement.
+// describe the device, not a measurement.  Display strings; the typed facts
+// are HardwareFacts.
 struct DeviceProp {
     std::string key;
     std::string value;
+};
+
+// ---- Hardware facts ---------------------------------------------------------
+//
+// What an API -- or for a CPU, the OS and CPUID -- says about the hardware,
+// typed.  A device keeps its own API's (`facts`), and a processor the facts
+// merged from the most native backend that ran, written on the processor
+// itself; so a consumer with other rules can merge them again.  Vocabulary
+// fields hold their strings.  None identifies a unit: a PCI device id is a
+// model's, not a card's.
+
+struct CacheInfo {
+    std::string   level;           // CacheLevel: "l1d", "l2", "slc"
+    std::uint64_t sizeBytes = 0;   // one instance
+    unsigned      instances = 0;   // how many the processor, or the cluster, has
+    unsigned      lineBytes = 0;
+};
+
+struct CpuCluster {
+    std::string kind;              // ClusterKind; "" for a CPU of one kind of core
+    unsigned    cores = 0;
+    unsigned    threadsPerCore = 0;
+    unsigned    maxMhz = 0;
+    std::string microarch;         // as MIDR or CPUID decode it: "Firestorm", "Zen 2"
+    std::string midr;              // ARM: MIDR_EL1 of its cores, hex
+    std::vector<CacheInfo> caches; // the cluster's own
+};
+
+struct CpuEngine {
+    std::string kind;              // EngineKind: "matrix"
+    std::string name;              // "AMX", "SME"
+    std::string scope;             // EngineScope: one per "core" | per "cluster"
+    std::string reachedBy;         // EngineReach: "instructions" | "library"
+};
+
+struct CpuFacts {
+    std::string isa;               // "arm64", "x86_64"
+    unsigned    cores   = 0;
+    unsigned    threads = 0;
+    unsigned    sockets = 0;
+    std::vector<CpuCluster> clusters;
+    std::vector<CacheInfo>  caches;    // the ones the whole processor shares
+    // x86: CPUID's vendor string and family / model / stepping; -1 unknown.
+    std::string cpuidVendor;
+    int         cpuidFamily   = -1;
+    int         cpuidModel    = -1;
+    int         cpuidStepping = -1;
+    std::vector<CpuEngine>   engines;
+    std::vector<std::string> features; // normalised: "neon", "dotprod", "avx512_vnni"
+
+    bool empty() const;
+};
+
+struct HardwareFacts {
+    std::string   vendorId;        // the API's vendor id, lower-case hex: "10de", "10005"
+    std::string   deviceId;        // the PCI device id, lower-case hex: a model id
+    std::string   arch;            // "sm_120", "gfx1201", "Apple7"
+    unsigned      computeUnits = 0;
+    std::string   computeUnit;     // what one is called: "SM", "CU", "Xe-core", "core"
+    unsigned      clockMhz = 0;
+    std::uint64_t memoryBytes = 0;
+    int           integrated = -1; // -1 unknown, 0 discrete, 1 integrated
+    CpuFacts      cpu;             // a CPU's
+
+    bool empty() const;
+};
+
+// What links a device to its processor, as the document keeps it: tokens for
+// the strong identifiers its API gave -- HMACs under a key made per run and
+// never written to the result, so two devices in one file can be seen to
+// share an identifier while nothing correlates across files -- and the
+// weaker evidence, which identifies nothing.  The raw identifiers never
+// leave the process (logger::DeviceSpec::Identity).
+struct DeviceEvidence {
+    std::map<std::string, std::string> tokens;   // "uuid" | "luid" | "pci_bus" | "registry"
+    bool        host = false;      // executes on the host CPU
+    std::string soc;               // ProcessorKind: the SoC's "npu" or "gpu"
+    bool        defaultGpu = false;// the platform's default GPU
+
+    bool empty() const { return tokens.empty() && !host && soc.empty() && !defaultGpu; }
+};
+
+// An ML runtime's view of where it ran.
+struct RuntimeInfo {
+    std::string provider;          // ONNX Runtime's execution provider: "CoreMLExecutionProvider"
+    std::string accelerator;       // LiteRT's accelerator, Core ML's compute device: "NPU", "GPU"
+    std::string version;           // the runtime's version: "1.31.0"
+
+    bool empty() const { return provider.empty() && accelerator.empty() && version.empty(); }
 };
 
 struct DeviceResult {
@@ -197,6 +406,17 @@ struct DeviceResult {
     int deviceIndex   = -1;
 
     std::vector<DeviceProp> properties;
+
+    // The processor this device is a view of (ProcessorInfo::id: "gpu0"),
+    // and what linked it there (LinkEvidence: "uuid", "host", "sole").
+    // Empty until the run is linked.
+    std::string    processor;
+    std::string    link;
+    HardwareFacts  facts;      // what its API reported
+    DeviceEvidence evidence;
+    RuntimeInfo    runtime;    // ML backends
+    std::string    ext;        // experimental fields, raw JSON; "" for none
+
     std::vector<TestResult> tests;
 
     // `driver` is metadata, not identity: a baseline stays comparable across
@@ -237,10 +457,20 @@ struct LogEntry {
     std::string      message;
 };
 
+// One backend compiled into the binary, with what it reaches.
+struct BuildBackend {
+    std::string name;                    // as the document's devices name it: "CUDA"
+    std::string kind;                    // BackendKind: "gpu" | "cpu" | "ai"
+    bool        portable = false;        // runs on more than one vendor's silicon
+};
+
+// The entry for one of this build's backends.
+BuildBackend buildBackendFor(Backend b);
+
 // What the binary that produced the file is made of.  The first question on
 // any "backend X is missing" report is whether it was ever compiled in.
 struct BuildInfo {
-    std::vector<std::string> backends;   // Backend names, registry order
+    std::vector<BuildBackend> backends;  // registry order
     std::string config;                  // CMake configuration ("Release", "Debug"), when the build stamped it
 };
 
@@ -260,6 +490,11 @@ struct Invocation {
     // --verbose: the log carries Debug entries.  Recorded so an empty debug
     // log reads as "was not asked", not "nothing happened".
     bool verbose = false;
+
+    // The run used this build's default budgets, warm-up and iterations, and
+    // ran every category and test: the run a leaderboard ranks.  Choosing
+    // backends and devices does not change it.
+    bool standard = false;
 };
 
 // Where in a run something happened: a test on a device, named as the log
@@ -315,6 +550,20 @@ struct RunMeta {
     GeneratorInfo generator;
     std::string generatedAt;        // ISO-8601 UTC, "2026-08-29T14:03:11Z"
 
+    // A random UUID per run, kept across --resume, so one run uploaded twice
+    // is recognised as one.  It identifies the run, not who ran it.
+    std::string runId;
+
+    // The format_minor a loaded file was written in; 0 for a file that says
+    // none.  The writer always writes RESULT_FORMAT_MINOR: what this build
+    // writes is what it knows.
+    int         formatMinor = 0;
+
+    // The run's key for linking evidence (DeviceEvidence::tokens), as hex.
+    // Made per run, kept in the checkpoint so a resumed run's tokens match the
+    // part before's, and never written to the result or the sidecar.
+    std::string evidenceKey;
+
     // Seconds spent running.  For a resumed run, the parts summed: the time
     // between them is not the run's.
     double      durationS = 0.0;
@@ -324,17 +573,52 @@ struct RunMeta {
     // absent test reads as unsupported hardware.
     bool        cancelled = false;
 
-    BuildInfo  build;
-    HostInfo   host;
-    Invocation invocation;
+    BuildInfo     build;
+    SystemInfo    system;         // the machine (host_info.h)
+    RunConditions conditions;     // what it was doing (host_info.h)
+    Invocation    invocation;
+
+    // Facts only a person knows -- a name for the system, its cooling, a
+    // power limit, notes -- as a flat string map.  Never filled by a
+    // measurement, and never overriding one.
+    std::map<std::string, std::string> annotations;
 
     // Each part after the first, in order; empty for a run done in one go.
     std::vector<ResumeRecord> resumed;
+
+    std::string ext;              // the run's experimental fields, raw JSON
+};
+
+// ---- Hardware ---------------------------------------------------------------
+//
+// The run's hardware, which the devices are views of: packages (an SoC, a CPU
+// package, a discrete card) and the processors in them, with run-local ids
+// that are deterministic for one machine -- `cpu0`, `gpu0`, `npu0`.
+
+struct PackageInfo {
+    std::string id;               // "pkg0"
+    std::string kind;             // PackageKind: "soc" | "cpu" | "discrete"
+    std::string vendor;           // Vendor, when known
+    std::string name;             // "Apple M1 Pro", "NVIDIA GeForce RTX 5060"
+    std::string ext;
+};
+
+struct ProcessorInfo {
+    std::string   id;             // "cpu0", "gpu0", "npu0"
+    std::string   kind;           // ProcessorKind
+    std::string   package;        // PackageInfo::id
+    std::string   vendor;         // Vendor, when known
+    std::string   vendorName;     // the vendor's own string: "NVIDIA Corporation"
+    std::string   name;
+    HardwareFacts facts;          // merged; written on the processor itself
+    std::string   ext;
 };
 
 struct RunDocument {
-    RunMeta                   meta;
-    std::vector<DeviceResult> devices;
+    RunMeta                    meta;
+    std::vector<PackageInfo>   packages;
+    std::vector<ProcessorInfo> processors;
+    std::vector<DeviceResult>  devices;
 
     // Every backend's `--list-devices` view, taken before the run: which
     // backends were available (and why not), and every device each one saw
@@ -354,7 +638,8 @@ struct RunDocument {
     DeviceResult *findDevice(const std::string &deviceKey);
 
     // Append another document's devices.  Used to fold the per-backend
-    // loggers into one file; `meta`, `inventory` and `log` are the caller's.
+    // loggers into one file; `meta`, `packages`, `processors`, `inventory`
+    // and `log` are the caller's.
     void append(const RunDocument &other);
 };
 
@@ -383,7 +668,21 @@ std::string isoTimestampUtc();
 // The same form back to seconds since the epoch; false when it is not one.
 bool parseIsoTimestampUtc(const std::string &iso, long long &secondsSinceEpoch);
 
+// A new run's `run_id`: a random (version 4) UUID, "6f1c2e8a-0d4b-4a59-…".
+std::string newRunId();
+
+// A new run's evidence key: 32 random bytes, as hex (RunMeta::evidenceKey).
+std::string newEvidenceKey();
+
 // ---- Serialization --------------------------------------------------------
+
+// An `ext` as the document keeps it: `json` when it is an object, as compact
+// JSON text, and "" when it is not one -- which then is not written.
+std::string extFromJson(const std::string &json);
+
+// Dims as the compact JSON object the document writes ("{}" for none): what
+// the GUI event stream carries (src/ffi/logger_ffi.cpp).
+std::string dimsToJson(const Dims &dims);
 
 // One log entry as a single-line JSON object -- the form the document's
 // `log` array holds one per line, the run-log sidecar holds one per line, and
@@ -408,12 +707,22 @@ std::string runDocumentToJson(const RunDocument &doc);
 
 // Read a document back.  Returns false (after a stderr message) for a missing
 // file, malformed JSON, a file clpeak 3.x wrote, a format_version this build
-// does not write, or a run's checkpoint, which is not a result.
+// does not write, or a run's checkpoint, which is not a result.  Any
+// format_minor of format 4 is read, and what this build does not know -- a
+// key, a vocabulary value, a dim -- is ignored or kept as written, never an
+// error; a file from a newer minor says so on stderr.
 bool loadRunJson(const std::string &filename, RunDocument &out);
 
+// The same, from the document's text; `name` is what a message calls it.
+// Silent: false with `error` set, and `newerMinor` true for a file a newer
+// minor wrote.
+bool parseRunJson(const std::string &text, const std::string &name, RunDocument &out,
+                  std::string &error, bool &newerMinor);
+
 // A run's checkpoint (include/common/run_checkpoint.h): the document so far
-// -- meta and devices, no log or inventory -- with schema
-// "xpupeak/run-partial" and its `progress`, on one line.
+// -- meta (the evidence key included), hardware and devices, no log or
+// inventory -- with schema "xpupeak/run-partial" and its `progress`, on one
+// line.
 std::string partialRunToJson(const RunDocument &doc, const RunProgress &progress);
 
 // Read one back.  false with `error` set for a missing file, malformed JSON,

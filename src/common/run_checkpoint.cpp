@@ -202,6 +202,8 @@ void RunCheckpoint::write(const RunDocument &live)
     RunDocument snapshot;
     snapshot.meta           = doc.meta;
     snapshot.meta.durationS = runningS();
+    snapshot.packages       = doc.packages;
+    snapshot.processors     = doc.processors;
     snapshot.devices        = doc.devices;
     snapshot.append(live);
     if (inPart) snapshot.meta.resumed.push_back(partRecord(snapshot));

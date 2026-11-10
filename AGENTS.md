@@ -96,11 +96,12 @@ run and the result document all share.
 
 ## Quick Lookups
 
-- **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h` (a `Benchmark` names what is measured, never which backend; reuse one when the measurement exists elsewhere)
-- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface; then a `Backend` enum value (`include/common/benchmark_enums.h`), a row in the backend table (`src/common/options.cpp`), an `entry<YourPeak>()` in `src/registry/backend_registry.cpp`, and its name in the `foreach` of `src/common/cmake/backends.cmake` -- the CLI, the GUI bridge, the help, the listing and `--devices` need nothing else
+- **Adding a new benchmark?** → the backend's `AGENTS.md` + `include/common/benchmark_enums.h` (a `Benchmark` names what is measured, never which backend; reuse one when the measurement exists elsewhere), its flag in `src/common/options.cpp` and its family row in `src/common/vocabulary.cpp`; its tests open under its `admit()`, which is what names their family in the file
+- **Adding a new backend?** → `src/common/AGENTS.md` for the `Peak` interface; then a `Backend` enum value (`include/common/benchmark_enums.h`), a row in the backend table (`src/common/options.cpp`), an `entry<YourPeak>()` in `src/registry/backend_registry.cpp`, its name in the `foreach` of `src/common/cmake/backends.cmake`, and its kind in `backendKind()` / `backendPortable()` (`src/common/vocabulary.cpp`) -- the CLI, the GUI bridge, the help, the listing and `--devices` need nothing else
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
-- **Result output format?** → `docs/format-v4.md` (the schema) + `include/common/run_document.h`
+- **Result output format?** → `docs/format-v4.md` (the schema, and the *Compatibility* rules every change to it follows) + `include/common/run_document.h`; its words — data types, dim keys, vendors, kinds, families — are `include/common/vocabulary.h`, and the headline catalog is `app/assets/measures.json`
+- **Saying what a reading measured, so it compares across backends?** → `dims` and `revision` at `beginTest()` / `emit()` / `skip()`: `include/common/AGENTS.md` § `dims`
 - **Emitting a diagnostic, or reading one back?** → `XPUPEAK_LOG` / `XPUPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`
 - **Is this number plausible?** → the saved runs in `results/<vendor>/`

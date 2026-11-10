@@ -92,6 +92,9 @@ struct LogEvent {
   Direction   direction = Direction::HigherIsBetter;
   std::string unit;                             // resolved display symbol
   Quantity    quantity  = Quantity::Unknown;
+  std::string testBenchmark;                    // the test's family, by flag name
+  Dims        testDims;                         // what its readings share
+  int         testRevision = 1;
 
   // True when this TestBegin reopened an already-recorded test to append more
   // readings to it, rather than starting a new one.
@@ -138,6 +141,23 @@ public:
 
   using Prop = LogProp;
 
+  // Who a device is, as its API says: the evidence that links it to its
+  // processor (docs/format-v4.md, Linking).  The identifiers are raw and
+  // stay in the process -- a GPU's UUID is in effect a serial number -- so
+  // the document gets tokens of them, never the values
+  // (DeviceEvidence::tokens).  The flags identify nothing and are kept as
+  // they are.
+  struct Identity {
+    std::string uuid;             // the API's device UUID, as hex
+    std::string luid;             // Windows' adapter LUID, as hex
+    std::string pciBus;           // "0000:01:00.0": domain, bus, device, function
+    std::string registryId;       // Metal's registryID
+    bool host       = false;      // executes on the host CPU: a CPU driver, an ML runtime's CPU path
+    bool socNpu     = false;      // is the SoC's NPU
+    bool socGpu     = false;      // is the SoC's GPU (an Android GPU delegate)
+    bool defaultGpu = false;      // is the platform's default GPU (LiteRT WebGPU, Core ML on Metal)
+  };
+
   struct DeviceSpec {
     std::string name;
     std::string platform;         // empty → auto-set to backend name
@@ -149,6 +169,15 @@ public:
     // backend knows; Unknown is only for a device its API declines to
     // classify (Vulkan's OTHER, OpenCL's CUSTOM).
     DeviceType type    = DeviceType::Unknown;
+
+    // Linking (filled by each backend's enumeration): who the device is,
+    // what its API reports of the hardware, typed, and for an ML runtime
+    // where it ran.  The facts reach the document as the device's `facts`;
+    // the identity, as its `evidence`.
+    Identity      identity{};
+    HardwareFacts facts{};
+    RuntimeInfo   runtime{};
+    std::string   ext{};          // experimental fields: a JSON object, or ""
   };
 
   struct TestSpec {
@@ -186,6 +215,19 @@ public:
     // rather than slugged onto `tag` is what keeps tags stable across
     // machines, and so keeps --compare working across them.
     std::string variant;
+
+    // The coordinates every reading of the test shares, from the vocabulary
+    // (include/common/vocabulary.h): a vector test's data type, a CPU test's
+    // ISA.  Each reading adds its own (EmitOptions::dims).  A reopen keeps
+    // the first open's.
+    Dims dims{};
+
+    // The test's methodology version (TestResult::revision): raised, beside
+    // the change and with the commit saying why, whenever a change moves the
+    // numbers for a reason other than the hardware.
+    int revision = 1;
+
+    std::string ext{};            // experimental fields: a JSON object, or ""
   };
 
   struct EmitOptions {
@@ -207,6 +249,14 @@ public:
 
     // Direction override; FromUnit inherits the test's.
     Direction direction = Direction::FromUnit;
+
+    // This reading's coordinates, added to its test's and winning over
+    // them: `{{Dim::Width, 4}}`, `{{Dim::Level, dim::Level::L1},
+    // {Dim::Scope, dim::Scope::Core}}`.  A skipped reading carries them too:
+    // it says which measurement is missing.
+    Dims dims{};
+
+    std::string ext{};            // experimental fields: a JSON object, or ""
   };
 
   // ── RAII context handles (defined below, implemented in logger.cpp) ────
@@ -239,6 +289,16 @@ public:
   /// name.
   int openDeviceIndex() const { return contextDepth >= 2 ? curDeviceIndex : -1; }
   const std::string &openDeviceName() const { return curDevice; }
+
+  /// The Benchmark the backend's admit() has open, or Benchmark::COUNT for
+  /// none.  Peak::Admission sets it for as long as its guard lives.  A test
+  /// opened while it is open is that Benchmark's -- the test's `benchmark`
+  /// -- and a reading recorded while another is open names that one as its
+  /// own, which is how one test holds the readings of two families (the
+  /// CPU's integer dot product: int8 under one Benchmark, int16 under the
+  /// other).
+  Benchmark openBenchmark() const { return curBenchmark; }
+  void setOpenBenchmark(Benchmark b) { curBenchmark = b; }
 
   /// A test that is recorded, not measured: one reading with `status` and
   /// `reason`, on the open device -- where a resumed run's part before died
@@ -289,6 +349,7 @@ protected:
   std::string curDriver;
   int         curDeviceIndex = -1;
   int         contextDepth = 0;   // 0=none, 1=backend, 2=device, 3=test
+  Benchmark   curBenchmark = Benchmark::COUNT;   // the admission open, if any
 
   // Where the open scopes live in `doc`.  Indices, not pointers: appending a
   // device or a test reallocates the vector holding it.
@@ -416,10 +477,19 @@ public:
   /// description, or use EmitOptions.
   void emit(std::string metric, float value, const char *description);
 
+  /// Same, with the reading's dims in the compact form:
+  ///   test.emit("float4", v, note, {{Dim::Width, 4}});
+  /// `description` may be nullptr.
+  void emit(std::string metric, float value, const char *description, Dims dims);
+
   /// Emit a skipped / unsupported / errored reading.  `description` documents
   /// the reading that would have been, exactly as in emit().
   void skip(std::string metric, ResultStatus status, std::string reason,
             std::string description = "");
+
+  /// Same, with the dims of the reading that would have been.
+  void skip(std::string metric, ResultStatus status, std::string reason,
+            std::string description, Dims dims);
 
   /// Same, for a reading that carries more than a note — above all the unit
   /// it would have been measured in.  A skipped integer reading inside an

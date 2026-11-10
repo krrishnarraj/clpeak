@@ -882,5 +882,15 @@ Invocation invocationFrom(const CliOptions &opts, int argc, char **argv)
         inv.tests.push_back(testFlags[t].name);
 
   inv.verbose = opts.verbose;
+
+  // This build's defaults, and nothing narrowed: the run a leaderboard can
+  // rank.  Which backends and devices ran is a choice of hardware, not of
+  // method, so it leaves a run standard.
+  const CliOptions defaults;
+  inv.standard = !opts.forceIters && opts.warmupCount == defaults.warmupCount &&
+                 opts.targetTimeUs == defaults.targetTimeUs &&
+                 opts.targetTimeUsCpu == defaults.targetTimeUsCpu &&
+                 opts.targetTimeUsMlGpu == defaults.targetTimeUsMlGpu &&
+                 opts.enabledTests.all() && opts.enabledCategories.all();
   return inv;
 }

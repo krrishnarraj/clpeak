@@ -10,6 +10,7 @@ No backend-specific includes live here.
 - Looking for benchmark constants + calibration? → `common.h`
 - Looking for CLI options struct? → `options.h`
 - Looking for result output format? → `run_document.h` (model) / `docs/format-v4.md` (schema)
+- Looking for the format's words — data types, dim keys, vendors, processor and package kinds, families? → `vocabulary.h`
 - Looking for logger interface? → `logger.h` (base) / `logger_text.h` (shared text formatter)
 - Emitting a diagnostic? → `XPUPEAK_LOG(Error|Warning|Info|Debug, fmt, …)` and `XPUPEAK_VLOG(…)` (= Debug, gated) in `common.h`; a backend with its logger in hand can call `log->note()` / `log->log()` instead. The run-level store and sidecar are `run_log.h`
 - Looking for device inventory structs? → `inventory.h`
@@ -18,7 +19,7 @@ No backend-specific includes live here.
 
 ## What a backend authors at `beginTest()`
 
-Six things, all authored where the measurement lives — never collected into a
+Eight things, all authored where the measurement lives — never collected into a
 table somewhere else, because none of them can be recovered from anywhere else.
 
 | field | says |
@@ -29,6 +30,55 @@ table somewhere else, because none of them can be recovered from anywhere else.
 | `variant` | a runtime qualifier that is *not* identity — a CPU ISA, a GPU arch |
 | `description` | what the test measures (below) |
 | `unit` | the token the unit table resolves (`src/common/units.cpp`) |
+| `dims` | the coordinates every reading shares, from `vocabulary.h` (below) |
+| `revision` | the method's version: raised when a change moves the numbers for a reason other than the hardware (below) |
+
+The test's family — the document's `benchmark` — is not authored at all:
+`Peak::admit()`'s guard tells the logger which Benchmark is open, and
+`beginTest()` stamps it. So a test must open under the `admit()` of the
+Benchmark it measures, and a test holding the readings of two (the CPU's
+integer dot product) opens under each in turn, reopening the test, so a
+reading of the second names its own family.
+
+### `dims` — what a reading measured
+
+A reading's coordinates, in the vocabulary's words (`vocabulary.h`, and the
+tables in `docs/format-v4.md`): what all readings share on the `TestSpec`,
+each reading's own on `EmitOptions::dims` or the dims overloads of `emit()` and
+`skip()`. A skipped reading carries them too. A file that authors them starts
+
+```cpp
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+```
+
+and writes the compact form — `{{Dim::Dtype, DType::Fp16}, {Dim::Acc,
+DType::Fp16}}`, `{{Dim::Level, dim::Level::L1}, {Dim::Scope,
+dim::Scope::Core}}`, `{{Dim::Width, 4}}`, `{{Dim::Form, winner}}`. A value of
+the wrong kind for its key (a data type for `level`, a word of another key's
+list, text for a number) stops a debug build where the dims are built; a table that
+holds a data type or a word as a string may pass the string.
+
+Rules that span every backend:
+
+- **Authored where measured.** On the `TestSpec`, the `emit()` / `skip()`
+  call, or the table the loop walks — the variant tables of the ML backends,
+  a runner's descriptor — never in a mapping table somewhere else. The same
+  label means different things in different backends: Vulkan's `int8_dp2` is
+  `chains`, OpenCL's `width`.
+- **Every identity dim that is not at its default.** Two readings compare
+  when their family, quantity and non-default identity dims match, so a
+  missing `acc: fp16` merges an fp16-accumulate reading into the fp32 one. A
+  multi-type family's readings always carry `dtype`.
+- **Variant dims are free.** `width`, `chains`, `isa`, `simd_bits`, `impl`,
+  `form`, `tile`, `problem_size` say how a number was reached; the best is
+  taken over them.
+- **A missing word goes at the end of its list** in `vocabulary.h` and
+  `src/common/vocabulary.cpp`, in a commit of its own, and in the spec's
+  tables. A key's class and default never change: a correction is a new key.
+- **A new identity dim on an existing test's readings raises its
+  `revision`**, as any change does that moves its numbers for a reason other
+  than the hardware — authored on the `TestSpec`, with the commit saying
+  why.
 
 ### `shape` — homogeneous or heterogeneous
 
@@ -177,10 +227,11 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `benchmark_enums.h` | `Benchmark`, `Category`, `DeviceType` enums, `categoryOf()` |
 | `common.h` | OS macros, tuning constants, `benchmark_config_t`, `pickIters()` calibration, the diagnostics route (`LogLevel`, `logMessage()`, `XPUPEAK_LOG` / `XPUPEAK_VLOG`, `LogSink`) |
 | `options.h` | `CliOptions` struct + `parseCliOptions()` / `parseCliOptionsNoExit()` declarations; `setProgramName()` / `programName()`, the name messages give the program (the one the CLI was started as, `xpupeak` when embedded) |
-| `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format |
+| `run_document.h` | `RunDocument`/`DeviceResult`/`TestResult`/`MetricResult` + `TestShape` + JSON save/load. The one dump format: the run's `system`, `conditions` and `annotations`, its `packages` and `processors` (with `HardwareFacts`), and per device its `processor`, `link`, `facts`, `evidence` and `runtime`; per test `benchmark`, `dims` and `revision`, per reading `dims` and a `benchmark` override; `ext` kept whole on the contract objects |
+| `vocabulary.h` | The format's words, each list append-only: `DType`, `Dim` with each key's class, kind and default (`dimInfo()`, `dimDefaultFor()`) and the `dim::` value enums, the family table (`familyInfo()`: method, data type, accumulator rule), processor / package / cluster / cache / engine kinds, `LinkEvidence`, `Vendor` with the PCI, CPUID and MIDR tables, form factors, `BackendKind` and `backendPortable()`. In `namespace xpupeak` |
 | `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix, `formatReading()` the same as one string for a reading quoted in a description |
-| `json.h` | Minimal JSON DOM parser (reading side only; the writers stream text) |
-| `host_info.h` | `probeHost()` — the machine a run happened on, never its owner |
+| `json.h` | Minimal JSON DOM parser (the writers stream text), and `jsonSerialize()`, which writes a parsed value back: what keeps an `ext` whole |
+| `host_info.h` | `probeHost()` — the machine a run happened on, never its owner — and the document's `SystemInfo` (`probeSystem()`) and `RunConditions` |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
 | `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |
 | `run_checkpoint.h` | `RunCheckpoint` — what a run has finished, kept as `<output>.partial.json` (an `xpupeak/run-partial` document + `progress`, with the part in flight's `resumed` record) and rewritten as each Benchmark, device and backend finishes, and before the run waits at a boundary between readings, so a run that dies, or is cancelled, can be continued |
@@ -196,12 +247,14 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 
 - If you change the `Peak` interface → update all backend `AGENTS.md` files.
 - If you add/remove a header → update this file's Key Files table.
-- If you change result format → update `docs/format-v4.md`, and bump
-  `RESULT_FORMAT_VERSION` in `run_document.h` only for a *breaking* change.
-  Adding an optional field is not one: the loader ignores keys it doesn't know,
-  and absent-means-default is the format's own convention. A bump makes every
-  file already saved unreadable, the GUI's whole run history included, so it
-  also means bumping `formatVersion` in
+- If you change result format → update `docs/format-v4.md`, marking the new
+  key's class, and follow its *Compatibility* rules: add, never rename or
+  repurpose. From the 4.0.0 release an addition raises
+  `RESULT_FORMAT_MINOR` (`run_document.h`); `RESULT_FORMAT_VERSION` changes
+  only for a break, which the rules exist to prevent. The loader ignores keys
+  it doesn't know, and absent-means-default is the format's own convention. A
+  major bump makes every file already saved unreadable, the GUI's whole run
+  history included, so it also means bumping `formatVersion` in
   `app/lib/src/services/run_history_store.dart`, whose schema strings mirror
   `run_document.cpp`'s too.
 - If you change benchmark enums → make sure all backends handle the new enum values.
