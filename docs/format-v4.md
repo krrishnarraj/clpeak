@@ -832,16 +832,22 @@ Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
 
 ## The headline catalog
 
-Headlines are the measures worth a summary row or a leaderboard: "FP16
-matrix", "DRAM latency". They are not in the run document. They are data of
-their own, `app/assets/measures.json` (`"schema": "xpupeak/measures"`), with
-a `catalog_version` of its own, read by the app and embedded in the CLI
-*(V8 owns its content; V10 embeds it)*. Each headline names the processor
-kinds it applies to (`processors`), the `families` and the `quantity` it
-selects, and `dims`: a list of identity-dim objects, defaults filled in, of
-which a selected key must equal one. Its value on a processor is the best of
-the selected keys there, over every backend, and it names the backend that
-reached it.
+Headlines are the measures worth a summary row or a leaderboard: a
+processor's peak floating-point and integer compute, its memory bandwidth.
+They are not in the run document. They are data of their own,
+`app/assets/measures.json` (`"schema": "xpupeak/measures"`), with a
+`catalog_version` of its own, read by the app and embedded in the CLI
+*(V10 embeds it)*. Each headline has an `id`, a `title` and the `quantity`
+it selects, and may narrow that by the processor kinds it applies to
+(`processors`), the `families` it selects from, and `dims`: a list of
+identity-dim objects, defaults filled in, of which a selected key must equal
+one. Each of the three, absent, means any. Its value on a processor is the
+best reading of the selected keys there, over every backend, named with the
+backend and the reading it came from: a raw measurement, never a score. The
+catalog the app ships holds the flagship numbers its results summary shows
+for every processor: `peak-float` (`flops`, any family and dims, so a 2:4
+sparse NVFP4 reading counts), `peak-integer` (`ops`) and
+`peak-memory-bandwidth` (`global-memory-bandwidth`).
 
 ## Compatibility
 

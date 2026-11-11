@@ -30,3 +30,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # The headline catalog: the flagship numbers the results summary shows
+    # (lib/src/model/headlines.dart; docs/format-v4.md, The headline catalog).
+    - assets/measures.json

@@ -202,10 +202,17 @@ Future<void> _shoot(
   await tester.pumpWidget(const SizedBox.shrink());
 }
 
-/// Select a device chip in the results view by its label.
-Future<void> _selectDevice(WidgetTester tester, String label) async {
-  await tester.tap(find.text(label));
+/// Open a backend's tab in the results view, and one of its devices by its
+/// chip where the backend reached several.
+Future<void> _selectDevice(WidgetTester tester, String backend,
+    [String? device]) async {
+  await tester.tap(find.byKey(ValueKey('results-tab:$backend')));
   await tester.pumpAndSettle();
+  if (device != null) {
+    // The chip row comes before the device's header, which may name it too.
+    await tester.tap(find.text(device).first);
+    await tester.pumpAndSettle();
+  }
 }
 
 /// Scroll the screen's list until the first text containing [text] sits
@@ -282,7 +289,7 @@ void main() {
           service: svc(m1),
           settings: settings,
           history: history, arrange: (tester) async {
-        await _selectDevice(tester, 'CoreML · Apple Neural Engine');
+        await _selectDevice(tester, 'CoreML', 'Apple Neural Engine');
       });
 
       // A GPU: tensor cores on CUDA, one reading per data type.
@@ -292,7 +299,7 @@ void main() {
           service: svc(rtx),
           settings: settings,
           history: history, arrange: (tester) async {
-        await _selectDevice(tester, 'CUDA · NVIDIA GeForce RTX 5060');
+        await _selectDevice(tester, 'CUDA');
         await _scrollTo(tester, 'Tensor cores (WMMA / mma.sync)');
       });
 
@@ -303,10 +310,7 @@ void main() {
           service: svc(tr),
           settings: settings,
           history: history, arrange: (tester) async {
-        await _selectDevice(
-            tester, 'CPU · AMD Ryzen Threadripper PRO 3955WX 16-Cores');
-        // The chip row first, so the selection shows above the device.
-        await _scrollTo(tester, 'oneAPI · ', alignment: 0.02);
+        await _selectDevice(tester, 'CPU');
       });
     }
   });

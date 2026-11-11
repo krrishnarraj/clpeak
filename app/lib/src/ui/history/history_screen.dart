@@ -13,6 +13,7 @@ import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
 import '../results/results_screen.dart';
+import 'details_editor.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -631,6 +632,25 @@ class _RunTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final offer = this.offer;
+    // Not while the run is being continued: the continuation rewrites its
+    // file when it ends.
+    final inFlight =
+        context.read<BenchmarkService>().inFlightRunId == summary.id;
+    final system = [
+      summary.systemName,
+      if (summary.formFactorDetail.isNotEmpty)
+        '${summary.formFactor} (${summary.formFactorDetail})'
+      else
+        summary.formFactor,
+    ].where((s) => s.isNotEmpty).join('  ·  ');
+    // The hardware, where the file links its devices to it; otherwise the
+    // devices, which then are all it says.
+    final hardware = summary.processors.isNotEmpty
+        ? [
+            for (final p in summary.processors)
+              [p.kind.toUpperCase(), p.name].where((s) => s.isNotEmpty).join(' '),
+          ].join('  ·  ')
+        : summary.devices.join(', ');
     return CPanel(
       child: CTap(
         onTap: () => _open(context),
@@ -656,22 +676,36 @@ class _RunTile extends StatelessWidget {
                   ],
                   _Menu(
                     onRename: () => _rename(context),
+                    onDetails: inFlight
+                        ? null
+                        : () => editRunDetails(context, summary,
+                            onSaved: onChanged),
                     onExport: () => _export(context),
                     onDelete: () => _delete(context),
                   ),
                 ],
               ),
-              const SizedBox(height: 7),
+              if (system.isNotEmpty) ...[
+                const SizedBox(height: 7),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Text(
+                    system,
+                    style: t.mono,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 5),
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Text(
-                  [
-                    // The title is a name or a timestamp id, so the devices
-                    // always belong here.
-                    if (summary.devices.isNotEmpty) summary.devices.join(', '),
-                  ].join(),
+                  // The title is a name or a timestamp id, so the hardware
+                  // always belongs here.
+                  hardware,
                   style: t.monoSmall,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -749,11 +783,15 @@ class _RunTile extends StatelessWidget {
 class _Menu extends StatelessWidget {
   const _Menu({
     required this.onRename,
+    required this.onDetails,
     required this.onExport,
     required this.onDelete,
   });
 
   final VoidCallback onRename;
+
+  /// Null while the run cannot be edited.
+  final VoidCallback? onDetails;
   final VoidCallback onExport;
   final VoidCallback onDelete;
 
@@ -768,6 +806,7 @@ class _Menu extends StatelessWidget {
       position: PopupMenuPosition.under,
       onSelected: (action) => switch (action) {
         'rename' => onRename(),
+        'details' => onDetails?.call(),
         'export' => onExport(),
         'delete' => onDelete(),
         _ => null,
@@ -777,6 +816,11 @@ class _Menu extends StatelessWidget {
             value: 'rename',
             height: 38,
             child: Text('Rename', style: t.monoSmall)),
+        PopupMenuItem(
+            value: 'details',
+            height: 38,
+            enabled: onDetails != null,
+            child: Text('Details', style: t.monoSmall)),
         PopupMenuItem(
             value: 'export',
             height: 38,
