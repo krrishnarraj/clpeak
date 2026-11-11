@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 
+import '../../model/headlines.dart';
+import '../../model/measures.dart';
 import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/xpupeak_theme.dart';
-import '../common/format.dart';
 import '../common/kit.dart';
+import 'summary_view.dart';
 
-/// Renders one RunDocument: run-selector chips (when a session covered
-/// multiple backends/devices), a device header, then each category as a
-/// hairline table of tests with expandable metric detail, and a de-emphasized
+/// Renders one RunDocument as tabs: for a finished run a Summary first --
+/// the system, then every processor's flagship numbers -- and then a tab per
+/// backend, holding today's device view: device chips (when the backend
+/// reached several), a device header, then each category as a hairline
+/// table of tests with expandable metric detail, and a de-emphasized
 /// unsupported section.  Used by the live run view, the just-finished view,
 /// and the history viewer.
 class ResultsBody extends StatefulWidget {
@@ -17,6 +21,7 @@ class ResultsBody extends StatefulWidget {
     required this.document,
     this.header,
     this.showDiagnostics = true,
+    this.catalog,
   });
 
   final RunDocument document;
@@ -29,12 +34,48 @@ class ResultsBody extends StatefulWidget {
   /// diagnostics enabled; saved runs leave the default true.
   final bool showDiagnostics;
 
+  /// The headlines the Summary shows; the app's bundled catalog
+  /// ([HeadlineCatalog.bundled]) when null.
+  final HeadlineCatalog? catalog;
+
   @override
   State<ResultsBody> createState() => _ResultsBodyState();
 }
 
 class _ResultsBodyState extends State<ResultsBody> {
-  String? _selectedRunKey;
+  /// The tab on show: [_summary] or a backend's name; null until the user
+  /// picks one, which shows the default.
+  String? _tab;
+
+  /// Per backend, the device on show ([DeviceRun.key]).
+  final Map<String, String> _deviceOf = {};
+
+  /// No backend is named this.
+  static const _summary = '\u0000summary';
+
+  HeadlineCatalog? _bundled;
+  bool _loadingCatalog = false;
+
+  HeadlineCatalog? get _catalog => widget.catalog ?? _bundled;
+
+  void _loadCatalog() {
+    if (_catalog != null || _loadingCatalog) return;
+    _loadingCatalog = true;
+    HeadlineCatalog.bundled().then((c) {
+      if (mounted) setState(() => _bundled = c);
+    });
+  }
+
+  /// A run whose document came from a file -- saved, from history, or what a
+  /// run that stopped saved.  A live run's has no meta until it is over,
+  /// and nothing to summarise until it is linked and saved: its tabs are
+  /// its backends, following the device in flight.
+  bool get _finished => widget.document.meta != null;
+
+  void _openDevice(DeviceRun run) => setState(() {
+        _tab = run.backend;
+        _deviceOf[run.backend] = run.key;
+      });
 
   // Global expand/collapse generation.  Null means follow each test's default
   // (heterogeneous expanded, homogeneous collapsed); true/false forces all
@@ -116,12 +157,100 @@ class _ResultsBodyState extends State<ResultsBody> {
       );
     }
 
-    final selected = runs.firstWhere((r) => r.key == _selectedRunKey,
-        orElse: () => runs.last);
+    final backends = <String>[];
+    for (final r in runs) {
+      if (!backends.contains(r.backend)) backends.add(r.backend);
+    }
+    final tabs = [if (_finished) _summary, ...backends];
+    final tab = tabs.contains(_tab)
+        ? _tab!
+        : (_finished ? _summary : runs.last.backend);
+
+    final rows = tab == _summary ? _summaryRows() : _backendRows(tab, context);
+    final list = ListView.builder(
+      // Bottom pad carries the old trailing SizedBox(32).
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 52),
+      itemCount: rows.length,
+      itemBuilder: (context, i) => RepaintBoundary(child: rows[i].build()),
+    );
+    if (tabs.length < 2) return list;
+    // Pinned over the list, so another backend is a tap away however far
+    // down this one has been read.
+    return Column(
+      children: [
+        _TabStrip(
+          tabs: [
+            for (final name in tabs) (name, name == _summary ? 'Summary' : name),
+          ],
+          selected: tab,
+          onSelected: (name) => setState(() => _tab = name),
+        ),
+        Expanded(child: list),
+      ],
+    );
+  }
+
+  /// The Summary: the system, then each processor's flagship numbers.
+  List<_Row> _summaryRows() {
+    final doc = widget.document;
+    final catalog = _catalog;
+    if (catalog == null) _loadCatalog();
+    final measures = RunMeasures.of(doc);
+    final unlinked = doc.processors.isEmpty;
+    return [
+      if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
+      if (doc.meta != null) _WidgetRow(SystemPanel(meta: doc.meta!)),
+      _WidgetRow(
+        CSection(
+          label: 'Peaks',
+          trailing: '${measures.groups.length} '
+              '${measures.groups.length == 1 ? 'device' : 'devices'}',
+        ),
+        padTop: 22,
+        padBottom: unlinked ? 8 : 12,
+      ),
+      if (unlinked)
+        _WidgetRow(
+          Text(
+            'This file does not link its devices to processors, so each '
+            "backend's view of one is listed on its own.",
+            style: CP.of(context).monoSmallDim,
+          ),
+          padBottom: 12,
+        ),
+      if (catalog != null)
+        for (final group in measures.groups)
+          _WidgetRow(
+            FlagshipCard(
+              group: group,
+              package: group.processor == null
+                  ? null
+                  : doc.packageById(group.processor!.package),
+              values: [
+                for (final h in catalog.headlines)
+                  if (h.appliesTo(group.kind)) (h, group.headline(h)),
+              ],
+              onDevice: _openDevice,
+            ),
+            padBottom: 12,
+          ),
+      if (widget.showDiagnostics && doc.log.isNotEmpty)
+        _WidgetRow(_DiagnosticsSection(log: doc.log), padTop: 10),
+    ];
+  }
+
+  /// One backend's tab: today's device view, for the device picked among
+  /// those it reached.
+  List<_Row> _backendRows(String backend, BuildContext context) {
+    final doc = widget.document;
+    final mine = [for (final r in doc.runs) if (r.backend == backend) r];
+    final selected = mine.firstWhere((r) => r.key == _deviceOf[backend],
+        // A live run follows the device in flight; a finished one opens on
+        // the backend's first.
+        orElse: () => _finished ? mine.first : mine.last);
     final brightness = Theme.of(context).brightness;
     final hasTests =
         selected.categories.any((g) => g.supported.isNotEmpty);
-    final meta = widget.document.meta;
 
     // Flattened one level: category sections used to be non-lazy Columns
     // holding every test card, so all of them were built, laid out and
@@ -131,23 +260,19 @@ class _ResultsBodyState extends State<ResultsBody> {
     //
     // The table look is drawn per row (each carries its own rules) rather than
     // by wrapping a category in one container, which would undo the laziness.
-    final rows = <_Row>[
+    return <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
-      if (meta != null &&
-          (meta.generator.version.isNotEmpty ||
-              meta.generatedAt.isNotEmpty ||
-              meta.system.isNotEmpty))
-        _WidgetRow(_RunMetaPanel(meta: meta), padBottom: 16),
-      if (runs.length > 1)
+      if (mine.length > 1)
         _WidgetRow(
           _RunSelector(
-            runs: runs,
+            runs: mine,
             selectedKey: selected.key,
-            onSelected: (key) => setState(() => _selectedRunKey = key),
+            onSelected: (key) => setState(() => _deviceOf[backend] = key),
           ),
           padBottom: 16,
         ),
-      _WidgetRow(_DeviceHeader(run: selected)),
+      _WidgetRow(_DeviceHeader(
+          run: selected, processor: doc.processorById(selected.processor))),
       if (hasTests)
         _WidgetRow(
           _ExpandControls(
@@ -167,6 +292,7 @@ class _ResultsBodyState extends State<ResultsBody> {
           ),
           for (var i = 0; i < group.supported.length; i++)
             _TestRow(
+              selected,
               group,
               group.supported[i],
               brightness,
@@ -180,12 +306,62 @@ class _ResultsBodyState extends State<ResultsBody> {
       if (widget.showDiagnostics && widget.document.log.isNotEmpty)
         _WidgetRow(_DiagnosticsSection(log: widget.document.log), padTop: 22),
     ];
+  }
+}
 
-    return ListView.builder(
-      // Bottom pad carries the old trailing SizedBox(32).
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 52),
-      itemCount: rows.length,
-      itemBuilder: (context, i) => RepaintBoundary(child: rows[i].build()),
+/// The results' tabs: Summary, then each backend.  A Wrap, not a horizontal
+/// scroller, for the reason the device chips are one: on a narrow screen the
+/// trailing tabs would sit off-screen with no way to reach them.
+class _TabStrip extends StatelessWidget {
+  const _TabStrip({
+    required this.tabs,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  /// Each tab's key and label.
+  final List<(String, String)> tabs;
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: t.line)),
+      ),
+      child: Wrap(
+        children: [
+          for (final (key, label) in tabs)
+            CTap(
+              key: ValueKey('results-tab:$label'),
+              onTap: () => onSelected(key),
+              builder: (context, hovered, pressed) {
+                final on = key == selected;
+                return Container(
+                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
+                  decoration: BoxDecoration(
+                    color: hovered || pressed ? t.hover : Colors.transparent,
+                    border: Border(
+                      bottom: BorderSide(
+                          color: on ? t.text : Colors.transparent, width: 2),
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: t.mono.copyWith(
+                      color: on ? t.text : t.dim,
+                      fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }
@@ -313,9 +489,10 @@ class _BracketButton extends StatelessWidget {
 }
 
 class _TestRow extends _Row {
-  const _TestRow(this.group, this.test, this.brightness,
+  const _TestRow(this.run, this.group, this.test, this.brightness,
       {required this.last, this.forcedExpanded, this.forcedGen = 0});
 
+  final DeviceRun run;
   final CategoryGroup group;
   final TestResult test;
   final Brightness brightness;
@@ -325,10 +502,11 @@ class _TestRow extends _Row {
 
   @override
   Widget build() => _TestLine(
-        // Keyed by test tag: rows are inserted as results stream in during a
-        // live run, and without a key a row's expansion state would follow
-        // the index and land on the wrong test.
-        key: ValueKey(test.key),
+        // Keyed by device and test tag: rows are inserted as results stream
+        // in during a live run, and without a key a row's expansion state
+        // would follow the index and land on the wrong test -- or, with the
+        // tag alone, on the same test of the next device shown.
+        key: ValueKey('${run.key}/${test.key}'),
         test: test,
         color: XpuPeakTheme.categoryColor(group.category,
             brightness: brightness),
@@ -339,7 +517,7 @@ class _TestRow extends _Row {
       );
 }
 
-/// Which backend/device the readings below belong to.
+/// Which of one backend's devices the readings below belong to.
 class _RunSelector extends StatelessWidget {
   const _RunSelector({
     required this.runs,
@@ -347,6 +525,7 @@ class _RunSelector extends StatelessWidget {
     required this.onSelected,
   });
 
+  /// One backend's devices.
   final List<DeviceRun> runs;
   final String selectedKey;
   final ValueChanged<String> onSelected;
@@ -368,7 +547,11 @@ class _RunSelector extends StatelessWidget {
           children: [
             for (final run in runs)
               CChip(
-                label: '${run.backend} · ${run.device}',
+                // A name is not unique -- MoltenVK shows one GPU twice --
+                // so the backend's index tells such twins apart.
+                label: runs.where((r) => r.device == run.device).length > 1
+                    ? '${run.device} #${run.index}'
+                    : run.device,
                 selected: run.key == selectedKey,
                 onTap: () => onSelected(run.key),
               ),
@@ -381,11 +564,14 @@ class _RunSelector extends StatelessWidget {
 
 /// Device identity and its properties.  Props are shown from the moment the
 /// device opens — they arrive with the very first event of a device's run, so
-/// there is nothing to wait for — and are static thereafter.
+/// there is nothing to wait for — and are static thereafter.  A saved file
+/// adds which processor the device is a view of, what linked it there, and
+/// an ML runtime's provider or accelerator.
 class _DeviceHeader extends StatelessWidget {
-  const _DeviceHeader({required this.run});
+  const _DeviceHeader({required this.run, this.processor});
 
   final DeviceRun run;
+  final ProcessorInfo? processor;
 
   @override
   Widget build(BuildContext context) {
@@ -395,6 +581,22 @@ class _DeviceHeader extends StatelessWidget {
     final trail = [
       if (showPlatform) run.platform,
       if (run.driver.isNotEmpty) run.driver,
+    ];
+    final p = processor;
+    final rt = run.runtime;
+    final entries = [
+      if (run.processor.isNotEmpty)
+        (
+          key: 'Processor',
+          value: p == null || p.name.isEmpty
+              ? run.processor
+              : '${run.processor} · ${p.name}',
+        ),
+      if (run.link.isNotEmpty) (key: 'Linked by', value: run.link),
+      if (rt.provider.isNotEmpty) (key: 'Provider', value: rt.provider),
+      if (rt.accelerator.isNotEmpty) (key: 'Accelerator', value: rt.accelerator),
+      if (rt.version.isNotEmpty) (key: 'Runtime', value: rt.version),
+      ...run.props,
     ];
 
     return CPanel(
@@ -430,14 +632,14 @@ class _DeviceHeader extends StatelessWidget {
               );
             },
           ),
-          if (run.props.isNotEmpty)
+          if (entries.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
               child: Wrap(
                 spacing: 22,
                 runSpacing: 7,
                 children: [
-                  for (final prop in run.props)
+                  for (final prop in entries)
                     Text.rich(TextSpan(children: [
                       TextSpan(
                           text: '${prop.key.toUpperCase()}  ', style: t.micro),
@@ -446,86 +648,6 @@ class _DeviceHeader extends StatelessWidget {
                 ],
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RunMetaPanel extends StatelessWidget {
-  const _RunMetaPanel({required this.meta});
-
-  final RunMeta meta;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    final entries = <({String key, String value})>[];
-
-    // Named by the file's own generator: "XPUPEAK VERSION".
-    final generator = meta.generator;
-    if (generator.version.isNotEmpty) {
-      final by = generator.name.toUpperCase();
-      entries.add((
-        key: by.isEmpty ? 'VERSION' : '$by VERSION',
-        value: generator.version,
-      ));
-    }
-    if (meta.durationSeconds > 0) {
-      entries.add((
-        key: 'DURATION',
-        value: formatDuration(
-            Duration(milliseconds: (meta.durationSeconds * 1000).round()))
-      ));
-    }
-    for (final e in [
-      (key: 'OS', value: meta.osName),
-      (key: 'OS_VERSION', value: meta.osVersion),
-      (key: 'ARCH', value: meta.arch),
-    ]) {
-      if (e.value.isNotEmpty) entries.add(e);
-    }
-
-    if (entries.isEmpty) return const SizedBox.shrink();
-
-    return CPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-            decoration: BoxDecoration(
-              color: t.isDark ? t.hover : t.hover.withValues(alpha: 0.7),
-              border: Border(bottom: BorderSide(color: t.line)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 13, color: t.faint),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text('RUN INFO', style: t.micro),
-                ),
-                if (meta.cancelled)
-                  CTag(text: 'cancelled', color: t.danger),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-            child: Wrap(
-              spacing: 22,
-              runSpacing: 7,
-              children: [
-                for (final e in entries)
-                  Text.rich(
-                    TextSpan(children: [
-                      TextSpan(text: '${e.key}  ', style: t.micro),
-                      TextSpan(text: e.value, style: t.monoSmall),
-                    ]),
-                  ),
-              ],
-            ),
-          ),
         ],
       ),
     );
