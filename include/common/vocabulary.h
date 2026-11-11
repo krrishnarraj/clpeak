@@ -88,6 +88,7 @@ enum class Dim : unsigned char {
     Width, Chains, Isa, SimdBits, Impl, Form, Tile, ProblemSize,
     // Appended after the seed list
     Kv,                 // a transformer block's KV-cache data type (`int8_kv`)
+    Bound,              // what limits a compute kernel (SMT scaling's one-chain rows)
     COUNT
 };
 
@@ -163,6 +164,9 @@ enum class Isa : unsigned char {
 enum class Impl : unsigned char {
     Cublaslt, Hipblaslt, Rocblas, Rocwmma, Onemkl, Mps, Mpsgraph, Accelerate, Bnns, COUNT
 };
+// Throughput: enough independent chains to fill every pipe, as every compute
+// peak is.  Latency: one chain, each operation waiting on the one before.
+enum class Bound : unsigned char { Throughput, Latency, COUNT };
 
 // Which key each value enum belongs to.
 template <class E> struct WordOf {};
@@ -181,6 +185,7 @@ template <> struct WordOf<Contention>  { static constexpr Dim key = Dim::Content
 template <> struct WordOf<Workload>    { static constexpr Dim key = Dim::Workload; };
 template <> struct WordOf<Isa>         { static constexpr Dim key = Dim::Isa; };
 template <> struct WordOf<Impl>        { static constexpr Dim key = Dim::Impl; };
+template <> struct WordOf<Bound>       { static constexpr Dim key = Dim::Bound; };
 
 template <class E, class = void> struct IsWord : std::false_type {};
 template <class E> struct IsWord<E, decltype(void(WordOf<E>::key))> : std::true_type {};
@@ -276,6 +281,26 @@ const char *toString(EngineReach r);
 bool        fromString(const std::string &s, EngineKind &out);
 bool        fromString(const std::string &s, EngineScope &out);
 bool        fromString(const std::string &s, EngineReach &out);
+
+// A CPU feature, as a processor's facts list them (`features`): one word per
+// capability, the same on every OS, and on both architectures where the
+// capability is one (`aes`, `sha256`, `sha512`, `crc32`).  x86 words follow
+// the Linux kernel's flag names where it has one; Arm's are the
+// architecture's FEAT_ names in lower case, AdvSIMD being `neon`.
+enum class CpuFeature : unsigned char {
+    // x86
+    Sse2, Ssse3, Sse4_1, Sse4_2, Avx, Avx2, Fma,
+    Avx512f, Avx512bw, Avx512vl, Avx512dq, Avx512Vnni, Avx512Bf16, Avx512Fp16,
+    AvxVnni, AvxVnniInt8, AvxVnniInt16, Avx10, Avx10_2,
+    AmxTile, AmxInt8, AmxBf16, AmxFp16, AmxFp8, Vaes,
+    // Arm
+    Neon, Fp16, Fhm, Dotprod, Bf16, I8mm, Sve, Sve2, Sme, Sme2, SmeF64f64, Fp8dot4,
+    // Both
+    Aes, Sha256, Sha512, Crc32,
+    COUNT
+};
+const char *toString(CpuFeature f);
+bool        fromString(const std::string &s, CpuFeature &out);
 
 // Vendors, of processors and of the APIs' devices.
 enum class Vendor : unsigned char {

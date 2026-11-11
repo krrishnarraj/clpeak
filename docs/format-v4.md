@@ -622,6 +622,7 @@ rest.
 | `contention` | identity | `none`, `all` | `none` | whether every other thread competed for the same data |
 | `workload` | identity | `trivial_op`, `small_matmul`, `session_create`, `model_create` | — | what a dispatch-latency reading submits |
 | `kv` | identity | a data type | the reading's `dtype` | a transformer block's KV-cache type |
+| `bound` | identity | `throughput`, `latency` | `throughput` | what limits a compute kernel: enough independent chains to fill every pipe, as in every compute peak, or one chain whose every operation waits on the one before |
 | `width` | variant | a number | — | vector width, in elements |
 | `chains` | variant | a number | — | independent dependency chains in flight |
 | `isa` | variant | `scalar`, `sse2`, `ssse3`, `sse4_2`, `avx`, `avx2`, `avx512`, `avx10`, `amx`, `neon`, `sve`, `sve2`, `sme`, `sme2` | — | the instruction set a CPU kernel was written in |
@@ -695,6 +696,7 @@ Each family's category is the category its flag is listed under in
 | cluster kind | `prime`, `performance`, `efficiency`, `low_power` |
 | cache level | `l1d`, `l1i`, `l2`, `l3`, `slc` |
 | engine | `kind`: `matrix`; `scope`: `core`, `cluster`; `reached_by`: `instructions`, `library` |
+| CPU feature | x86: `sse2`, `ssse3`, `sse4_1`, `sse4_2`, `avx`, `avx2`, `fma`, `avx512f`, `avx512bw`, `avx512vl`, `avx512dq`, `avx512_vnni`, `avx512_bf16`, `avx512_fp16`, `avx_vnni`, `avx_vnni_int8`, `avx_vnni_int16`, `avx10`, `avx10_2`, `amx_tile`, `amx_int8`, `amx_bf16`, `amx_fp16`, `amx_fp8`, `vaes`; Arm: `neon`, `fp16`, `fhm`, `dotprod`, `bf16`, `i8mm`, `sve`, `sve2`, `sme`, `sme2`, `sme_f64f64`, `fp8dot4`; both: `aes`, `sha256`, `sha512`, `crc32`. One word per capability on every OS, the same word on both architectures where the capability is one; x86 words follow the Linux kernel's flags, Arm's are the FEAT_ names in lower case (`neon` for AdvSIMD) |
 | form factor | `mobile`, `laptop`, `desktop`, `server` |
 | form factor detail | `phone`, `tablet`, `embedded` |
 | `form_factor_from` | `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, `default` |
