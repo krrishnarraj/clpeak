@@ -32,7 +32,7 @@ backend.
 
 | File | Purpose |
 |------|---------|
-| `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()` |
+| `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()`; `onnxIdentify()`, who each device is (*Identity*) |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `XPUPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxHeldBytes()` — what a session holds, every memory gate's count |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
@@ -49,6 +49,21 @@ backend.
 | `block.cpp` | `runBlock` (`--transformer-block`) — one fixed transformer decoder block in both regimes, at each precision a model ships in (`kVariants`: fp16, bf16, fp32, int4/fp4/int8 weight-only, int8 and float8 QDQ, int8 KV cache). Three scopes, one unit each: `onnx-block-prefill` (flops, int8_qdq `ops` per-reading), prompt ladder; `onnx-block-decode` (bps), `onnx-block-latency` (s, prefill pass + context ladder).  `variantFence` — the graphs only this test provokes a crash with, never built.  The `int8_qdq` prompt runs its float parts at whichever of fp16 and fp32 the provider takes faster |
 | `tensor_bandwidth.cpp` | `runTensorBandwidth` (`--tensor-bandwidth`) — GEMV against a resident fp16 weight matrix at three sizes (bps) |
 | `dispatch_latency.cpp` | `runDispatchLatency` (`--kernel-launch-latency`) — per-submission overhead and session-creation cost (s) |
+
+## Identity
+
+Each provider's device reports who it is with its `beginDevice()`
+(`onnxIdentify()` in `onnx_peak.cpp`, read by
+`include/common/hardware_link.h`): a CPU-class provider is the host, an
+NPU-class one -- QNN's HTP, Vitis AI, CoreML, OpenVINO's NPU, a plugin's NPU,
+all typed `npu` (`classRank()` ranks them with the accelerators) -- the
+SoC's NPU, and NNAPI the SoC, on no one unit it names.  A GPU is linked by
+the hardware device the runtime pairs with it: a plugin device's own, and a
+built-in provider's where the environment pairs exactly one
+(`onnxAttachBuiltinHardware()` in `onnx_plugin.cpp`) -- its PCI ids and
+vendor, and from its metadata the CUDA plugin's `pci_bus_id`, DXGI's `LUID`
+and OpenVINO's `DEVICE_PCI_INFO`, `DEVICE_UUID` and `DEVICE_LUID`.
+`runtime` is the provider and the runtime's version.
 
 ## The runtime is dlopen'd, never linked (except on iOS)
 

@@ -18,7 +18,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 
 | File | Purpose |
 |------|---------|
-| `cl_peak.cpp` | `clPeak` class: constructor, `runAll()` (devices numbered consecutively across platforms), `run_kernel()`, `enumerate()` |
+| `cl_peak.cpp` | `clPeak` class: constructor, `runAll()` (devices numbered consecutively across platforms), `run_kernel()`, `enumerate()`; `openclIdentify()`, who each device is (*Identity*) |
 | `cl_kernels.cpp` | Kernel source strings (stringified .cl includes); `clGetTestKernels(which)` is the source of one test's program -- `runAll` builds one program per selected test, side by side on worker threads |
 | `compute_test.cpp` | `runComputeTest()` — shared compute-peak driver for float/int/char/short/etc. |
 | `cl_common.cpp` | `device_info_t` struct, device capability queries |
@@ -31,6 +31,18 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
 | `kernels/mad_chain.cl` | The alternate MAD chains (`AF*` affine, `RT*` rotating) every `compute_*_alt_v*` kernel expands.  Included first in `cl_kernels.cpp` so the macros exist before use |
 | `cmake/` | `BuildSdk.cmake` — SDK fallback finder |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`openclIdentify()` in
+`cl_peak.cpp`, read by `include/common/hardware_link.h`): `cl_khr_device_uuid`'s
+UUID and LUID, a PCI address by whichever of `cl_khr_pci_bus_info`,
+`cl_nv_device_attribute_query` and `CL_DEVICE_TOPOLOGY_AMD` the driver has,
+on macOS `CL_DEVICE_REGISTRY_ID_APPLE` (0 on Apple silicon, so the M1's GPU
+joins Metal's by the sole rule), and as facts the vendor id and string,
+unified memory as integrated, NVIDIA's `sm_` arch, compute units named for
+the vendor (`computeUnitName()`), clock, and a discrete part's memory.  A CPU
+device (PoCL, Intel's CPU runtime) is the host CPU.
 
 ## Test documentation
 

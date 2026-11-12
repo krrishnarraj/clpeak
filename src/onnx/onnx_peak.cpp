@@ -8,9 +8,13 @@
 #include "onnx_winml.h"
 
 #include <common/coreml_cache.h>
+#include <common/hardware_link.h>
 #include <common/options.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
 #include <ostream>
 
 // ---------------------------------------------------------------------------
@@ -31,12 +35,14 @@ struct EpTableEntry
 };
 
 static const EpTableEntry kEpTable[] = {
-  // NPU-class providers (vendor AI runtimes).  OpenVINO is not listed
-  // here: one EP fronts NPU, GPU and CPU behind its `device_type` option
-  // (see onnxAvailableEps below), so a single table row cannot name it.
-  {"QNNExecutionProvider",        "Qualcomm QNN (Hexagon NPU)",   "NPU", DeviceType::Accelerator},
-  {"VitisAIExecutionProvider",    "AMD Vitis AI (XDNA NPU)",      "NPU", DeviceType::Accelerator},
-  {"CoreMLExecutionProvider",     "Apple CoreML (Neural Engine)", "NPU", DeviceType::Accelerator},
+  // NPU-class providers (vendor AI runtimes), typed npu.  NNAPI is not an
+  // NPU but Android's router to whichever unit it picks, so it stays an
+  // accelerator.  OpenVINO is not listed here: one EP fronts NPU, GPU and
+  // CPU behind its `device_type` option (see onnxAvailableEps below), so a
+  // single table row cannot name it.
+  {"QNNExecutionProvider",        "Qualcomm QNN (Hexagon NPU)",   "NPU", DeviceType::Npu},
+  {"VitisAIExecutionProvider",    "AMD Vitis AI (XDNA NPU)",      "NPU", DeviceType::Npu},
+  {"CoreMLExecutionProvider",     "Apple CoreML (Neural Engine)", "NPU", DeviceType::Npu},
   {"NnapiExecutionProvider",      "Android NNAPI",                "NPU", DeviceType::Accelerator},
 
   // GPU providers
@@ -181,7 +187,7 @@ std::vector<onnx_ep_info_t> onnxAvailableEps(const OrtRuntime &rt)
     if (key == "OpenVINOExecutionProvider")
     {
       static const struct { const char *dev; const char *display; const char *type; DeviceType dt; } kOv[] = {
-        {"NPU", "Intel OpenVINO (NPU)", "NPU", DeviceType::Accelerator},
+        {"NPU", "Intel OpenVINO (NPU)", "NPU", DeviceType::Npu},
         {"GPU", "Intel OpenVINO (GPU)", "GPU", DeviceType::Gpu},
         {"CPU", "Intel OpenVINO (CPU)", "CPU", DeviceType::Cpu},
       };
@@ -252,6 +258,9 @@ std::vector<onnx_ep_info_t> onnxUsableEps(
         skipped->emplace_back(ep, reason);
     }
   }
+  // What the built-in providers run on, where the environment says so
+  // unambiguously: what links them (onnxIdentify).
+  onnxAttachBuiltinHardware(rt, out);
   return out;
 }
 
@@ -299,6 +308,116 @@ OnnxRuntimeStatus onnxRuntimeStatus()
     st.pendingWinmlPath = pending.winmlPath;
   }
   return st;
+}
+
+// A number from a provider's metadata: decimal, or hex with "0x".
+static bool metadataNumber(const std::string &v, unsigned long long &out)
+{
+  if (v.empty())
+    return false;
+  const bool hex = v.size() > 2 && v[0] == '0' && (v[1] == 'x' || v[1] == 'X');
+  const std::string digits = hex ? v.substr(2) : v;
+  if (digits.empty() ||
+      digits.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") != std::string::npos)
+    return false;
+  out = std::strtoull(digits.c_str(), nullptr, hex ? 16 : 10);
+  return true;
+}
+
+// `n` bytes from a value written as 2n hex digits, separators aside.
+static bool metadataBytes(const std::string &v, unsigned char *out, size_t n)
+{
+  std::string hex;
+  for (char c : v)
+    if (std::isxdigit(static_cast<unsigned char>(c)))
+      hex += c;
+    else if (c != '-' && c != ':' && c != ' ' && c != '{' && c != '}')
+      return false;
+  if (hex.size() > 2 * n && hex.compare(0, 2, "0x") == 0)
+    hex.erase(0, 2);
+  if (hex.size() != 2 * n)
+    return false;
+  for (size_t i = 0; i < n; i++)
+    out[i] = (unsigned char)std::strtoul(hex.substr(2 * i, 2).c_str(), nullptr, 16);
+  return true;
+}
+
+// OpenVINO's PCI info, "{domain: 0, bus: 3, device: 0x0, function: 0}": the
+// number after each word.
+static std::string metadataPciInfo(const std::string &v)
+{
+  unsigned long long part[4] = {0, 0, 0, 0};
+  const char *const words[4] = {"domain", "bus", "device", "function"};
+  for (int i = 0; i < 4; i++)
+  {
+    size_t at = v.find(words[i]);
+    if (at == std::string::npos)
+      return "";
+    at += std::strlen(words[i]);
+    while (at < v.size() && (v[at] == ':' || v[at] == '=' || v[at] == ' '))
+      at++;
+    size_t end = at;
+    while (end < v.size() && std::isalnum(static_cast<unsigned char>(v[end])))
+      end++;
+    if (!metadataNumber(v.substr(at, end - at), part[i]))
+      return "";
+  }
+  return xpupeak::pciBusText((unsigned)part[0], (unsigned)part[1], (unsigned)part[2],
+                             (unsigned)part[3]);
+}
+
+// Who a provider's device is (include/common/hardware_link.h): what the
+// runtime pairs with it -- a PCI address, a Windows LUID, OpenVINO's UUID --
+// and what it says of the hardware.  A CPU-class provider is the host, an
+// NPU-class one the SoC's NPU (the Neural Engine, Hexagon, XDNA, Intel's
+// NPU), and NNAPI the SoC, on no one unit it names.  A listing can ask it
+// too.
+static void onnxIdentify(const OrtRuntime &rt, const onnx_ep_info_t &ep, logger::Identity &ident,
+                         HardwareFacts &facts, RuntimeInfo &runtime)
+{
+  runtime.provider = ep.providerKey;
+  runtime.version  = rt.versionString;
+  if (!ep.epDevicePtr && ep.providerKey == "OpenVINOExecutionProvider")
+  {
+    runtime.accelerator = ep.epDevice;   // its device_type
+    for (char &c : runtime.accelerator)
+      c = (char)std::tolower(static_cast<unsigned char>(c));
+  }
+  ident.host           = ep.deviceType == DeviceType::Cpu;
+  ident.socNpu         = ep.deviceType == DeviceType::Npu;
+  ident.socAccelerator = ep.providerKey == "NnapiExecutionProvider";
+
+  facts.vendorId   = xpupeak::pciIdText(ep.hwVendorId);
+  facts.deviceId   = xpupeak::pciIdText(ep.hwDeviceId);
+  facts.vendorName = ep.hwVendor;
+
+  // A plugin device's metadata and its provider's (`hardware`), and the
+  // device the environment pairs with a built-in one (`hwMetadata`).
+  for (const auto *kvs : {&ep.hardware, &ep.hwMetadata})
+    for (const auto &kv : *kvs)
+    {
+      const std::string &k = kv.first, &v = kv.second;
+      unsigned long long n = 0;
+      unsigned char bytes[16];
+      if (k == "pci_bus_id" && ident.pciBus.empty())
+        ident.pciBus = xpupeak::pciBusFromText(v);
+      else if (k == "DEVICE_PCI_INFO" && ident.pciBus.empty())
+        ident.pciBus = metadataPciInfo(v);
+      else if (k == "LUID" && ident.luid.empty() && metadataNumber(v, n))
+        ident.luid = xpupeak::luidText((uint32_t)(n & 0xffffffffu), (int32_t)(uint32_t)(n >> 32));
+      else if (k == "DEVICE_LUID" && ident.luid.empty() && metadataBytes(v, bytes, 8))
+        ident.luid = xpupeak::luidText(bytes);
+      else if (k == "DEVICE_UUID" && ident.uuid.empty() && metadataBytes(v, bytes, 16))
+        ident.uuid = xpupeak::uuidText(bytes);
+      else if (k == "Discrete" && (v == "0" || v == "1"))
+        facts.integrated = v == "1" ? 0 : 1;
+      else if (k == "cuda_compute_capability" && facts.arch.empty())
+      {
+        const size_t dot = v.find('.');
+        if (dot != std::string::npos && dot > 0 && dot + 1 < v.size())
+          facts.arch = "sm_" + v.substr(0, dot) + v.substr(dot + 1);
+      }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +477,8 @@ int OnnxPeak::runAll()
   // reach it.
   bool hasAccelerator = false;
   for (const auto &ep : eps)
-    if (ep.deviceType == DeviceType::Accelerator || ep.deviceType == DeviceType::Gpu)
+    if (ep.deviceType == DeviceType::Npu || ep.deviceType == DeviceType::Accelerator ||
+        ep.deviceType == DeviceType::Gpu)
       hasAccelerator = true;
   if (!hasAccelerator)
     log->note("ONNX: this onnxruntime build exposes CPU providers only -- "
@@ -437,6 +557,10 @@ int OnnxPeak::runAll()
     // is the runtime's own, which the "ONNX Runtime" prop repeats.
     const std::string driver = !ep.epDevicePtr || ep.pluginVersion.empty()
         ? rt->versionString : ep.pluginVersion;
+    logger::Identity identity;
+    HardwareFacts facts;
+    RuntimeInfo runtime;
+    onnxIdentify(*rt, ep, identity, facts, runtime);
     auto deviceScope = backendScope.beginDevice({
         ep.displayName,
         "",   // platform defaults to "ONNX"
@@ -445,6 +569,9 @@ int OnnxPeak::runAll()
         -1,
         idx,
         ep.deviceType,
+        identity,
+        facts,
+        runtime,
     });
     currentDeviceScope = &deviceScope;
 

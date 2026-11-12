@@ -2,6 +2,7 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+#include <common/hardware_link.h>
 #include <common/inventory.h>
 #include <common/options.h>
 #include <algorithm>
@@ -14,6 +15,34 @@ static const char *hipErrStr(hipError_t r)
 {
   const char *s = hipGetErrorString(r);
   return s ? s : "unknown HIP error";
+}
+
+// Who the device is, as the runtime says -- its PCI address, which is what
+// links an AMD GPU across APIs, and its UUID, whose scheme is HIP's own --
+// and what it says of the hardware (include/common/hardware_link.h).  A
+// listing can ask it too.
+static void rocmIdentify(int index, const hipDeviceProp_t &props, logger::Identity &id,
+                         HardwareFacts &facts)
+{
+  id.pciBus = xpupeak::pciBusText((unsigned)props.pciDomainID, (unsigned)props.pciBusID,
+                                  (unsigned)props.pciDeviceID, 0);
+  hipDevice_t device;
+  hipUUID uuid;
+  if (hipDeviceGet(&device, index) == hipSuccess && hipDeviceGetUuid(&uuid, device) == hipSuccess)
+    id.uuid = xpupeak::uuidText(reinterpret_cast<const unsigned char *>(uuid.bytes));
+
+  facts.vendorId = xpupeak::pciIdText(0x1002);   // HIP's devices here are AMD's
+  facts.arch = props.gcnArchName[0] ? std::string(props.gcnArchName) : std::string();
+  facts.arch = facts.arch.substr(0, facts.arch.find(':'));   // "gfx942:sramecc+:xnack-"
+  if (props.multiProcessorCount > 0)
+  {
+    facts.computeUnits = (unsigned)props.multiProcessorCount;
+    facts.computeUnit  = "CU";
+  }
+  if (props.clockRate > 0) facts.clockMhz = (unsigned)(props.clockRate / 1000);
+  facts.integrated = props.integrated ? 1 : 0;
+  // An APU's "device memory" is the system's.
+  if (!props.integrated) facts.memoryBytes = props.totalGlobalMem;
 }
 
 RocmPeak::RocmPeak()
@@ -152,6 +181,11 @@ int RocmPeak::runAll()
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    hipDeviceProp_t props;
+    if (hipGetDeviceProperties(&props, idx) == hipSuccess)
+      rocmIdentify(idx, props, identity, facts);
     auto deviceScope = backendScope.beginDevice({
       dev.info.deviceName,
       "",
@@ -165,7 +199,9 @@ int RocmPeak::runAll()
       },
       -1,
       idx,
-      dev.info.deviceType
+      dev.info.deviceType,
+      identity,
+      facts,
     });
     currentDeviceScope = &deviceScope;
 

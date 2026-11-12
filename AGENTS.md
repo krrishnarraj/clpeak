@@ -101,6 +101,7 @@ run and the result document all share.
 - **Classifying or explaining a test?** → `include/common/AGENTS.md`
   § What a backend authors at `beginTest()` (shape, axis, variant, prose)
 - **Result output format?** → `docs/format-v4.md` (the schema, and the *Compatibility* rules every change to it follows) + `include/common/run_document.h`; its words — data types, dim keys, vendors, kinds, families — are `include/common/vocabulary.h`, and the headline catalog is `app/assets/measures.json`
+- **Which processor a device is a view of?** → `include/common/hardware_link.h` (the linker, run before every save, and its queries) and `docs/format-v4.md` § Linking; a backend's part is the `logger::Identity` and `HardwareFacts` it passes at `beginDevice()`, described in its own `AGENTS.md` § Identity
 - **Saying what a reading measured, so it compares across backends?** → `dims` and `revision` at `beginTest()` / `emit()` / `skip()`: `include/common/AGENTS.md` § `dims`
 - **Emitting a diagnostic, or reading one back?** → `XPUPEAK_LOG` / `XPUPEAK_VLOG` in `include/common/common.h`; every line lands on the document's `log` via `RunLog` (`include/common/run_log.h`), and with `-o` on the `<output>.log` sidecar as it happens — `--verbose` is what makes a dump debuggable without the machine
 - **CLI options?** → `include/common/options.h`

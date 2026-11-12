@@ -23,7 +23,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 
 | File | Purpose |
 |------|---------|
-| `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()` |
+| `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()`; `metalIdentify()`, who each device is (*Identity*) |
 | `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyXpuPeakMetalDevices()` helper |
 | `mtl_utils.mm` | `mtlGetLibrary()`, `mtlGetPipeline()` — Metal library/pipeline caching |
 | `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
@@ -37,6 +37,16 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `kernel_latency.mm` | `runKernelLatency` |
 | `mtl_kernels/` | Metal Shading Language kernels (`.metal`) embedded as C++ string literals |
 | `cmake/EmbedMetalKernels.cmake` | `embed_metal_kernels()` — .metal → C++ raw-string arrays |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`metalIdentify()` in
+`mtl_peak.mm`, read by `include/common/hardware_link.h`): its `registryID`,
+which Core ML's GPU device reports for the same `MTLDevice`, and as facts
+Apple's PCI vendor id (as MoltenVK reports the same GPU), the `Apple<N>`
+family as its arch, its core count and unified memory as integrated.
+Apple's OpenCL answers registry ID 0 on Apple silicon and MoltenVK's UUID
+matches nothing, so those two join this GPU by the sole rule.
 
 ## Test documentation
 

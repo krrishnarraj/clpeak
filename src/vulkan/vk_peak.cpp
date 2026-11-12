@@ -4,6 +4,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/common.h>
+#include <common/hardware_link.h>
 #include <algorithm>
 #include <tuple>
 #include <cstring>
@@ -129,6 +130,101 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugMessage(
 }
 
 } // namespace
+
+// Who the device is, as its driver says -- deviceUUID, the adapter LUID on
+// Windows, the PCI address where VK_EXT_pci_bus_info gives it -- and what it
+// says of the hardware (include/common/hardware_link.h).  NVIDIA's UUID is
+// CUDA's; other vendors' are their own, and the PCI address is what links
+// those across APIs.  A CPU device (llvmpipe, lavapipe) is the host CPU.  A
+// listing can ask it too.
+static void vulkanIdentify(VkPhysicalDevice pd, logger::Identity &id, HardwareFacts &facts)
+{
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(pd, &props);
+  facts.vendorId = xpupeak::pciIdText(props.vendorID);
+  facts.deviceId = xpupeak::pciIdText(props.deviceID);
+  switch (props.deviceType)
+  {
+  case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: facts.integrated = 1; break;
+  case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   facts.integrated = 0; break;
+  case VK_PHYSICAL_DEVICE_TYPE_CPU:            id.host = true; break;
+  default:                                     break;
+  }
+
+  uint32_t extCount = 0;
+  vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, nullptr);
+  std::vector<VkExtensionProperties> exts(extCount);
+  if (extCount)
+    vkEnumerateDeviceExtensionProperties(pd, nullptr, &extCount, exts.data());
+  auto hasExt = [&](const char *name) {
+    for (const auto &e : exts)
+      if (strcmp(e.extensionName, name) == 0) return true;
+    return false;
+  };
+
+  if (props.apiVersion >= VK_API_VERSION_1_1)
+  {
+    VkPhysicalDeviceIDProperties ids = {};
+    ids.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+    VkPhysicalDevicePCIBusInfoPropertiesEXT pci = {};
+    pci.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT;
+    const bool hasPci = hasExt(VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);
+    if (hasPci)
+      ids.pNext = &pci;
+    VkPhysicalDeviceProperties2 p2 = {};
+    p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    p2.pNext = &ids;
+    vkGetPhysicalDeviceProperties2(pd, &p2);
+    id.uuid = xpupeak::uuidText(ids.deviceUUID);
+    if (ids.deviceLUIDValid)
+      id.luid = xpupeak::luidText(ids.deviceLUID);
+    if (hasPci)
+      id.pciBus = xpupeak::pciBusText(pci.pciDomain, pci.pciBus, pci.pciDevice, pci.pciFunction);
+  }
+
+  // Compute units as the vendor's own extension counts them, and names them.
+  VkPhysicalDeviceProperties2 p2 = {};
+  p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+  if (hasExt("VK_NV_shader_sm_builtins"))
+  {
+    VkPhysicalDeviceShaderSMBuiltinsPropertiesNV sm = {};
+    sm.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_PROPERTIES_NV;
+    p2.pNext = &sm;
+    vkGetPhysicalDeviceProperties2(pd, &p2);
+    facts.computeUnits = sm.shaderSMCount;
+    facts.computeUnit  = "SM";
+  }
+  else if (hasExt("VK_AMD_shader_core_properties2"))
+  {
+    VkPhysicalDeviceShaderCoreProperties2AMD core = {};
+    core.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_PROPERTIES_2_AMD;
+    p2.pNext = &core;
+    vkGetPhysicalDeviceProperties2(pd, &p2);
+    facts.computeUnits = core.activeComputeUnitCount;
+    facts.computeUnit  = "CU";
+  }
+  else if (hasExt("VK_ARM_shader_core_builtins"))
+  {
+    VkPhysicalDeviceShaderCoreBuiltinsPropertiesARM core = {};
+    core.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_BUILTINS_PROPERTIES_ARM;
+    p2.pNext = &core;
+    vkGetPhysicalDeviceProperties2(pd, &p2);
+    facts.computeUnits = core.shaderCoreCount;
+    facts.computeUnit  = "core";
+  }
+  if (!facts.computeUnits)
+    facts.computeUnit.clear();
+
+  // A discrete part's own memory: its largest device-local heap.
+  if (facts.integrated == 0)
+  {
+    VkPhysicalDeviceMemoryProperties mem;
+    vkGetPhysicalDeviceMemoryProperties(pd, &mem);
+    for (uint32_t i = 0; i < mem.memoryHeapCount; i++)
+      if (mem.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+        facts.memoryBytes = std::max<std::uint64_t>(facts.memoryBytes, mem.memoryHeaps[i].size);
+  }
+}
 
 bool vkPeak::initInstance()
 {
@@ -549,6 +645,9 @@ int vkPeak::runAll()
     if (dev.info.numCUs > 0)
       deviceProps.push_back({"Compute units", std::to_string(dev.info.numCUs)});
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    vulkanIdentify(physicalDevices[d], identity, facts);
     auto deviceScope = backendScope.beginDevice({
       dev.info.deviceName,
       "",   // platform defaults to "Vulkan"
@@ -556,7 +655,9 @@ int vkPeak::runAll()
       deviceProps,
       -1,
       static_cast<int>(d),
-      dev.info.deviceType
+      dev.info.deviceType,
+      identity,
+      facts,
     });
     currentDeviceScope = &deviceScope;
 

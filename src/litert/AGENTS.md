@@ -33,7 +33,7 @@ GPU, CPU -- is one device, exactly as a Core ML compute unit is.
 
 | File | Purpose |
 |------|---------|
-| `litert_peak.cpp` | `LitertPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name) |
+| `litert_peak.cpp` | `LitertPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `litertUsableDevices()` probes each accelerator with one tiny model; the NPU vendor table (dispatch-library name → display name); `litertIdentify()`, who each device is (*Identity*) |
 | `litert_runtime.{h,cpp}` | `litertRuntime()` — dlopens libLiteRt and resolves every entry point by name into `LitertApi` (one X-macro, required and optional lists), and reads the library's own ABI from what it exports (`abiVersion`, `abi11`); `litertSetLibraryOverride()` (fixed for the process by the first library that loads; `litertPendingLibrary()` reports a later choice), `litertSetNpuDirOverride()`, `litertLoadDiagnostic()` |
 | `litert_session.{h,cpp}` | `LitertSession`: one environment per accelerator (with the recreation the Metal accelerator needs), the options payloads, model load + compile, tensor buffers, `run()`, the sink logger and console capture, the profiler |
 | `tflite_model.{h,cpp}` | A minimal back-to-front FlatBuffer builder and `TfliteModel`, which serializes tensors, buffers, operators and their options tables to the `.tflite` wire format |
@@ -58,6 +58,18 @@ Test ids are lower_snake and keep the `litert_` prefix (`litert_gemm`,
 (`--gemm`, `--transformer-block`, …) and shared with the ONNX and Core ML
 backends through the same `Benchmark` values.  Every test is heterogeneous:
 each reading is a different format, shape, size or context length.
+
+## Identity
+
+Each accelerator reports who it is with its `beginDevice()`
+(`litertIdentify()` in `litert_peak.cpp`, read by
+`include/common/hardware_link.h`).  The C API names no adapter, so it is what
+the accelerator is for: the NPU is the SoC's (type `npu`, its dispatch
+library's vendor a fact), a GPU delegate on Android the SoC's GPU, and
+elsewhere -- Metal on Apple, WebGPU on a desktop -- the platform's default
+GPU, which joins the run's one GPU and never one of several.  The CPU is the
+host.  `runtime.accelerator` is `npu`, `gpu` or `cpu`; LiteRT reports no
+version of its own.
 
 ## The runtime is dlopen'd, never linked
 

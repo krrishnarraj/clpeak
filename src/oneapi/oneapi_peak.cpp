@@ -3,6 +3,7 @@
 #include <oneapi/oneapi_peak.h>
 #include <common/common.h>
 #include <common/dynlib.h>
+#include <common/hardware_link.h>
 #include <common/inventory.h>
 #include <common/options.h>
 #include <algorithm>
@@ -124,6 +125,45 @@ static const char *deviceTypeStr(const sycl::device &d)
   return "Other";
 }
 
+// Who the device is, as SYCL's Intel extensions say -- its PCI address and
+// its UUID, where the device offers them -- and what it says of the hardware
+// (include/common/hardware_link.h).  A CPU device is the host CPU.  A
+// listing can ask it too.
+static void oneapiIdentify(const sycl::device &d, logger::Identity &id, HardwareFacts &facts)
+{
+  const DeviceType type = d.is_gpu()           ? DeviceType::Gpu
+                        : d.is_cpu()           ? DeviceType::Cpu
+                        : d.is_accelerator()   ? DeviceType::Accelerator
+                                               : DeviceType::Unknown;
+  id.host = type == DeviceType::Cpu;
+  try
+  {
+    if (d.has(sycl::aspect::ext_intel_pci_address))
+      id.pciBus = xpupeak::pciBusFromText(
+          d.get_info<sycl::ext::intel::info::device::pci_address>());
+    if (d.has(sycl::aspect::ext_intel_device_info_uuid))
+    {
+      const auto uuid = d.get_info<sycl::ext::intel::info::device::uuid>();
+      id.uuid = xpupeak::uuidText(uuid.data());
+    }
+    if (d.has(sycl::aspect::ext_intel_device_id))
+      facts.deviceId = xpupeak::pciIdText(d.get_info<sycl::ext::intel::info::device::device_id>());
+    facts.vendorId   = xpupeak::pciIdText(d.get_info<sycl::info::device::vendor_id>());
+    facts.vendorName = d.get_info<sycl::info::device::vendor>();
+    const unsigned cus = (unsigned)d.get_info<sycl::info::device::max_compute_units>();
+    if (cus)
+    {
+      facts.computeUnits = cus;
+      facts.computeUnit  = xpupeak::computeUnitName(facts, type);
+    }
+    facts.clockMhz = (unsigned)d.get_info<sycl::info::device::max_clock_frequency>();
+  }
+  catch (const sycl::exception &)
+  {
+    // What was read stands; a runtime may decline any of these.
+  }
+}
+
 bool OneapiPeak::initRuntime()
 {
   if (initialised)
@@ -219,6 +259,9 @@ int OneapiPeak::runAll()
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    oneapiIdentify(devices[idx], identity, facts);
     auto deviceScope = backendScope.beginDevice({
       dev.info.deviceName,
       "",
@@ -233,7 +276,9 @@ int OneapiPeak::runAll()
       },
       -1,
       idx,
-      dev.info.deviceType
+      dev.info.deviceType,
+      identity,
+      facts,
     });
     currentDeviceScope = &deviceScope;
 

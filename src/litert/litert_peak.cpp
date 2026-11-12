@@ -8,6 +8,7 @@
 
 #include <common/console_mute.h>
 #include <common/dynlib.h>
+#include <common/hardware_link.h>
 #include <common/options.h>
 
 #include <algorithm>
@@ -357,7 +358,7 @@ std::vector<litert_device_info_t> litertUsableDevices(
       litert_device_info_t dev;
       dev.accel = LitertAccel::Npu;
       dev.typeStr = "NPU";
-      dev.deviceType = DeviceType::Accelerator;
+      dev.deviceType = DeviceType::Npu;
       std::string socModel;
       litertStageNpuVendor(rt, &socModel);
       g_devNpuDir = litertNpuDir();
@@ -509,6 +510,37 @@ static std::string pendingNote()
          "LiteRT it loaded first";
 }
 
+// Who an accelerator is (include/common/hardware_link.h).  LiteRT's C API
+// names no adapter, so it is what the accelerator is for: the NPU is the
+// SoC's, a GPU delegate on Android the SoC's GPU, and elsewhere -- Metal on
+// Apple, WebGPU on a desktop -- the platform's default GPU, which joins the
+// run's only GPU and never one of several.  The CPU is the host.  A listing
+// can ask it too.
+static void litertIdentify(const litert_device_info_t &dev, logger::Identity &ident,
+                           HardwareFacts &facts, RuntimeInfo &runtime)
+{
+  switch (dev.accel)
+  {
+  case LitertAccel::Npu:
+    ident.socNpu = true;
+    facts.vendorName = dev.vendor;   // whose dispatch library it is
+    runtime.accelerator = "npu";
+    break;
+  case LitertAccel::Gpu:
+#if defined(__ANDROID__)
+    ident.socGpu = true;
+#else
+    ident.defaultGpu = true;
+#endif
+    runtime.accelerator = "gpu";
+    break;
+  case LitertAccel::Cpu:
+    ident.host = true;
+    runtime.accelerator = "cpu";
+    break;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // LitertPeak
 // ---------------------------------------------------------------------------
@@ -580,6 +612,10 @@ int LitertPeak::runAll()
     if (!dev.detail.empty())
       details.push_back({"Device", dev.detail});
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    RuntimeInfo runtime;
+    litertIdentify(dev, identity, facts, runtime);
     auto deviceScope = backendScope.beginDevice({
         dev.displayName,
         "",   // platform defaults to the backend name
@@ -588,6 +624,9 @@ int LitertPeak::runAll()
         -1,
         idx,
         dev.deviceType,
+        identity,
+        facts,
+        runtime,
     });
     currentDeviceScope = &deviceScope;
 

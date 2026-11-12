@@ -13,6 +13,7 @@
 #include <common/keep_awake.h>
 #include <common/thermal.h>
 #include <common/console_mute.h>
+#include <common/hardware_link.h>
 #include <version.h>
 #include <iostream>
 #include <vector>
@@ -204,6 +205,10 @@ int main(int argc, char **argv)
         if (status != 0)
             lastError |= status;
     }
+
+    // Every device onto the processor it is a view of, before the file is
+    // written (include/common/hardware_link.h).
+    xpupeak::linkHardware(combined);
 
     combined.meta.durationS = checkpoint.runningS();
     if (resuming)

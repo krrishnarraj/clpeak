@@ -81,7 +81,7 @@ DeviceType classOf(OrtHardwareDeviceType t)
   {
   case OrtHardwareDeviceType_CPU: return DeviceType::Cpu;
   case OrtHardwareDeviceType_GPU: return DeviceType::Gpu;
-  case OrtHardwareDeviceType_NPU: return DeviceType::Accelerator;
+  case OrtHardwareDeviceType_NPU: return DeviceType::Npu;
   }
   return DeviceType::Unknown;
 }
@@ -90,6 +90,7 @@ int classRank(DeviceType t)
 {
   switch (t)
   {
+  case DeviceType::Npu:
   case DeviceType::Accelerator: return 0;
   case DeviceType::Gpu:         return 1;
   case DeviceType::Cpu:         return 2;
@@ -513,6 +514,9 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
       if (const char *v = rt.api->HardwareDevice_Vendor(hw))
         ep.vendor = v;
       appendPairs(rt, rt.api->HardwareDevice_Metadata(hw), ep.hardware);
+      ep.hwVendorId = rt.api->HardwareDevice_VendorId(hw);
+      ep.hwDeviceId = rt.api->HardwareDevice_DeviceId(hw);
+      ep.hwVendor   = ep.vendor;
     }
     if (ep.vendor.empty())
       if (const char *v = rt.api->EpDevice_EpVendor(d))
@@ -585,6 +589,55 @@ std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt)
                      return classRank(a.deviceType) < classRank(b.deviceType);
                    });
   return out;
+}
+
+void onnxAttachBuiltinHardware(const OrtRuntime &rt, std::vector<onnx_ep_info_t> &eps)
+{
+  if (rt.apiVersion < kMinPluginApiVersion)
+    return;
+  bool any = false;
+  for (const auto &ep : eps)
+    any = any || !ep.epDevicePtr;
+  if (!any)
+    return;
+  OrtEnv *env = onnxEnv(rt);
+  if (!env)
+    return;
+  const std::vector<const OrtEpDevice *> devices = epDevices(rt, env);
+  for (auto &ep : eps)
+  {
+    if (ep.epDevicePtr)
+      continue;
+    // OpenVINO's devices are told apart by its `device_type`, which the
+    // environment's list does not carry.
+    if (!ep.epDevice.empty())
+      continue;
+    const OrtHardwareDevice *match = nullptr;
+    int matches = 0;
+    for (const OrtEpDevice *d : devices)
+    {
+      const char *name = rt.api->EpDevice_EpName(d);
+      const OrtHardwareDevice *hw = rt.api->EpDevice_Device(d);
+      if (!name || ep.providerKey != name || !hw ||
+          classOf(rt.api->HardwareDevice_Type(hw)) != ep.deviceType)
+        continue;
+      match = hw;
+      matches++;
+    }
+    if (matches != 1)
+    {
+      if (matches > 1)
+        XPUPEAK_VLOG("onnx: %s pairs with %d hardware devices; which one it runs on is "
+                     "not known, so it is not linked by them\n",
+                     ep.providerKey.c_str(), matches);
+      continue;
+    }
+    ep.hwVendorId = rt.api->HardwareDevice_VendorId(match);
+    ep.hwDeviceId = rt.api->HardwareDevice_DeviceId(match);
+    if (const char *v = rt.api->HardwareDevice_Vendor(match))
+      ep.hwVendor = v;
+    appendPairs(rt, rt.api->HardwareDevice_Metadata(match), ep.hwMetadata);
+  }
 }
 
 std::string onnxAppendPluginDevice(

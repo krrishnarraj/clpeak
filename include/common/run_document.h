@@ -360,6 +360,9 @@ struct CpuFacts {
 struct HardwareFacts {
     std::string   vendorId;        // the API's vendor id, lower-case hex: "10de", "10005"
     std::string   deviceId;        // the PCI device id, lower-case hex: a model id
+    // The vendor's own string, as the API gives it: "NVIDIA Corporation".  A
+    // device's; a processor keeps its own in ProcessorInfo::vendorName.
+    std::string   vendorName;
     std::string   arch;            // "sm_120", "gfx1201", "Apple7"
     unsigned      computeUnits = 0;
     std::string   computeUnit;     // what one is called: "SM", "CU", "Xe-core", "core"

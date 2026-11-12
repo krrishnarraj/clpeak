@@ -1,4 +1,5 @@
 #include <common/logger.h>
+#include <common/hardware_link.h>   // evidenceFrom
 #include <common/options.h>   // benchmarkFlag
 #include <common/run_checkpoint.h>
 #include <common/run_log.h>
@@ -51,19 +52,17 @@ std::string trimmed(const std::string &s)
     return s.substr(b, s.find_last_not_of(ws) - b + 1);
 }
 
-// The part of a device's identity a document may hold as it is: whether it
-// runs on the host, is the SoC's NPU or GPU, is the default GPU.  The raw
-// identifiers are not copied -- a document holds only tokens of them
-// (DeviceEvidence::tokens), never the values.
+// A device's identity as a document may hold it: whether it runs on the
+// host, is the SoC's NPU or GPU, is the default GPU, as they are, and its
+// identifiers only as tokens -- HMACs under the run's evidence key, which
+// the run's checkpoint carries, so a resumed run's tokens match the part
+// before's.  Made here, as the device opens, so that a checkpoint written
+// part-way through a backend already has them.  A device opened with no run
+// takes this process's key instead: its tokens still never are the values.
 DeviceEvidence evidenceOf(const logger::Identity &id)
 {
-    DeviceEvidence e;
-    e.host       = id.host;
-    e.soc        = id.socNpu ? xpupeak::toString(xpupeak::ProcessorKind::Npu)
-                 : id.socGpu ? xpupeak::toString(xpupeak::ProcessorKind::Gpu)
-                             : "";
-    e.defaultGpu = id.defaultGpu;
-    return e;
+    const RunCheckpoint *run = RunCheckpoint::current();
+    return xpupeak::evidenceFrom(id, run ? run->evidenceKey() : std::string());
 }
 
 } // namespace

@@ -18,6 +18,7 @@
 #include <common/run_log.h>
 #include <common/run_resume.h>
 #include <common/console_mute.h>
+#include <common/hardware_link.h>
 #include <version.h>
 
 #ifdef ENABLE_ONNX
@@ -433,6 +434,10 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         // iOS and macOS is where it lands.
         xpupeak::purgeCoreMLCompileCache();
     }
+
+    // Every device onto the processor it is a view of, before the file is
+    // written, as in the CLI (include/common/hardware_link.h).
+    xpupeak::linkHardware(combined);
 
     bool cancelled = xpupeak::cancelRequested();
 
