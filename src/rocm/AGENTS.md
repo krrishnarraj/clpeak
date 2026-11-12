@@ -78,6 +78,30 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
   through `runTimed` / `runVariant`.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  ROCm specifics:
+
+- `rocm_compute_desc_t::dims`, `::revision` and `::metricDims`, and
+  `rocm_compute_variant_t::dims`, as CUDA's: vector tests carry their data
+  type on the test, `width` or (int8-dot) `chains` per reading, and
+  `bfloat16_compute` is `{dtype: bf16, acc: fp32}`.
+- `WmmaEntry`, `MfmaEntry` and `SparseEntry` carry each row's `dtype`;
+  `unitOpts()` adds its `tile` from M x N x K (`rocmTile()`) on every path.
+  `smfmac` is `{sparsity: 2:4}` on the test.  An "fp8" row is E4M3 in the
+  arch's encoding (`rocmFp8Format()`): `fp8_e4m3fnuz` on gfx94x, `fp8_e4m3`
+  on gfx950 and RDNA4.
+- `rocwmma` is `impl` rocwmma: a way to the same matrix-compute rows.
+- `rocblas_gemm` (`impl` rocblas) and `hipblaslt-fp8` (`impl` hipblaslt)
+  keep each row's dims beside its note.  hipBLASLt asks for FNUZ fp8 on
+  every arch, so its rows say `fp8_e4m3fnuz`, and `fp8_e5m2` is
+  `{dtype: fp8_e5m2fnuz, weights: fp8_e4m3fnuz}`.
+- Bandwidth and latency as CUDA's.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.

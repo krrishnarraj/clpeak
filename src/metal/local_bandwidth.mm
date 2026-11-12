@@ -1,6 +1,8 @@
 #ifdef ENABLE_METAL
 #include "mtl_internal.h"
 
+using xpupeak::Dim;
+
 // ---------------------------------------------------------------------------
 // Local memory bandwidth (Metal -- threadgroup memory)
 // ---------------------------------------------------------------------------
@@ -43,7 +45,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::local_bandwidth_name, v.kname);
         if (!pso) {
             test.skip(v.label, ResultStatus::Error, "Kernel compile failed",
-                      mtlWidthNote(v.width));
+                      mtlWidthNote(v.width), {{Dim::Width, v.width}});
             continue;
         }
         float us = mtlRunDispatches(dev, pso, outBuf, nullptr, 0, nil,
@@ -51,7 +53,7 @@ int MetalPeak::runLocalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
         float bps = (float)bytes / us * 1e6f;
-        test.emit(v.label, bps, mtlWidthNote(v.width));
+        test.emit(v.label, bps, mtlWidthNote(v.width), {{Dim::Width, v.width}});
     }
 
     return 0;

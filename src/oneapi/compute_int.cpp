@@ -5,6 +5,8 @@
 #include <sycl/sycl.hpp>
 #include <string>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 namespace xpupeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
@@ -113,10 +115,11 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
   };
 
   const char *note = oneapiWidthNote(W);
+  const Dims dims = {{Dim::Width, W}};
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f)
   {
-    test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+    test.skip(label, ResultStatus::Error, "kernel launch failed", note, dims);
     return;
   }
   float value = xpupeak_oneapi::computeFlops(totalThreads, workPerWI, us);
@@ -134,7 +137,7 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
       value = rotValue;
   }
 
-  test.emit(label, value, note);
+  test.emit(label, value, note, dims);
 }
 
 // --------------------------------------------------------------------------
@@ -142,10 +145,16 @@ static void runIntWidth(OneapiPeak &peak, OneapiDevice &dev,
 // --------------------------------------------------------------------------
 int OneapiPeak::runComputeInt32(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
+  logger::TestSpec spec =
     {"integer_compute", "Integer compute (32-bit IMAD)", "ops", Category::Unknown,
      "Peak 32-bit integer arithmetic rate.",
-     TestShape::Homogeneous, "vector width"});
+     TestShape::Homogeneous, "vector width"};
+  // Its "int8" and "int16" are vector widths of int32, as its dims say.
+  spec.dims = {{Dim::Dtype, DType::Int32}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races a rotating one
+  // (2.1.3) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(int));

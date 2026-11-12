@@ -68,6 +68,34 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
 - `cuda_blas.cpp` threads a `note` next to `label` through `runVariantAB` /
   `runVariant` / `runVariantFp4`.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  CUDA specifics:
+
+- `cuda_compute_desc_t::dims` and `::revision` (the test it opens),
+  `::metricDims` (the single-variant path's reading) and
+  `cuda_compute_variant_t::dims` (one reading); `runComputeKernel()`
+  forwards them on every path.
+- Vector tests carry their data type on the test and `width` per reading;
+  `bfloat16_compute` is `{dtype: bf16, acc: fp32}`, and the int8-dot rows are
+  `chains`.
+- `wmma`: each block's `metricDims` say `dtype`, `acc` where it is fp16 (the
+  f16acc rows), `sparsity`, and `tile`, the instruction's M x N x K
+  (mma.sync m16n8k32 is "16x8x32").  `fp4_e2m1` is plain E2M1 with no block
+  scale, `mxf4_e2m1` and `nvf4_e2m1` are `mxfp4` and `nvfp4`, and `int8 k32`
+  is int8 at another `tile`.
+- `cublas_gemm` is `impl` cublaslt, and each row's dims sit beside its note
+  at the `runVariant` / `runVariantAB` / `runVariantFp4` call.  fp16 is
+  `{acc: fp16}` (CUBLAS_COMPUTE_16F); `fp8_e5m2` is E5M2 x E4M3, so
+  `{dtype: fp8_e5m2, weights: fp8_e4m3}`.
+- Bandwidth: global `{op: read}` and `width`, local `width`, image
+  `pixel_format: rgba32f`, transfer `{memory: pinned}` and `direction`.
+  Latency: `op`.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file + update `CMakeLists.txt` + this file.

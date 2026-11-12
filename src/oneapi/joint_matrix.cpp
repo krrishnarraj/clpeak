@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 #ifdef XPUPEAK_ONEAPI_HAS_JOINT_MATRIX
 #include <sycl/ext/oneapi/matrix/matrix.hpp>
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
@@ -254,6 +256,47 @@ static bool jmIsIntAcc(syclex::matrix_type t)
     default:
       return false;
   }
+}
+
+// A matrix_type as the format's data type; false for one the vocabulary has
+// no word for (none today: every matrix_type maps).
+static bool jmDType(syclex::matrix_type t, DType &out)
+{
+  using mt = syclex::matrix_type;
+  switch (t)
+  {
+    case mt::bf16:   out = DType::Bf16;   return true;
+    case mt::fp16:   out = DType::Fp16;   return true;
+    case mt::tf32:   out = DType::Tf32;   return true;
+    case mt::fp32:   out = DType::Fp32;   return true;
+    case mt::fp64:   out = DType::Fp64;   return true;
+    case mt::sint8:  out = DType::Int8;   return true;
+    case mt::sint16: out = DType::Int16;  return true;
+    case mt::sint32: out = DType::Int32;  return true;
+    case mt::sint64: out = DType::Int64;  return true;
+    case mt::uint8:  out = DType::Uint8;  return true;
+    case mt::uint16: out = DType::Uint16; return true;
+    case mt::uint32: out = DType::Uint32; return true;
+    case mt::uint64: out = DType::Uint64; return true;
+    default:         return false;
+  }
+}
+
+// A row's coordinates, from the combination it ran: A's type as the row's
+// data type, B's as its weights where the two differ (a mixed-sign 8-bit
+// pair), the accumulator where it is not the usual one, and the tile.
+static Dims jmDims(const JmTile &t)
+{
+  Dims d;
+  DType a, b, c;
+  if (jmDType(t.at, a))
+  {
+    d.set({Dim::Dtype, a});
+    if (jmDType(t.bt, b) && b != a) d.set({Dim::Weights, b});
+    if (jmDType(t.ct, c) && c != xpupeak::usualAccumulator(a)) d.set({Dim::Acc, c});
+  }
+  if (!t.shape.empty()) d.set({Dim::Tile, t.shape});
+  return d;
 }
 
 // Resolve the device's table into the concrete tiles this category will run.
@@ -533,30 +576,27 @@ static float runJmInt(OneapiPeak &peak, OneapiDevice &dev,
 int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   // One test for all data types -- integer readings carry their own unit.
-  auto test = currentDeviceScope->beginTest(
-    {"joint_matrix", "joint_matrix peak",
-     "flops", Category::Unknown,
-     "Peak rate of the device's matrix engine through SYCL joint_matrix.  One "
-     "row per input-type pair and tile shape the device advertises.",
-     TestShape::Heterogeneous, "data type"});
-
-  auto jmOpts = [&](const JmTile &t) {
-    logger::EmitOptions o;
-    o.description = jmNote(t);
-    if (jmIsIntAcc(t.ct)) o.unit = "ops";
-    return o;
-  };
+  logger::TestSpec spec{"joint_matrix", "joint_matrix peak",
+                        "flops", Category::Unknown,
+                        "Peak rate of the device's matrix engine through SYCL joint_matrix.  One "
+                        "row per input-type pair and tile shape the device advertises.",
+                        TestShape::Heterogeneous, "data type"};
+  // 2: it runs the tiles the device advertises since 2.1.4, and races its
+  // chain against spread tiles and sixteen-product blocks since 3.0.2.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // Note for the int8 row, used by the paths that skip before any enumeration
-  // has happened.  The FP equivalents go through skipAll, which carries no
-  // per-reading notes, so they have nothing to declare here.
+  // has happened.  The FP rows there go without one; every row says its data
+  // type all the same.
   const char *int8Note = "int8 inputs, int32 accumulator.";
 
   auto skipEverything = [&](ResultStatus status, const char *reason) {
-    test.skip("bf16", status, reason);
-    test.skip("fp16", status, reason);
-    test.skip("tf32", status, reason);
+    test.skip("bf16", status, reason, "", {{Dim::Dtype, DType::Bf16}});
+    test.skip("fp16", status, reason, "", {{Dim::Dtype, DType::Fp16}});
+    test.skip("tf32", status, reason, "", {{Dim::Dtype, DType::Tf32}});
     logger::EmitOptions o; o.description = int8Note; o.unit = "ops";
+    o.dims = {{Dim::Dtype, DType::Int8}};
     test.skip("int8", status, reason, o);
   };
 
@@ -565,6 +605,14 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
                  "joint_matrix header not available in this oneAPI toolchain");
   return 0;
 #else
+  auto jmOpts = [&](const JmTile &t) {
+    logger::EmitOptions o;
+    o.description = jmNote(t);
+    if (jmIsIntAcc(t.ct)) o.unit = "ops";
+    o.dims = jmDims(t);
+    return o;
+  };
+
   // Query the device's matrix-combination table ONCE: it is both the verbose
   // dump and the source of the row list below.
   bool combosThrew = false;
@@ -752,6 +800,8 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
                                  "mad chain",
                                  "16-mad blocks, 1 accumulator",
                                  "16-mad blocks, 4 accumulators"};
+    // The same four as the reading's `form`, when it raced more than one.
+    const char *shapeForms[4] = {"chain_filled", "chain_spread", "blocks_1acc", "blocks_4acc"};
     int ran = 1;
     int best = 0;
     for (int shape : {1, 2, 3})
@@ -783,7 +833,10 @@ int OneapiPeak::runJointMatrix(OneapiDevice &dev, benchmark_config_t &cfg)
       }
     }
     if (ran > 1)
+    {
       opts.description += std::string("  Fastest form: ") + shapeNames[best] + ".";
+      opts.dims.set({Dim::Form, shapeForms[best]});
+    }
     test.emit(t.metric, value, opts);
   }
 

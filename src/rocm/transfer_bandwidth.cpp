@@ -3,33 +3,44 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
   const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  auto test = currentDeviceScope->beginTest(
+  logger::TestSpec spec =
     {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
      "Copy bandwidth between host and GPU memory, over PCIe on a discrete card.  "
      "Both rows use pinned host memory.",
-     TestShape::Heterogeneous, "direction"});
+     TestShape::Heterogeneous, "direction"};
+  // Both rows use pinned host memory; each says which way it went.
+  spec.dims = {{Dim::Memory, dim::Memory::Pinned}};
+  auto test = currentDeviceScope->beginTest(spec);
 
   const char *h2dNote = "Host to GPU.";
   const char *d2hNote = "GPU to host.";
+  const Dims h2dDims = {{Dim::Direction, dim::Direction::H2d}};
+  const Dims d2hDims = {{Dim::Direction, dim::Direction::D2h}};
 
   void *dBuf = nullptr;
   if (hipMalloc(&dBuf, bytes) != hipSuccess)
   {
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer", h2dNote);
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer", d2hNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer", h2dNote,
+              h2dDims);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer", d2hNote,
+              d2hDims);
     return -1;
   }
   void *hPinned = nullptr;
   if (hipHostMalloc(&hPinned, bytes) != hipSuccess)
   {
     (void)hipFree(dBuf);
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", h2dNote);
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", d2hNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", h2dNote,
+              h2dDims);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", d2hNote,
+              d2hDims);
     return -1;
   }
 
@@ -91,15 +102,15 @@ int RocmPeak::runTransferBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 
   float usH2D = timeXfer(true);
   if (usH2D > 0.0f)
-    test.emit("h2d_pinned", (float)bytes / usH2D * 1e6f, h2dNote);
+    test.emit("h2d_pinned", (float)bytes / usH2D * 1e6f, h2dNote, h2dDims);
   else
-    test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote, h2dDims);
 
   float usD2H = timeXfer(false);
   if (usD2H > 0.0f)
-    test.emit("d2h_pinned", (float)bytes / usD2H * 1e6f, d2hNote);
+    test.emit("d2h_pinned", (float)bytes / usD2H * 1e6f, d2hNote, d2hDims);
   else
-    test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote);
+    test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote, d2hDims);
 
   (void)hipHostFree(hPinned);
   (void)hipFree(dBuf);

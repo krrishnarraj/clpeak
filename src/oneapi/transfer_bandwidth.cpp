@@ -5,6 +5,8 @@
 #include <sycl/sycl.hpp>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // H2D / D2H peak via queue.memcpy with pinned (USM host) staging buffer.
 // Equivalent to hipMemcpyAsync between pinned host and device memory in the
 // ROCm backend.
@@ -14,21 +16,25 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
-     "Copy bandwidth between host and device memory.  Both rows use pinned "
-     "host memory.",
-     TestShape::Heterogeneous, "direction"});
+  logger::TestSpec spec{"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
+                        "Copy bandwidth between host and device memory.  Both rows use pinned "
+                        "host memory.",
+                        TestShape::Heterogeneous, "direction"};
+  // Both rows use pinned host memory; each says which way it went.
+  spec.dims = {{Dim::Memory, dim::Memory::Pinned}};
+  auto test = currentDeviceScope->beginTest(spec);
 
   const char *h2dNote = "Host to device.";
   const char *d2hNote = "Device to host.";
+  const Dims h2dDims = {{Dim::Direction, dim::Direction::H2d}};
+  const Dims d2hDims = {{Dim::Direction, dim::Direction::D2h}};
 
   void *dBuf    = sycl::malloc_device(bytes, dev.stream);
   void *hPinned = sycl::malloc_host(bytes, dev.stream);
   if (!dBuf || !hPinned)
   {
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate buffers", h2dNote);
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate buffers", d2hNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate buffers", h2dNote, h2dDims);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate buffers", d2hNote, d2hDims);
     if (dBuf)    sycl::free(dBuf, dev.stream);
     if (hPinned) sycl::free(hPinned, dev.stream);
     return -1;
@@ -80,12 +86,14 @@ int OneapiPeak::runTransferBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   };
 
   float usH2D = timeXfer(true);
-  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D * 1e6f, h2dNote);
-  else              test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote);
+  if (usH2D > 0.0f) test.emit("h2d_pinned", (float)bytes / usH2D * 1e6f, h2dNote, h2dDims);
+  else              test.skip("h2d_pinned", ResultStatus::Error, "transfer failed", h2dNote,
+                              h2dDims);
 
   float usD2H = timeXfer(false);
-  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H * 1e6f, d2hNote);
-  else              test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote);
+  if (usD2H > 0.0f) test.emit("d2h_pinned", (float)bytes / usD2H * 1e6f, d2hNote, d2hDims);
+  else              test.skip("d2h_pinned", ResultStatus::Error, "transfer failed", d2hNote,
+                              d2hDims);
 
   sycl::free(hPinned, dev.stream);
   sycl::free(dBuf,    dev.stream);

@@ -3,6 +3,8 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim;
+
 int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
@@ -18,9 +20,12 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUdeviceptr outBuf = 0;
   if (cuMemAlloc(&outBuf, globalThreads * sizeof(float)) != CUDA_SUCCESS)
   {
-    test.skip("float", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(1));
-    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(2));
-    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(4));
+    test.skip("float", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(1),
+              {{Dim::Width, 1}});
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(2),
+              {{Dim::Width, 2}});
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", cudaWidthNote(4),
+              {{Dim::Width, 4}});
     return -1;
   }
 
@@ -43,7 +48,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ')
         key.pop_back();
-      test.skip(key, k.status, k.reason, cudaWidthNote(v.width));
+      test.skip(key, k.status, k.reason, cudaWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     void *args[1] = {&outBuf};
@@ -54,7 +59,7 @@ int CudaPeak::runLocalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     std::string key(v.label);
     while (!key.empty() && key.back() == ' ')
       key.pop_back();
-    test.emit(key, bps, cudaWidthNote(v.width));
+    test.emit(key, bps, cudaWidthNote(v.width), {{Dim::Width, v.width}});
   }
 
   cuMemFree(outBuf);

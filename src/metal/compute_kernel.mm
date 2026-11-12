@@ -75,14 +75,16 @@ float mtlRunDispatches(MetalDevice &dev, id<MTLComputePipelineState> pso,
 int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                                 const mtl_compute_desc_t &d)
 {
-    auto test = currentDeviceScope->beginTest(
-        {d.resultTag, d.title, d.unit, Category::Unknown,
-         d.description ? d.description : "",
-         d.shape, d.axis ? d.axis : ""});
+    logger::TestSpec spec{d.resultTag, d.title, d.unit, Category::Unknown,
+                          d.description ? d.description : "",
+                          d.shape, d.axis ? d.axis : ""};
+    spec.dims     = d.dims;
+    spec.revision = d.revision;
+    auto test = currentDeviceScope->beginTest(spec);
 
     struct Variant { const char *label; const char *kernelName; const char *src;
                      const char *srcName; const char *description;
-                     const char *altKernelName; const char *skipMsg; };
+                     const char *altKernelName; const char *skipMsg; Dims dims; };
     std::vector<Variant> variants;
     if (d.variants && d.numVariants > 0)
         for (uint32_t i = 0; i < d.numVariants; i++)
@@ -90,10 +92,11 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
                                 d.variants[i].src,   d.variants[i].srcName,
                                 d.variants[i].description,
                                 d.variants[i].altKernelName,
-                                d.variants[i].skipMsg});
+                                d.variants[i].skipMsg,
+                                d.variants[i].dims});
     else
         variants.push_back({d.metricLabel, d.kernelName, d.src, d.srcName, nullptr,
-                            nullptr, nullptr});
+                            nullptr, nullptr, {}});
 
     // Labels carry right-padding for stdout column alignment; the metric tag
     // stored in the dump (and shown in the GUI) must be the clean label.
@@ -109,7 +112,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     {
         for (const auto &v : variants)
             test.skip(metricTag(v.label), ResultStatus::Unsupported,
-                      d.skipMsg ? d.skipMsg : "Skipped", note(v.description));
+                      d.skipMsg ? d.skipMsg : "Skipped", note(v.description), v.dims);
         return 0;
     }
 
@@ -128,7 +131,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
     {
         for (const auto &v : variants)
             test.skip(metricTag(v.label), ResultStatus::Error,
-                      "Failed to allocate output buffer", note(v.description));
+                      "Failed to allocate output buffer", note(v.description), v.dims);
         return -1;
     }
 
@@ -143,7 +146,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         if (v.skipMsg)
         {
             test.skip(metricTag(v.label), ResultStatus::Unsupported, v.skipMsg,
-                      note(v.description));
+                      note(v.description), v.dims);
             continue;
         }
 
@@ -151,7 +154,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
         if (!pso)
         {
             test.skip(metricTag(v.label), ResultStatus::Error, "Kernel compile failed",
-                      note(v.description));
+                      note(v.description), v.dims);
             continue;
         }
 
@@ -190,7 +193,7 @@ int MetalPeak::runComputeKernel(MetalDevice &dev, benchmark_config_t &cfg,
             }
         }
 
-        test.emit(metricTag(v.label), value, note(v.description).c_str());
+        test.emit(metricTag(v.label), value, note(v.description).c_str(), v.dims);
     }
 
     return 0;

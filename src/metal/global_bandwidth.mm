@@ -1,6 +1,8 @@
 #ifdef ENABLE_METAL
 #include "mtl_internal.h"
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Global bandwidth (Metal)
 // ---------------------------------------------------------------------------
@@ -9,11 +11,14 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
     const uint32_t tgSize = 256;
 
-    auto test = currentDeviceScope->beginTest(
-        {"global_memory_bandwidth", "Global memory bandwidth", "bps",
-         Category::Unknown,
-         "Read bandwidth from GPU memory, over a buffer too large to cache.",
-         TestShape::Homogeneous, "vector width"});
+    logger::TestSpec spec{"global_memory_bandwidth", "Global memory bandwidth", "bps",
+                          Category::Unknown,
+                          "Read bandwidth from GPU memory, over a buffer too large to cache.",
+                          TestShape::Homogeneous, "vector width"};
+    // Only the bytes read are counted: the CPU backend's read row is the same
+    // measurement, which `op` is what tells apart from its copy and triad.
+    spec.dims = {{Dim::Op, dim::Op::Read}};
+    auto test = currentDeviceScope->beginTest(spec);
 
     // Reserve enough scalar floats so the widest variant (v16 = 16 floats per
     // logical "WI" element) still aligns to (tg * FETCH_PER_WI * 16).
@@ -66,7 +71,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             v.kname);
         if (!pso) {
             test.skip(v.label, ResultStatus::Error, "Kernel compile failed",
-                      mtlWidthNote(v.width));
+                      mtlWidthNote(v.width), {{Dim::Width, v.width}});
             continue;
         }
 
@@ -82,7 +87,7 @@ int MetalPeak::runGlobalBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
                                  cfg.targetTimeUs, forceIters ? specifiedIters : 0);
         uint64_t bytesRead = (uint64_t)numGroups * scalarsPerGroup * sizeof(float);
         float bps = (float)bytesRead / us * 1e6f;
-        test.emit(v.label, bps, mtlWidthNote(v.width));
+        test.emit(v.label, bps, mtlWidthNote(v.width), {{Dim::Width, v.width}});
     }
 
     return 0;

@@ -3,6 +3,8 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = forceIters ? specifiedIters
@@ -16,12 +18,14 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   const char *dispatchNote = "Host submit to kernel start, one way.  CUDA has no "
                              "host/GPU shared clock to measure it.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
+  const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+  const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
   CudaKernel k = dev.getKernel(cuda_kernels::kernel_latency, "kernel_latency_noop");
   if (!k)
   {
-    test.skip("dispatch", k.status, k.reason, dispatchNote);
-    test.skip("roundtrip", k.status, k.reason, roundtripNote);
+    test.skip("dispatch", k.status, k.reason, dispatchNote, dispatchDims);
+    test.skip("roundtrip", k.status, k.reason, roundtripNote, roundtripDims);
     return -1;
   }
   CUfunction fn = k.fn;
@@ -59,16 +63,16 @@ int CudaPeak::runKernelLatency(CudaDevice &dev, benchmark_config_t &cfg)
   }
 
   test.skip("dispatch", ResultStatus::Unsupported,
-            "Not measurable via CUDA driver API", dispatchNote);
+            "Not measurable via CUDA driver API", dispatchNote, dispatchDims);
   if (submitFailed)
   {
     test.skip("roundtrip", ResultStatus::Error,
-              "cuLaunchKernel/cuStreamSynchronize failed", roundtripNote);
+              "cuLaunchKernel/cuStreamSynchronize failed", roundtripNote, roundtripDims);
   }
   else
   {
     float roundtripUs = (float)(totalRoundtripUs / iters);
-    test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote);
+    test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote, roundtripDims);
   }
 
   return 0;

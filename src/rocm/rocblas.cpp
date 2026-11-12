@@ -5,6 +5,8 @@
 #include <cstring>
 #include <string>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 #ifdef XPUPEAK_ROCM_HAS_ROCBLAS
 #include <rocblas/rocblas.h>
 #include <hip/hip_fp16.h>
@@ -131,31 +133,44 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   const char *fp16Note = "fp16 inputs, fp32 accumulator.";
   const char *bf16Note = "bf16 inputs, fp32 accumulator.";
   const char *int8Note = "int8 inputs, int32 accumulator.";
+  // And its coordinates.  fp16 and bf16 compute in fp32 (rocblas_datatype_f32_r
+  // below), the usual accumulator, so they say none.
+  const Dims fp32Dims = {{Dim::Dtype, DType::Fp32}};
+  const Dims fp64Dims = {{Dim::Dtype, DType::Fp64}};
+  const Dims fp16Dims = {{Dim::Dtype, DType::Fp16}};
+  const Dims bf16Dims = {{Dim::Dtype, DType::Bf16}};
+  const Dims int8Dims = {{Dim::Dtype, DType::Int8}};
 
-  auto test = currentDeviceScope->beginTest(
-        {"rocblas_gemm", "rocBLAS GEMM peak", "flops", Category::Unknown,
-         "Peak GEMM rate through AMD's rocBLAS library, on a large square "
-         "problem.",
-         TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"rocblas_gemm", "rocBLAS GEMM peak", "flops", Category::Unknown,
+                        "Peak GEMM rate through AMD's rocBLAS library, on a large square "
+                        "problem.",
+                        TestShape::Heterogeneous, "data type"};
+  spec.dims = {{Dim::Impl, dim::Impl::Rocblas}};
+  auto test = currentDeviceScope->beginTest(spec);
 
-  auto blasOpts = [&](const char *note) {
+  auto blasOpts = [&](const char *note, const Dims &dims) {
     logger::EmitOptions o;
     if (note) o.description = note;
+    o.dims = dims;
     return o;
   };
-  auto intOpts = [&](const char *note) {
-    logger::EmitOptions o;
-    if (note) o.description = note;
+  auto intOpts = [&](const char *note, const Dims &dims) {
+    logger::EmitOptions o = blasOpts(note, dims);
     o.unit = "ops";
     return o;
   };
 
 #ifndef XPUPEAK_ROCM_HAS_ROCBLAS
-  test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp32Note));
-  test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp64Note));
-  test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(fp16Note));
-  test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time", blasOpts(bf16Note));
-  test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time", intOpts(int8Note));
+  test.skip("fp32", ResultStatus::Unsupported, "rocBLAS not found at configure time",
+            blasOpts(fp32Note, fp32Dims));
+  test.skip("fp64", ResultStatus::Unsupported, "rocBLAS not found at configure time",
+            blasOpts(fp64Note, fp64Dims));
+  test.skip("fp16", ResultStatus::Unsupported, "rocBLAS not found at configure time",
+            blasOpts(fp16Note, fp16Dims));
+  test.skip("bf16", ResultStatus::Unsupported, "rocBLAS not found at configure time",
+            blasOpts(bf16Note, bf16Dims));
+  test.skip("int8", ResultStatus::Unsupported, "rocBLAS not found at configure time",
+            intOpts(int8Note, int8Dims));
   return 0;
 #else
   const uint32_t D = pickRocblasGemmDim(dev.info);
@@ -169,11 +184,11 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   const size_t cBytes = (size_t)M * N * sizeof(double);
 
   auto skipPhase = [&](ResultStatus status, const char *msg) {
-    test.skip("fp32", status, msg, blasOpts(fp32Note));
-    test.skip("fp64", status, msg, blasOpts(fp64Note));
-    test.skip("fp16", status, msg, blasOpts(fp16Note));
-    test.skip("bf16", status, msg, blasOpts(bf16Note));
-    test.skip("int8", status, msg, intOpts(int8Note));
+    test.skip("fp32", status, msg, blasOpts(fp32Note, fp32Dims));
+    test.skip("fp64", status, msg, blasOpts(fp64Note, fp64Dims));
+    test.skip("fp16", status, msg, blasOpts(fp16Note, fp16Dims));
+    test.skip("bf16", status, msg, blasOpts(bf16Note, bf16Dims));
+    test.skip("int8", status, msg, intOpts(int8Note, int8Dims));
   };
 
   // rocBLAS is an optional runtime dependency (not part of the HIP runtime).
@@ -208,12 +223,12 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
   }
   (void)rocblas_set_stream(handle, dev.stream);
 
-  auto runTimed = [&](const char *label, const char *note, auto gemmFn) {
+  auto runTimed = [&](const char *label, const char *note, const Dims &dims, auto gemmFn) {
     const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
     double probeUs = timeRocblas(dev.stream, gemmFn, warm);
     if (probeUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
+      test.skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note, dims));
       return;
     }
     unsigned int iters = pickIters(probeUs, 5000000u,
@@ -221,15 +236,15 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     double meanUs = timeRocblas(dev.stream, gemmFn, iters);
     if (meanUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", blasOpts(note));
+      test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", blasOpts(note, dims));
       return;
     }
-    test.emit(label, (float)(flops * 1.0e6 / meanUs), blasOpts(note));
+    test.emit(label, (float)(flops * 1.0e6 / meanUs), blasOpts(note, dims));
   };
 
   {
     const float alpha32 = 1.0f, beta32 = 0.0f;
-    runTimed("fp32", fp32Note, [&]() {
+    runTimed("fp32", fp32Note, fp32Dims, [&]() {
       return rocblas_sgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha32,
                            (const float *)dA, M,
@@ -239,7 +254,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     });
 
     const double alpha64 = 1.0, beta64 = 0.0;
-    runTimed("fp64", fp64Note, [&]() {
+    runTimed("fp64", fp64Note, fp64Dims, [&]() {
       return rocblas_dgemm(handle, rocblas_operation_none, rocblas_operation_none,
                            M, N, K, &alpha64,
                            (const double *)dA, M,
@@ -254,7 +269,7 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     const float alphaf = 1.0f, betaf = 0.0f;
     if (dev.info.fp16Supported)
     {
-      runTimed("fp16", fp16Note, [&]() {
+      runTimed("fp16", fp16Note, fp16Dims, [&]() {
         return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
                                M, N, K, &alphaf,
                                dA, rocblas_datatype_f16_r, M,
@@ -268,12 +283,13 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     }
     else
     {
-      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device", blasOpts(fp16Note));
+      test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this ROCm device",
+                blasOpts(fp16Note, fp16Dims));
     }
 
     if (dev.info.bf16Supported)
     {
-      runTimed("bf16", bf16Note, [&]() {
+      runTimed("bf16", bf16Note, bf16Dims, [&]() {
         return rocblas_gemm_ex(handle, rocblas_operation_none, rocblas_operation_none,
                                M, N, K, &alphaf,
                                dA, rocblas_datatype_bf16_r, M,
@@ -287,7 +303,8 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     }
     else
     {
-      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device", blasOpts(bf16Note));
+      test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this ROCm device",
+                blasOpts(bf16Note, bf16Dims));
     }
   }
   {
@@ -310,12 +327,12 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
     // The launch status is returned synchronously, so an unsupported type combo
     // (rocblas_status_not_implemented) is distinguishable from a runtime error
     // here -- report it as Unsupported rather than Error.
-    auto int8Wrapper = [&](const char *label, const char *note, auto fn) {
+    auto int8Wrapper = [&](const char *label, const char *note, const Dims &dims, auto fn) {
       const unsigned int warm = warmupCount > 0 ? warmupCount : 2;
       double probeUs = timeRocblas(dev.stream, fn, warm);
       if (probeUs <= 0.0)
       {
-        test.skip(label, ResultStatus::Error, "timing probe failed", intOpts(note));
+        test.skip(label, ResultStatus::Error, "timing probe failed", intOpts(note, dims));
         return;
       }
       unsigned int iters = pickIters(probeUs, 5000000u,
@@ -323,16 +340,17 @@ int RocmPeak::runRocblas(RocmDevice &dev, benchmark_config_t &)
       double meanUs = timeRocblas(dev.stream, fn, iters);
       if (meanUs <= 0.0)
       {
-        test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", intOpts(note));
+        test.skip(label, ResultStatus::Error, "rocBLAS GEMM failed", intOpts(note, dims));
         return;
       }
-      test.emit(label, (float)(flops * 1.0e6 / meanUs), intOpts(note));
+      test.emit(label, (float)(flops * 1.0e6 / meanUs), intOpts(note, dims));
     };
     if (int8Gemm() != rocblas_status_success)
       test.skip("int8", ResultStatus::Unsupported,
-                std::string("int8 GEMM not supported on ") + dev.info.archName, intOpts(int8Note));
+                std::string("int8 GEMM not supported on ") + dev.info.archName, intOpts(int8Note,
+                            int8Dims));
     else
-      int8Wrapper("int8", int8Note, int8Gemm);
+      int8Wrapper("int8", int8Note, int8Dims, int8Gemm);
   }
 
   (void)rocblas_destroy_handle(handle);

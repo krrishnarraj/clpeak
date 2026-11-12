@@ -3,19 +3,27 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 int RocmPeak::runComputeInt32(RocmDevice &dev, benchmark_config_t &cfg)
 {
   // Native HIP SDK vector widths: int, int2, int4. Each variant does the same
   // 4096 ops/thread (loop count divided by the vector width).
   static const rocm_compute_variant_t variants[] = {
-      {"int", "compute_int32", &rocm_kernels::compute_int32, rocmWidthNote(1)},
-      {"int2", "compute_int32_v2", &rocm_kernels::compute_int32, rocmWidthNote(2)},
-      {"int4", "compute_int32_v4", &rocm_kernels::compute_int32, rocmWidthNote(4)},
+      {"int", "compute_int32", &rocm_kernels::compute_int32, rocmWidthNote(1), {{Dim::Width, 1}}},
+      {"int2", "compute_int32_v2", &rocm_kernels::compute_int32, rocmWidthNote(2),
+       {{Dim::Width, 2}}},
+      {"int4", "compute_int32_v4", &rocm_kernels::compute_int32, rocmWidthNote(4),
+       {{Dim::Width, 4}}},
   };
   int A = 3;
   rocm_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
+  // 2: its MAD chain went from two ping-ponged registers to one accumulator
+  // (2.1.0) after it first shipped, which moved its numbers.
+  d.revision = 2;
+  d.dims = {{Dim::Dtype, DType::Int32}};
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "ops";
@@ -37,18 +45,22 @@ int RocmPeak::runComputeInt8DP(RocmDevice &dev, benchmark_config_t &cfg)
   // Where dp8 stops gaining on dp4, the issue rate is the limit, not latency.
   static const rocm_compute_variant_t variants[] = {
       {"int8_dp", "compute_int8_dp", &rocm_kernels::compute_int8_dp,
-       "One dependent chain of dot products."},
+       "One dependent chain of dot products.", {{Dim::Chains, 1}}},
       {"int8_dp2", "compute_int8_dp2", &rocm_kernels::compute_int8_dp,
-       "2 independent chains."},
+       "2 independent chains.", {{Dim::Chains, 2}}},
       {"int8_dp4", "compute_int8_dp4", &rocm_kernels::compute_int8_dp,
-       "4 independent chains."},
+       "4 independent chains.", {{Dim::Chains, 4}}},
       {"int8_dp8", "compute_int8_dp8", &rocm_kernels::compute_int8_dp,
-       "8 independent chains."},
+       "8 independent chains.", {{Dim::Chains, 8}}},
   };
   int A = 4;
   rocm_compute_desc_t d = {};
   d.title = "INT8 dot-product compute (DP4a)";
   d.resultTag = "integer_compute_int8_dp";
+  // 2: its chain stopped issuing an op beside each dot that the budget did not
+  // count (2.1.4), which had read it low.
+  d.revision = 2;
+  d.dims = {{Dim::Dtype, DType::Int8}};
   d.shape = TestShape::Homogeneous;
   // Independent DP4a chains, not wider vectors: each reading gives the
   // hardware more dot products to have in flight at once.

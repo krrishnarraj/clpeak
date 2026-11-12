@@ -135,6 +135,30 @@ See `include/common/AGENTS.md` § Test documentation.  oneAPI specifics:
 - `onemkl.cpp` threads a `note` next to `label` through `measure()`, likewise
   into one `onemkl_gemm`.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  oneAPI specifics:
+
+- Vector tests carry their data type on the test's `TestSpec` and `width`
+  per reading, off the template parameter in `runFpWidth` / `runIntWidth`
+  beside the note.  `integer_compute`'s `int8` and `int16` are widths of
+  int32; `bfloat16_compute` is `{dtype: bf16, acc: fp32}`.
+- `joint_matrix`: `jmDims()` reads a row's dims off the combination it ran:
+  A's type as `dtype`, B's as `weights` where the two differ (`s8u8`,
+  `u8s8`), the accumulator as `acc` where it is not the usual one, and the
+  shape as `tile`.  The race's winner is its `form` (`chain_filled`,
+  `chain_spread`, `blocks_1acc`, `blocks_4acc`).
+- `onemkl_gemm` is `impl` onemkl.  Where a dtype races forms, the winner is
+  its `form`, `GemmForm::form`, made beside the name in `layouts()`
+  (`fp16_out_tn`, `gemm_bias_s8u8_tn`).
+- Bandwidth and latency as the other GPU backends: global `{op: read}`,
+  image `pixel_format: rgba32f`, transfer `{memory: pinned}` and
+  `direction`, latency `op`.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
+
 ## Chain shapes
 
 `runFpWidth` and `runIntWidth` each submit two kernels -- the squaring chain

@@ -4,6 +4,8 @@
 #include <common/common.h>
 #include <sycl/sycl.hpp>
 
+using xpupeak::Dim;
+
 // Shared-local-memory streaming benchmark.  Each work-group ping-pongs
 // LMEM_REPS times through a per-group scratch array, alternating writes and
 // reads with a barrier between phases (matches local_bandwidth_kernels.cl).
@@ -59,11 +61,14 @@ static float runLocalVariant(OneapiPeak &peak, OneapiDevice &dev,
 
 int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
-     Category::Unknown,
-     "Bandwidth of local memory, the scratchpad a work-group shares.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"local_memory_bandwidth", "Local memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Bandwidth of local memory, the scratchpad a work-group shares.",
+                        TestShape::Homogeneous, "vector width"};
+  // 2: a device with no local memory of its own skips it since 2.1.4, instead
+  // of timing global memory under its name.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // local_mem_type == global: the device has no scratchpad and the runtime
   // carves local memory out of ordinary global memory -- every CPU device.
@@ -85,9 +90,12 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   float *outBuf = sycl::malloc_device<float>(globalThreads, dev.stream);
   if (!outBuf)
   {
-    test.skip("float",  ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(1));
-    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(2));
-    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(4));
+    test.skip("float",  ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(1),
+              {{Dim::Width, 1}});
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(2),
+              {{Dim::Width, 2}});
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", oneapiWidthNote(4),
+              {{Dim::Width, 4}});
     return -1;
   }
 
@@ -104,11 +112,11 @@ int OneapiPeak::runLocalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     if (us <= 0.0f)
     {
       test.skip(v.key, ResultStatus::Error, "kernel launch failed",
-                oneapiWidthNote(v.W));
+                oneapiWidthNote(v.W), {{Dim::Width, v.W}});
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.W * sizeof(float) * globalThreads;
-    test.emit(v.key, (float)bytes / us * 1e6f, oneapiWidthNote(v.W));
+    test.emit(v.key, (float)bytes / us * 1e6f, oneapiWidthNote(v.W), {{Dim::Width, v.W}});
   }
 
   sycl::free(outBuf, dev.stream);

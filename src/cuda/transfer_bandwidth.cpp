@@ -4,33 +4,43 @@
 #include <common/common.h>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   const uint64_t bytes = cfg.transferBWMaxSize ? cfg.transferBWMaxSize : (1ull << 27);
   unsigned int forced = forceIters ? specifiedIters : 0;
 
-  auto test = currentDeviceScope->beginTest(
-    {"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
-     "Copy bandwidth between host and GPU memory, over PCIe on a discrete "
-     "card.  Both rows use pinned host memory.",
-     TestShape::Heterogeneous, "direction"});
+  logger::TestSpec spec{"transfer_bandwidth", "Transfer bandwidth", "bps", Category::Unknown,
+                        "Copy bandwidth between host and GPU memory, over PCIe on a discrete "
+                        "card.  Both rows use pinned host memory.",
+                        TestShape::Heterogeneous, "direction"};
+  // Both rows use pinned host memory; each says which way it went.
+  spec.dims = {{Dim::Memory, dim::Memory::Pinned}};
+  auto test = currentDeviceScope->beginTest(spec);
 
   const char *h2dNote = "Host to GPU.";
   const char *d2hNote = "GPU to host.";
+  const Dims h2dDims = {{Dim::Direction, dim::Direction::H2d}};
+  const Dims d2hDims = {{Dim::Direction, dim::Direction::D2h}};
 
   CUdeviceptr dBuf = 0;
   if (cuMemAlloc(&dBuf, bytes) != CUDA_SUCCESS)
   {
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer", h2dNote);
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer", d2hNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate device buffer", h2dNote,
+              h2dDims);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate device buffer", d2hNote,
+              d2hDims);
     return -1;
   }
   void *hPinned = nullptr;
   if (cuMemAllocHost(&hPinned, bytes) != CUDA_SUCCESS)
   {
     cuMemFree(dBuf);
-    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", h2dNote);
-    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", d2hNote);
+    test.skip("h2d_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", h2dNote,
+              h2dDims);
+    test.skip("d2h_pinned", ResultStatus::Error, "Failed to allocate pinned host buffer", d2hNote,
+              d2hDims);
     return -1;
   }
 
@@ -86,11 +96,11 @@ int CudaPeak::runTransferBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   float usH2D = timeXfer(true);
   float bpsH2D = (float)bytes / usH2D * 1e6f;
-  test.emit("h2d_pinned", bpsH2D, h2dNote);
+  test.emit("h2d_pinned", bpsH2D, h2dNote, h2dDims);
 
   float usD2H = timeXfer(false);
   float bpsD2H = (float)bytes / usD2H * 1e6f;
-  test.emit("d2h_pinned", bpsD2H, d2hNote);
+  test.emit("d2h_pinned", bpsD2H, d2hNote, d2hDims);
 
   cuMemFreeHost(hPinned);
   cuMemFree(dBuf);

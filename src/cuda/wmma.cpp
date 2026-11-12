@@ -3,6 +3,8 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // WMMA + FP8 mma.sync umbrella -- mirrors vkPeak::runCoopMatrix.
 // ---------------------------------------------------------------------------
@@ -17,10 +19,16 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
   // One scope for the whole family -- all data types in one test.
   // The integer readings carry their own unit (ops) so they share the
   // test with the floating-point ones.
-  auto test = currentDeviceScope->beginTest(
-      {"wmma", "Tensor cores (WMMA / mma.sync)", "flops", Category::Unknown,
-         "Peak matrix-multiply rate of the tensor cores.",
-         TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"wmma", "Tensor cores (WMMA / mma.sync)", "flops", Category::Unknown,
+                        "Peak matrix-multiply rate of the tensor cores.",
+                        TestShape::Heterogeneous, "data type"};
+  // 2: the fp16, bf16, tf32, int8 and fp64 kernels once folded their four
+  // accumulator chains through mma_sync's destination, which dead-coded three
+  // of them while the host counted all four -- up to 4x high (fp16 165.9
+  // TFLOPS on an RTX 5060, against 42.7 since).  tf32 also moved from the
+  // fragment's 16x16x8 to mma.sync's native 16x8x8 then.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
     // FP16 WMMA
     {
@@ -31,6 +39,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "GeForce runs it at half rate; see f16acc.";
       d.unit = "flops";
       d.metricLabel = "fp16";
+      d.metricDims = {{Dim::Dtype, DType::Fp16}, {Dim::Tile, "16x16x16"}};
       d.kernelName = "wmma_fp16";
       d.blob = &cuda_kernels::wmma_fp16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 4 parallel chains per kernel
@@ -53,6 +62,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       d.metricDescription = "fp16 inputs and accumulator (mma.sync m16n8k16).";
       d.unit = "flops";
       d.metricLabel = "fp16 f16acc";
+      d.metricDims = {{Dim::Dtype, DType::Fp16}, {Dim::Acc, DType::Fp16}, {Dim::Tile, "16x8x16"}};
       d.kernelName = "wmma_fp16_f16";
       d.blob = &cuda_kernels::wmma_fp16_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4; // 8 chains * m16n8k16
@@ -73,6 +83,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
       d.metricDescription = "bf16 inputs, fp32 accumulator (WMMA 16x16x16).";
       d.unit = "flops";
       d.metricLabel = "bf16";
+      d.metricDims = {{Dim::Dtype, DType::Bf16}, {Dim::Tile, "16x16x16"}};
       d.kernelName = "wmma_bf16";
       d.blob = &cuda_kernels::wmma_bf16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 4;
@@ -96,6 +107,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "(mma.sync m16n8k8).";
       d.unit = "flops";
       d.metricLabel = "tf32";
+      d.metricDims = {{Dim::Dtype, DType::Tf32}, {Dim::Tile, "16x8x8"}};
       d.kernelName = "wmma_tf32";
       d.blob = &cuda_kernels::wmma_tf32;
       d.workPerWI = COOPMAT_WORK_PER_WI * 2; // 8 chains * m16n8k8 (half K of fp16)
@@ -117,6 +129,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "rate on datacenter parts only.";
       d.unit = "flops";
       d.metricLabel = "fp64";
+      d.metricDims = {{Dim::Dtype, DType::Fp64}, {Dim::Tile, "8x8x4"}};
       d.kernelName = "wmma_fp64";
       d.blob = &cuda_kernels::wmma_fp64;
       d.workPerWI = COOPMAT_WORK_PER_WI; // 1024 outer iters bring this to par
@@ -139,6 +152,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "f16acc.";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Tile, "16x8x32"}};
       d.kernelName = "wmma_fp8_e4m3";
       d.blob = &cuda_kernels::wmma_fp8_e4m3;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 parallel chains for FP8
@@ -160,6 +174,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "fp32 accumulator (mma.sync m16n8k32).";
       d.unit = "flops";
       d.metricLabel = "fp8_e5m2";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E5m2}, {Dim::Tile, "16x8x32"}};
       d.kernelName = "wmma_fp8_e5m2";
       d.blob = &cuda_kernels::wmma_fp8_e5m2;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8;
@@ -183,6 +198,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "m16n8k32).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 f16acc";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Acc, DType::Fp16},
+                      {Dim::Tile, "16x8x32"}};
       d.kernelName = "wmma_fp8_f16";
       d.blob = &cuda_kernels::wmma_fp8_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8; // 8 chains * m16n8k32, as the +fp32 row
@@ -204,6 +221,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "sparsity (mma.sp m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 2:4";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Sparsity, dim::Sparsity::S2_4},
+                      {Dim::Tile, "16x8x64"}};
       d.kernelName = "wmma_fp8_sparse";
       d.blob = &cuda_kernels::wmma_fp8_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64 = 2x dense k32
@@ -228,6 +247,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "sparsity (mma.sp m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "fp8_e4m3 2:4 f16acc";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Acc, DType::Fp16},
+                      {Dim::Sparsity, dim::Sparsity::S2_4}, {Dim::Tile, "16x8x64"}};
       d.kernelName = "wmma_fp8_sparse_f16";
       d.blob = &cuda_kernels::wmma_fp8_sparse_f16;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16; // 8 chains * k64, as the +fp32 row
@@ -250,6 +271,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "Blackwell.";
       d.unit = "flops";
       d.metricLabel = "fp4_e2m1";
+      d.metricDims = {{Dim::Dtype, DType::Fp4E2m1}, {Dim::Tile, "16x8x32"}};
       d.kernelName = "wmma_fp4_e2m1";
       d.blob = &cuda_kernels::wmma_fp4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 8;
@@ -271,6 +293,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "(OCP MX, mma.sync m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "mxf4_e2m1";
+      d.metricDims = {{Dim::Dtype, DType::Mxfp4}, {Dim::Tile, "16x8x64"}};
       d.kernelName = "wmma_mxf4_e2m1";
       d.blob = &cuda_kernels::wmma_mxf4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16;
@@ -292,6 +315,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "(NVFP4, mma.sync m16n8k64).";
       d.unit = "flops";
       d.metricLabel = "nvf4_e2m1";
+      d.metricDims = {{Dim::Dtype, DType::Nvfp4}, {Dim::Tile, "16x8x64"}};
       d.kernelName = "wmma_nvf4_e2m1";
       d.blob = &cuda_kernels::wmma_nvf4_e2m1;
       d.workPerWI = COOPMAT_WORK_PER_WI * 16;
@@ -313,6 +337,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "structured sparsity (OCP MX, mma.sp m16n8k128).";
       d.unit = "flops";
       d.metricLabel = "mxf4_e2m1 2:4";
+      d.metricDims = {{Dim::Dtype, DType::Mxfp4}, {Dim::Sparsity, dim::Sparsity::S2_4},
+                      {Dim::Tile, "16x8x128"}};
       d.kernelName = "wmma_mxf4_sparse";
       d.blob = &cuda_kernels::wmma_mxf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
@@ -334,6 +360,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                             "structured sparsity (NVFP4, mma.sp m16n8k128).";
       d.unit = "flops";
       d.metricLabel = "nvf4_e2m1 2:4";
+      d.metricDims = {{Dim::Dtype, DType::Nvfp4}, {Dim::Sparsity, dim::Sparsity::S2_4},
+                      {Dim::Tile, "16x8x128"}};
       d.kernelName = "wmma_nvf4_sparse";
       d.blob = &cuda_kernels::wmma_nvf4_sparse;
       d.workPerWI = COOPMAT_WORK_PER_WI * 32; // 8 chains * k128 = 2x dense k64
@@ -358,6 +386,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
     d.metricDescription = "int8 inputs, int32 accumulator (WMMA 16x16x16).";
     d.unit = "ops";
     d.metricLabel = "int8";
+    d.metricDims = {{Dim::Dtype, DType::Int8}, {Dim::Tile, "16x16x16"}};
     d.metricUnit = "ops";
     d.kernelName = "wmma_int8";
     d.blob = &cuda_kernels::wmma_int8;
@@ -380,6 +409,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                           "m16n8k32).";
     d.unit = "ops";
     d.metricLabel = "int8 k32";
+    d.metricDims = {{Dim::Dtype, DType::Int8}, {Dim::Tile, "16x8x32"}};
     d.metricUnit = "ops";
     d.kernelName = "wmma_int8_k32";
     d.blob = &cuda_kernels::wmma_int8_k32;
@@ -404,6 +434,8 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                           "sparsity (mma.sp m16n8k64).";
     d.unit = "ops";
     d.metricLabel = "int8 2:4";
+    d.metricDims = {{Dim::Dtype, DType::Int8}, {Dim::Sparsity, dim::Sparsity::S2_4},
+                    {Dim::Tile, "16x8x64"}};
     d.metricUnit = "ops";
     d.kernelName = "wmma_int8_sparse";
     d.blob = &cuda_kernels::wmma_int8_sparse;
@@ -427,6 +459,7 @@ int CudaPeak::runWmma(CudaDevice &dev, benchmark_config_t &cfg)
                           "emulate it).";
     d.unit = "ops";
     d.metricLabel = "int4";
+    d.metricDims = {{Dim::Dtype, DType::Int4}, {Dim::Tile, "8x8x32"}};
     d.metricUnit = "ops";
     d.kernelName = "wmma_int4";
     d.blob = &cuda_kernels::wmma_int4;
