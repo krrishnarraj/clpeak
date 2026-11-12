@@ -482,7 +482,9 @@ void writeSystem(JsonWriter &w, const SystemInfo &s)
     if (s.isVirtual)  w.boolean("virtual", true);
     if (s.translated) w.boolean("translated", true);
     w.strIf("manufacturer", s.manufacturer);
+    w.strIf("brand",        s.brand);
     w.strIf("model",        s.model);
+    w.strIf("codename",     s.codename);
     w.strIf("name",         s.name);
     w.strIf("family",       s.family);
     w.strIf("board",        s.board);
@@ -1115,7 +1117,9 @@ void readSystem(const JsonValue &v, SystemInfo &s)
     s.isVirtual        = v.flag("virtual");
     s.translated       = v.flag("translated");
     s.manufacturer     = v.str("manufacturer");
+    s.brand            = v.str("brand");
     s.model            = v.str("model");
+    s.codename         = v.str("codename");
     s.name             = v.str("name");
     s.family           = v.str("family");
     s.board            = v.str("board");

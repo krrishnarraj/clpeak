@@ -115,6 +115,7 @@ int main(int argc, char **argv)
         combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
         combined.meta.system        = probeSystem();
+        combined.meta.conditions    = probeConditions();
         combined.meta.invocation    = invocationFrom(opts, argc, argv);
     }
 
@@ -206,6 +207,7 @@ int main(int argc, char **argv)
     }
 
     combined.meta.durationS = checkpoint.runningS();
+    finishConditions(combined.meta.conditions);
     if (resuming)
         combined.meta.resumed.push_back(checkpoint.partRecord(combined));
     runLog.finish();

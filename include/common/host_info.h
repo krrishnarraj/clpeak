@@ -14,9 +14,12 @@
 //
 // Deliberately NOT here: hostname, username, machine serial, MAC address,
 // DMI product_uuid, IORegistry product-id, and any name the user gave the
-// device.  Result files get uploaded and shared -- nothing in one should
+// device (Android's device_name, iOS's UIDevice.name, a simulator's device
+// name).  Result files get uploaded and shared -- nothing in one should
 // identify the unit or the person who ran it.  Every field below is a
-// property of the hardware model or the OS build, not of its owner.
+// property of the hardware model or the OS build, not of its owner, and the
+// probes never read the ones that are not (they are absent from the code,
+// not filtered out of its output).
 //
 // Fields the platform cannot answer are left empty / zero; the writer omits
 // them rather than emitting a placeholder.
@@ -25,8 +28,8 @@
 // (probeSystem); the host CPU's brand and thread count are what the host CPU
 // processor starts from when no CPU backend ran.
 struct HostInfo {
-    std::string os;             // "Macintosh" | "Linux ARM64" | "Win64" | …
-    std::string osVersion;      // "26.6.2", "6.8.0-40-generic", "22631"
+    std::string os;             // "macOS" | "iOS" | "Android" | "Linux" | "Windows"
+    std::string osVersion;      // "27.2", "16", "24.04", "11 24H2"
     std::string arch;           // "arm64" | "x86_64" | "x86" | "arm"
     std::string cpu;            // marketing name of the host CPU
     unsigned    logicalCores = 0;
@@ -44,9 +47,9 @@ HostInfo probeHost();
 // so a newer file's values survive a read.
 
 struct OsInfo {
-    std::string name;           // "macOS" (today the probe's "Macintosh"), "Android", "Linux"
-    std::string version;        // the user-visible release: "27.2", "16", "24.04"
-    std::string build;          // the OS build: "25C56"
+    std::string name;           // "macOS", "iOS", "Android", "Linux", "Windows"
+    std::string version;        // the user-visible release: "27.2", "16", "24.04", "11 24H2"
+    std::string build;          // the OS build: "26B123", "BP2A.250605.031", "26100.2314"
     std::string kernel;         // the kernel release, where it is not the version
     std::string distribution;   // Linux: /etc/os-release's PRETTY_NAME
 };
@@ -56,11 +59,13 @@ struct SystemInfo {
     std::string formFactor;
     std::string formFactorDetail;
     std::string formFactorFrom;
-    bool        isVirtual  = false;   // a virtual machine
+    bool        isVirtual  = false;   // a VM, an emulator or a simulator ran it
     bool        translated = false;   // an x86 binary under Rosetta or Prism
 
     std::string manufacturer;   // "Apple", "samsung", DMI sys_vendor
+    std::string brand;          // Android's ro.product.brand: "Redmi" under "Xiaomi"
     std::string model;          // the model id: "MacBookPro18,3", "SM-S921B"
+    std::string codename;       // Android's ro.product.device: "e1s"
     std::string name;           // the OS's marketing name, never a table's
     std::string family;         // DMI product_family, SMBIOS SystemFamily
     std::string board;          // the board, where the product name is an OEM placeholder
@@ -73,8 +78,8 @@ struct SystemInfo {
     std::string ext;            // experimental fields, raw JSON (docs/format-v4.md)
 };
 
-// The system as far as today's probe goes: the OS name and version, the
-// binary's architecture, the CPU brand as the SoC, and the memory.
+// The system as the OS describes it, per docs/format-v4.md's System section:
+// its identity, form factor, OS, and whether it is virtual or translated.
 SystemInfo probeSystem();
 
 // ── `conditions` ───────────────────────────────────────────────────────────
@@ -98,5 +103,21 @@ struct RunConditions {
                ext.empty();
     }
 };
+
+// What the machine is doing as a run starts: everything above but
+// `thermalEnd`.  Called once, beside probeSystem(); a resumed run keeps the
+// first part's.
+RunConditions probeConditions();
+
+// The run's end: its thermal state, as `thermalEnd`.  Called once the last
+// backend is done, in every part of a run (the last part's is the run's).
+void finishConditions(RunConditions &c);
+
+// Facts only the app can read (xpupeak_set_host_facts, src/ffi/xpupeak_ffi.h):
+// a JSON object holding `power_source` and `low_power_mode`, in the
+// document's words, for every run probeConditions() starts after it.  Each
+// key it holds replaces the native probe's reading; one it leaves out keeps
+// it.  Empty or malformed text clears them.
+void setHostFacts(const std::string &json);
 
 #endif  // XPUPEAK_HOST_INFO_H
