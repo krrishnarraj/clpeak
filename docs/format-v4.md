@@ -172,7 +172,7 @@ Abbreviated; the values are illustrative.
 | `conditions` | C | what the machine was doing (*Conditions*) *(V3)* |
 | `annotations` | C | what only a person knows about the run (*Annotations*) |
 | `resumed` | C | present only for a run continued after its process ended part-way: one entry per part after the first (*Resumed runs*) |
-| `packages`, `processors` | C | the hardware (*Hardware*) *(V2)* |
+| `packages`, `processors` | C | the hardware (*Hardware*) |
 | `devices` | C | one entry per benchmarked device |
 | `ext` | — | experimental fields (*Compatibility*) |
 | `inventory` | D | `--verbose` only: what `--list-devices` would have shown (*Inventory*) |
@@ -254,27 +254,38 @@ Any other key is allowed; a reader shows what it does not know as written.
 
 ## Hardware
 
-*(V2 links the devices; V4 fills the CPU's facts.)*
+*(V4 fills the CPU's facts.)*
 
 A **package** is one chip or card: an SoC, a CPU package, a discrete GPU. A
-**processor** is one CPU, GPU or NPU in a package. Ids are run-local and
-deterministic for one machine: the host package first, then by kind, then by
-first appearance in run order, so `gpu0` is the same GPU on every run there.
-A device that nothing links to another still gets a processor of its own.
+**processor** is one CPU, GPU or NPU in a package. Both are the linker's
+answer (*Linking*), written before the file is saved. Ids are run-local and
+deterministic for one machine: a processor's is its kind and its place among
+that kind's — `cpu0`, `gpu1`, `npu0`, `accelerator0` — counted over the host
+package's processors first, then the rest in order of first appearance in run
+order, so `gpu0` is the same GPU on every run there. Packages are `pkg0`, the
+host's, then one per processor outside it, in the same order. The host CPU
+processor is always there, whether or not a device ran on it, and a device
+that nothing links to another gets a processor of its own.
 
 `packages[]`, all C:
 
 | key | meaning |
 |---|---|
 | `id` | `pkg0`, `pkg1`, … |
-| `kind` | `soc` (the host CPU and whatever shares its package: an integrated GPU, an on-die NPU), `cpu` (a host CPU with nothing joined), `discrete` (a card) |
-| `vendor` | a vendor (*Vocabulary*), when known |
-| `name` | "Apple M1 Pro", "NVIDIA GeForce RTX 5060" |
+| `kind` | `soc` (the host CPU and whatever shares its package: an integrated GPU, an on-die NPU), `cpu` (a host CPU with nothing joined), `discrete` (a card). Absent for a package of its own whose processor no API says is integrated or not |
+| `vendor` | a vendor (*Vocabulary*), when known: the host package's from `system.soc`'s first word where it names one, else its CPU's |
+| `name` | "Apple M1 Pro", "NVIDIA GeForce RTX 5060": the host package's is `system.soc` where there is one, else its CPU's; another's, its processor's |
 | `ext` | experimental fields |
 
 `processors[]`, all C. The facts are written on the processor itself, merged
-from the most native backend that ran, in registry order; each device keeps
-its own API's (`devices[].facts`), so a consumer can merge them differently.
+from the most native backend that ran, in registry order: each field from the
+first device that gives it, `vendor_id` and `device_id` together from the
+first whose vendor id is a known PCI one, a count together with what it
+counts. The host CPU's come from the CPU backend's device alone — another
+backend's CPU driver reports its own vendor (Intel's OpenCL runtime on an AMD
+CPU) — or, when the CPU backend did not run, are the host's brand, thread
+count and ISA. Each device keeps its own API's (`devices[].facts`), so a
+consumer can merge them differently.
 
 | key | meaning |
 |---|---|
@@ -301,12 +312,12 @@ a per-cluster engine's all-core number does not scale with cores.
 | `backend`, `platform`, `name`, `device_index` | C | its identity within the run (below) |
 | `driver` | C | the driver's version: metadata, not identity |
 | `platform_index` | C | the platform's index, for a backend with platforms (OpenCL) |
-| `type` | C | what the device is: `gpu`, `cpu`, `npu`, `accelerator` or `unknown`. An ML runtime's NPU is `npu`; `accelerator` is for every other device that is neither *(V2 moves the NPUs to `npu`)* |
-| `processor` | C | the `id` of the processor it is a view of *(V2)* |
-| `link` | C | what linked it there (*Linking*) *(V2)* |
-| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes *(V2, V4)* |
-| `evidence` | C | the identity evidence that links it, never an identifier itself (*Linking*) *(V2)* |
-| `runtime` | C | an ML runtime's view of where it ran: `provider` (ONNX Runtime's execution provider), `accelerator` (LiteRT's accelerator, Core ML's compute device), `version` *(V2)* |
+| `type` | C | what the device is: `gpu`, `cpu`, `npu`, `accelerator` or `unknown`. An ML runtime's NPU is `npu`; `accelerator` is for every other device that is neither, Android's NNAPI among them |
+| `processor` | C | the `id` of the processor it is a view of |
+| `link` | C | what linked it there (*Linking*) |
+| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes, with `vendor_name` the vendor's own string as the API gives it (`NVIDIA Corporation`). A vendor id is the API's: Apple's OpenCL answers `1027f00`, a CPU driver its own maker's *(V4 for the CPU backend's)* |
+| `evidence` | C | the identity evidence that links it, never an identifier itself (*Linking*) |
+| `runtime` | C | an ML runtime's view of where it ran: `provider` (ONNX Runtime's execution provider), `accelerator` (Core ML's compute device — `neural_engine`, `gpu`, `cpu` —, LiteRT's — `npu`, `gpu`, `cpu` —, OpenVINO's `device_type`), `version` (ONNX Runtime's; LiteRT and Core ML report none) |
 | `properties` | C / I | free-form facts the backend chose to report, `key` and `value` strings. The shape is contract; the content informational |
 | `tests` | C | the tests |
 | `ext` | — | experimental fields |
@@ -326,33 +337,67 @@ driver update.
 
 ### Linking
 
-*(V2 implements the linker and owns this section.)*
+Each backend passes, with each device, what its API says about who the
+device is, and what it says about the hardware (`facts`). Before the file is
+saved, the tool merges the devices that are views of one processor, by these
+rules and no others:
 
-Each backend passes the identity evidence its API gives with each device, and
-the tool merges the devices that share strong evidence into one processor:
-
+- **Host.** Every device that executes on the CPU is the host CPU: the CPU
+  backend, llvmpipe and lavapipe, PoCL, Intel's CPU runtime, oneAPI's CPU
+  device, and the CPU paths of ONNX Runtime, LiteRT and Core ML — every
+  device with `host: true` or of type `cpu`.
 - **Strong.** An equal UUID, LUID, PCI bus address or Metal registry ID
-  merges. UUIDs are compared verbatim and only ever add a link.
-- **Host.** Every device that executes on the CPU joins the host CPU: the CPU
-  backend, llvmpipe, PoCL, Intel's CPU runtime, oneAPI's CPU device, and the
-  CPU paths of ONNX Runtime, LiteRT and Core ML.
-- **SoC.** An ML runtime's NPU joins the SoC's NPU; an Android GPU delegate
-  joins the SoC's GPU.
-- **Sole.** A PCI vendor:device id, or being the platform's default GPU,
-  joins the only candidate of that kind and vendor — never one of several.
-- **Nothing else merges.** A device left alone gets a processor of its own.
+  merges. UUIDs are compared verbatim and only ever add a link: NVIDIA's
+  CUDA, Vulkan and OpenCL report one scheme, other vendors' APIs each their
+  own, so two different UUIDs say nothing. The PCI bus address is what links
+  a discrete part across vendors' APIs, the LUID a Windows adapter, the
+  registry ID an Apple GPU (Metal, and Core ML's GPU device, which names the
+  same `MTLDevice`).
+- **SoC.** An ML runtime's NPU (the Neural Engine, Hexagon, XDNA, Intel's
+  NPU, LiteRT's vendor dispatch libraries) is the SoC's NPU: all of them are
+  one processor, unless their vendors say otherwise. An Android GPU delegate
+  is the SoC's GPU: it joins the one integrated GPU another backend sees, or
+  is a processor of its own on the SoC. Android's NNAPI runs somewhere on the
+  SoC and names no one unit: an `accelerator` of its own, on the SoC.
+- **Sole.** The views of one vendor's GPU (NPU, accelerator) that nothing
+  else links merge when the run shows only one: no backend lists two of that
+  kind and vendor, and nothing says two of them are different devices — two
+  vendors, two PCI device ids, one integrated and one not, two different
+  LUIDs, PCI bus addresses or registry IDs, or one backend listing both. A
+  GPU whose vendor is unknown and that nothing identifies — the platform's
+  default GPU (LiteRT's WebGPU and Metal accelerators, which name no
+  adapter), a runtime that names none — joins the run's one GPU on the same
+  terms. Never one of several.
+- **Nothing else merges.** A device left alone is a processor of its own.
 
-`link` says which rule linked the device: `uuid`, `luid`, `pci_bus`,
-`registry`, `host`, `soc`, `sole`, or `own` for a processor of its own.
+A processor is in the host package when it is the host CPU, is on the SoC by
+the rules above, or is integrated (`facts.integrated`); otherwise it is a
+package of its own, `discrete` when its API says it is not integrated.
 
-`evidence` keeps what the linker saw, so better rules can re-link an old
-file: a token per strong identifier (`uuid`, `luid`, `pci_bus`,
-`registry`), and the weaker evidence as it is — `host: true`, `soc: "npu"`
-or `"gpu"`, `default_gpu: true`. **The tokens are HMACs under a key made per
-run**, which the result never holds (only the checkpoint does, for a resume).
-Two devices in one file can be seen to share an identifier; nothing
-correlates across files, and the raw values never leave the process. A key a
-newer build adds to `evidence` with a string value is a token.
+`link` says how a device came to its processor: the first of `uuid`, `luid`,
+`pci_bus` and `registry` it shares with another device there; `host` or
+`soc` for a device with that evidence; `sole` for one the sole rule joined,
+and for the device it joined; `own` for a processor of its own.
+
+`evidence` keeps what the linker saw, so that better rules can re-link an old
+file: a token per strong identifier (`uuid`, `luid`, `pci_bus`, `registry`),
+and the weaker evidence as it is — `host: true`, `soc: "npu"`, `"gpu"` or
+`"accelerator"`, `default_gpu: true`. **The tokens are HMACs under a key made
+per run**, which the result never holds (only the checkpoint does, for a
+resume): the first 64 bits of HMAC-SHA256 over the evidence key's name, a zero
+byte and the identifier in its one written form (a UUID as 32 lower-case hex
+digits, a LUID and a registry ID as 16, a PCI bus address as `0000:01:00.0`),
+as 16 hex digits. Two devices in one file can be seen to share an identifier;
+nothing correlates across files, and the raw values never leave the process
+— they are made into tokens as each device opens, so a checkpoint holds
+tokens too. A key a newer build adds to `evidence` with a string value is a
+token.
+
+Every decision is a `debug` line on the log under `--verbose` — `hardware:
+vulkan:0 (Apple M1 Pro) -> gpu0 by sole` — and so is every device a rule
+left apart that it might have joined, with the reason (`litert:0 not linked:
+its GPU is not named (Vulkan lists 2 GPUs)`). No line holds an identifier:
+what a library relays has its identifiers replaced by their tokens (*Log*).
 
 ## Test
 
@@ -687,7 +732,7 @@ reproduces what the CLI printed.
 | `level` | `error` \| `warning` \| `info` \| `debug` |
 | `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
-| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
+| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found |
 
 What each level means, and when it is in the file:
 
@@ -946,7 +991,8 @@ it ran on or the person who ran it, and no minor may add:
   per-run tokens (*Linking*);
 - the key those tokens are made under, which only the checkpoint holds.
 
-The log is held to the same rule.
+The log is held to the same rule, a vendor runtime's relayed words included
+(*Log*).
 
 ## Conventions
 

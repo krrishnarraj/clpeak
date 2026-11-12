@@ -74,6 +74,10 @@ public:
 
     const RunProgress &progress() const { return prog; }
 
+    // The run's key for linking evidence (RunMeta::evidenceKey): what the
+    // logger makes a device's tokens under as it opens.
+    const std::string &evidenceKey() const { return doc.meta.evidenceKey; }
+
     // ---- What finished ---------------------------------------------------
     // `live` is the document of the backend in flight -- its logger's --
     // which the host folds into its own only once the backend is done.

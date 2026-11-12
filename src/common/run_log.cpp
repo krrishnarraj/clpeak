@@ -1,4 +1,5 @@
 #include <common/run_log.h>
+#include <common/hardware_link.h>   // scrubIdentifiers
 #include <common/logger.h>
 
 #include <cerrno>
@@ -242,7 +243,9 @@ void RunLog::onLog(xpupeak::LogLevel level, const std::string &source,
     LogEntry e;
     e.level   = level;
     e.source  = source;
-    e.message = message;
+    // A library's own words, without the identifiers they may hold
+    // (include/common/hardware_link.h).
+    e.message = source.empty() ? message : xpupeak::scrubIdentifiers(message);
     record(e);
     if (fallback)
     {

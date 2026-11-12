@@ -30,7 +30,7 @@ micro-graphs on all three side by side.
 
 | File | Purpose |
 |------|---------|
-| `coreml_peak.mm` | `CoreMLPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts) |
+| `coreml_peak.mm` | `CoreMLPeak`: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`; `coremlDevices()` from `MLAllComputeDevices()`; `coremlSpecVersion()` (the newest model spec this OS accepts); `coremlIdentify()`, who each device is (*Identity*) |
 | `coreml_session.{h,mm}` | `CoremlSession`: writes the `.mlpackage`, compiles it (synchronously, inside `@try`), loads it for the device's `MLModelConfiguration`, loads its `MLComputePlan`, binds inputs to session-owned buffers, times predictions.  `onDevice()` / `offDevice()` / `offDeviceCapable()` are the placement guard |
 | `coreml_internal.h` | ObjC helpers shared by the `.mm` files (`coremlKindOf`, `coremlConfigurationFor`); never included from a `.cpp` |
 | `coreml_model.{h,cpp}` | `CoremlProgram` — emits `Model.proto` wrapping a `MILSpec.Program` plus the MIL storage-format weight blob; the weight formats (`CoremlWeight`), the projection recipe, and every model recipe (`coremlMatMulChainModel`, `coremlBlockModel`, …); fp16 / bf16 / fp8 conversions |
@@ -54,6 +54,16 @@ Test ids are lower_snake and keep the `coreml_` prefix (`coreml_gemm`,
 (`--gemm`, `--transformer-block`, …) and shared with the ONNX backend through
 the same `Benchmark` values.  Every test is heterogeneous: each reading is a
 different format, size or context length.
+
+## Identity
+
+Each compute device reports who it is with its `beginDevice()`
+(`coremlIdentify()` in `coreml_peak.mm`, read by
+`include/common/hardware_link.h`): the Neural Engine is the SoC's NPU (type
+`npu`, its core count a fact), the GPU the `MTLDevice` Core ML names, by its
+registry ID (`coreml_device_info_t::gpuRegistryId`), which links it to the
+Metal backend's view, and the CPU the host.  `runtime.accelerator` is
+`neural_engine`, `gpu` or `cpu`.
 
 ## Models are emitted as protobuf bytes, not built with coremltools
 
