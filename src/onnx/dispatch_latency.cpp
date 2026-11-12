@@ -187,30 +187,36 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
        "work.",
        TestShape::Heterogeneous, "what is submitted"});
 
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+
   const char *trivialNote =
       "One multiply over 64 values, so nearly all of this is overhead.";
+  const Dims trivialDims{{Dim::Workload, dim::Workload::TrivialOp}};
   if (trivial.perRunUs > 0.0)
-    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote);
+    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote, trivialDims);
   else
-    test.skip("trivial_op", trivial.status, trivial.error, trivialNote);
+    test.skip("trivial_op", trivial.status, trivial.error, trivialNote, trivialDims);
 
   const std::string mmNote =
       std::string("A 256-cubed matmul in ") +
       (mmDtype == ONNX_DT_FLOAT ? "fp32" : "fp16") +
       ", 34 million operations: what it adds over trivial_op is still mostly "
       "overhead on an accelerator.";
+  const Dims mmDims{{Dim::Workload, dim::Workload::SmallMatmul}};
   if (matmul.perRunUs > 0.0)
-    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str());
+    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str(), mmDims);
   else
-    test.skip("matmul_256", matmul.status, matmul.error, mmNote);
+    test.skip("matmul_256", matmul.status, matmul.error, mmNote, mmDims);
 
   const char *createNote =
       "Creating a session for the trivial graph; on providers that compile "
       "ahead of time, this runs a compiler.";
+  const Dims createDims{{Dim::Workload, dim::Workload::SessionCreate}};
   if (trivial.createUs > 0.0)
-    test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote);
+    test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote, createDims);
   else
-    test.skip("session_create", trivial.status, trivial.error, createNote);
+    test.skip("session_create", trivial.status, trivial.error, createNote, createDims);
 
   test.end();
   return 0;

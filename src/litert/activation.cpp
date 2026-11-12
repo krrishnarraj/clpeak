@@ -63,13 +63,14 @@ struct Variant
 {
   LitertActivation act;
   const char *label;
+  xpupeak::dim::Op op;   // the reading's `op`; its `working_set` is the size's
   const char *note;
 };
 
 const Variant kVariants[] = {
-    {LitertActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
-    {LitertActivation::Softmax, "softmax", "Softmax across each row"},
-    {LitertActivation::LayerNorm, "layernorm",
+    {LitertActivation::Silu, "silu", xpupeak::dim::Op::Silu, "SiLU, x times sigmoid(x)"},
+    {LitertActivation::Softmax, "softmax", xpupeak::dim::Op::Softmax, "Softmax across each row"},
+    {LitertActivation::LayerNorm, "layernorm", xpupeak::dim::Op::Layernorm,
      "Layer norm as seven .tflite operators (each row's mean and variance, then a rescale)"},
 };
 
@@ -160,6 +161,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note =
           std::string(v.note) + ", over " + std::to_string(sz.bytes >> 20) + " MB of activations.";
+      const Dims dims{{xpupeak::Dim::Op, v.op}, {xpupeak::Dim::WorkingSet, sz.bytes}};
       // The working set is sized in the bytes the accelerator streams, half
       // on every accelerator under this plan; `graphBytes` is what the model
       // holds, which is the same now that the GPU's constants are stored as
@@ -169,7 +171,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
 
       if (graphBytes * kCopiesAtPeak > maxTensorBytes())
       {
-        test.skip(metric, ResultStatus::Unsupported, "not enough memory for this working set", note);
+        test.skip(metric, ResultStatus::Unsupported, "not enough memory for this working set", note, dims);
         continue;
       }
 
@@ -185,14 +187,14 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       {
         test.skip(metric, ref.run.status,
                   "reference graph failed: " + (ref.run.error.empty() ? std::string("run failed") : ref.run.error),
-                  note);
+                  note, dims);
         continue;
       }
 
       Run full = measure(rt, dev, plan, rows, v.act, warmupCount, forceIters, specifiedIters);
       if (full.us <= 0.0)
       {
-        test.skip(metric, full.status, full.error.empty() ? "run failed" : full.error, note);
+        test.skip(metric, full.status, full.error.empty() ? "run failed" : full.error, note, dims);
         continue;
       }
       const double opUs = full.us - ref.run.us;
@@ -211,7 +213,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
                             std::to_string((long long)noiseUs) +
                             " us), so it cannot be resolved -- on an accelerator that fuses it "
                             "into the passes around it, it costs nothing",
-                  note);
+                  note, dims);
         continue;
       }
       // Read once, written once.
@@ -226,7 +228,7 @@ int LitertPeak::runActivation(const LitertRuntime &rt, const litert_device_info_
       if (bps > 2.0 * refStreamBps)
         row += "  Faster than the reference graph streams the tensor, so it was fused or "
                "stayed in cache: an arithmetic rate, not a memory one.";
-      test.emit(metric, (float)bps, row.c_str());
+      test.emit(metric, (float)bps, row.c_str(), dims);
     }
   }
 

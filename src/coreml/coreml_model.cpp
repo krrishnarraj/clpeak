@@ -807,6 +807,31 @@ const char *coremlWeightLabel(CoremlWeight w)
   return "?";
 }
 
+Dims coremlWeightDims(CoremlWeight w)
+{
+  using xpupeak::Dim;
+  using xpupeak::DType;
+  namespace dim = xpupeak::dim;
+  switch (w)
+  {
+  case CoremlWeight::Fp32: return {{Dim::Dtype, DType::Fp32}};
+  case CoremlWeight::Fp16: return {{Dim::Dtype, DType::Fp16}};
+  case CoremlWeight::Bf16: return {{Dim::Dtype, DType::Bf16}};
+  case CoremlWeight::Int8Channel:
+    return {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int8}, {Dim::Quant, dim::Quant::Channel}};
+  case CoremlWeight::Int4Block:
+    return {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int4}, {Dim::Quant, dim::Quant::Block}};
+  // Sixteen levels, so four bits a weight, as int4_weight's grid is: the two
+  // rows differ only in how a level is found, which `quant` says.
+  case CoremlWeight::Int4Lut:
+    return {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int4}, {Dim::Quant, dim::Quant::Lut}};
+  case CoremlWeight::Fp8Block:
+    return {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Fp8E4m3}, {Dim::Quant, dim::Quant::Block}};
+  case CoremlWeight::Int8Qdq: return {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}};
+  }
+  return {};
+}
+
 float coremlQdqActScale(float magnitude)
 {
   // Inputs are uniform in [-0.5, 0.5) * magnitude; map the edge onto 127.

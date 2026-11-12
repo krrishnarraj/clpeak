@@ -746,6 +746,38 @@ budgets.
   than those is unchecked.  Those lines reach the run log at LiteRT's
   severity, as any of its warnings do.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  LiteRT specifics:
+
+- **`litertFormatDims(format, plan)`** (`litert_model.cpp`, beside
+  `litertPlanFor()`) is every format's dims on one accelerator, for gemm,
+  conv, numeric error and the block.  The weight-only formats are
+  dynamic-range quantization, whose graph's activations are fp32:
+  `int8_weight` is `{dtype: fp32, weights: int8, quant: channel}`,
+  `int4_weight` `{fp32, int4, block}`, `fp8_weight` `{fp32, fp8_e4m3,
+  channel}`.  The full-integer ones are `quant: qdq` -- `int8_qdq` `{int8}`,
+  `int16x8` `{int16, weights: int8}` -- like the ONNX rows of that name.
+- **`acc` comes from the GPU's precision policy and nothing else.** Its fp16
+  policy computes in fp16 throughout, so the GPU's `fp16` rows are `{acc:
+  fp16}` (4690 ppm against `fp16_acc32`'s 388, on an M1 Pro and a Pixel 7a),
+  and `fp16_acc32` is `{acc: fp32}`.  XNNPACK's fp16 is left at the default
+  although it accumulates in fp16 on an M1 too (4690 ppm; 207 on a Zen 2):
+  the kernel chose it, nothing asked, and the numeric-error row shows it.
+- **gemm** adds `problem_size`, and `form` (`matmul` or `conv1x1`) where
+  the int8 layers' spelling was raced.  The GPU's other raced choices (its
+  8-bit kernels, its graph pipeline) stay in the description.
+- **conv**: the format's dims and `layer`.  **The block**: the format's
+  dims, `kv: int8` for `int8_kv`, `phase`, `context` and `form` --
+  `explicit`, or `sdpa` for `fp16_composite` (`pointDims`).
+- **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`,
+  transfer `direction`, dispatch `workload` (`matmul_256` is
+  `small_matmul`).
+- **`revision` is 2** for `litert_gemm` (the sixteen-layer chain),
+  `litert_conv` (the 3x3 at stride 2), and `litert_block_prefill` and
+  `litert_block_latency` (the prompt through a seed), all since 3.0.1; 1
+  elsewhere, with the reason beside each line.
+
 ## When You Change This Directory
 
 - A new format: a `LitertFormat` value, its plan in `litertPlanFor()` (with

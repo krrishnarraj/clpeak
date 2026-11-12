@@ -55,10 +55,14 @@ namespace
 
   // A row's description is "<Shape::note>, <DType::note>." and then a
   // sentence on where it peaked.
+  // Each carries its reading's dims beside its label: the data type, and the
+  // layer's shape.  xpupeak::DType is qualified, never used: this file's own
+  // DType is the table row.
   struct DType
   {
     int dtype;
     const char *label;
+    xpupeak::DType type;
     const char *note;
   };
 
@@ -68,6 +72,7 @@ namespace
     int64_t stride;
     bool depthwise;
     const char *label;
+    xpupeak::dim::Layer layer;
     const char *note;
   };
 
@@ -80,8 +85,8 @@ namespace
   // reason the symmetric int4 GEMM row does not exist.  MatMul gained
   // bfloat16 among its types at opset 14, which is why gemm keeps its row.
   const DType kDTypes[] = {
-      {ONNX_DT_FLOAT, "fp32", "full 32-bit precision"},
-      {ONNX_DT_FLOAT16, "fp16", "16-bit weights and arithmetic"},
+      {ONNX_DT_FLOAT, "fp32", xpupeak::DType::Fp32, "full 32-bit precision"},
+      {ONNX_DT_FLOAT16, "fp16", xpupeak::DType::Fp16, "16-bit weights and arithmetic"},
   };
 
   // The dense 3x3 runs at stride 2 because a FLOPS row has to count
@@ -98,9 +103,10 @@ namespace
   // either.  Core ML and LiteRT take these shapes, so the ladders divide row
   // for row.
   const Shape kShapes[] = {
-      {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
-      {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
-      {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
+      {3, 2, false, "conv3x3s2", xpupeak::dim::Layer::Conv3x3s2, "Stride-2 3x3"},
+      {1, 1, false, "conv1x1", xpupeak::dim::Layer::Conv1x1, "1x1 (a matmul per pixel)"},
+      {3, 1, true, "depthwise3x3", xpupeak::dim::Layer::Depthwise3x3,
+       "Depthwise 3x3 (each channel on its own)"},
   };
 
   // Deterministic fp values in [-0.5, 0.5), as in gemm.cpp's filler: small
@@ -273,13 +279,17 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
-       "2-D convolution rate on this provider at 256 channels -- a stride-2 "
-       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size "
-       "and reported at its best.  Set against the matmul rows, it shows how "
-       "well this provider handles convolution.",
-       TestShape::Heterogeneous, "convolution shape and data type"});
+  logger::TestSpec spec{
+      "onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
+      "2-D convolution rate on this provider at 256 channels -- a stride-2 "
+      "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size "
+      "and reported at its best.  Set against the matmul rows, it shows how "
+      "well this provider handles convolution.",
+      TestShape::Heterogeneous, "convolution shape and data type"};
+  // Revision 2 (3.0.1): the dense 3x3 runs at stride 2 (kShapes says why),
+  // where 3.0.0 ran it at stride 1 and counted multiplies Winograd skips.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   for (const DType &dt : kDTypes)
   {
@@ -290,6 +300,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
       const std::string row = std::string(dt.label) + "_" + v.label;
       const std::string desc = std::string(v.note) + ", " + dt.note + ".";
+      const Dims dims{{xpupeak::Dim::Dtype, dt.type}, {xpupeak::Dim::Layer, v.layer}};
 
       // Global probe fast-path: gemm's 64^3 matmul probe already tells us if
       // this dtype is emulated on this EP (QNN HTP fp32 33s).  Skip before
@@ -300,7 +311,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         if (it != probe.end() && !it->second.ok)
         {
           test.skip(row, onnxFailureStatus(it->second.reason), it->second.reason,
-                    desc);
+                    desc, dims);
           continue;
         }
       }
@@ -312,7 +323,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           !wrong.empty())
       {
         XPUPEAK_VLOG("onnx-conv[%s/%s]: %s\n", ep.providerKey.c_str(), row.c_str(), wrong.c_str());
-        test.skip(row, ResultStatus::Error, wrong, desc);
+        test.skip(row, ResultStatus::Error, wrong, desc, dims);
         continue;
       }
 
@@ -589,6 +600,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       if (best > 0.0)
       {
         logger::EmitOptions o;
+        o.dims = dims;
         const std::string side = std::to_string(bestSpatial);
         o.description = desc + "  Fastest at a " + side + "x" + side +
                         " feature map";
@@ -612,7 +624,7 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         test.skip(row, onnxFailureStatus(firstErr, errStatus),
                   firstErr.empty() ? "convolution unsupported" : firstErr,
-                  desc);
+                  desc, dims);
       }
     }
   }

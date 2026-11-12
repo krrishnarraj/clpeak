@@ -65,6 +65,7 @@ struct Shape
   int64_t stride;
   bool depthwise;
   const char *label;
+  xpupeak::dim::Layer layer;   // the reading's `layer`, beside its label
   const char *note;
 };
 
@@ -76,9 +77,9 @@ const Format kFormats[] = {
 };
 
 const Shape kShapes[] = {
-    {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
-    {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
-    {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
+    {3, 2, false, "conv3x3s2", xpupeak::dim::Layer::Conv3x3s2, "Stride-2 3x3"},
+    {1, 1, false, "conv1x1", xpupeak::dim::Layer::Conv1x1, "1x1 (a matmul per pixel)"},
+    {3, 1, true, "depthwise3x3", xpupeak::dim::Layer::Depthwise3x3, "Depthwise 3x3 (each channel on its own)"},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -117,13 +118,18 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"litert_conv", "LiteRT convolution peak", "flops", Category::Compute,
-       "2-D convolution rate on this accelerator at 256 channels -- a stride-2 "
-       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
-       "reported at its best.  Set against the matmul rows, it shows how well "
-       "this accelerator handles convolution.",
-       TestShape::Heterogeneous, "format and shape"});
+  logger::TestSpec testSpec{
+      "litert_conv", "LiteRT convolution peak", "flops", Category::Compute,
+      "2-D convolution rate on this accelerator at 256 channels -- a stride-2 "
+      "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
+      "reported at its best.  Set against the matmul rows, it shows how well "
+      "this accelerator handles convolution.",
+      TestShape::Heterogeneous, "format and shape"};
+  // Revision 2 (3.0.1): the dense 3x3 at stride 2, where 3.0.0 ran it at
+  // stride 1 and the GPU read 12.8 TFLOPS of Winograd on a 5.3 TFLOPS M1 Pro
+  // (src/onnx/conv.cpp, kShapes).
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   for (const Format &fmt : kFormats)
   {
@@ -163,6 +169,8 @@ int LitertPeak::runConv(const LitertRuntime &rt, const litert_device_info_t &dev
       const std::string row = std::string(fmt.label) + "_" + v.label;
       logger::EmitOptions o;
       o.description = std::string(v.note) + ", " + fmt.note + ".";
+      o.dims = litertFormatDims(fmt.f, plan);
+      o.dims.set({xpupeak::Dim::Layer, v.layer});
       if (plan.integerOps)
         o.unit = "ops";
       if (!plan.applies)

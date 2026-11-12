@@ -121,6 +121,7 @@ namespace
   {
     OnnxActivation act;
     const char *label;
+    xpupeak::dim::Op op; // the reading's `op`; its `working_set` is the size's
     const char *note; // "<note>, over <size> of activations."
     // The tensors of the input's size it computes, the scaled input among
     // them (onnxResidentActivationModel).
@@ -128,9 +129,9 @@ namespace
   };
 
   const Variant kVariants[] = {
-      {OnnxActivation::Silu, "silu", "SiLU, x times sigmoid(x)", 3},
-      {OnnxActivation::Softmax, "softmax", "Softmax across each row", 2},
-      {OnnxActivation::LayerNorm, "layernorm",
+      {OnnxActivation::Silu, "silu", xpupeak::dim::Op::Silu, "SiLU, x times sigmoid(x)", 3},
+      {OnnxActivation::Softmax, "softmax", xpupeak::dim::Op::Softmax, "Softmax across each row", 2},
+      {OnnxActivation::LayerNorm, "layernorm", xpupeak::dim::Op::Layernorm,
        "Layer norm (each row's mean and variance, then a rescale)", 2},
   };
 
@@ -488,17 +489,18 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       const std::string note = std::string(v.note) + ", over " +
                                std::to_string(bytes >> 20) +
                                " MB of activations." + widthNote;
+      const Dims dims{{xpupeak::Dim::Op, v.op}, {xpupeak::Dim::WorkingSet, bytes}};
 
       if (onnxHeldBytes(ep, bytes, (uint64_t)v.intermediates * bytes) >
           maxHeldBytes())
       {
         test.skip(metric, ResultStatus::Unsupported,
-                  "larger than this machine's memory budget allows", note);
+                  "larger than this machine's memory budget allows", note, dims);
         continue;
       }
       if (!ladder.ended.empty())
       {
-        test.skip(metric, ladder.endedStatus, ladder.ended, note);
+        test.skip(metric, ladder.endedStatus, ladder.ended, note, dims);
         continue;
       }
       // Before the reference, which this size would otherwise build for
@@ -509,14 +511,14 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         XPUPEAK_VLOG("onnx-activation[%s/%s]: %s not built: %s\n",
                      ep.providerKey.c_str(), v.label, sz.label,
                      pastCap.c_str());
-        test.skip(metric, ResultStatus::Unsupported, pastCap, note);
+        test.skip(metric, ResultStatus::Unsupported, pastCap, note, dims);
         continue;
       }
 
       const Reference &ref = referenceAt(si, rows);
       if (ref.run.us <= 0.0)
       {
-        test.skip(metric, ref.run.status, ref.reason, note);
+        test.skip(metric, ref.run.status, ref.reason, note, dims);
         continue;
       }
       Run full = measure(rt, ep, dtype, v.act, rows, warmupCount, forceIters,
@@ -526,7 +528,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       {
         const std::string error =
             full.error.empty() ? std::string("run failed") : full.error;
-        test.skip(metric, full.status, error, note);
+        test.skip(metric, full.status, error, note, dims);
         if (full.endsLadder)
         {
           ladder.ended =
@@ -559,7 +561,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                      full.us, floorUs, dispatchUs);
         test.skip(metric, ResultStatus::Error,
                   "too close to the reference graph it is measured against",
-                  note);
+                  note, dims);
         continue;
       }
 
@@ -570,7 +572,7 @@ int OnnxPeak::runActivation(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                    "floor %.0f us)\n",
                    ep.providerKey.c_str(), v.label,
                    sz.label, bps / 1.0e9, full.us, floorUs);
-      test.emit(metric, (float)bps, note.c_str());
+      test.emit(metric, (float)bps, note.c_str(), dims);
     }
   }
 

@@ -41,10 +41,14 @@ constexpr unsigned int kSizeBudgetUs = 2000000;
 // the GPU's depthwise row is fastest at.
 uint64_t maxRungBytes() { return xpupeak::memoryBudget(3ull << 30); }
 
+// Each carries its reading's dims beside its label: the data type, and the
+// layer's shape.  xpupeak::DType is qualified, never used: this file's own
+// DType is the table row.
 struct DType
 {
   int dtype;
   const char *label;
+  xpupeak::DType type;
   const char *note;
 };
 
@@ -54,20 +58,21 @@ struct Shape
   int64_t stride;
   bool depthwise;
   const char *label;
+  xpupeak::dim::Layer layer;
   const char *note;
 };
 
 // A row's description is its shape's note, then its type's: "Stride-2 3x3,
 // 16-bit weights and arithmetic."
 const DType kDTypes[] = {
-    {CML_FP16, "fp16", "16-bit weights and arithmetic."},
-    {CML_FP32, "fp32", "full 32-bit precision."},
+    {CML_FP16, "fp16", xpupeak::DType::Fp16, "16-bit weights and arithmetic."},
+    {CML_FP32, "fp32", xpupeak::DType::Fp32, "full 32-bit precision."},
 };
 
 const Shape kShapes[] = {
-    {3, 2, false, "conv3x3s2", "Stride-2 3x3"},
-    {1, 1, false, "conv1x1", "1x1 (a matmul per pixel)"},
-    {3, 1, true, "depthwise3x3", "Depthwise 3x3 (each channel on its own)"},
+    {3, 2, false, "conv3x3s2", xpupeak::dim::Layer::Conv3x3s2, "Stride-2 3x3"},
+    {1, 1, false, "conv1x1", xpupeak::dim::Layer::Conv1x1, "1x1 (a matmul per pixel)"},
+    {3, 1, true, "depthwise3x3", xpupeak::dim::Layer::Depthwise3x3, "Depthwise 3x3 (each channel on its own)"},
 };
 
 double convFlops(const Shape &v, int64_t spatial)
@@ -86,13 +91,17 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
-  auto test = currentDeviceScope->beginTest(
-      {"coreml_conv", "Core ML convolution peak", "flops", Category::Compute,
-       "2-D convolution rate on this compute unit at 256 channels -- a stride-2 "
-       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
-       "reported at its best.  Set against the matmul rows, it shows how well "
-       "this compute unit handles convolution.",
-       TestShape::Heterogeneous, "data type and shape"});
+  logger::TestSpec testSpec{
+      "coreml_conv", "Core ML convolution peak", "flops", Category::Compute,
+      "2-D convolution rate on this compute unit at 256 channels -- a stride-2 "
+      "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size and "
+      "reported at its best.  Set against the matmul rows, it shows how well "
+      "this compute unit handles convolution.",
+      TestShape::Heterogeneous, "data type and shape"};
+  // Revision 2 (3.0.1): the dense 3x3 at stride 2, where 3.0.0 ran it at
+  // stride 1 -- the GPU then read 6.0 TFLOPS against a 5.3 peak (above).
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   for (const DType &dt : kDTypes)
   {
@@ -112,6 +121,7 @@ int CoreMLPeak::runConv(const coreml_device_info_t &dev, benchmark_config_t &cfg
       const std::string row = std::string(dt.label) + "_" + v.label;
       logger::EmitOptions o;
       o.description = std::string(v.note) + ", " + dt.note;
+      o.dims = {{xpupeak::Dim::Dtype, dt.type}, {xpupeak::Dim::Layer, v.layer}};
       if (!wrongConv.empty())
       {
         XPUPEAK_VLOG("coreml-conv[%s/%s]: %s\n", dev.displayName.c_str(), row.c_str(), wrongConv.c_str());

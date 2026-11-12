@@ -169,18 +169,20 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
     if (rung >= kAlwaysMeasured && prevBps > 0.0 && !stillFalling)
       break;
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
+    // The rung's working set, as its label names it.
+    const Dims dims{{xpupeak::Dim::WorkingSet, bytes}};
     // The weights are held as any constant is (coremlHeldBytes); the
     // vector they multiply is nothing beside them.
     if (coremlHeldBytes(bytes, 0) > xpupeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
-        test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note);
+        test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note, dims);
       break;
     }
     Result r = measure(dev, spec, s.dim, warmupCount, forceIters, specifiedIters);
     if (r.us <= 0.0)
     {
-      test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error, s.note);
+      test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error, s.note, dims);
       // A small rung the planner keeps off this unit says nothing about the
       // larger ones -- Core ML sends the Neural Engine a 128 MB matrix-vector
       // product and keeps an 8 MB one on the CPU -- so the base rungs are
@@ -193,7 +195,7 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
     if (netUs <= 0.0)
     {
       test.skip(s.label, ResultStatus::Error,
-                "took no longer than the per-dispatch floor, so nothing measurable was streamed", s.note);
+                "took no longer than the per-dispatch floor, so nothing measurable was streamed", s.note, dims);
       break;
     }
     const double bps = (double)bytes / (netUs * 1.0e-6);
@@ -201,7 +203,7 @@ int CoreMLPeak::runTensorBandwidth(const coreml_device_info_t &dev, benchmark_co
                  s.label, bps / 1.0e9, netUs, floorUs);
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;
-    test.emit(s.label, (float)bps, s.note);
+    test.emit(s.label, (float)bps, s.note, dims);
   }
 
   test.end();

@@ -431,6 +431,38 @@ ANE), which is why `block.cpp` probes each variant at the first point it
 reports and lets a point the planner declined for its size stand as that
 point's row instead of settling the variant.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  Core ML specifics:
+
+- **`coremlWeightDims()`** (`coreml_model.cpp`, beside
+  `coremlWeightLabel()`) is every weight format's dims, so gemm, numeric
+  error and the block cannot drift apart: `int8_weight` is `{dtype: fp16,
+  weights: int8, quant: channel}`, `int4_weight` `{fp16, int4, block}`,
+  `int4_lut` `{fp16, int4, lut}` (sixteen levels, four bits a weight, so
+  the two int4 rows differ in `quant` alone), `fp8_weight` `{fp16,
+  fp8_e4m3, block}`, `int8_qdq` `{dtype: int8, quant: qdq}`.
+- **`acc` is never authored**: nothing here lets a unit accumulate in fp16
+  (`allowLowPrecisionAccumulationOnGPU` stays off), and the numeric-error row
+  shows what each did -- on an M1 Pro the GPU's and the Neural Engine's fp16
+  read about 210 ppm, an fp32 running sum, the CPU's about 3300.
+- **gemm** adds `problem_size`, the layer width it peaked at; the layout
+  race's winner stays in the description.
+- **conv**: `dtype` and `layer` beside each table row's label (the file's
+  own `DType` is the table row: qualify `xpupeak::DType`).
+- **The block**: the format's dims, `kv: int8` for `int8_kv`, `phase`,
+  `context` (the prompt's tokens or the cache's) and `form` -- `sdpa` where
+  the OS has the fused op and the row does not spell attention out,
+  `explicit` otherwise (`pointDims`).
+- **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`,
+  transfer `direction`, dispatch `workload` -- `model_create` for this
+  backend's creation row, and `small_matmul` with the `problem_size` the
+  planner first sent the unit.
+- **`revision` is 2** for `coreml_gemm` (the sixteen-layer chain),
+  `coreml_conv` (the 3x3 at stride 2), and `coreml_block_prefill` and
+  `coreml_block_latency` (the prompt through a seed), all since 3.0.1; 1
+  elsewhere, with the reason beside each line.
+
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `CMakeLists.txt`, a call in

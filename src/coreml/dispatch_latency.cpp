@@ -181,6 +181,16 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
        "still lose to the host on small work.",
        TestShape::Heterogeneous, "what is submitted"});
 
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+  const Dims trivialDims{{Dim::Workload, dim::Workload::TrivialOp}};
+  const Dims createDims{{Dim::Workload, dim::Workload::ModelCreate}};
+  // The smallest multiply the planner sends this unit: a size the row
+  // sweeps for, so it says which.
+  Dims mmDims{{Dim::Workload, dim::Workload::SmallMatmul}};
+  if (matmul.perRunUs > 0.0)
+    mmDims.set({Dim::ProblemSize, matmul.size});
+
   if (trivial.perRunUs > 0.0)
   {
     std::string note = "One elementwise multiply over " + mbOrValues(trivial.size) +
@@ -189,12 +199,12 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
       note += ", so nearly all of it is the cost of asking.";
     else
       note += "; it includes moving that data in and out.";
-    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), note.c_str());
+    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), note.c_str(), trivialDims);
   }
   else
     test.skip("trivial_op", trivial.status,
               "no elementwise model up to 8 MB was sent to this unit: " + trivial.error,
-              "One elementwise multiply, at the smallest size the planner sends this unit.");
+              "One elementwise multiply, at the smallest size the planner sends this unit.", trivialDims);
 
   if (matmul.perRunUs > 0.0)
   {
@@ -207,12 +217,12 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
       note += ", so it is still mostly overhead.";
     else
       note += "; beyond its arithmetic, the time is submission and the input copy.";
-    test.emit("small_matmul", (float)(matmul.perRunUs * 1e-6), note.c_str());
+    test.emit("small_matmul", (float)(matmul.perRunUs * 1e-6), note.c_str(), mmDims);
   }
   else
     test.skip("small_matmul", matmul.status,
               "no matrix multiply up to 1024-cube was sent to this unit: " + matmul.error,
-              "A small fp16 matmul, at the smallest size the planner sends this unit.");
+              "A small fp16 matmul, at the smallest size the planner sends this unit.", mmDims);
 
   const Timed &created = (trivial.perRunUs > 0.0 && trivial.createUs > 0.0) ? trivial : first;
   if (created.createUs > 0.0)
@@ -221,11 +231,11 @@ int CoreMLPeak::runDispatchLatency(const coreml_device_info_t &dev, benchmark_co
         "Compiling (" + std::to_string((long long)(created.compileUs / 1000.0)) + " ms) and loading (" +
         std::to_string((long long)(created.loadUs / 1000.0)) + " ms) the elementwise multiply over " +
         mbOrValues(created.size) + " values, uncached; loading is where the unit's own compiler runs.";
-    test.emit("model_create", (float)(created.createUs * 1e-6), note.c_str());
+    test.emit("model_create", (float)(created.createUs * 1e-6), note.c_str(), createDims);
   }
   else
     test.skip("model_create", created.status, created.error,
-              "Compiling and loading a trivial model for this compute unit.");
+              "Compiling and loading a trivial model for this compute unit.", createDims);
 
   test.end();
   return 0;

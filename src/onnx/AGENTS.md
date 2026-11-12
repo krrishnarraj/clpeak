@@ -2354,6 +2354,42 @@ on real hardware:
 When a graph works on one provider and not another, suspect the optional
 behaviour before the operator.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  ONNX specifics:
+
+- **`onnxgemm::Variant::dims`** (`gemm_setup.cpp`) is each GEMM row's
+  format: `dtype` (the activations'), `weights` where they are narrower,
+  and `quant` -- `qdq` for every row quantized in and out (int8, both
+  float8s, fp4), `block` for the weight-only rows (blocks of 32).  NVFP4 is
+  the dtype `nvfp4`: its block scales are the type's own.  `int8_qdq` and
+  `int8_qdq_conv1x1` are one measurement spelled two ways, `form: matmul`
+  and `form: conv1x1`.  A rate adds `problem_size`, the layer width it
+  peaked at.
+- **The numeric-error row of a label carries its GEMM row's dims**
+  (`gemmDims()` in `numeric_error.cpp`), so a reader pairs the two on
+  coordinates, not on the label.
+- **Dims say what the graph asks for, not what a provider made of it.** A
+  row run wider ("run in fp32 (no fp16 kernel)") keeps its format's dims and
+  says so in its description, and `acc` is never authored: a provider picks
+  its accumulator, and the numeric-error row shows which (about 200 ppm for
+  fp16 is an fp32 running sum, ten times that an fp16 one).
+- **conv**: `dtype` and `layer` beside each table row's label.  The file's
+  own `DType` is the table row, so `xpupeak::DType` is qualified there.
+- **The block**: each `Variant::dims`, plus `phase`, `context` (the
+  prompt's tokens or the cache's) and `form: explicit` -- attention is
+  MatMul, Softmax and MatMul in every row (`pointDims()`).  `int8_kv` is
+  `{dtype: fp16, kv: int8}`.
+- **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`
+  (the rung's weight bytes, whichever width streams them), transfer
+  `direction`, dispatch `workload` (`matmul_256` is `small_matmul`).
+- **`revision` is 2** for `onnx_gemm` (the sixteen-layer chain),
+  `onnx_conv` (the 3x3 at stride 2), and `onnx_block_prefill` and
+  `onnx_block_latency` (the prompt through a seed), all since 3.0.1; 1
+  elsewhere.  The rule is the GPU backends': 2 where a release after the
+  test first shipped changed its method in a way that moved its numbers.
+  The reason sits beside each line that sets it.
+
 ## When You Change This Directory
 
 - Adding a benchmark → new `.cpp` here, entry in `src/onnx/CMakeLists.txt`,

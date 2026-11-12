@@ -315,6 +315,9 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     }
 
     const std::string note = std::string(s.note) + widthNote;
+    // The rung's working set, named as its label is: the weight bytes,
+    // whichever width streams them.
+    const Dims dims{{xpupeak::Dim::WorkingSet, (uint64_t)s.dim * (uint64_t)s.dim * 2ull}};
     Result r = measure(rt, ep, s.dim, dtype, warmupCount, forceIters,
                        specifiedIters);
     if (r.us <= 0.0)
@@ -329,7 +332,7 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         break;
       }
       test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error,
-                note.c_str());
+                note, dims);
       continue;
     }
 
@@ -341,12 +344,12 @@ int OnnxPeak::runTensorBandwidth(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       // wearing a bandwidth label.
       test.skip(s.label, ResultStatus::Error,
                 "too small to measure against this provider's dispatch cost",
-                note.c_str());
+                note, dims);
       continue;
     }
     const double bytes = (double)s.dim * (double)s.dim * 2.0;
     const double bps  = bytes / (netUs * 1.0e-6);
-    test.emit(s.label, (float)bps, note.c_str());
+    test.emit(s.label, (float)bps, note.c_str(), dims);
 
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;

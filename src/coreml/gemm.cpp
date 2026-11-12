@@ -158,13 +158,17 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
   const int spec = coremlSpecVersion();
 
-  auto test = currentDeviceScope->beginTest(
-      {"coreml_gemm", "Core ML matmul peak", "flops", Category::Unknown,
-       "Matrix-multiply rate on this compute unit, one weight format per row: "
-       "sixteen chained square matmuls in one prediction, swept over layer width "
-       "and reported at its best in the faster of the two weight layouts.  A row "
-       "Core ML would move to another unit reports unsupported.",
-       TestShape::Heterogeneous, "weight format"});
+  logger::TestSpec testSpec{
+      "coreml_gemm", "Core ML matmul peak", "flops", Category::Unknown,
+      "Matrix-multiply rate on this compute unit, one weight format per row: "
+      "sixteen chained square matmuls in one prediction, swept over layer width "
+      "and reported at its best in the faster of the two weight layouts.  A row "
+      "Core ML would move to another unit reports unsupported.",
+      TestShape::Heterogeneous, "weight format"};
+  // Revision 2 (3.0.1): the sixteen-layer chain from a live seed, where
+  // 3.0.0 timed one multiply per prediction (the header says what moved).
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   for (const Variant &v : kVariants)
   {
@@ -177,6 +181,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
 
     logger::EmitOptions o;
     o.description = v.note;
+    o.dims = coremlWeightDims(v.w);
     if (isInt)
       o.unit = "ops";
 
@@ -530,6 +535,7 @@ int CoreMLPeak::runGemm(const coreml_device_info_t &dev, benchmark_config_t &cfg
                       layoutNote(bestTransposed, lanes[!bestTransposed].rungs,
                                  !wrongWhy[!bestTransposed].empty()) +
                       ln.offDeviceNote + ln.glueNote + ".";
+      o.dims.set({xpupeak::Dim::ProblemSize, bestDim});
       test.emit(label, (float)best, o);
     }
     else

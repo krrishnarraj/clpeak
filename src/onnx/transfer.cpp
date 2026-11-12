@@ -255,6 +255,12 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                    (long long)((lastElems * 2) >> 20));
   }
 
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+  const Dims h2dDims{{Dim::Direction, dim::Direction::H2d}};
+  const Dims rtDims{{Dim::Direction, dim::Direction::Roundtrip}};
+  const Dims d2hDims{{Dim::Direction, dim::Direction::D2h}};
+
   const std::string h2dNote =
       "Host to device: a tensor in, one row of it back.  Reported at the "
       "largest size" +
@@ -265,12 +271,12 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       "by pointer and no copy takes place";
 
   if (lastBps > 0.0 && transfers)
-    test.emit("h2d", (float)lastBps, h2dNote.c_str());
+    test.emit("h2d", (float)lastBps, h2dNote.c_str(), h2dDims);
   else if (lastBps > 0.0)
-    test.skip("h2d", ResultStatus::Unsupported, sharedNote, h2dNote);
+    test.skip("h2d", ResultStatus::Unsupported, sharedNote, h2dNote, h2dDims);
   else
     test.skip("h2d", errStatus, firstErr.empty() ? "unsupported" : firstErr,
-              h2dNote);
+              h2dNote, h2dDims);
 
   // ---- Round trip: one measurement, at the smallest rung.
   //
@@ -305,17 +311,17 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       XPUPEAK_VLOG("onnx-transfer[%s/roundtrip]: %lld MB -> %.1f GB/s\n",
                    ep.providerKey.c_str(),
                    (long long)((rtElems * 2) >> 20), bps);
-      test.emit("roundtrip", (float)bps, rtNote.c_str());
+      test.emit("roundtrip", (float)bps, rtNote.c_str(), rtDims);
     }
     else
     {
       test.skip("roundtrip", r.status,
-                r.error.empty() ? "run failed" : r.error, rtNote);
+                r.error.empty() ? "run failed" : r.error, rtNote, rtDims);
     }
   }
   else
   {
-    test.skip("roundtrip", ResultStatus::Error, "no usable size", rtNote);
+    test.skip("roundtrip", ResultStatus::Error, "no usable size", rtNote, rtDims);
   }
 
   // ---- Trip back, by difference ------------------------------------------
@@ -331,7 +337,7 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
 
   if (!transfers)
   {
-    test.skip("d2h", ResultStatus::Unsupported, sharedNote, d2hNote);
+    test.skip("d2h", ResultStatus::Unsupported, sharedNote, d2hNote, d2hDims);
   }
   else
   {
@@ -351,11 +357,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
       test.emit("d2h",
                 (float)((double)rtElems * 2.0 /
                         ((roundUs - computeUs) * 1.0e-6)),
-                d2hNote.c_str());
+                d2hNote.c_str(), d2hDims);
     else if (roundUs <= 0.0)
       test.skip("d2h", ResultStatus::Error,
                 "the round trip it is derived from could not be measured",
-                d2hNote);
+                d2hNote, d2hDims);
     else if (computeUs <= 0.0)
       // The graph that keeps the result on the device could not be run --
       // on the CoreML provider because Core ML costs the one-row gather at
@@ -365,11 +371,11 @@ int OnnxPeak::runTransferBandwidth(const OrtRuntime &rt,
                 "the graph that keeps its result on the device could not be measured, so "
                 "the return trip cannot be separated from the round trip: " +
                     (compute.error.empty() ? std::string("run failed") : compute.error),
-                d2hNote);
+                d2hNote, d2hDims);
     else
       test.skip("d2h", ResultStatus::Error,
                 "returning the result cost no more than keeping it on device",
-                d2hNote);
+                d2hNote, d2hDims);
   }
 
   test.end();

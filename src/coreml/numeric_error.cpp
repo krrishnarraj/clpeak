@@ -382,10 +382,12 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
     if (xpupeak::cancelRequested())
       break;
     const char *label = coremlWeightLabel(v.w);
+    // The gemm row's coordinates: the format this accuracy is the price of.
+    const Dims dims = coremlWeightDims(v.w);
     const AnswerCheck &c = answerCheck(dev, v.w);
     if (c.read < 0)
     {
-      test.skip(label, c.layout[0].status, c.layout[0].error, v.note);
+      test.skip(label, c.layout[0].status, c.layout[0].error, v.note, dims);
       continue;
     }
     const std::string note = std::string(v.note) + c.note;
@@ -402,15 +404,15 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
                     otherWrong ? std::string("and stored ") + coremlLayoutName(1 - c.read) +
                                      " it is wrong too, so its rate rows are withheld"
                                : std::string("so its rate rows are withheld")),
-                note);
+                note, dims);
       continue;
     }
     if (r.ppm < 0.0)
     {
-      test.skip(label, r.status, r.error, note);
+      test.skip(label, r.status, r.error, note, dims);
       continue;
     }
-    test.emit(label, (float)r.ppm, note.c_str());
+    test.emit(label, (float)r.ppm, note.c_str(), dims);
   }
 
   test.end();

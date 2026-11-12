@@ -41,6 +41,10 @@
 namespace
 {
 
+  using xpupeak::Dim;
+  using xpupeak::DType;
+  namespace dim = xpupeak::dim;
+
   // Fixed geometry: llama-style proportions (SwiGLU hidden = 2.6875x d_model,
   // 128-wide heads), sized so the weights -- 50.6M parameters, 101 MB at fp16
   // -- overflow every cache on every device while still compiling in seconds
@@ -141,6 +145,9 @@ namespace
   struct Variant
   {
     const char *label;
+    // The format in the vocabulary's words, onnx-gemm's for the same label;
+    // each reading adds its phase and context (pointDims).
+    Dims dims;
     int actDtype;     // arithmetic width: attention, softmax, residuals
     int wDtype;       // how the seven projection weights are stored
     int64_t wBlock;   // >0: blocked weight-only, one scale per this many
@@ -163,52 +170,77 @@ namespace
   // a measurement rather than a repetition -- and the rest
   // take the headline rung of each regime, which is the number anyone quotes.
   const Variant kVariants[] = {
-      {"fp16", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true, nullptr,
+      {"fp16", {{Dim::Dtype, DType::Fp16}},
+       ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true, nullptr,
        "16-bit weights and arithmetic, the reference row."},
 
-      {"int4_weight", ONNX_DT_FLOAT16, ONNX_DT_INT4, kWeightBlock, false,
+      {"int4_weight",
+       {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int4}, {Dim::Quant, dim::Quant::Block}},
+       ONNX_DT_FLOAT16, ONNX_DT_INT4, kWeightBlock, false,
        /*sweep=*/true, nullptr,
        "4-bit integer weights in blocks of 32 against 16-bit "
        "activations."},
 
-      {"fp4_weight", ONNX_DT_FLOAT16, ONNX_DT_FLOAT4E2M1, kWeightBlock, false,
+      {"fp4_weight",
+       {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Fp4E2m1}, {Dim::Quant, dim::Quant::Block}},
+       ONNX_DT_FLOAT16, ONNX_DT_FLOAT4E2M1, kWeightBlock, false,
        /*sweep=*/false, nullptr,
        "4-bit float weights in blocks of 32 against 16-bit "
        "activations."},
 
-      {"int8_weight", ONNX_DT_FLOAT16, ONNX_DT_INT8, kWeightBlock, false,
+      {"int8_weight",
+       {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int8}, {Dim::Quant, dim::Quant::Block}},
+       ONNX_DT_FLOAT16, ONNX_DT_INT8, kWeightBlock, false,
        /*sweep=*/false, nullptr,
        "8-bit integer weights in blocks of 32 against 16-bit "
        "activations."},
 
-      {"int8_qdq", ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
+      {"int8_qdq", {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}},
+       ONNX_DT_FLOAT16, ONNX_DT_INT8, 0, /*qdq=*/true,
        /*sweep=*/false, "ops",
        "Full-integer int8 in the projections: 8-bit activations and "
        "weights."},
 
       // A control: an fp16 row that fails to beat it is not running
       // half-precision hardware.
-      {"fp32", ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
+      {"fp32", {{Dim::Dtype, DType::Fp32}},
+       ONNX_DT_FLOAT, ONNX_DT_FLOAT, 0, false, /*sweep=*/false, nullptr,
        "Full 32-bit precision throughout the layer."},
 
       // A layer needs bf16 kernels for every operation in it, so a refusal
       // here beside a working gemm bf16 row is that gap.
-      {"bf16", ONNX_DT_BFLOAT16, ONNX_DT_BFLOAT16, 0, false, /*sweep=*/false,
+      {"bf16", {{Dim::Dtype, DType::Bf16}},
+       ONNX_DT_BFLOAT16, ONNX_DT_BFLOAT16, 0, false, /*sweep=*/false,
        nullptr,
        "bfloat16 weights and arithmetic throughout the layer."},
 
-      {"fp8_e4m3", ONNX_DT_FLOAT16, ONNX_DT_FLOAT8E4M3FN, 0, /*qdq=*/true,
+      {"fp8_e4m3", {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Quant, dim::Quant::Qdq}},
+       ONNX_DT_FLOAT16, ONNX_DT_FLOAT8E4M3FN, 0, /*qdq=*/true,
        /*sweep=*/false, nullptr,
        "fp8 e4m3 projections, quantized in and out."},
 
       // Sweeps context, the axis that decides how long a conversation fits;
       // counted only where the provider folds the cache's dequantize into
       // attention (validateVariant).
-      {"int8_kv", ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true,
+      {"int8_kv", {{Dim::Dtype, DType::Fp16}, {Dim::Kv, DType::Int8}},
+       ONNX_DT_FLOAT16, ONNX_DT_FLOAT16, 0, false, /*sweep=*/true,
        nullptr,
        "16-bit weights and arithmetic, the cache stored as 8-bit integers.",
        /*kvDtype=*/ONNX_DT_INT8, /*decodeOnly=*/true},
   };
+
+  // One reading's dims: its format's, its phase, and its context -- the
+  // prompt's tokens, or the cache's.  Attention is spelled out (MatMul,
+  // Softmax, MatMul) in every row: the opset this block is built at has no
+  // fused operator for it, where Core ML's block has one.
+  Dims pointDims(const Variant &v, dim::Phase phase, int64_t context)
+  {
+    Dims d = v.dims;
+    d.set({Dim::Phase, phase});
+    d.set({Dim::Context, context});
+    d.set({Dim::Form, "explicit"});
+    return d;
+  }
 
   // Why a variant cannot be sent to this provider at all, or empty.
   //
@@ -872,6 +904,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       logger::EmitOptions o;
       o.description = std::string(vv.note) + "  A " + std::to_string(sseq) +
                       "-token prompt" + prov + ".";
+      o.dims = pointDims(vv, dim::Phase::Prefill, sseq);
       if (vv.unit)
         o.unit = vv.unit;
       if (!vvr.usable)
@@ -1067,14 +1100,19 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "Prompt processing through one 2048-wide, 16-head decoder block "
       "(SwiGLU feed-forward, 50.6M parameters) at each precision a model "
       "ships in -- what sets time to the first token.";
-  const logger::TestSpec prefillFlopsSpec = {
+  // Revision 2 (3.0.1) for both prompt tests: a prompt longer than the seed
+  // enters through a 64-wide seed widened by one uncounted multiply, where
+  // 3.0.0 scaled the whole input.  Decode's one row never had a seed.
+  logger::TestSpec prefillFlopsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "flops",
       Category::Ai, prefillDescription,
       TestShape::Heterogeneous, "data type and prompt length"};
-  const logger::TestSpec prefillOpsSpec = {
+  prefillFlopsSpec.revision = 2;
+  logger::TestSpec prefillOpsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "ops",
       Category::Ai, prefillDescription,
       TestShape::Heterogeneous, "data type and prompt length"};
+  prefillOpsSpec.revision = 2;
   const logger::TestSpec decodeSpec = {
       "onnx_block_decode", "Transformer block, decode", "bps",
       Category::Ai,
@@ -1083,13 +1121,15 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "narrow-weight row far below fp16 means this provider unpacks the "
       "weights to full width first.",
       TestShape::Heterogeneous, "data type"};
-  const logger::TestSpec latencySpec = {
+  // Revision 2 (3.0.1): its prompt rows time the seeded prompt above.
+  logger::TestSpec latencySpec = {
       "onnx_block_latency", "Transformer block latency", "s",
       Category::Ai,
       "Time for one pass of the block at each precision; multiply by a "
       "model's layer count for a floor on time to first token and per-token "
       "time.  What the decode rows add as the context grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
+  latencySpec.revision = 2;
 
   // ---- Prefill: flops vs ops split, single header per unit, per-variant ----
   // Measures only the prompt ladder; decode/latency are measured in their
@@ -1269,6 +1309,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         desc += ", fp32 counted at the 2 bytes this provider holds it in";
       logger::EmitOptions o;
       o.description = desc + ".";
+      o.dims = pointDims(v, dim::Phase::Decode, kDecodeKv);
 
       // Prefill settled most variants already; validateVariant answers from
       // what it recorded and only probes the ones it has not seen -- the
@@ -1375,7 +1416,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string note = std::string(v.note) + "  One pass over a " +
                                  std::to_string(kPrefillSeq) + "-token prompt" +
                                  prefillProvenance(v, vr, kPrefillSeq) + ".";
-        if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); }
+        const Dims dims = pointDims(v, dim::Phase::Prefill, kPrefillSeq);
+        if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note, dims); }
         else
         {
           // The prompt test timed this pass or said why not -- too slow to
@@ -1403,9 +1445,9 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           }
           if (it != vr.prefill.end())
           {
-            if (it->second.us > 0.0) test.emit(metric, (float)(it->second.us * 1e-6), note.c_str());
-            else if (vr.usable) test.skip(metric, it->second.status, it->second.error, note);
-            else test.skip(metric, vr.skipStatus, vr.skipReason, note);
+            if (it->second.us > 0.0) test.emit(metric, (float)(it->second.us * 1e-6), note.c_str(), dims);
+            else if (vr.usable) test.skip(metric, it->second.status, it->second.error, note, dims);
+            else test.skip(metric, vr.skipStatus, vr.skipReason, note, dims);
           }
         }
       }
@@ -1415,7 +1457,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         const std::string note = std::string(v.note) + "  One token with " +
                                  std::to_string(kv) + " tokens of context" + prov + ".";
-        if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note); continue; }
+        const Dims dims = pointDims(v, dim::Phase::Decode, kv);
+        if (!vr.usable && !vr.skipReason.empty()) { test.skip(metric, vr.skipStatus, vr.skipReason, note, dims); continue; }
         // As for the prompt: a context the decode test answered keeps its
         // answer, and only the lengths it does not measure are timed here.
         auto it = vr.decode.find(kv);
@@ -1438,8 +1481,8 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
           }
         }
         if (it == vr.decode.end()) continue;
-        if (it->second.us > 0.0) test.emit(metric, (float)(it->second.us * 1e-6), note.c_str());
-        else { test.skip(metric, it->second.status, it->second.error.empty() ? "run failed" : it->second.error, note); break; }
+        if (it->second.us > 0.0) test.emit(metric, (float)(it->second.us * 1e-6), note.c_str(), dims);
+        else { test.skip(metric, it->second.status, it->second.error.empty() ? "run failed" : it->second.error, note, dims); break; }
       }
     }
     test.end();

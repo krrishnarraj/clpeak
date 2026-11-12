@@ -14,6 +14,8 @@
 // blob file, packaged as an .mlpackage directory (coreml_session.mm writes
 // that directory; this file only produces its two byte strings).
 
+#include <common/run_document.h>   // Dims
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -221,6 +223,14 @@ int coremlSpecForWeight(CoremlWeight w);
 // is also what coremltools does with its minimum deployment target.
 int coremlSpecNeeded(CoremlWeight w, bool fusedAttention = false);
 const char *coremlWeightLabel(CoremlWeight w);
+
+// The same format in the vocabulary's words, for a reading's dims
+// (docs/format-v4.md): the type the multiply runs in, the stored weights'
+// where they are narrower, and how those are scaled -- one scale per output
+// column, per block of 32, a lookup table, or quantize/dequantize pairs.
+// Every test that walks weight formats takes its readings' dims from here,
+// so a gemm row and its numeric-error row carry the same coordinates.
+Dims coremlWeightDims(CoremlWeight w);
 
 // Deterministic weight value at a position, in [-0.5, 0.5).  A hash of the
 // position rather than a running sequence, so a matrix can be visited twice

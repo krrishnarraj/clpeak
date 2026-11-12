@@ -554,6 +554,21 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     vr.decode[kv] = pt;
   };
 
+  // One reading's dims: its weight format's (coremlWeightDims), its cache's
+  // type where that is narrower, its phase and context -- the prompt's
+  // tokens, or the cache's -- and how attention is spelled: Core ML's fused
+  // op where this OS has one (shapeFor), matmul, softmax and matmul where it
+  // has not or the row asks for them.
+  auto pointDims = [&](const Variant &v, xpupeak::dim::Phase phase, int64_t context) {
+    Dims d = coremlWeightDims(v.w);
+    if (v.int8Kv)
+      d.set({xpupeak::Dim::Kv, xpupeak::DType::Int8});
+    d.set({xpupeak::Dim::Phase, phase});
+    d.set({xpupeak::Dim::Context, context});
+    d.set({xpupeak::Dim::Form, (spec >= 9 && !v.explicitAttention) ? "sdpa" : "explicit"});
+    return d;
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, const Variant &v, const VariantResult &vr)
   {
     for (int64_t seq : promptsFor(v))
@@ -562,6 +577,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       const std::string prompt = std::string(v.note) + "  A " + std::to_string(seq) + "-token prompt";
       logger::EmitOptions o;
       o.description = prompt + ".";
+      o.dims = pointDims(v, xpupeak::dim::Phase::Prefill, seq);
       if (v.unit)
         o.unit = v.unit;
       if (!vr.usable)
@@ -582,7 +598,11 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
     }
   };
 
-  const logger::TestSpec prefillSpec = {
+  // Revision 2 (3.0.1) for both prompt tests and the latency one, whose
+  // prompt rows they are: a prompt longer than the seed enters through a
+  // 64-wide seed widened by one uncounted multiply, where 3.0.0 scaled the
+  // whole input.  Decode's one row never had a seed.
+  logger::TestSpec prefillSpec = {
       "coreml_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
       std::string("Prompt processing through one 2048-wide, 16-head decoder block (SwiGLU "
                   "feed-forward, 50.6M parameters) at each precision a model ships in -- what "
@@ -590,21 +610,24 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
           (spec >= 9 ? "Attention is Core ML's fused op" : "Attention is explicit matmul, softmax and matmul") +
           ", and the compute plan confirms the block ran on this unit.",
       TestShape::Heterogeneous, "data type and prompt length"};
-  const logger::TestSpec prefillOpsSpec = {
+  prefillSpec.revision = 2;
+  logger::TestSpec prefillOpsSpec = {
       "coreml_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "data type and prompt length"};
+  prefillOpsSpec.revision = 2;
   const logger::TestSpec decodeSpec = {
       "coreml_block_decode", "Transformer block, decode", "bps", Category::Ai,
       "Weight-streaming rate of the same block generating one token at 2048 context, counting "
       "the bytes each format actually moves.  A narrow-weight row far below fp16 means this "
       "compute unit unpacks the weights to full width first.",
       TestShape::Heterogeneous, "data type"};
-  const logger::TestSpec latencySpec = {
+  logger::TestSpec latencySpec = {
       "coreml_block_latency", "Transformer block latency", "s", Category::Ai,
       "Time for one pass of the block at each precision; multiply by a model's layer count for a "
       "floor on time to first token and per-token time.  What the decode rows add as the context "
       "grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
+  latencySpec.revision = 2;
 
   // ---- Prefill, flops ------------------------------------------------------
   {
@@ -678,6 +701,7 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
                                 std::to_string((unsigned long long)(kvB >> 20)) + " MB of cache";
       logger::EmitOptions o;
       o.description = token + ".";
+      o.dims = pointDims(v, xpupeak::dim::Phase::Decode, kDecodeKv);
       if (!validateVariant(v, vr))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -710,16 +734,17 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
         const std::string pass =
             std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) + "-token prompt";
+        const Dims dims = pointDims(v, xpupeak::dim::Phase::Prefill, kPrefillSeq);
         if (!vr.usable)
-          test.skip(metric, vr.skipStatus, vr.skipReason, pass + ".");
+          test.skip(metric, vr.skipStatus, vr.skipReason, pass + ".", dims);
         else
         {
           measurePrefill(v, vr, kPrefillSeq);
           const Point &pt = vr.prefill[kPrefillSeq];
           if (pt.us > 0.0)
-            test.emit(metric, (float)(pt.us * 1e-6), (pass + layoutNote(pt, vr) + ".").c_str());
+            test.emit(metric, (float)(pt.us * 1e-6), (pass + layoutNote(pt, vr) + ".").c_str(), dims);
           else
-            test.skip(metric, pt.status, pt.error, pass + ".");
+            test.skip(metric, pt.status, pt.error, pass + ".", dims);
         }
       }
       for (int64_t kv : contextsFor(v))
@@ -729,18 +754,19 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
         const std::string token =
             std::string(v.note) + "  One token with " + std::to_string(kv) + " tokens of context";
+        const Dims dims = pointDims(v, xpupeak::dim::Phase::Decode, kv);
         if (!vr.usable)
         {
-          test.skip(metric, vr.skipStatus, vr.skipReason, token + ".");
+          test.skip(metric, vr.skipStatus, vr.skipReason, token + ".", dims);
           continue;
         }
         measureDecode(v, vr, kv);
         const Point &pt = vr.decode[kv];
         if (pt.us > 0.0)
-          test.emit(metric, (float)(pt.us * 1e-6), (token + layoutNote(pt, vr) + ".").c_str());
+          test.emit(metric, (float)(pt.us * 1e-6), (token + layoutNote(pt, vr) + ".").c_str(), dims);
         else
         {
-          test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, token + ".");
+          test.skip(metric, pt.status, pt.error.empty() ? "run failed" : pt.error, token + ".", dims);
           // A longer context is more work, so a point the unit could not
           // run ends the ladder -- but one the planner kept back for its
           // size says nothing about the next.
