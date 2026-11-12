@@ -22,6 +22,8 @@
 #include <windows.h>
 #endif
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 // Microarchitecture probes (Category::Latency): atomic-RMW cost and branch-
 // mispredict penalty.  Both report nanoseconds -- these are per-operation
 // costs, not throughput peaks, and they are the two numbers synchronization-
@@ -64,12 +66,17 @@ int CpuPeak::runAtomics(benchmark_config_t &cfg)
   const char *coNote = "Every core fighting over the same counter, which has to be "
                        "handed from core to core -- the time between completed "
                        "updates anywhere on the chip.";
-  if (ops1 > 0) test.emit("uncontended ST", (float)(1.0 / ops1), unNote);
-  else          test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote);
+  // One thread on one core, against every thread on one line.
+  const Dims unDims{{Dim::Scope, dim::Scope::Core}};
+  const Dims coDims{{Dim::Contention, dim::Contention::All}};
+  if (ops1 > 0) test.emit("uncontended ST", (float)(1.0 / ops1), unNote, unDims);
+  else          test.skip("uncontended ST", ResultStatus::Error, "workload failed", unNote,
+                          unDims);
   // The rate counts every thread's completions, so its inverse is the
   // system-wide time between completed updates.
-  if (opsN > 0) test.emit("contended MT", (float)(1.0 / opsN), coNote);
-  else          test.skip("contended MT", ResultStatus::Error, "workload failed", coNote);
+  if (opsN > 0) test.emit("contended MT", (float)(1.0 / opsN), coNote, coDims);
+  else          test.skip("contended MT", ResultStatus::Error, "workload failed", coNote,
+                          coDims);
   return 0;
 }
 
@@ -152,6 +159,7 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
                         // The third reading is the difference between the other
                         // two, so nothing here is a variant of anything else.
                         TestShape::Heterogeneous};
+  spec.dims = {{Dim::Scope, dim::Scope::Core}};
   auto test = currentDeviceScope->beginTest(spec);
 
   // Pinned single-thread, like the pointer-chase.
@@ -164,15 +172,17 @@ int CpuPeak::runBranchPenalty(benchmark_config_t &cfg)
   {
     test.emit("predicted", (float)(pred * 1e-9),       // s/branch, sorted input
               "Time per if-statement on sorted data, where the CPU guesses right "
-              "every time.");
+              "every time.", {{Dim::Pattern, dim::Pattern::Predictable}});
     test.emit("random", (float)(rnd * 1e-9),           // s/branch, 50/50 input
               "Time per if-statement on shuffled data, where the CPU is wrong "
               "about half the time.");
-    test.emit("penalty", (float)(std::max(pen, 0.0) * 1e-9), penNote);  // s per mispredict
+    test.emit("penalty", (float)(std::max(pen, 0.0) * 1e-9), penNote,   // s per mispredict
+              {{Dim::Op, dim::Op::Mispredict}});
   }
   else
   {
-    test.skip("penalty", ResultStatus::Error, "branch benchmark failed", penNote);
+    test.skip("penalty", ResultStatus::Error, "branch benchmark failed", penNote,
+              {{Dim::Op, dim::Op::Mispredict}});
   }
   return 0;
 }
@@ -261,6 +271,7 @@ int CpuPeak::runStoreForward(benchmark_config_t &cfg)
       "How fast the core can read back a value it just wrote, without the "
       "write having reached the cache yet.",
       TestShape::Homogeneous};
+  spec.dims = {{Dim::Scope, dim::Scope::Core}};
   auto test = currentDeviceScope->beginTest(spec);
 
   double ns = -1.0;
@@ -364,37 +375,52 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
                         "last, which leaves a core mostly idle for a second thread "
                         "to use.",
                         TestShape::Heterogeneous, "threads"};
+
+  // Widest non-streaming fp32 chain (skip the SSVE row: the SME unit is a
+  // shared per-cluster resource, which would measure the wrong thing here),
+  // and its one-accumulator twin from the same TU, paired by ISA label.
+  // Chosen before the test opens, which carries its ISA.
+  const auto &menu = xpupeak_cpu::kernelMenu();
+  const xpupeak_cpu::IsaVariant *chain = nullptr;
+  for (auto it = menu.fp32.vars.rbegin(); it != menu.fp32.vars.rend(); ++it)
+    if (it->isaDim != dim::Isa::Sme) { chain = &*it; break; }
+  const xpupeak_cpu::IsaVariant *lat = nullptr;
+  if (chain)
+    for (const auto &v : menu.fp32lat.vars)
+      if (std::string(v.isa) == chain->isa) lat = &v;
+
+  spec.dims = {{Dim::Dtype, DType::Fp32}};
+  if (chain)
+  {
+    spec.dims.set({Dim::Isa, chain->isaDim});
+    spec.dims.set({Dim::SimdBits, chain->simdBits});
+  }
   auto test = currentDeviceScope->beginTest(spec);
 
+  // Each reading names how many threads ran on a core, and the single-chain
+  // pair that it is latency-bound: a measure of its own, not a slower way to
+  // the same peak.
+  const Dims oneDims{{Dim::ThreadsPerCore, 1}};
   if (info.logicalCores <= info.physicalCores || info.physicalCores < 1)
   {
-    test.skip("1T/core", ResultStatus::Unsupported, "no SMT on this CPU");
+    test.skip("1T/core", ResultStatus::Unsupported, "no SMT on this CPU", "", oneDims);
     return 0;
   }
+  const Dims smtDims{{Dim::ThreadsPerCore, info.logicalCores / info.physicalCores}};
 
   std::vector<int> primaries = primaryCpusPerCore(info.logicalCores);
   if ((int)primaries.size() != info.physicalCores)
   {
     test.skip("1T/core", ResultStatus::Unsupported,
-              "SMT sibling topology unavailable (needs Linux sysfs / Windows GLPI + hard affinity)");
+              "SMT sibling topology unavailable (needs Linux sysfs / Windows GLPI + hard affinity)",
+              "", oneDims);
     return 0;
   }
-
-  // Widest non-streaming fp32 chain (skip the SSVE row: the SME unit is a
-  // shared per-cluster resource, which would measure the wrong thing here),
-  // and its one-accumulator twin from the same TU, paired by ISA label.
-  const auto &menu = xpupeak_cpu::kernelMenu();
-  const xpupeak_cpu::IsaVariant *chain = nullptr;
-  for (auto it = menu.fp32.vars.rbegin(); it != menu.fp32.vars.rend(); ++it)
-    if (std::string(it->isa).rfind("SSVE", 0) != 0) { chain = &*it; break; }
   if (!chain)
   {
-    test.skip("1T/core", ResultStatus::Error, "no fp32 kernel available");
+    test.skip("1T/core", ResultStatus::Error, "no fp32 kernel available", "", oneDims);
     return 0;
   }
-  const xpupeak_cpu::IsaVariant *lat = nullptr;
-  for (const auto &v : menu.fp32lat.vars)
-    if (std::string(v.isa) == chain->isa) lat = &v;
 
   const int nPhys = info.physicalCores;
   const int nAll  = pool->maxThreads();
@@ -425,10 +451,13 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
   (void)keep;
 
   auto emitRow = [&](const char *id, const xpupeak_cpu::ChainVariant &v,
-                     double ips, const char *note) {
-    if (ips > 0) test.emit(id, (float)(v.opsPerIter * ips), note);
-    else         test.skip(id, ResultStatus::Error, "workload failed", note);
+                     double ips, const char *note, const Dims &dims) {
+    if (ips > 0) test.emit(id, (float)(v.opsPerIter * ips), note, dims);
+    else         test.skip(id, ResultStatus::Error, "workload failed", note, dims);
   };
+  Dims oneLat = oneDims, smtLat = smtDims;
+  oneLat.set({Dim::Bound, dim::Bound::Latency});
+  smtLat.set({Dim::Bound, dim::Bound::Latency});
   const char *physNote = "One thread per physical core, with the extra hardware "
                          "threads left idle.  Each thread keeps enough independent "
                          "calculations in flight to fill its core on its own.";
@@ -443,19 +472,19 @@ int CpuPeak::runSmtScaling(benchmark_config_t &cfg)
                             "second thread on each core fills the idle time the "
                             "first leaves, which is the case SMT is built for: "
                             "expect close to twice the one-thread-per-core chain.";
-  emitRow("1T/core", chain->v, ipsPhys, physNote);
-  emitRow("SMT MT",  chain->v, ipsAll,  smtNote);
+  emitRow("1T/core", chain->v, ipsPhys, physNote, oneDims);
+  emitRow("SMT MT",  chain->v, ipsAll,  smtNote, smtDims);
   if (lat)
   {
-    emitRow("1T/core 1 chain", lat->v, ipsPhysLat, physLatNote);
-    emitRow("SMT MT 1 chain",  lat->v, ipsAllLat,  smtLatNote);
+    emitRow("1T/core 1 chain", lat->v, ipsPhysLat, physLatNote, oneLat);
+    emitRow("SMT MT 1 chain",  lat->v, ipsAllLat,  smtLatNote, smtLat);
   }
   else
   {
     test.skip("1T/core 1 chain", ResultStatus::Error,
-              "no single-chain fp32 kernel for this ISA", physLatNote);
+              "no single-chain fp32 kernel for this ISA", physLatNote, oneLat);
     test.skip("SMT MT 1 chain", ResultStatus::Error,
-              "no single-chain fp32 kernel for this ISA", smtLatNote);
+              "no single-chain fp32 kernel for this ISA", smtLatNote, smtLat);
   }
   return 0;
 }

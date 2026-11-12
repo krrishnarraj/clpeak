@@ -15,6 +15,7 @@ local memory, DRAM ↔ global memory.
 
 - Main class / orchestrator / `runAll()` / `runWorkload()`? → `cpu_peak.cpp`
 - CPU detection (name, cores, cache sizes, ISA flags), which core is fastest? → `cpu_device.cpp`
+- The processor's facts in the file (clusters, caches, CPUID / MIDR, features, engines)? → `cpu_device.cpp` (`info.facts`), see *Dims and facts* below
 - A cache size the OS lists a level without? → measured by `cache_probe.cpp` (`probeCacheSizes`, run by `runAll()` once the pool is pinned)
 - Pinned barrier thread pool? → `thread_pool.cpp`
 - SIMD abstraction (per-ISA vector wrappers, `NACC`, unroll macros)? → `cpu_simd.h`
@@ -37,11 +38,11 @@ local memory, DRAM ↔ global memory.
 | File | Purpose |
 |------|---------|
 | `cpu_peak.cpp` | `CpuPeak`: ctor, `applyOptions`, `runAll` (category-ordered dispatch, device header), `runWorkload` (ST: warmup → probe → `pickIters` timed batch; MT: warmup → deadline settle that doubles as the probe → work claimed from a shared counter, timed until it runs dry; returns a rate), `enumerate` |
-| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates |
+| `cpu_device.cpp` | `detectCpuInfo()` — brand/vendor (CPUID / sysctl / `/proc/cpuinfo`, MIDR_EL1 decode on brand-string-less ARM hosts), core counts incl. P/E split, ISA flags from the `cpu_dispatch.cpp` probe, and the per-CPU topology: `info.cores` ranked fastest first (Linux `cpu_capacity` then `cpuinfo_max_freq`, Windows `EfficiencyClass`), each CPU's own cache instances (sysfs per CPU, the device tree where sysfs has no size, Windows GLPI masks, Apple perf levels), the ST core's per-instance sizes and clock, and every instance for the aggregates. Also the processor's facts (`info.facts`, *Dims and facts*), and the `--verbose` topology lines they were drawn from (`info.topologyLines`) |
 | `cache_probe.cpp` | `probeCacheSizes()` — the sizes of cache levels the OS lists without one, from where a dependent-load walk slows down (two walks, the faster kept; timed against a 4 KB walk for the clock), one core of each rank, matched in order to the listed levels, a private L2 checked against a neighbour streaming beside it; `cache_probe.h` has the walker and the step finder on their own |
 | `thread_pool.cpp` | `CpuThreadPool`: persistent workers parked on a CV, `run(n, body)` barrier dispatch, pinning worker i to the i-th id it is given (the main pool: `info.cores`, fastest first), re-applied at every job |
 | `cpu_simd.h` | Per-ISA `f32v`/`f64v`/`i32v` wrappers (AVX-512 / AVX2+FMA / AVX / SSE2 / NEON / scalar), selected by the *build flags of the TU they compile in*, plus the per-ISA accumulator counts (`*_NACC`) and `CPU_UNROLL_*` |
-| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run). A `ChainVariant` can carry other spellings of its work (`alts`), which `emitCompute()` races |
+| `cpu_kernels.h` | Dispatch API: `CpuFeatures`, `CpuKernelTable`, `cpuFeatures()`, `isaName()`, `kernels()` (widest variant per kernel — bandwidth only) and `kernelMenu()` (**every** supported ISA variant + its canonical label — the compute tests — one `MenuSlot` per kernel, which also lists the `MissingKernel`s whose feature the CPU has but this binary cannot run). A `ChainVariant` can carry other spellings of its work (`alts`), which `emitCompute()` races. An `IsaVariant` carries its label's dims beside it (`isaDim`, `simdBits`) |
 | `cpu_kernels_impl.h` | Per-TU aggregator: includes the `kernels/` sub-headers and emits this TU's `tuTable()` from whatever its build flags enabled |
 | `kernels/base_compute.h` | fp32 / fp64 / int32 FMA chains (plus `fp32lat`, the one-accumulator fp32 chain only the SMT test runs), fp divide/sqrt, the scalar u64 integer divide, and the streaming read + vector write/copy kernels. Present in every TU |
 | `kernels/crypto_compute.h` | AES-128, SHA-256, SHA-512, CRC32-C. `opsPerIter` counts BYTES so `emitCompute()` lands in GB/s. SHA-512 is ARM-only: x86 SHA512 is *detected* but has no kernel, so that row is Unsupported there |
@@ -52,8 +53,8 @@ local memory, DRAM ↔ global memory.
 | `kernels/sme_compute.h` | SME ZA outer products (fp32/fp64/bf16/fp16/int8) + streaming-SVE vector chains. Gated on `__ARM_FEATURE_SME`; owns the one `#include <arm_sme.h>` |
 | `cpu_tu_registry.h` | `XPUPEAK_TU_REGISTRY(X)` X-macro: the single list of feature-TU tags, driving the accessor declarations in `cpu_dispatch.cpp` |
 | `cpu_kernels_tu.cpp` | Thin TU (`#include cpu_kernels_impl.h` + export `xpupeak_table_<tag>()`), compiled once per ISA by `CMakeLists.txt` |
-| `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels, reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
-| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or XpuPeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not |
+| `cpu_dispatch.cpp` | Runtime feature probe (x86 CPUID+XGETBV / ARM HWCAP / Apple sysctl / Windows-ARM64 registry), the `kernels()` merge, and `kernelMenu()` with its canonical per-slot ISA labels -- each push names its ISA as an `IsaTag`, label plus `isa` and `simd_bits` -- reaching each TU through `TU(tag)` (an empty table when CMake didn't build it) |
+| `compute_common.h` | `emitCompute()` — runs a chain `ST` and `MT`, emits both, racing a variant's spellings in each reading when it has several and naming the winner in the note; `emitVariants()` — every ISA variant of one `kernelMenu()` slot as its own test, told apart by `variant`; `emitFamily()` — several slots as one test per ISA; `unsupportedReason()` — a skip blames the CPU only when the CPU lacks the feature, else names the build, OS or XpuPeak gap. The `ST`/`MT` reading notes are authored ONCE here — never repeat them at a call site. `emitVariants` also sets the shape (homogeneous: the MT reading is the chip's real peak for that kernel), so call sites do not. The runners author the dims every compute test shares: the ISA's on each test (`setIsaDims`), `scope: core` on each ST reading, `form` on a race's winner; a family row adds its own (`FamilyRow::dims`), and `withDims()` puts a test's on its spec |
 | `compute_float.cpp` | `runComputeSP/DP/HP/BF16/MP/FP8DP/DivSqrt` (fp8 dot is arm64-only) |
 | `compute_int.cpp` | `runComputeInt32`/`Int8DP`/`Int16DP` (int16 is x86-only) + `runComputeIntDiv` (scalar u64, single un-suffixed test) |
 | `crypto.cpp` | `runCryptoAes/Sha256/Sha512/Crc32c` — `Category::Crypto` in GB/s, own `--crypto` flag |
@@ -157,6 +158,56 @@ TU tags (`cpu_tu_registry.h`):
    **not** `#if`-guarded. The predicate has to run in every build, so a build
    whose compiler could not make the TU names the feature in the skip instead
    of reporting that the CPU lacks it.
+
+## Dims and facts (format v4)
+
+Every reading says what it measured in the vocabulary's words
+(`include/common/AGENTS.md` § `dims`), and the device carries the processor's
+spec. All of it is authored where it is measured:
+
+- **ISA dims** are authored with the label, at the `kernelMenu()` push
+  (`IsaTag`). `isa` is the instruction set the kernel is written in, never the
+  CPU's features: AVX-VNNI is an `avx2` kernel, AES-NI an `sse2` one, SSVE an
+  `sme` one, and the "SVE2" label runs the `+sve` TU's `sve` kernel.
+  `simd_bits` is the registers it works on: 128/256/512, the SVE or streaming
+  vector length, a tile row for AMX (512) as for SME (its SVL), and a general
+  register for the scalar floor, the u64 divide and CRC32.
+- **`scope: core`** is on every single-thread reading: `emitCompute()` adds it
+  to ST rows, and the latency tests, which run on one thread only, carry it on
+  the `TestSpec`. All-thread readings keep the default.
+- **Each test's own dims** go on its `TestSpec`, its `emit()`/`skip()` calls or
+  the table its loop walks (`FamilyRow::dims`, the `Level` tables): a data type
+  on every compute test (multi-type families need it; the rest carry it
+  anyway), `acc: fp32` on the bf16 dot (its family accumulates in bf16), `op`
+  on divide/sqrt and the bandwidth rows, `level`, `pattern` and `in_flight` on
+  the memory rows, `contention` on atomics, `threads_per_core` and `bound` on
+  SMT scaling, `impl` and `problem_size` on Accelerate and BNNS. A skip carries
+  the dims of the reading that is missing.
+- **Families**: every test opens under its own `admit()`, so the logger stamps
+  its family -- `bfloat16_fma_compute` under `ComputeBF16`,
+  `l1_write_bandwidth` under `CacheBandwidth`, the integer dot product's int8
+  and int16 rows each under their own.
+
+**The facts** (`cpu_device_info_t::facts`, the device's `facts.cpu`, with
+`identity.host`): the OS's and CPUID's word only, built in `detectCpuInfo()`
+before `probeCacheSizes()` runs, so a measured size never reaches them.
+
+- A cluster is one kind of core. Linux and Windows draw them from every online
+  CPU (`buildClusters()`): on Arm a kind is a MIDR plus the OS's capacity and
+  clock (a faster bin of one core is a cluster of its own), on x86 the PMU
+  that claims the CPU (Intel's P/E), and on Windows the efficiency class; the
+  caches each CPU reads tell the rest apart. Apple gives its performance
+  levels already grouped. Kinds go by rank: `performance` down to
+  `efficiency`, `prime` above on Arm, `low_power` below on x86.
+- A cache instance is its cluster's own unless more than one kind of core, or
+  every CPU, reads it; then it is the processor's.
+- `features` come from the dispatch probe, in the vocabulary's order
+  (`xpupeak::CpuFeature`); engines are Intel's AMX (per core, instructions),
+  SME (per cluster, instructions) and Apple's AMX (per cluster, library). x86
+  gets no `microarch`: its CPUID family, model and stepping are stored as they
+  are, and naming them is a reader's table.
+- `--verbose` logs the topology each was drawn from (`[cpu] topology:` lines:
+  per CPU, or per performance level), then the clusters drawn.
 
 ## Gotchas
 
@@ -358,3 +409,8 @@ rows — if it returns, frame it as GHASH GB/s or Gops.
   and document it under `cpu_device_info_t`.
 - If you validate a codegen-only path on real silicon → move it out of the
   Validation status table.
+- If you add a menu push → give it an `IsaTag` (label, `isa`, width); a test
+  or a reading → author its dims, and `scope: core` where one thread ran it.
+- If the probe gains a feature bit → append its word to `xpupeak::CpuFeature`
+  (`include/common/vocabulary.h`, `src/common/vocabulary.cpp` and the spec's
+  table, in a commit of its own) and to `commonFacts()`'s list.

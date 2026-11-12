@@ -10,7 +10,31 @@
 
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
+
+// Every file that drives these runners authors dims (include/common/AGENTS.md).
+using xpupeak::Dim;
+using xpupeak::DType;
+namespace dim = xpupeak::dim;
+
+// A test's spec with the dims every one of its readings shares: a vector
+// test's data type, a family's operation.  The runners below add the ISA
+// (emitVariants, emitFamily) and the thread scope (emitCompute) themselves.
+[[maybe_unused]] static logger::TestSpec withDims(logger::TestSpec spec, Dims dims)
+{
+  spec.dims = std::move(dims);
+  return spec;
+}
+
+// The ISA dims of a test that runs `iv`: the instruction set its kernel is
+// written in and the register width it runs at, as kernelMenu() authored
+// them beside the label that becomes the test's variant.
+[[maybe_unused]] static void setIsaDims(Dims &dims, const xpupeak_cpu::IsaVariant &iv)
+{
+  dims.set({Dim::Isa, iv.isaDim});
+  dims.set({Dim::SimdBits, iv.simdBits});
+}
 
 // Run one compute variant single-threaded (1T, on the fastest core) and across
 // all logical cores (NT), emitting both metrics.  `v.fn(iters)` performs
@@ -24,13 +48,17 @@
 // reading: every form runs for a quarter of the budget, and the fastest -- the
 // earlier on a tie (kFormRaceTie) -- is timed again over the whole of it, so
 // the reading is one measurement rather than the best of several noisy ones.
-// Its note names the form; --verbose logs every form's rate.
+// Its note names the form, and so does the reading's `form` dim; --verbose
+// logs every form's rate.  `dims` are the two readings' own (a family row's
+// data type or operation); the ST reading adds `scope: core` -- one thread on
+// one core -- while MT keeps the default, the whole processor.
 [[maybe_unused]] static void emitCompute(CpuPeak &peak, logger::TestScope &test,
                                          const std::string &label,
                                          const xpupeak_cpu::ChainVariant &v,
                                          benchmark_config_t &cfg,
                                          const char *description = nullptr,
-                                         const char *unit = nullptr)
+                                         const char *unit = nullptr,
+                                         const Dims &dims = {})
 {
   const int maxT = peak.pool->maxThreads();
   std::vector<double> sink((size_t)maxT, 0.0);
@@ -97,27 +125,30 @@
 
   // A race names its winner inside the thread note, so the reading keeps to
   // two sentences.
-  auto opts = [&](const char *threadNote, const Reading &r) {
+  auto opts = [&](const char *threadNote, const Reading &r, bool singleThread) {
     logger::EmitOptions o;
     std::string note = threadNote;
+    o.dims = dims;
+    if (singleThread) o.dims.set({Dim::Scope, dim::Scope::Core});
     if (forms.size() > 1)
     {
       note.pop_back();   // the full stop
       note += " (fastest of " + std::to_string(forms.size()) + " spellings: " +
               r.form->form + ").";
+      o.dims.set({Dim::Form, r.form->form});
     }
     o.description = description ? std::string(description) + "  " + note : note;
     if (unit) o.unit = unit;
     return o;
   };
 
-  if (st.rate > 0.0) test.emit(label + " ST", (float)st.rate, opts(stNote, st));
+  if (st.rate > 0.0) test.emit(label + " ST", (float)st.rate, opts(stNote, st, true));
   else               test.skip(label + " ST", ResultStatus::Error, "workload failed",
-                               opts(stNote, st));
+                               opts(stNote, st, true));
 
-  if (mt.rate > 0.0) test.emit(label + " MT", (float)mt.rate, opts(mtNote, mt));
+  if (mt.rate > 0.0) test.emit(label + " MT", (float)mt.rate, opts(mtNote, mt, false));
   else               test.skip(label + " MT", ResultStatus::Error, "workload failed",
-                               opts(mtNote, mt));
+                               opts(mtNote, mt, false));
 }
 
 // Why `slot` has no variant on this host.  `cpuLacks` is the call site's
@@ -198,6 +229,8 @@
 
   if (slot.vars.empty())
   {
+    // No ISA ran, so the test carries only the spec's dims (the data type
+    // the missing reading would have had).
     auto test = peak.currentDeviceScope->beginTest(spec);
     // No thread-count suffix: there is no ST/MT pair to distinguish when the
     // kernel does not exist on this host at all.
@@ -207,6 +240,8 @@
   for (const auto &iv : slot.vars)
   {
     spec.variant = iv.isa;
+    spec.dims = base.dims;
+    setIsaDims(spec.dims, iv);
     auto test = peak.currentDeviceScope->beginTest(spec);
     emitCompute(peak, test, metric, iv.v, cfg);
   }
@@ -219,6 +254,10 @@ struct FamilyRow {
   const char *unsupReason;   // shown when the CPU lacks every variant of it
   const xpupeak_cpu::MenuSlot *slot;
   const char *unit = nullptr;  // nullptr = the test's unit
+  // What the row measures, in dims: every family that shares a test holds
+  // several data types or operations, so each row names its own -- on its
+  // skips too, which say which measurement is missing.
+  Dims dims{};
 };
 
 // Run a family of related kernels as ONE test per ISA, instead of one test per
@@ -257,6 +296,7 @@ struct FamilyRow {
     logger::EmitOptions o;
     if (r.description) o.description = r.description;
     if (r.unit) o.unit = r.unit;
+    o.dims = r.dims;
     return o;
   };
 
@@ -273,15 +313,17 @@ struct FamilyRow {
   };
 
   // Ordered union of the ISAs any row supports, first-seen order (the menus
-  // are built baseline-first, so this stays low-ISA to high-ISA).
-  std::vector<const char *> isas;
+  // are built baseline-first, so this stays low-ISA to high-ISA).  Each is
+  // kept as the first variant seen under its label, which carries the
+  // label's dims.
+  std::vector<const xpupeak_cpu::IsaVariant *> isas;
   for (const FamilyRow &r : rows)
     for (const auto &iv : r.slot->vars)
     {
       bool known = false;
-      for (const char *seen : isas)
-        if (std::string(seen) == iv.isa) { known = true; break; }
-      if (!known) isas.push_back(iv.isa);
+      for (const xpupeak_cpu::IsaVariant *seen : isas)
+        if (std::string(seen->isa) == iv.isa) { known = true; break; }
+      if (!known) isas.push_back(&iv);
     }
 
   // Nothing on this host runs any of it: one test, one skip per row, each
@@ -295,9 +337,12 @@ struct FamilyRow {
     return;
   }
 
-  for (const char *isa : isas)
+  for (const xpupeak_cpu::IsaVariant *first : isas)
   {
+    const char *isa = first->isa;
     spec.variant = isa;
+    spec.dims = base.dims;
+    setIsaDims(spec.dims, *first);
     auto test = peak.currentDeviceScope->beginTest(spec);
     for (const FamilyRow &r : rows)
     {
@@ -311,7 +356,7 @@ struct FamilyRow {
         continue;
       }
       emitCompute(peak, test, r.metric, match->v, cfg,
-                  r.description, r.unit);
+                  r.description, r.unit, r.dims);
     }
   }
 }
