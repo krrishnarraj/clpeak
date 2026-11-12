@@ -32,6 +32,8 @@ typedef _SetOnScreenNative = Void Function(Int32 onScreen);
 typedef _SetOnScreen = void Function(int onScreen);
 typedef _SetPausedNative = Void Function(Int32 paused);
 typedef _SetPaused = void Function(int paused);
+typedef _SetHostFactsNative = Void Function(Pointer<Utf8> json);
+typedef _SetHostFacts = void Function(Pointer<Utf8> json);
 typedef _SetOnnxLibNative = Void Function(Pointer<Utf8> path);
 typedef _SetOnnxLib = void Function(Pointer<Utf8> path);
 typedef _SetOnnxEpLibsNative = Void Function(Pointer<Utf8> spec);
@@ -45,7 +47,7 @@ typedef _SetLitertStageNative = Void Function(Pointer<Utf8> dir);
 typedef _SetLitertStage = void Function(Pointer<Utf8> dir);
 typedef _LitertStatusNative = Pointer<Utf8> Function();
 
-/// Thin, manual dart:ffi bindings over the 14 xpupeak_* symbols.
+/// Thin, manual dart:ffi bindings over the 15 xpupeak_* symbols.
 class XpuPeakBindings {
   XpuPeakBindings._(DynamicLibrary lib)
       : _version = lib.lookupFunction<_VersionNative, _VersionNative>(
@@ -63,6 +65,8 @@ class XpuPeakBindings {
             'xpupeak_set_on_screen'),
         _setPaused = lib.lookupFunction<_SetPausedNative, _SetPaused>(
             'xpupeak_set_paused'),
+        _setHostFacts = lib.lookupFunction<_SetHostFactsNative, _SetHostFacts>(
+            'xpupeak_set_host_facts'),
         _setOnnxLibrary = lib.lookupFunction<_SetOnnxLibNative, _SetOnnxLib>(
             'xpupeak_set_onnx_library'),
         _setOnnxEpLibraries =
@@ -91,6 +95,7 @@ class XpuPeakBindings {
   final XpuPeakRequestCancel requestCancel;
   final _SetOnScreen _setOnScreen;
   final _SetPaused _setPaused;
+  final _SetHostFacts _setHostFacts;
   final _SetOnnxLib _setOnnxLibrary;
   final _SetOnnxEpLibs _setOnnxEpLibraries;
   final _SetOnnxWinml _setOnnxWinml;
@@ -107,6 +112,22 @@ class XpuPeakBindings {
   /// Pause the in-flight run at its next boundary between readings, or let
   /// it go on (xpupeak_set_paused).  Each change is recorded on its log.
   void setPaused(bool paused) => _setPaused(paused ? 1 : 0);
+
+  /// What only the app can read of the state a run starts in, for the
+  /// `conditions` of every launch after this call (xpupeak_set_host_facts):
+  /// `power_source` ("ac" | "battery") and `low_power_mode` (bool), in the
+  /// document's words.  Each key replaces what the native probe read, one
+  /// left out keeps the probe's, and each call replaces the last -- so an
+  /// empty map clears them.  Just before a launch, and in this process
+  /// only: an engine process reads these itself.
+  void setHostFacts(Map<String, Object> facts) {
+    final ptr = jsonEncode(facts).toNativeUtf8();
+    try {
+      _setHostFacts(ptr);
+    } finally {
+      malloc.free(ptr);
+    }
+  }
 
   /// XpuPeak version string, e.g. "2.1.0-3-gabc1234".
   String version() => _version().toDartString();

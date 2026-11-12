@@ -16,6 +16,9 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RunNotice") {
       RunNotice.register(with: registrar.messenger())
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "HostFacts") {
+      HostFacts.register(with: registrar.messenger())
+    }
   }
 }
 
@@ -46,6 +49,34 @@ enum RunNotice {
         center.removeDeliveredNotifications(withIdentifiers: [id])
         center.removePendingNotificationRequests(withIdentifiers: [id])
         result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+}
+
+// The platform half of lib/src/services/host_facts.dart: the power source a
+// run starts on, in the result document's words (docs/format-v4.md,
+// Conditions), for xpupeak_set_host_facts.  It is UIKit's, so it is read
+// here, on the main thread the channel answers on; Low Power Mode the native
+// side reads itself.  A state iOS does not know -- the simulator's -- is
+// left out.
+enum HostFacts {
+  static func register(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "kr.XpuPeak/system", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "hostFacts":
+        var facts: [String: Any] = [:]
+        // Unknown until monitoring is on.
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        switch UIDevice.current.batteryState {
+        case .charging, .full: facts["power_source"] = "ac"
+        case .unplugged: facts["power_source"] = "battery"
+        default: break
+        }
+        result(facts)
       default:
         result(FlutterMethodNotImplemented)
       }

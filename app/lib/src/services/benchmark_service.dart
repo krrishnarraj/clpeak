@@ -12,6 +12,7 @@ import '../model/catalog.dart';
 import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import 'host_facts.dart';
 import 'process_exit.dart';
 import 'resume_offer.dart';
 import 'run_history_store.dart';
@@ -463,6 +464,9 @@ class BenchmarkService extends ChangeNotifier {
     final resultPath = await _history.filePathFor(id);
     _resultPath = resultPath;
 
+    // The power state the run starts in, which on a phone only the app can
+    // read (HostFacts).
+    if (HostFacts.supported) _engine.setHostFacts(await HostFacts.read());
     final run = _engine.start(args(resultPath));
     _run = run;
     run.events.listen(_onEvent, onDone: () async {

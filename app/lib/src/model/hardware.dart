@@ -40,7 +40,9 @@ class SystemInfo {
     this.isVirtual = false,
     this.translated = false,
     this.manufacturer = '',
+    this.brand = '',
     this.model = '',
+    this.codename = '',
     this.name = '',
     this.family = '',
     this.board = '',
@@ -71,8 +73,15 @@ class SystemInfo {
 
   final String manufacturer;
 
+  /// The brand it is sold under, where it is not the maker's own name:
+  /// `Redmi` under `Xiaomi` (Android's `ro.product.brand`).
+  final String brand;
+
   /// The model id: `MacBookPro18,3`, `SM-S921B`, a DMI product name.
   final String model;
+
+  /// The maker's name for the device: Android's `ro.product.device` (`e1s`).
+  final String codename;
 
   /// The marketing name, only as the OS gives it.  Where it gives none the
   /// app shows the `system.name` annotation or the model id
@@ -109,7 +118,9 @@ class SystemInfo {
       isVirtual: _bool(m, 'virtual') ?? false,
       translated: _bool(m, 'translated') ?? false,
       manufacturer: _str(m, 'manufacturer'),
+      brand: _str(m, 'brand'),
       model: _str(m, 'model'),
+      codename: _str(m, 'codename'),
       name: _str(m, 'name'),
       family: _str(m, 'family'),
       board: _str(m, 'board'),

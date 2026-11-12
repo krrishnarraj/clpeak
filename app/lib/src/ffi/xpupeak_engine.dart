@@ -59,6 +59,12 @@ abstract interface class XpuPeakEngine {
   void setLitertLibrary(String path);
   void setLitertNpuStageDir(String dir);
 
+  /// What only the app can read of the state a run starts in -- on a phone,
+  /// its power source and battery saver (HostFacts) -- for the
+  /// `conditions` of the launches after it, as
+  /// [XpuPeakBindings.setHostFacts] documents.  Just before a launch.
+  void setHostFacts(Map<String, Object> facts);
+
   /// Start a run with CLI-grammar arguments, without a program name.
   EngineRun start(List<String> args);
 
@@ -110,6 +116,10 @@ class InProcessEngine implements XpuPeakEngine {
 
   @override
   void setLitertNpuStageDir(String dir) => _bindings.setLitertNpuStageDir(dir);
+
+  @override
+  void setHostFacts(Map<String, Object> facts) =>
+      _bindings.setHostFacts(facts);
 
   @override
   EngineRun start(List<String> args) => XpuPeakRunner(_bindings).start(args);
@@ -207,6 +217,11 @@ class ChildProcessEngine implements XpuPeakEngine {
   /// Android only; an engine process never runs there.
   @override
   void setLitertNpuStageDir(String dir) {}
+
+  /// Nothing to hand on: an engine process reads the power state itself,
+  /// and the setter is not forwarded to it.
+  @override
+  void setHostFacts(Map<String, Object> facts) {}
 
   @override
   EngineRun start(List<String> args) =>

@@ -8,9 +8,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -19,7 +22,8 @@ import io.flutter.plugin.common.MethodChannel
 // is stamped on this process, and Android's record of how an earlier process
 // ended is read back with that stamp on it.  And of lib/src/services/
 // run_notice.dart: the notification a run posts when the app leaves the
-// screen mid-run.
+// screen mid-run.  And of lib/src/services/host_facts.dart: the power state
+// a run starts in.
 class MainActivity : FlutterActivity() {
     // The Dart call waiting on the permission dialog's answer.
     private var pendingAsk: MethodChannel.Result? = null
@@ -70,6 +74,27 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "kr.XpuPeak/system")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "hostFacts" -> result.success(hostFacts())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // The power state a run starts in, in the result document's words
+    // (docs/format-v4.md, Conditions), for xpupeak_set_host_facts: SELinux
+    // hides /sys/class/power_supply from the app's native code, and battery
+    // saver has no native API.  A key Android cannot answer is left out.
+    private fun hostFacts(): Map<String, Any> {
+        val facts = mutableMapOf<String, Any>()
+        // The sticky broadcast's last value; a null receiver registers nothing.
+        val battery = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val plugged = battery?.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1) ?: -1
+        if (plugged >= 0) facts["power_source"] = if (plugged != 0) "ac" else "battery"
+        facts["low_power_mode"] = getSystemService(PowerManager::class.java).isPowerSaveMode
+        return facts
     }
 
     // POST_NOTIFICATIONS is a runtime permission from Android 13, which is

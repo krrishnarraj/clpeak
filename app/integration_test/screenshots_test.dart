@@ -68,6 +68,9 @@ class _StubBindings implements XpuPeakBindings {
   void setPaused(bool paused) {}
 
   @override
+  void setHostFacts(Map<String, Object> facts) {}
+
+  @override
   String version() => _version;
 
   @override
