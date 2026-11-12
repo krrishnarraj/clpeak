@@ -522,7 +522,7 @@ dims say how to compare its readings.
 
 Most readings carry their dims as they are emitted; until the backends author
 them, a reading has only its test's family *(V5: CUDA, ROCm,
-oneAPI, Metal; V6: Vulkan, OpenCL; V7: ONNX, Core ML, LiteRT)*.
+oneAPI, Metal; V6: Vulkan, OpenCL)*.
 
 ### `revision`
 
@@ -656,9 +656,14 @@ test); `mp` → fp16 with the family's fp32 accumulator; `bf16_2` →
 `{width: 2}`; OpenCL's `int8_dp4` → `{width: 4}` but Vulkan's →
 `{chains: 4}`; `fp16 f16acc` → `{dtype: fp16, acc: fp16}`; `fp8_e4m3 2:4` →
 `{dtype: fp8_e4m3, sparsity: "2:4"}`; `nvf4_e2m1` and `nvfp4` → `nvfp4`;
-`int8_weight` → `{dtype: fp16, weights: int8}`; `int4_lut` →
+`int8_weight` → `{dtype: fp16, weights: int8, quant: block}` (ONNX's
+blocks of 32; Core ML's is `quant: channel`, and LiteRT's, dynamic-range
+quantization, `{dtype: fp32, weights: int8, quant: channel}`); `int4_lut` →
 `{dtype: fp16, weights: int4, quant: lut}`; `int8_qdq` → `{dtype: int8,
-quant: qdq}`; `int16x8` → `{dtype: int16, weights: int8}`; `int8_kv` →
+quant: qdq}`; `int16x8` → `{dtype: int16, weights: int8, quant: qdq}`;
+`fp16_acc32` → `{dtype: fp16, acc: fp32}`, against the LiteRT GPU's `fp16`
+`{dtype: fp16, acc: fp16}`; `int8_qdq_conv1x1` → `{dtype: int8, quant: qdq,
+form: conv1x1}`; `int8_kv` →
 `{dtype: fp16, kv: int8}`; `float ST` → `{scope: core}`; `fdiv fp64 MT` →
 `{dtype: fp64, op: fdiv}`; `DRAM x8` → `{level: dram, in_flight: 8}`;
 `fp16_decode_kv2048` → `{dtype: fp16, phase: decode, context: 2048}`.

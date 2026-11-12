@@ -469,9 +469,11 @@ See `include/common/AGENTS.md` § `dims`.  Core ML specifics:
   backend's creation row, and `small_matmul` with the `problem_size` the
   planner first sent the unit.
 - **`revision` is 2** for `coreml_gemm` (the sixteen-layer chain),
-  `coreml_conv` (the 3x3 at stride 2), and `coreml_block_prefill` and
-  `coreml_block_latency` (the prompt through a seed), all since 3.0.1; 1
-  elsewhere, with the reason beside each line.
+  `coreml_conv` (the 3x3 at stride 2), `coreml_block_prefill` and
+  `coreml_block_latency` (the prompt through a seed), and
+  `coreml_block_decode` and `coreml_numeric_error` (the layout race, which
+  moved the GPU's int4 decode and the CPU's int4 accuracy), all since
+  3.0.1; 1 elsewhere, with the reason beside each line.
 
 ## When You Change This Directory
 

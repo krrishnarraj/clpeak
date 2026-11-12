@@ -615,12 +615,16 @@ int CoreMLPeak::runBlock(const coreml_device_info_t &dev, benchmark_config_t &cf
       "coreml_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "data type and prompt length"};
   prefillOpsSpec.revision = 2;
-  const logger::TestSpec decodeSpec = {
+  // Revision 2 (3.0.1): every point races the two weight layouts
+  // (CoremlLayoutRace), where 3.0.0 stored one per unit -- the M1 Pro GPU's
+  // blockwise int4 decode went from 18.7 GB/s to 48.6.
+  logger::TestSpec decodeSpec = {
       "coreml_block_decode", "Transformer block, decode", "bps", Category::Ai,
       "Weight-streaming rate of the same block generating one token at 2048 context, counting "
       "the bytes each format actually moves.  A narrow-weight row far below fp16 means this "
       "compute unit unpacks the weights to full width first.",
       TestShape::Heterogeneous, "data type"};
+  decodeSpec.revision = 2;
   logger::TestSpec latencySpec = {
       "coreml_block_latency", "Transformer block latency", "s", Category::Ai,
       "Time for one pass of the block at each precision; multiply by a model's layer count for a "

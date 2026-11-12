@@ -369,13 +369,19 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 {
   (void)cfg;
 
-  auto test = currentDeviceScope->beginTest(
-      {"coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
-       "How far each weight format's answer on a 1024-cubed matmul drifts from a "
-       "double-precision reference, in parts per million.  The reference "
-       "multiplies the exact values this compute unit was given, so only the "
-       "arithmetic and the width the answer was kept in remain.",
-       TestShape::Heterogeneous, "weight format"});
+  logger::TestSpec testSpec{
+      "coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
+      "How far each weight format's answer on a 1024-cubed matmul drifts from a "
+      "double-precision reference, in parts per million.  The reference "
+      "multiplies the exact values this compute unit was given, so only the "
+      "arithmetic and the width the answer was kept in remain.",
+      TestShape::Heterogeneous, "weight format"};
+  // Revision 2 (3.0.1): the answer read is the faster weight layout's
+  // (CoremlLayoutRace), where 3.0.0 read one layout per unit -- the M1 Pro
+  // CPU's int4_weight went from 272 ppm to 3218, its fast kernel
+  // accumulating in fp16.
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   for (const Variant &v : kVariants)
   {
