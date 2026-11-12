@@ -288,8 +288,6 @@ Any other key is allowed; a reader shows what it does not know as written.
 
 ## Hardware
 
-*(V4 fills the CPU's facts.)*
-
 A **package** is one chip or card: an SoC, a CPU package, a discrete GPU. A
 **processor** is one CPU, GPU or NPU in a package. Both are the linker's
 answer (*Linking*), written before the file is saved. Ids are run-local and
@@ -339,6 +337,27 @@ one per `core` (Intel's AMX) or one per `cluster` (Apple's AMX and M4's SME)
 Accelerate). Its readings are the CPU's `matrix-compute` and `gemm` readings;
 a per-cluster engine's all-core number does not scale with cores.
 
+**CPU facts** are the OS's and CPUID's word, for every CPU the OS has online,
+and never a cache size XpuPeak measured: a level the OS lists without a size
+has no `size_bytes`.
+
+- A **cluster** is one kind of core: a MIDR and the OS's capacity and clock on
+  Arm (a faster bin of one core is a cluster of its own), the PMU that claims
+  the CPU on x86 (Intel's P- and E-cores), and the caches it reads; Apple's
+  are its performance levels. They are listed fastest first, and `kind` goes
+  by rank: `performance` down to `efficiency`, with `prime` above them on Arm
+  and `low_power` below them on x86. A CPU of one kind of core has one
+  cluster and no `kind`. Its `max_mhz` is the fastest of its cores', absent
+  where the OS gives none (Apple silicon, Windows).
+- A cache is its cluster's, counted in the cluster's `instances`, unless more
+  than one kind of core, or every CPU, reads an instance of it: then it is in
+  the processor's `caches[]`. So a Threadripper's four CCX L3s are its one
+  cluster's, and a desktop Core's ring L3 is the processor's.
+- `microarch` is what the MIDR names. x86 has none: `cpuid` is kept as it is,
+  and naming a family and model is a reader's table, like a model id's name.
+- `features` are the words of the CPU feature list (*Vocabulary*), as the
+  running CPU and OS allow them, in the list's order.
+
 ## Device
 
 | key | class | meaning |
@@ -349,7 +368,7 @@ a per-cluster engine's all-core number does not scale with cores.
 | `type` | C | what the device is: `gpu`, `cpu`, `npu`, `accelerator` or `unknown`. An ML runtime's NPU is `npu`; `accelerator` is for every other device that is neither, Android's NNAPI among them |
 | `processor` | C | the `id` of the processor it is a view of |
 | `link` | C | what linked it there (*Linking*) |
-| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes, with `vendor_name` the vendor's own string as the API gives it (`NVIDIA Corporation`). A vendor id is the API's: Apple's OpenCL answers `1027f00`, a CPU driver its own maker's *(V4 for the CPU backend's)* |
+| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes, with `vendor_name` the vendor's own string as the API gives it (`NVIDIA Corporation`). A vendor id is the API's: Apple's OpenCL answers `1027f00`, a CPU driver its own maker's |
 | `evidence` | C | the identity evidence that links it, never an identifier itself (*Linking*) |
 | `runtime` | C | an ML runtime's view of where it ran: `provider` (ONNX Runtime's execution provider), `accelerator` (Core ML's compute device — `neural_engine`, `gpu`, `cpu` —, LiteRT's — `npu`, `gpu`, `cpu` —, OpenVINO's `device_type`), `version` (ONNX Runtime's; LiteRT and Core ML report none) |
 | `properties` | C / I | free-form facts the backend chose to report, `key` and `value` strings. The shape is contract; the content informational |
@@ -502,7 +521,7 @@ file (*Compatibility*). The `shape` still says how to present a test; the
 dims say how to compare its readings.
 
 Most readings carry their dims as they are emitted; until the backends author
-them, a reading has only its test's family *(V4: CPU; V5: CUDA, ROCm,
+them, a reading has only its test's family *(V5: CUDA, ROCm,
 oneAPI, Metal; V6: Vulkan, OpenCL; V7: ONNX, Core ML, LiteRT)*.
 
 ### `revision`

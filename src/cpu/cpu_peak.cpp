@@ -395,9 +395,13 @@ int CpuPeak::runAll()
 
   // The host CPU, and its facts: the CPU processor takes its facts from this
   // device alone (docs/format-v4.md, Hardware).
+  // Its vendor's own string -- CPUID's, the MIDR implementer's name, Apple's
+  // -- is the one an Apple CPU, with neither CPUID nor a MIDR to read, is
+  // known by.
   logger::DeviceSpec spec{info.name, "", "", props, -1, 0, DeviceType::Cpu};
-  spec.identity.host = true;
-  spec.facts.cpu     = info.facts;
+  spec.identity.host    = true;
+  spec.facts.cpu        = info.facts;
+  spec.facts.vendorName = info.vendor;
   auto deviceScope = backendScope.beginDevice(spec);
   currentDeviceScope = &deviceScope;
 
