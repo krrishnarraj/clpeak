@@ -30,7 +30,7 @@ ROCm headers. Built as `peak_rocm` static library.
 
 | File | Purpose |
 |------|---------|
-| `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()` |
+| `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()`; `rocmIdentify()`, who each device is (*Identity*) |
 | `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching; reads the bundle header to tell a GPU the build has no code for (Error) from one a kernel's arch group leaves out (Unsupported)) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -49,6 +49,17 @@ ROCm headers. Built as `peak_rocm` static library.
 | `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
 | `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed; probes (and caches) which archs hipcc and rocWMMA can build |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`rocmIdentify()` in
+`rocm_peak.cpp`, read by `include/common/hardware_link.h`): its PCI address
+from `hipDeviceProp_t`, which is what links an AMD GPU to its Vulkan and
+OpenCL views, its HIP UUID (a scheme of HIP's own; the runtime's `GPU-XX`
+placeholder for a card with no unique id is refused, since every such card
+would share it), and as facts its vendor (AMD), `gfx` arch, CU count, clock,
+whether it is an APU and, if not, its memory.  `enumerate()` already holds
+the properties it takes.
 
 ## Test documentation
 
@@ -77,6 +88,30 @@ See `include/common/AGENTS.md` § Test documentation.  ROCm specifics:
 - `rocblas_gemm` and `rocwmma` are each one test, with the integer reading carrying its own unit.
 - `rocblas.cpp` and `hipblaslt_gemm.cpp` thread a `note` next to `label`
   through `runTimed` / `runVariant`.
+
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  ROCm specifics:
+
+- `rocm_compute_desc_t::dims`, `::revision` and `::metricDims`, and
+  `rocm_compute_variant_t::dims`, as CUDA's: vector tests carry their data
+  type on the test, `width` or (int8-dot) `chains` per reading, and
+  `bfloat16_compute` is `{dtype: bf16, acc: fp32}`.
+- `WmmaEntry`, `MfmaEntry` and `SparseEntry` carry each row's `dtype`;
+  `unitOpts()` adds its `tile` from M x N x K (`rocmTile()`) on every path.
+  `smfmac` is `{sparsity: 2:4}` on the test.  An "fp8" row is E4M3 in the
+  arch's encoding (`rocmFp8Format()`): `fp8_e4m3fnuz` on gfx94x, `fp8_e4m3`
+  on gfx950 and RDNA4.
+- `rocwmma` is `impl` rocwmma: a way to the same matrix-compute rows.
+- `rocblas_gemm` (`impl` rocblas) and `hipblaslt-fp8` (`impl` hipblaslt)
+  keep each row's dims beside its note.  hipBLASLt asks for FNUZ fp8 on
+  every arch, so its rows say `fp8_e4m3fnuz`, and `fp8_e5m2` is
+  `{dtype: fp8_e5m2fnuz, weights: fp8_e4m3fnuz}`.
+- Bandwidth and latency as CUDA's.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
 
 ## When You Change This Directory
 

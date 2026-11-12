@@ -1,6 +1,8 @@
 #ifdef ENABLE_METAL
 #include "mtl_internal.h"
 
+using xpupeak::Dim; using xpupeak::DType;
+
 // ---------------------------------------------------------------------------
 // SIMD-group matrix multiply (Apple tensor cores)
 //
@@ -23,7 +25,8 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
           nullptr,
           dev.info.simdgroupMatrixFP16Supported
               ? nullptr
-              : "simdgroup_matrix requires Apple7 (M1) or newer" },
+              : "simdgroup_matrix requires Apple7 (M1) or newer",
+          {{Dim::Dtype, DType::Fp16}} },
 
         { "bf16", "simdgroup_matrix_bf16",
           mtl_kernels::simdgroup_matrix_bf16_src,
@@ -33,7 +36,8 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
           (dev.info.simdgroupMatrixFP16Supported &&
            dev.info.simdgroupMatrixBF16Supported)
               ? nullptr
-              : "bf16 simdgroup_matrix requires Apple9 (M3) or newer" },
+              : "bf16 simdgroup_matrix requires Apple9 (M3) or newer",
+          {{Dim::Dtype, DType::Bf16}} },
     };
 
     float A = 1.3f;
@@ -45,6 +49,12 @@ int MetalPeak::runSimdgroupMatrix(MetalDevice &dev, benchmark_config_t &cfg)
                          "multiply-accumulate instruction.";
     d.shape            = TestShape::Heterogeneous;
     d.axis             = "data type";
+    d.dims             = {{Dim::Tile, "8x8x8"}};
+    // 2: the kernels once folded their accumulator chains through the
+    // multiply-accumulate's destination, which dead-coded three of every four
+    // while the host counted all of them -- 4x high (15.8 TFLOPS fp16 on an
+    // M1 Pro, against 5.1 since).  Every chain stays live now.
+    d.revision         = 2;
     d.variants         = variants;
     d.numVariants      = sizeof(variants) / sizeof(variants[0]);
     d.workPerWI        = MTL_SIMDGROUP_WORK_PER_WI;

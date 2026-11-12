@@ -36,6 +36,8 @@
 #include <sstream>
 #include <vector>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Optional cuBLASLt loader.  cuBLASLt is not part of the NVIDIA driver, so it
 // is resolved at run time; if absent the GEMM benchmark is skipped and the rest
@@ -222,15 +224,17 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // cuBLASLt is an optional runtime dependency (not part of the driver).
     if (!g_lt.load())
     {
-        auto t = currentDeviceScope->beginTest(
-            {"cublas_gemm", "cuBLASLt GEMM peak",
-             "flops", Category::Unknown,
-             "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
-             "square problem.",
-             TestShape::Heterogeneous, "data type"});
+        logger::TestSpec spec{"cublas_gemm", "cuBLASLt GEMM peak",
+                              "flops", Category::Unknown,
+                              "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
+                              "square problem.",
+                              TestShape::Heterogeneous, "data type"};
+        spec.dims = {{Dim::Impl, dim::Impl::Cublaslt}};
+        auto t = currentDeviceScope->beginTest(spec);
         t.skip("fp32", ResultStatus::Unsupported,
-                "cuBLASLt library not found; GEMM skipped");
-        logger::EmitOptions o; o.unit = "ops";
+               "cuBLASLt library not found; GEMM skipped", "",
+               {{Dim::Dtype, DType::Fp32}});
+        logger::EmitOptions o; o.unit = "ops"; o.dims = {{Dim::Dtype, DType::Int8}};
         t.skip("int8", ResultStatus::Unsupported,
                "cuBLASLt library not found; GEMM skipped", o);
         return 0;
@@ -297,23 +301,24 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
 
     logger::TestScope *blasTest = nullptr;
 
-    auto blasOpts = [&](const char *note)
+    // A row's note and dims, on every emit and skip path below; the integer
+    // rows carry their own unit as well.
+    auto blasOpts = [&](const char *note, const Dims &dims)
     {
         logger::EmitOptions o;
         if (note)
             o.description = note;
+        o.dims = dims;
         return o;
     };
-    auto intOpts = [&](const char *note)
+    auto intOpts = [&](const char *note, const Dims &dims)
     {
-        logger::EmitOptions o;
-        if (note)
-            o.description = note;
+        logger::EmitOptions o = blasOpts(note, dims);
         o.unit = "ops";
         return o;
     };
 
-    auto runVariantAB = [&](const char *label, const char *note,
+    auto runVariantAB = [&](const char *label, const char *note, const Dims &dims,
                             cudaDataType_t aType, cudaDataType_t bType,
                             cudaDataType_t cType,
                             cublasComputeType_t computeType,
@@ -322,7 +327,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                             bool useTN) -> int
     {
         const bool isIntLabel = (label[0]=='i' && label[1]=='n' && label[2]=='t');
-        auto curOpts = isIntLabel ? intOpts(note) : blasOpts(note);
+        auto curOpts = isIntLabel ? intOpts(note, dims) : blasOpts(note, dims);
         cublasLtMatmulDesc_t opDesc = nullptr;
         cublasLtMatrixLayout_t Adesc = nullptr, Bdesc = nullptr, Cdesc = nullptr;
 
@@ -463,14 +468,14 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // -----------------------------------------------------------------------
 
     // Convenience wrapper: most variants use the same dtype for A and B.
-    auto runVariant = [&](const char *label, const char *note,
+    auto runVariant = [&](const char *label, const char *note, const Dims &dims,
                           cudaDataType_t abType, cudaDataType_t cType,
                           cublasComputeType_t computeType,
                           cudaDataType_t scaleType,
                           const void *alphaPtr, const void *betaPtr,
                           bool useTN) -> int
     {
-        return runVariantAB(label, note, abType, abType, cType, computeType,
+        return runVariantAB(label, note, dims, abType, abType, cType, computeType,
                             scaleType, alphaPtr, betaPtr, useTN);
     };
 
@@ -494,7 +499,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // scale buffers are over-allocated to the operand element count (always >=
     // the padded scale-tensor size cuBLASLt expects) to stay safe regardless of
     // the exact block-scale layout.  TN layout, like the fp8 path.
-    auto runVariantFp4 = [&](const char *label, const char *note,
+    auto runVariantFp4 = [&](const char *label, const char *note, const Dims &dims,
                              cublasLtMatmulMatrixScale_t scaleMode,
                              uint8_t neutralScaleByte) -> int
     {
@@ -504,7 +509,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         if (cuMemAlloc(&dSA, scaleABytes) != CUDA_SUCCESS ||
             cuMemAlloc(&dSB, scaleBBytes) != CUDA_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "scale buffer alloc failed",
+                           blasOpts(note, dims));
             if (dSA)
                 cuMemFree(dSA);
             if (dSB)
@@ -522,7 +528,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
             cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_4F_E2M1, K, N, K) != CUBLAS_STATUS_SUCCESS ||
             cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_16BF, M, N, M) != CUBLAS_STATUS_SUCCESS)
         {
-            blasTest->skip(label, ResultStatus::Error, "descriptor create failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "descriptor create failed",
+                           blasOpts(note, dims));
             if (opDesc)
                 cublasLtMatmulDescDestroy(opDesc);
             if (Adesc)
@@ -573,7 +580,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         if (hs != CUBLAS_STATUS_SUCCESS || returnedResults == 0)
         {
             blasTest->skip(label, ResultStatus::Unsupported,
-                           std::string("unsupported on ") + dev.info.archName, blasOpts(note));
+                           std::string("unsupported on ") + dev.info.archName, blasOpts(note,
+                                       dims));
             cleanup();
             return 0;
         }
@@ -595,7 +603,8 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         }
         if (bestIdx < 0)
         {
-            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "all candidate algos failed",
+                           blasOpts(note, dims));
             cleanup();
             return -1;
         }
@@ -607,7 +616,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                           &heurs[bestIdx].algo, (void *)dWS, wsBytes, warmup);
         if (per_iter_us <= 0.0)
         {
-            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note));
+            blasTest->skip(label, ResultStatus::Error, "timing probe failed", blasOpts(note, dims));
             cleanup();
             return -1;
         }
@@ -620,24 +629,26 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                       &heurs[bestIdx].algo, (void *)dWS, wsBytes, iters);
 
         double rate = flops_per_iter * 1.0e6 / mean_us;
-        blasTest->emit(label, (float)rate, blasOpts(note));
+        blasTest->emit(label, (float)rate, blasOpts(note, dims));
         cleanup();
         return 0;
     };
 #endif // XPUPEAK_CUBLASLT_HAS_FP4
 
     // One test for all data types -- integer readings carry their own unit.
-    auto test = currentDeviceScope->beginTest(
-        {"cublas_gemm", "cuBLASLt GEMM peak", "flops", Category::Unknown,
-         "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
-         "square problem.",
-         TestShape::Heterogeneous, "data type"});
+    logger::TestSpec spec{"cublas_gemm", "cuBLASLt GEMM peak", "flops", Category::Unknown,
+                          "Peak GEMM rate through NVIDIA's cuBLASLt library, on a large "
+                          "square problem.",
+                          TestShape::Heterogeneous, "data type"};
+    spec.dims = {{Dim::Impl, dim::Impl::Cublaslt}};
+    auto test = currentDeviceScope->beginTest(spec);
     blasTest = &test;
 
         // fp32: full-precision GEMM on CUDA cores.  NN layout -- TN measured ~50%
         // slower for fp32 on RTX 5060 because cuBLASLt's heuristic falls off the
         // tuned kernel set for fp32 + TN.
         runVariant("fp32", "fp32 inputs and accumulator, without the tensor cores.",
+                   {{Dim::Dtype, DType::Fp32}},
                    CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                    CUDA_R_32F, &alpha32, &beta32, /*useTN=*/false);
 
@@ -646,6 +657,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // layout matches fp32 -- DGEMM kernels are tuned for that shape.
         runVariant("fp64", "fp64 inputs and accumulator.  Consumer GPUs run it "
                            "at a small fraction of their fp32 rate.",
+                   {{Dim::Dtype, DType::Fp64}},
                    CUDA_R_64F, CUDA_R_64F, CUBLAS_COMPUTE_64F,
                    CUDA_R_64F, &alpha64, &beta64, /*useTN=*/false);
 
@@ -653,13 +665,16 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // tensor cores (Ampere+).  Inputs/outputs stay fp32.
         if (dev.info.tf32GemmSupported)
             runVariant("tf32", "fp32 inputs rounded to tf32, fp32 accumulator.",
+                       {{Dim::Dtype, DType::Tf32}},
                        CUDA_R_32F, CUDA_R_32F, CUBLAS_COMPUTE_32F_FAST_TF32,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
         // fp16: half inputs + half output + half compute.  scaleType is R_16F so
         // alpha/beta must be 16-bit half values, not float.
         if (dev.info.fp16Supported)
+            // CUBLAS_COMPUTE_16F: an fp16 accumulator, not the usual fp32.
             runVariant("fp16", "fp16 inputs and accumulator.",
+                       {{Dim::Dtype, DType::Fp16}, {Dim::Acc, DType::Fp16}},
                        CUDA_R_16F, CUDA_R_16F, CUBLAS_COMPUTE_16F,
                        CUDA_R_16F, &alpha16, &beta16, /*useTN=*/true);
 
@@ -669,6 +684,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         // peaks are quoted against.
         if (dev.info.bf16Supported)
             runVariant("bf16", "bf16 inputs, fp32 accumulator.",
+                       {{Dim::Dtype, DType::Bf16}},
                        CUDA_R_16BF, CUDA_R_32F, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
 
@@ -691,10 +707,13 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
         {
             runVariant("fp8_e4m3", "fp8 E4M3 inputs (more precision, less range), "
                                    "fp32 accumulator.",
+                       {{Dim::Dtype, DType::Fp8E4m3}},
                        CUDA_R_8F_E4M3, CUDA_R_16BF, CUBLAS_COMPUTE_32F,
                        CUDA_R_32F, &alpha32, &beta32, /*useTN=*/true);
+            // A is E5M2 and B E4M3: the activations' type and the weights'.
             runVariantAB("fp8_e5m2", "fp8 E5M2 x E4M3 inputs, fp32 accumulator.  "
                                      "cuBLASLt has no E5M2 x E5M2 GEMM.",
+                         {{Dim::Dtype, DType::Fp8E5m2}, {Dim::Weights, DType::Fp8E4m3}},
                          CUDA_R_8F_E5M2, CUDA_R_8F_E4M3, CUDA_R_16BF,
                          CUBLAS_COMPUTE_32F, CUDA_R_32F,
                          &alpha32, &beta32, /*useTN=*/true);
@@ -711,28 +730,36 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
                                "(OCP MX).";
         const char *nvf4Note = "fp4 E2M1 inputs, one shared scale per 16 values "
                                "(NVFP4).";
+        const Dims mxf4Dims = {{Dim::Dtype, DType::Mxfp4}};
+        const Dims nvf4Dims = {{Dim::Dtype, DType::Nvfp4}};
 #if defined(XPUPEAK_CUBLASLT_HAS_FP4)
         if (dev.info.fp4GemmSupported)
         {
             // 0x7F = 1.0 in UE8M0 (exponent-only, bias 127);
             // 0x38 = 1.0 in UE4M3 (e4m3, bias 7).
-            runVariantFp4("mxf4_e2m1", mxf4Note,
+            runVariantFp4("mxf4_e2m1", mxf4Note, mxf4Dims,
                           CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0, 0x7F);
-            runVariantFp4("nvf4_e2m1", nvf4Note,
+            runVariantFp4("nvf4_e2m1", nvf4Note, nvf4Dims,
                           CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3, 0x38);
         }
         else
         {
             blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(mxf4Note));
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") +
+                               dev.info.archName,
+                           blasOpts(mxf4Note, mxf4Dims));
             blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") + dev.info.archName, blasOpts(nvf4Note));
+                           std::string("FP4 tensor cores require Blackwell -- unsupported on ") +
+                               dev.info.archName,
+                           blasOpts(nvf4Note, nvf4Dims));
         }
 #else
         blasTest->skip("mxf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(mxf4Note));
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
+                       blasOpts(mxf4Note, mxf4Dims));
         blasTest->skip("nvf4_e2m1", ResultStatus::Unsupported,
-                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)", blasOpts(nvf4Note));
+                       "block-scaled FP4 GEMM API not in this cuBLASLt (needs CUDA 12.8+)",
+                       blasOpts(nvf4Note, nvf4Dims));
 #endif
 
     // Integer variants -- same test, each reading carries its own unit (ops).
@@ -741,6 +768,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     // and scale.  cc >= 7.5 (Turing) for IMMA tensor cores.
     if (dev.info.int8GemmSupported)
         runVariant("int8", "int8 inputs, int32 accumulator.",
+                   {{Dim::Dtype, DType::Int8}},
                    CUDA_R_8I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 
@@ -752,6 +780,7 @@ int CudaPeak::runCublas(CudaDevice &dev, benchmark_config_t &cfg)
     if (dev.info.int4GemmSupported)
         runVariant("int4", "int4 inputs, int32 accumulator.  cuBLASLt may refuse "
                            "it even where the hardware claims it.",
+                   {{Dim::Dtype, DType::Int4}},
                    CUDA_R_4I, CUDA_R_32I, CUBLAS_COMPUTE_32I,
                    CUDA_R_32I, &alpha32i, &beta32i, /*useTN=*/true);
 

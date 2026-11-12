@@ -2,6 +2,8 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+
+using xpupeak::Dim;
 #include <string>
 
 // Raw MFMA (matrix-core) peak microbenchmarks. Unlike the vector-ALU FMA
@@ -38,6 +40,10 @@ struct MfmaEntry
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
   const char *description;  // what this row is, next to the name
+  // The reading's data type; its tile is M x N x K above, and every row
+  // accumulates in the usual type (fp32, int32), so says no `acc`.  "fp8" is
+  // E4M3 in the arch's encoding: FNUZ on CDNA3, OCP on CDNA4 (rocmFp8Format).
+  xpupeak::DType dtype;
 };
 
 // Strip the gcnArchName feature suffix (e.g. "gfx942:sramecc+:xnack-").
@@ -63,27 +69,32 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     {"fp16", "MFMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::mfma_fp16, "mfma_fp16",
      16, 16, 16, false,
-     "fp16 inputs, fp32 accumulator (MFMA 16x16x16)."},
+     "fp16 inputs, fp32 accumulator (MFMA 16x16x16).",
+     xpupeak::DType::Fp16},
     {"bf16", "MFMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::mfma_bf16, "mfma_bf16",
      16, 16, 16, false,
-     "bf16 inputs, fp32 accumulator (MFMA 16x16x16).  CDNA2 and newer."},
+     "bf16 inputs, fp32 accumulator (MFMA 16x16x16).  CDNA2 and newer.",
+     xpupeak::DType::Bf16},
     {"fp8", "MFMA fp8xfp8+fp32 16x16x32", "flops",
      &rocm_kernels::mfma_fp8, "mfma_fp8",
      16, 16, 32, false,
      "fp8 E4M3 inputs (more precision, less range), fp32 accumulator "
-     "(MFMA 16x16x32).  CDNA3 and newer."},
+     "(MFMA 16x16x32).  CDNA3 and newer.",
+     xpupeak::DType::Fp8E4m3},
     {"mxfp4", "MFMA mxfp4(e2m1)+fp32 16x16x128", "flops",
      &rocm_kernels::mfma_mxfp4, "mfma_mxfp4",
      16, 16, 128, false,
      "fp4 E2M1 inputs, one shared scale per 32 values, OCP MX (scaled MFMA "
-     "16x16x128).  CDNA4 only."},
+     "16x16x128).  CDNA4 only.",
+     xpupeak::DType::Mxfp4},
   };
   static const MfmaEntry intEntries[] = {
     {"int8", "MFMA int8xint8+int32 16x16x32", "ops",
      &rocm_kernels::mfma_int8, "mfma_int8",
      16, 16, 32, true,
-     "int8 inputs, int32 accumulator (MFMA 16x16x32).  CDNA3 and newer."},
+     "int8 inputs, int32 accumulator (MFMA 16x16x32).  CDNA3 and newer.",
+     xpupeak::DType::Int8},
   };
 
   const bool cdna = isCdnaFamily(archBaseOf(dev.info.archName));
@@ -96,10 +107,13 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
   // The reading's own note rides along on every path, and the integer reading
   // carries its own unit -- that override is what lets it share the test with
   // the floating-point ones instead of needing a twin.
-  auto unitOpts = [](const MfmaEntry &en) {
+  const std::string archBase = archBaseOf(dev.info.archName);
+  auto unitOpts = [&](const MfmaEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
     if (en.isInt) o.unit = "ops";
+    o.dims = {{Dim::Dtype, rocmFp8Format(en.dtype, archBase)},
+              {Dim::Tile, rocmTile(en.M, en.N, en.K)}};
     return o;
   };
 
@@ -117,7 +131,8 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     if (!cdna)
     {
       test.skip(me.label, ResultStatus::Unsupported,
-                "MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", me.description);
+                "MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture",
+                unitOpts(me));
       continue;
     }
 
@@ -173,7 +188,8 @@ int RocmPeak::runMfma(RocmDevice &dev, benchmark_config_t &cfg)
     if (!cdna)
     {
       test.skip(me.label, ResultStatus::Unsupported,
-                "MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", me.description);
+                "MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture",
+                unitOpts(me));
       continue;
     }
 

@@ -73,6 +73,11 @@ struct mtl_compute_variant_t
   // types live in one test on hardware that supports only some of them --
   // `mtl_compute_desc_t::skip` gates the whole test, this gates one reading.
   const char *skipMsg;
+
+  // This reading's coordinates over the test's (include/common/AGENTS.md
+  // § dims): its vector width, a matrix row's data type.  Carried on every
+  // path, skips included.
+  Dims dims;
 };
 
 struct mtl_compute_desc_t
@@ -115,6 +120,11 @@ struct mtl_compute_desc_t
 
   bool        skip;
   const char *skipMsg;
+
+  // What every reading shares -- a vector test's data type, a matrix test's
+  // tile -- and the test's method revision; both travel to logger::TestSpec.
+  Dims dims;
+  int  revision = 1;
 };
 
 class MetalPeak : public Peak

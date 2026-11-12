@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <sycl/sycl.hpp>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 template <int TW, int TH, bool TRANSPOSE> class image_bw_kernel;
 
 // One walk shape: TW x TH blocks walked row-major, row-major within a block
@@ -21,19 +23,24 @@ template <int TW, int TH, bool TRANSPOSE> struct WalkOf<ImageWalk<TW, TH, TRANSP
 
 int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
-     Category::Unknown,
-     "Image read bandwidth, reading each pixel once.",
-     TestShape::Homogeneous});
+  logger::TestSpec spec{"image_memory_bandwidth", "Image memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Image read bandwidth, reading each pixel once.",
+                        TestShape::Homogeneous};
+  // 2: both walk orders race, and fetches stride by the global size, since
+  // 2.1.4; the walks race without divides since 3.0.2.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
   // hence the metric name.
   const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
+  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
 
   if (!dev.dev.has(sycl::aspect::ext_intel_legacy_image))
   {
-    test.skip("float4", ResultStatus::Unsupported, "device does not advertise ext_intel_legacy_image", fetchNote);
+    test.skip("float4", ResultStatus::Unsupported,
+              "device does not advertise ext_intel_legacy_image", fetchNote, fetchDims);
     return 0;
   }
 
@@ -61,7 +68,7 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
   if (!outBuf)
   {
     delete[] staging;
-    test.skip("float4", ResultStatus::Error, "Output buffer alloc failed", fetchNote);
+    test.skip("float4", ResultStatus::Error, "Output buffer alloc failed", fetchNote, fetchDims);
     return -1;
   }
 
@@ -143,14 +150,14 @@ int OneapiPeak::runImageBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     timeWalk(ImageWalk<16, 16, false>{}, "tile16x16");
 
     if (best <= 0.0f)
-      test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
+      test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote, fetchDims);
     else
-      test.emit("float4", best, fetchNote);
+      test.emit("float4", best, fetchNote, fetchDims);
   }
   catch (const sycl::exception &e)
   {
     test.skip("float4", ResultStatus::Error,
-              std::string("image creation/dispatch failed: ") + e.what());
+              std::string("image creation/dispatch failed: ") + e.what(), fetchNote, fetchDims);
   }
 
   delete[] staging;

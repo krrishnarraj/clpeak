@@ -3,6 +3,8 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim;
+
 int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
   auto test = currentDeviceScope->beginTest(
@@ -18,9 +20,12 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
   void *outBuf = nullptr;
   if (hipMalloc(&outBuf, globalThreads * sizeof(float)) != hipSuccess)
   {
-    test.skip("float", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(1));
-    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(2));
-    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(4));
+    test.skip("float", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(1),
+              {{Dim::Width, 1}});
+    test.skip("float2", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(2),
+              {{Dim::Width, 2}});
+    test.skip("float4", ResultStatus::Error, "Buffer alloc failed", rocmWidthNote(4),
+              {{Dim::Width, 4}});
     return -1;
   }
 
@@ -44,7 +49,7 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     RocmKernel k = dev.getKernel(rocm_kernels::local_bandwidth, v.kname);
     if (!k)
     {
-      test.skip(key, k.status, k.reason, rocmWidthNote(v.width));
+      test.skip(key, k.status, k.reason, rocmWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     void *args[1] = {&outBuf};
@@ -53,12 +58,12 @@ int RocmPeak::runLocalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     if (us <= 0.0f)
     {
       test.skip(key, ResultStatus::Error, "kernel launch failed",
-                rocmWidthNote(v.width));
+                rocmWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalThreads;
     float bps = (float)bytes / us * 1e6f;
-    test.emit(key, bps, rocmWidthNote(v.width));
+    test.emit(key, bps, rocmWidthNote(v.width), {{Dim::Width, v.width}});
   }
 
   (void)hipFree(outBuf);

@@ -14,6 +14,8 @@
 #include <common/common.h>
 #include <common/dynlib.h>   // must stay at file scope (defines namespace xpupeak)
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 #ifdef XPUPEAK_ROCM_HAS_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
 #include <common/console_mute.h>
@@ -174,11 +176,12 @@ double timeHipblasLt(hipStream_t stream, hipblasLtHandle_t lt,
 
 int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"hipblaslt-fp8", "hipBLASLt FP8 GEMM peak", "flops", Category::Unknown,
-     "Peak fp8 and fp4 GEMM rate through AMD's hipBLASLt library, on a large "
-     "square problem.",
-     TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"hipblaslt-fp8", "hipBLASLt FP8 GEMM peak", "flops", Category::Unknown,
+                        "Peak fp8 and fp4 GEMM rate through AMD's hipBLASLt library, on a large "
+                        "square problem.",
+                        TestShape::Heterogeneous, "data type"};
+  spec.dims = {{Dim::Impl, dim::Impl::Hipblaslt}};
+  auto test = currentDeviceScope->beginTest(spec);
 
   // One note per dtype row, shared by every emit and skip path below.
   const char *e4m3Note = "fp8 E4M3 FNUZ inputs (more precision, less range), "
@@ -187,18 +190,29 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   const char *e5m2Note = "fp8 E5M2 x E4M3 inputs (FNUZ), fp32 accumulator.";
   const char *mxf4Note = "fp4 E2M1 inputs, one shared scale per 32 values (OCP "
                          "MX), fp32 accumulator.";
+  // And its coordinates.  The fp8 rows ask for the FNUZ encodings on every
+  // arch, so that is what they measure where they run; e5m2's B operand, the
+  // weights, stays E4M3.
+  const Dims e4m3Dims = {{Dim::Dtype, DType::Fp8E4m3Fnuz}};
+  const Dims e5m2Dims = {{Dim::Dtype, DType::Fp8E5m2Fnuz}, {Dim::Weights, DType::Fp8E4m3Fnuz}};
+  const Dims mxf4Dims = {{Dim::Dtype, DType::Mxfp4}};
 
 #ifndef XPUPEAK_ROCM_HAS_HIPBLASLT
-  test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt not found at configure time", e4m3Note);
-  test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt not found at configure time", e5m2Note);
-  test.skip("mxf4_e2m1", ResultStatus::Unsupported, "hipBLASLt not found at configure time", mxf4Note);
+  test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt not found at configure time",
+            e4m3Note, e4m3Dims);
+  test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt not found at configure time",
+            e5m2Note, e5m2Dims);
+  test.skip("mxf4_e2m1", ResultStatus::Unsupported, "hipBLASLt not found at configure time",
+            mxf4Note, mxf4Dims);
   return 0;
 #else
   // hipBLASLt is an optional runtime dependency (not part of the HIP runtime).
   if (!g_hlt.load())
   {
-    test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped", e4m3Note);
-    test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped", e5m2Note);
+    test.skip("fp8_e4m3", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped",
+              e4m3Note, e4m3Dims);
+    test.skip("fp8_e5m2", ResultStatus::Unsupported, "hipBLASLt library not found; GEMM skipped",
+              e5m2Note, e5m2Dims);
     return 0;
   }
 
@@ -218,8 +232,10 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
       hipMalloc(&dC, cBytes)  != hipSuccess ||
       hipMalloc(&dWS, wsBytes) != hipSuccess)
   {
-    test.skip("fp8_e4m3", ResultStatus::Error, "Failed to allocate GEMM buffers", e4m3Note);
-    test.skip("fp8_e5m2", ResultStatus::Error, "Failed to allocate GEMM buffers", e5m2Note);
+    test.skip("fp8_e4m3", ResultStatus::Error, "Failed to allocate GEMM buffers", e4m3Note,
+              e4m3Dims);
+    test.skip("fp8_e5m2", ResultStatus::Error, "Failed to allocate GEMM buffers", e5m2Note,
+              e5m2Dims);
     if (dA) (void)hipFree(dA);
     if (dB) (void)hipFree(dB);
     if (dC) (void)hipFree(dC);
@@ -234,8 +250,8 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   hipblasLtHandle_t lt = nullptr;
   if (hipblasLtCreate(&lt) != HIPBLAS_STATUS_SUCCESS)
   {
-    test.skip("fp8_e4m3", ResultStatus::Error, "hipblasLtCreate failed", e4m3Note);
-    test.skip("fp8_e5m2", ResultStatus::Error, "hipblasLtCreate failed", e5m2Note);
+    test.skip("fp8_e4m3", ResultStatus::Error, "hipblasLtCreate failed", e4m3Note, e4m3Dims);
+    test.skip("fp8_e5m2", ResultStatus::Error, "hipblasLtCreate failed", e5m2Note, e5m2Dims);
     (void)hipFree(dA); (void)hipFree(dB); (void)hipFree(dC); (void)hipFree(dWS);
     return -1;
   }
@@ -244,7 +260,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 
   // TN layout (op(A)=T, op(B)=N) keeps K contiguous for both operands, matching
   // the fp8 MFMA load pattern -- same choice as the cuBLASLt fp8 path.
-  auto runVariant = [&](const char *label, const char *note,
+  auto runVariant = [&](const char *label, const char *note, const Dims &dims,
                         hipDataType aType, hipDataType bType)
   {
     hipblasLtMatmulDesc_t opDesc = nullptr;
@@ -256,7 +272,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
         hipblasLtMatrixLayoutCreate(&Bdesc, bType, K, N, K) != HIPBLAS_STATUS_SUCCESS ||
         hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_16BF, M, N, M) != HIPBLAS_STATUS_SUCCESS)
     {
-      test.skip(label, ResultStatus::Error, "descriptor create failed", note);
+      test.skip(label, ResultStatus::Error, "descriptor create failed", note, dims);
       if (opDesc) (void)hipblasLtMatmulDescDestroy(opDesc);
       if (Adesc)  (void)hipblasLtMatrixLayoutDestroy(Adesc);
       if (Bdesc)  (void)hipblasLtMatrixLayoutDestroy(Bdesc);
@@ -289,7 +305,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     {
       test.skip(label, ResultStatus::Unsupported,
                 std::string("no fp8 GEMM algorithm for this device (") + dev.info.archName + ")",
-                note);
+                note, dims);
       (void)hipblasLtMatmulDescDestroy(opDesc);
       (void)hipblasLtMatrixLayoutDestroy(Adesc);
       (void)hipblasLtMatrixLayoutDestroy(Bdesc);
@@ -310,7 +326,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     }
     if (bestIdx < 0)
     {
-      test.skip(label, ResultStatus::Error, "all candidate algos failed", note);
+      test.skip(label, ResultStatus::Error, "all candidate algos failed", note, dims);
       (void)hipblasLtMatmulDescDestroy(opDesc);
       (void)hipblasLtMatrixLayoutDestroy(Adesc);
       (void)hipblasLtMatrixLayoutDestroy(Bdesc);
@@ -324,7 +340,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
         &heurs[bestIdx].algo, dWS, wsBytes, warm);
     if (probeUs <= 0.0)
     {
-      test.skip(label, ResultStatus::Error, "timing probe failed", note);
+      test.skip(label, ResultStatus::Error, "timing probe failed", note, dims);
       (void)hipblasLtMatmulDescDestroy(opDesc);
       (void)hipblasLtMatrixLayoutDestroy(Adesc);
       (void)hipblasLtMatrixLayoutDestroy(Bdesc);
@@ -337,9 +353,9 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
         &alpha, dA, Adesc, dB, Bdesc, &beta, dC, Cdesc, dC, Cdesc,
         &heurs[bestIdx].algo, dWS, wsBytes, iters);
     if (meanUs <= 0.0)
-      test.skip(label, ResultStatus::Error, "hipBLASLt GEMM failed", note);
+      test.skip(label, ResultStatus::Error, "hipBLASLt GEMM failed", note, dims);
     else
-      test.emit(label, (float)(flops * 1.0e6 / meanUs), note);
+      test.emit(label, (float)(flops * 1.0e6 / meanUs), note, dims);
 
     (void)hipblasLtMatmulDescDestroy(opDesc);
     (void)hipblasLtMatrixLayoutDestroy(Adesc);
@@ -350,8 +366,8 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
   // gfx942 fp8 is the fnuz encoding. E4M3 x E4M3 is the canonical path;
   // E5M2 x E4M3 measures a path that includes an E5M2 input (same hardware
   // rate -- any asymmetry is library algo coverage, mirroring cuda_blas.cpp).
-  runVariant("fp8_e4m3", e4m3Note, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ);
-  runVariant("fp8_e5m2", e5m2Note, HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E4M3_FNUZ);
+  runVariant("fp8_e4m3", e4m3Note, e4m3Dims, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ);
+  runVariant("fp8_e5m2", e5m2Note, e5m2Dims, HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E4M3_FNUZ);
 
 #if defined(XPUPEAK_HIPBLASLT_HAS_FP4)
   // mxfp4: block-scaled 4-bit GEMM (OCP MX, 32-element UE8M0 scales) on gfx950 /
@@ -366,7 +382,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
     if (hipMalloc(&dSA, scaleABytes) != hipSuccess ||
         hipMalloc(&dSB, scaleBBytes) != hipSuccess)
     {
-      test.skip("mxf4_e2m1", ResultStatus::Error, "scale buffer alloc failed", mxf4Note);
+      test.skip("mxf4_e2m1", ResultStatus::Error, "scale buffer alloc failed", mxf4Note, mxf4Dims);
       if (dSA) (void)hipFree(dSA);
       if (dSB) (void)hipFree(dSB);
     }
@@ -383,7 +399,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
                  hipblasLtMatrixLayoutCreate(&Cdesc, HIP_R_16BF, M, N, M) == HIPBLAS_STATUS_SUCCESS);
       if (!ok)
       {
-        test.skip("mxf4_e2m1", ResultStatus::Error, "descriptor create failed", mxf4Note);
+        test.skip("mxf4_e2m1", ResultStatus::Error, "descriptor create failed", mxf4Note, mxf4Dims);
       }
       else
       {
@@ -417,7 +433,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
         {
           test.skip("mxf4_e2m1", ResultStatus::Unsupported,
                     std::string("no mxfp4 GEMM algorithm for this device (") + dev.info.archName + ")",
-                    mxf4Note);
+                    mxf4Note, mxf4Dims);
         }
         else
         {
@@ -433,7 +449,8 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
           }
           if (bestIdx < 0)
           {
-            test.skip("mxf4_e2m1", ResultStatus::Error, "all candidate algos failed", mxf4Note);
+            test.skip("mxf4_e2m1", ResultStatus::Error, "all candidate algos failed", mxf4Note,
+                      mxf4Dims);
           }
           else
           {
@@ -443,7 +460,8 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
                 &heurs[bestIdx].algo, dWS, wsBytes, warm);
             if (probeUs <= 0.0)
             {
-              test.skip("mxf4_e2m1", ResultStatus::Error, "timing probe failed", mxf4Note);
+              test.skip("mxf4_e2m1", ResultStatus::Error, "timing probe failed", mxf4Note,
+                        mxf4Dims);
             }
             else
             {
@@ -452,9 +470,10 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
                   &alpha, dA, Adesc, dB, Bdesc, &beta, dC, Cdesc, dC, Cdesc,
                   &heurs[bestIdx].algo, dWS, wsBytes, iters);
               if (meanUs <= 0.0)
-                test.skip("mxf4_e2m1", ResultStatus::Error, "hipBLASLt GEMM failed", mxf4Note);
+                test.skip("mxf4_e2m1", ResultStatus::Error, "hipBLASLt GEMM failed", mxf4Note,
+                          mxf4Dims);
               else
-                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs), mxf4Note);
+                test.emit("mxf4_e2m1", (float)(flops * 1.0e6 / meanUs), mxf4Note, mxf4Dims);
             }
           }
         }
@@ -470,7 +489,7 @@ int RocmPeak::runHipblasLt(RocmDevice &dev, benchmark_config_t &)
 #else
   test.skip("mxf4_e2m1", ResultStatus::Unsupported,
             "block-scaled FP4 GEMM API not in this hipBLASLt (needs gfx950 / recent ROCm)",
-            mxf4Note);
+            mxf4Note, mxf4Dims);
 #endif // XPUPEAK_HIPBLASLT_HAS_FP4
 
   (void)hipblasLtDestroy(lt);

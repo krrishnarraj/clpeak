@@ -3,6 +3,8 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 {
   const uint32_t blockSize = 256;
@@ -18,11 +20,17 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
 
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
-     Category::Unknown,
-     "Read bandwidth from GPU memory, over a buffer too large to cache.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"global_memory_bandwidth", "Global memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Read bandwidth from GPU memory, over a buffer too large to cache.",
+                        TestShape::Homogeneous, "vector width"};
+  // Only the bytes read are counted: the CPU backend's read row is the same
+  // measurement, which `op` is what tells apart from its copy and triad.
+  spec.dims = {{Dim::Op, dim::Op::Read}};
+  // 2: its working set is sized past the last-level cache since 2.1.4, and past
+  // the Infinity Cache, which HIP does not report, since 3.0.0.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
@@ -44,7 +52,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
       test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
-                rocmWidthNote(widths[i]));
+                rocmWidthNote(widths[i]), {{Dim::Width, widths[i]}});
     if (inBuf)
       (void)hipFree(inBuf);
     if (outBuf)
@@ -63,7 +71,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
       test.skip(labels[i], ResultStatus::Error, "Failed to upload input buffer",
-                rocmWidthNote(widths[i]));
+                rocmWidthNote(widths[i]), {{Dim::Width, widths[i]}});
     (void)hipFree(inBuf);
     (void)hipFree(outBuf);
     return -1;
@@ -90,7 +98,7 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     RocmKernel k = dev.getKernel(rocm_kernels::global_bandwidth, v.kernelName);
     if (!k)
     {
-      test.skip(key, k.status, k.reason, rocmWidthNote(v.width));
+      test.skip(key, k.status, k.reason, rocmWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
 
@@ -105,12 +113,12 @@ int RocmPeak::runGlobalBandwidth(RocmDevice &dev, benchmark_config_t &cfg)
     if (us <= 0.0f)
     {
       test.skip(key, ResultStatus::Error, "kernel launch failed",
-                rocmWidthNote(v.width));
+                rocmWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float bps = (float)(bytes / us * 1e6);
-    test.emit(key, bps, rocmWidthNote(v.width));
+    test.emit(key, bps, rocmWidthNote(v.width), {{Dim::Width, v.width}});
   }
 
   (void)hipFree(inBuf);

@@ -2,6 +2,8 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+
+using xpupeak::Dim; namespace dim = xpupeak::dim;
 #include <string>
 
 // 2:4 structured-sparse MFMA peak microbenchmarks (SMFMAC). Sibling of mfma.cpp
@@ -32,6 +34,10 @@ struct SparseEntry
   uint32_t M, N, Kdense; // dense-equivalent K for op accounting
   bool isInt;
   const char *description;  // what this row is, next to the name
+  // The reading's data type; its tile is M x N x Kdense above, every row is
+  // 2:4 sparse (the test's dims) and accumulates in the usual type.  "fp8"
+  // is E4M3 in the arch's encoding: FNUZ on CDNA3, OCP on CDNA4.
+  xpupeak::DType dtype;
 };
 
 std::string archBaseOf(const std::string &a)
@@ -56,22 +62,26 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     {"fp16", "Sparse MFMA fp16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp16, "smfmac_fp16",
      16, 16, 32, false,
-     "fp16 inputs, fp32 accumulator (SMFMAC 16x16x32)."},
+     "fp16 inputs, fp32 accumulator (SMFMAC 16x16x32).",
+     xpupeak::DType::Fp16},
     {"bf16", "Sparse MFMA bf16 2:4 16x16x32 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_bf16, "smfmac_bf16",
      16, 16, 32, false,
-     "bf16 inputs, fp32 accumulator (SMFMAC 16x16x32)."},
+     "bf16 inputs, fp32 accumulator (SMFMAC 16x16x32).",
+     xpupeak::DType::Bf16},
     {"fp8", "Sparse MFMA fp8 2:4 16x16x64 (TFLOPS)", "flops",
      &rocm_kernels::smfmac_fp8, "smfmac_fp8",
      16, 16, 64, false,
      "fp8 E4M3 inputs (more precision, less range), fp32 accumulator "
-     "(SMFMAC 16x16x64)."},
+     "(SMFMAC 16x16x64).",
+     xpupeak::DType::Fp8E4m3},
   };
   static const SparseEntry intEntries[] = {
     {"int8", "Sparse MFMA int8 2:4 16x16x64 (TOPS)", "ops",
      &rocm_kernels::smfmac_int8, "smfmac_int8",
      16, 16, 64, true,
-     "int8 inputs, int32 accumulator (SMFMAC 16x16x64)."},
+     "int8 inputs, int32 accumulator (SMFMAC 16x16x64).",
+     xpupeak::DType::Int8},
   };
 
 
@@ -85,19 +95,24 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
   // The reading's own note rides along on every path, and the integer reading
   // carries its own unit -- that override is what lets it share the test with
   // the floating-point ones instead of needing a twin.
-  auto unitOpts = [](const SparseEntry &en) {
+  const std::string archBase = archBaseOf(dev.info.archName);
+  auto unitOpts = [&](const SparseEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
     if (en.isInt) o.unit = "ops";
+    o.dims = {{Dim::Dtype, rocmFp8Format(en.dtype, archBase)},
+              {Dim::Tile, rocmTile(en.M, en.N, en.Kdense)}};
     return o;
   };
 
   // One scope for the whole family -- all data types in one test.
-  auto test = currentDeviceScope->beginTest(
-    {"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "flops", Category::Unknown,
-       "Peak rate of the CDNA3+ matrix cores with 2:4 structured sparsity "
-       "(SMFMAC), counted as dense-equivalent work.",
-       TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"smfmac", "Matrix cores, 2:4 sparse (SMFMAC)", "flops",
+                        Category::Unknown,
+                        "Peak rate of the CDNA3+ matrix cores with 2:4 structured sparsity "
+                        "(SMFMAC), counted as dense-equivalent work.",
+                        TestShape::Heterogeneous, "data type"};
+  spec.dims = {{Dim::Sparsity, dim::Sparsity::S2_4}};
+  auto test = currentDeviceScope->beginTest(spec);
 
   for (size_t e = 0; e < sizeof(fpEntries)/sizeof(fpEntries[0]); e++)
   {
@@ -106,7 +121,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     if (!cdna)
     {
       test.skip(se.label, ResultStatus::Unsupported,
-                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", se.description);
+                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture",
+                unitOpts(se));
       continue;
     }
 
@@ -162,7 +178,8 @@ int RocmPeak::runSparseMfma(RocmDevice &dev, benchmark_config_t &cfg)
     if (!cdna)
     {
       test.skip(se.label, ResultStatus::Unsupported,
-                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture", se.description);
+                "Sparse MFMA is a CDNA (gfx9xx) matrix-core feature; absent on this architecture",
+                unitOpts(se));
       continue;
     }
 

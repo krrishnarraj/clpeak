@@ -4,6 +4,8 @@
 #include <common/common.h>
 #include <sycl/sycl.hpp>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // Read FETCH_PER_WI elements per work-item, strided by local-size so adjacent
 // lanes coalesce.  Matches global_bandwidth.hip / .cl byte-for-byte.
 
@@ -62,11 +64,17 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
 
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
-     Category::Unknown,
-     "Read bandwidth from device memory, over a buffer too large to cache.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"global_memory_bandwidth", "Global memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Read bandwidth from device memory, over a buffer too large to cache.",
+                        TestShape::Homogeneous, "vector width"};
+  // Only the bytes read are counted: the CPU backend's read row is the same
+  // measurement, which `op` is what tells apart from its copy and triad.
+  spec.dims = {{Dim::Op, dim::Op::Read}};
+  // 2: its working set is sized past the last-level cache since 2.1.4, which
+  // some caches had been answering.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
@@ -85,7 +93,7 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     const int widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
       test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
-                oneapiWidthNote(widths[i]));
+                oneapiWidthNote(widths[i]), {{Dim::Width, widths[i]}});
     if (inBuf)  sycl::free(inBuf,  dev.stream);
     if (outBuf) sycl::free(outBuf, dev.stream);
     return -1;
@@ -100,9 +108,11 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     catch (const sycl::exception &e)
     {
       const char *labels[] = {"float", "float2", "float4"};
+      const int widths[] = {1, 2, 4};
       for (int i = 0; i < 3; i++)
         test.skip(labels[i], ResultStatus::Error,
-                  std::string("Failed to upload input buffer: ") + e.what());
+                  std::string("Failed to upload input buffer: ") + e.what(),
+                  oneapiWidthNote(widths[i]), {{Dim::Width, widths[i]}});
       delete[] hInput;
       sycl::free(inBuf,  dev.stream);
       sycl::free(outBuf, dev.stream);
@@ -129,11 +139,11 @@ int OneapiPeak::runGlobalBandwidth(OneapiDevice &dev, benchmark_config_t &cfg)
     if (us <= 0.0f)
     {
       test.skip(v.key, ResultStatus::Error, "kernel launch failed",
-                oneapiWidthNote(v.W));
+                oneapiWidthNote(v.W), {{Dim::Width, v.W}});
       continue;
     }
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.W * sizeof(float);
-    test.emit(v.key, (float)(bytes / us * 1e6), oneapiWidthNote(v.W));
+    test.emit(v.key, (float)(bytes / us * 1e6), oneapiWidthNote(v.W), {{Dim::Width, v.W}});
   }
 
   sycl::free(inBuf,  dev.stream);

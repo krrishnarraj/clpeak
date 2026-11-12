@@ -114,12 +114,33 @@ static inline const char *rocmWidthNote(uint32_t width)
   }
 }
 
+// The fp8 format a matrix instruction's "fp8" reads on `archBase` (gfx942,
+// no feature suffix): CDNA3 (gfx94x) has only the FNUZ encodings -- no
+// negative zero, NaN at 0x80, exponent bias one higher -- and CDNA4 and RDNA4
+// the OCP ones.  `ocp` is the OCP type the row names (fp8_e4m3, fp8_e5m2).
+static inline xpupeak::DType rocmFp8Format(xpupeak::DType ocp, const std::string &archBase)
+{
+  if (archBase.compare(0, 5, "gfx94") != 0) return ocp;
+  return ocp == xpupeak::DType::Fp8E5m2 ? xpupeak::DType::Fp8E5m2Fnuz
+                                        : xpupeak::DType::Fp8E4m3Fnuz;
+}
+
+// A matrix instruction's shape as a reading's `tile`: "16x16x32" (M x N x K).
+static inline std::string rocmTile(uint32_t M, uint32_t N, uint32_t K)
+{
+  return std::to_string(M) + "x" + std::to_string(N) + "x" + std::to_string(K);
+}
+
 struct rocm_compute_variant_t
 {
   const char *label;
   const char *kernelName;
   const rocm_kernels::Blob *blob;
   const char *description;   // what this one reading means (nullptr = undocumented)
+
+  // This reading's coordinates over the test's (include/common/AGENTS.md
+  // § dims): a vector width, a chain count.  Carried on every path.
+  Dims dims;
 };
 
 struct rocm_compute_desc_t
@@ -141,6 +162,7 @@ struct rocm_compute_desc_t
   const char *axis;
 
   const char *metricLabel;
+  Dims        metricDims;        // single-variant path: its reading's coordinates
   const char *kernelName;
   const rocm_kernels::Blob *blob;
 
@@ -162,6 +184,11 @@ struct rocm_compute_desc_t
   // leaves out parts without the instruction.  nullptr for kernels built for
   // every covered arch.
   const char *notBuilt;
+
+  // What every reading shares -- a vector test's data type -- and the test's
+  // method revision; both travel to logger::TestSpec.
+  Dims dims;
+  int  revision = 1;
 };
 
 class RocmPeak : public Peak

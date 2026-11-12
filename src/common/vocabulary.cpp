@@ -68,6 +68,7 @@ const char *const kIsa[]         = {"scalar", "sse2", "ssse3", "sse4_2", "avx", 
                                     "avx10", "amx", "neon", "sve", "sve2", "sme", "sme2"};
 const char *const kImpl[]        = {"cublaslt", "hipblaslt", "rocblas", "rocwmma", "onemkl", "mps",
                                     "mpsgraph", "accelerate", "bnns"};
+const char *const kBound[]       = {"throughput", "latency"};
 XPUPEAK_VOCAB_LIST(dim::Quant, kQuant);
 XPUPEAK_VOCAB_LIST(dim::Sparsity, kSparsity);
 XPUPEAK_VOCAB_LIST(dim::Scope, kScope);
@@ -83,6 +84,7 @@ XPUPEAK_VOCAB_LIST(dim::Contention, kContention);
 XPUPEAK_VOCAB_LIST(dim::Workload, kWorkload);
 XPUPEAK_VOCAB_LIST(dim::Isa, kIsa);
 XPUPEAK_VOCAB_LIST(dim::Impl, kImpl);
+XPUPEAK_VOCAB_LIST(dim::Bound, kBound);
 
 using DC = DimClass;
 using DK = DimKind;
@@ -151,6 +153,9 @@ const DimKeyInfo kDims[] = {
      "a GEMM's edge, where a test sweeps sizes"},
     {"kv", DC::Identity, DK::DataType, DD::SameAsDtype, "",
      "a transformer block's KV-cache type"},
+    {"bound", DC::Identity, DK::Word, DD::Value, "throughput",
+     "what limits a compute kernel: enough independent chains to fill every pipe, or "
+     "one chain whose every operation waits on the one before"},
 };
 XPUPEAK_VOCAB_LIST(Dim, kDims);
 
@@ -184,6 +189,7 @@ WordList wordsOf(Dim d)
     case Dim::Workload:    return words(kWorkload);
     case Dim::Isa:         return words(kIsa);
     case Dim::Impl:        return words(kImpl);
+    case Dim::Bound:       return words(kBound);
     default:               return {nullptr, 0};
     }
 }
@@ -267,6 +273,15 @@ const char *const kCacheLevels[]    = {"l1d", "l1i", "l2", "l3", "slc"};
 const char *const kEngineKinds[]    = {"matrix"};
 const char *const kEngineScopes[]   = {"core", "cluster"};
 const char *const kEngineReaches[]  = {"instructions", "library"};
+const char *const kCpuFeatures[]    = {"sse2", "ssse3", "sse4_1", "sse4_2", "avx", "avx2", "fma",
+                                       "avx512f", "avx512bw", "avx512vl", "avx512dq",
+                                       "avx512_vnni", "avx512_bf16", "avx512_fp16",
+                                       "avx_vnni", "avx_vnni_int8", "avx_vnni_int16", "avx10",
+                                       "avx10_2", "amx_tile", "amx_int8", "amx_bf16", "amx_fp16",
+                                       "amx_fp8", "vaes",
+                                       "neon", "fp16", "fhm", "dotprod", "bf16", "i8mm", "sve",
+                                       "sve2", "sme", "sme2", "sme_f64f64", "fp8dot4",
+                                       "aes", "sha256", "sha512", "crc32"};
 const char *const kVendors[]        = {"amd", "apple", "arm", "google", "imagination", "intel",
                                        "mediatek", "nvidia", "qualcomm", "samsung", "microsoft",
                                        "broadcom", "huawei", "mesa", "pocl", "ampere", "hygon",
@@ -285,6 +300,7 @@ XPUPEAK_VOCAB_LIST(CacheLevel, kCacheLevels);
 XPUPEAK_VOCAB_LIST(EngineKind, kEngineKinds);
 XPUPEAK_VOCAB_LIST(EngineScope, kEngineScopes);
 XPUPEAK_VOCAB_LIST(EngineReach, kEngineReaches);
+XPUPEAK_VOCAB_LIST(CpuFeature, kCpuFeatures);
 XPUPEAK_VOCAB_LIST(Vendor, kVendors);
 XPUPEAK_VOCAB_LIST(FormFactor, kFormFactors);
 XPUPEAK_VOCAB_LIST(FormFactorDetail, kFormDetails);
@@ -483,6 +499,8 @@ const char *toString(EngineReach r) { return nameIn(kEngineReaches, r); }
 bool fromString(const std::string &s, EngineKind &out) { return parseIn(kEngineKinds, s, out); }
 bool fromString(const std::string &s, EngineScope &out) { return parseIn(kEngineScopes, s, out); }
 bool fromString(const std::string &s, EngineReach &out) { return parseIn(kEngineReaches, s, out); }
+const char *toString(CpuFeature f) { return nameIn(kCpuFeatures, f); }
+bool fromString(const std::string &s, CpuFeature &out) { return parseIn(kCpuFeatures, s, out); }
 const char *toString(Vendor v) { return nameIn(kVendors, v); }
 bool fromString(const std::string &s, Vendor &out) { return parseIn(kVendors, s, out); }
 const char *toString(FormFactor f) { return nameIn(kFormFactors, f); }

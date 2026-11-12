@@ -18,6 +18,7 @@
 #include <common/run_log.h>
 #include <common/run_resume.h>
 #include <common/console_mute.h>
+#include <common/hardware_link.h>
 #include <version.h>
 
 #ifdef ENABLE_ONNX
@@ -266,6 +267,11 @@ void xpupeak_set_paused(int paused)
     xpupeak::setRunPaused(paused != 0);
 }
 
+void xpupeak_set_host_facts(const char *json)
+{
+    setHostFacts(json ? json : "");
+}
+
 int xpupeak_launch(int argc, const char **argv,
                    XpuPeakEventCallback on_event, void *user_data)
 {
@@ -370,6 +376,7 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
         combined.meta.system        = probeSystem();
+        combined.meta.conditions    = probeConditions();
         combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
     }
     // The sidecar: every entry on disk as it happens, for the native crash
@@ -434,10 +441,15 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         xpupeak::purgeCoreMLCompileCache();
     }
 
+    // Every device onto the processor it is a view of, before the file is
+    // written, as in the CLI (include/common/hardware_link.h).
+    xpupeak::linkHardware(combined);
+
     bool cancelled = xpupeak::cancelRequested();
 
     combined.meta.cancelled = cancelled;
     combined.meta.durationS = checkpoint.runningS();
+    finishConditions(combined.meta.conditions);
     if (resuming)
         combined.meta.resumed.push_back(checkpoint.partRecord(combined));
     runLog.finish();

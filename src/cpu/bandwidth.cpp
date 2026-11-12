@@ -11,6 +11,8 @@
 #include <new>
 #include <vector>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // Cache-line-aligned float buffer.  std::vector / malloc only promise 16-byte
 // alignment on x86-64, and glibc serves large allocations from mmap as
 // page + 16 (the chunk header) -- the worst possible case: with a 16-mod-64
@@ -66,6 +68,9 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                         "slow one shared by all of them.  Each reading uses a working "
                         "set sized to stay inside the cache it names.",
                         TestShape::Heterogeneous, "cache level"};
+  // Every reading reads; each names its level, and a single-thread one its
+  // scope.
+  spec.dims = {{Dim::Op, dim::Op::Read}};
   auto test = currentDeviceScope->beginTest(spec);
 
   const int maxT = pool->maxThreads();
@@ -105,22 +110,23 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     bool sharedForMt;
     const char *stNote;
     const char *mtNote;
+    dim::Level where;           // the reading's `level`
   };
   const Level levels[] = {
       {"L1", 1, std::max<uint64_t>(info.l1dCacheBytes / 2, 4096), info.l1dTotalBytes,
        0, false,
        "One thread reading from the small cache inside its own core.",
-       "Every core reading from its own L1 at the same time."},
+       "Every core reading from its own L1 at the same time.", dim::Level::L1},
       {"L2", 2, std::max<uint64_t>(info.l2CacheBytes / 2, 16384), info.l2TotalBytes,
        info.l1dCacheBytes * 2, l2Shared,
        "One thread reading from the mid-level cache, the next step out.",
        "Every core reading from L2 at once; where L2 is shared, the data is "
-       "split between them so it still fits."},
+       "split between them so it still fits.", dim::Level::L2},
       {"L3", 3, std::min<uint64_t>(std::max<uint64_t>(info.l3CacheBytes / 2, 65536), cap),
        info.l3TotalBytes, (info.l2CacheBytes ? info.l2CacheBytes : info.l1dCacheBytes) * 2, true,
        "One thread reading from the large cache shared by all cores.",
        "Every core reading from that shared cache at once, each taking a slice "
-       "of it."},
+       "of it.", dim::Level::L3},
   };
 
   // Every MT worker's working set at `lvl`, sized for the core it is pinned to.
@@ -197,10 +203,14 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
   for (int i = 0; i < 3; i++)
   {
     const Level &lvl = levels[i];
+    const Dims stDims{{Dim::Level, lvl.where}, {Dim::Scope, dim::Scope::Core}};
+    const Dims mtDims{{Dim::Level, lvl.where}};
     if (gap[i])
     {
-      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported, gap[i], lvl.stNote);
-      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported, gap[i], lvl.mtNote);
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Unsupported, gap[i], lvl.stNote,
+                stDims);
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Unsupported, gap[i], lvl.mtNote,
+                mtDims);
       continue;
     }
 
@@ -228,13 +238,15 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
 
     if (ps1 > 0)
       test.emit(std::string(lvl.name) + " ST", (float)(ps1 * (double)M1 * sizeof(float)),
-                lvl.stNote);
+                lvl.stNote, stDims);
     else
-      test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote);
+      test.skip(std::string(lvl.name) + " ST", ResultStatus::Error, "read failed", lvl.stNote,
+                stDims);
     if (bpsN > 0)
-      test.emit(std::string(lvl.name) + " MT", (float)bpsN, lvl.mtNote);
+      test.emit(std::string(lvl.name) + " MT", (float)bpsN, lvl.mtNote, mtDims);
     else
-      test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote);
+      test.skip(std::string(lvl.name) + " MT", ResultStatus::Error, "read failed", lvl.mtNote,
+                mtDims);
   }
 
   volatile uint64_t keep = 0;
@@ -262,19 +274,24 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
                            "paths out to memory than in, so writing usually lands "
                            "below the matching read row.",
                            TestShape::Heterogeneous, "operation"};
+    wspec.dims = {{Dim::Level, dim::Level::L1}};
     auto wtest = currentDeviceScope->beginTest(wspec);
     const char *wStNote = "One thread storing new values into its own L1.";
     const char *wMtNote = "Every core storing into its own L1 at the same time.";
     const char *cStNote = "One thread copying inside L1 -- one read plus one write "
                           "for every byte moved.";
     const char *cMtNote = "Every core copying inside its own L1 at the same time.";
+    const Dims wSt{{Dim::Op, dim::Op::Write}, {Dim::Scope, dim::Scope::Core}};
+    const Dims wMt{{Dim::Op, dim::Op::Write}};
+    const Dims cSt{{Dim::Op, dim::Op::Copy}, {Dim::Scope, dim::Scope::Core}};
+    const Dims cMt{{Dim::Op, dim::Op::Copy}};
 
     if (gap[0])
     {
-      wtest.skip("write ST", ResultStatus::Unsupported, gap[0], wStNote);
-      wtest.skip("write MT", ResultStatus::Unsupported, gap[0], wMtNote);
-      wtest.skip("copy ST", ResultStatus::Unsupported, gap[0], cStNote);
-      wtest.skip("copy MT", ResultStatus::Unsupported, gap[0], cMtNote);
+      wtest.skip("write ST", ResultStatus::Unsupported, gap[0], wStNote, wSt);
+      wtest.skip("write MT", ResultStatus::Unsupported, gap[0], wMtNote, wMt);
+      wtest.skip("copy ST", ResultStatus::Unsupported, gap[0], cStNote, cSt);
+      wtest.skip("copy MT", ResultStatus::Unsupported, gap[0], cMtNote, cMt);
       return 0;
     }
 
@@ -320,24 +337,25 @@ int CpuPeak::runCacheBandwidth(benchmark_config_t &cfg)
     double ps1  = runWorkload(1, writeBody(wFloatsST), cfg.targetTimeUs, forced);
     double bpsN = runWorkload(maxT, writeBody(wFloats), cfg.targetTimeUs, forced, &wBytes);
     if (ps1 > 0)
-      wtest.emit("write ST", (float)(ps1 * (double)wFloats1 * sizeof(float)), wStNote);
+      wtest.emit("write ST", (float)(ps1 * (double)wFloats1 * sizeof(float)), wStNote, wSt);
     else
-      wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote);
+      wtest.skip("write ST", ResultStatus::Error, "write failed", wStNote, wSt);
     if (bpsN > 0)
-      wtest.emit("write MT", (float)bpsN, wMtNote);
+      wtest.emit("write MT", (float)bpsN, wMtNote, wMt);
     else
-      wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote);
+      wtest.skip("write MT", ResultStatus::Error, "write failed", wMtNote, wMt);
 
     ps1  = runWorkload(1, copyBody(wFloatsST), cfg.targetTimeUs, forced);
     bpsN = runWorkload(maxT, copyBody(wFloats), cfg.targetTimeUs, forced, &cBytes);
     if (ps1 > 0)
-      wtest.emit("copy ST", (float)(ps1 * 2.0 * (double)(wFloats1 / 2) * sizeof(float)), cStNote);
+      wtest.emit("copy ST", (float)(ps1 * 2.0 * (double)(wFloats1 / 2) * sizeof(float)), cStNote,
+                 cSt);
     else
-      wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote);
+      wtest.skip("copy ST", ResultStatus::Error, "copy failed", cStNote, cSt);
     if (bpsN > 0)
-      wtest.emit("copy MT", (float)bpsN, cMtNote);
+      wtest.emit("copy MT", (float)bpsN, cMtNote, cMt);
     else
-      wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote);
+      wtest.skip("copy MT", ResultStatus::Error, "copy failed", cMtNote, cMt);
   }
   return 0;
 }
@@ -451,9 +469,11 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     }
     return w;
   };
-  auto emitBps = [&](const char *id, double bps, const char *note) {
-    if (bps > 0) test.emit(id, (float)bps, note);
-    else         test.skip(id, ResultStatus::Error, "workload failed", note);
+  // Every row is all cores together, so each names its operation alone: the
+  // family says the data is in DRAM.
+  auto emitBps = [&](const char *id, double bps, const char *note, dim::Op op) {
+    if (bps > 0) test.emit(id, (float)bps, note, {{Dim::Op, op}});
+    else         test.skip(id, ResultStatus::Error, "workload failed", note, {{Dim::Op, op}});
   };
 
   {
@@ -465,7 +485,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     };
     const std::vector<double> w = sliceBytes(1.0);
     emitBps("read", runWorkload(maxT, body, cfg.targetTimeUs, forced, &w),
-            "Reading one large array straight through, start to end.");
+            "Reading one large array straight through, start to end.", dim::Op::Read);
   }
   {
     Workload body = [&](int tid, uint64_t iters)
@@ -478,7 +498,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     const std::vector<double> w = sliceBytes(2.0);
     emitBps("copy", runWorkload(maxT, body, cfg.targetTimeUs, forced, &w),
             "Copying one large array into another -- a read and a write for "
-            "every element.");
+            "every element.", dim::Op::Copy);
   }
   {
     const float s = 1.5f;
@@ -493,7 +513,7 @@ int CpuPeak::runDramBandwidth(benchmark_config_t &cfg)
     const std::vector<double> w = sliceBytes(3.0);
     emitBps("triad", runWorkload(maxT, body, cfg.targetTimeUs, forced, &w),
             "Scaling one array, adding a second and storing to a third: two "
-            "reads and a write per element, the hardest of the three.");
+            "reads and a write per element, the hardest of the three.", dim::Op::Triad);
   }
 
   volatile uint64_t keep = 0;

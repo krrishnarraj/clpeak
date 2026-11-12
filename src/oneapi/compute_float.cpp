@@ -10,6 +10,8 @@
 #endif
 #include <algorithm>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 namespace xpupeak_oneapi {
 uint32_t pickComputeBlocks(const oneapi_device_info_t &info,
                            uint32_t blockSize, uint32_t outElemsPerBlock,
@@ -288,10 +290,11 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
   };
 
   const char *note = oneapiWidthNote(W);
+  const Dims dims = {{Dim::Width, W}};
   float us = peak.runKernel(dev, submit, targetTimeUs, forced);
   if (us <= 0.0f)
   {
-    test.skip(label, ResultStatus::Error, "kernel launch failed", note);
+    test.skip(label, ResultStatus::Error, "kernel launch failed", note, dims);
     return;
   }
   const float squaring = xpupeak_oneapi::computeFlops(totalThreads, workPerWI, us);
@@ -341,7 +344,7 @@ static void runFpWidth(OneapiPeak &peak, OneapiDevice &dev,
     }
   }
 
-  test.emit(label, value, note);
+  test.emit(label, value, note, dims);
 }
 
 // Drive the {1,2,4,8,16} sweep for one FP family.  D is the uniform-b shape's
@@ -370,11 +373,15 @@ static void runFpSweep(OneapiPeak &peak, OneapiDevice &dev,
 // --------------------------------------------------------------------------
 int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"single_precision_compute", "Single-precision compute", "flops",
-     Category::Unknown,
-     "Peak fp32 arithmetic rate of the device's ALUs, with no memory traffic.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"single_precision_compute", "Single-precision compute", "flops",
+                        Category::Unknown,
+                        "Peak fp32 arithmetic rate of the device's ALUs, with no memory traffic.",
+                        TestShape::Homogeneous, "vector width"};
+  spec.dims = {{Dim::Dtype, DType::Fp32}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races other shapes
+  // (2.1.3, 3.0.2) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   const uint32_t blockSize = 256;
   uint32_t numBlocks = xpupeak_oneapi::pickComputeBlocks(dev.info, blockSize, blockSize, sizeof(float));
@@ -401,11 +408,15 @@ int OneapiPeak::runComputeSP(OneapiDevice &dev, benchmark_config_t &cfg)
 // --------------------------------------------------------------------------
 int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"half_precision_compute", "Half-precision compute", "flops",
-     Category::Unknown,
-     "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"half_precision_compute", "Half-precision compute", "flops",
+                        Category::Unknown,
+                        "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.",
+                        TestShape::Homogeneous, "vector width"};
+  spec.dims = {{Dim::Dtype, DType::Fp16}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races other shapes
+  // (2.1.3, 3.0.2) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   if (!dev.info.fp16Supported)
   {
@@ -440,11 +451,15 @@ int OneapiPeak::runComputeHP(OneapiDevice &dev, benchmark_config_t &cfg)
 // --------------------------------------------------------------------------
 int OneapiPeak::runComputeDP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"double_precision_compute", "Double-precision compute", "flops",
-     Category::Unknown,
-     "Peak fp64 arithmetic rate.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"double_precision_compute", "Double-precision compute", "flops",
+                        Category::Unknown,
+                        "Peak fp64 arithmetic rate.",
+                        TestShape::Homogeneous, "vector width"};
+  spec.dims = {{Dim::Dtype, DType::Fp64}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races other shapes
+  // (2.1.3, 3.0.2) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   if (!dev.info.fp64Supported)
   {
@@ -518,15 +533,23 @@ class compute_mp_alt16_kernel;
 
 int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
+  logger::TestSpec spec =
     {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "flops",
      Category::Unknown,
      "Peak rate of fp16 multiplies accumulated in fp32, without the matrix engine.",
-     TestShape::Homogeneous, "vector width"});
+     TestShape::Homogeneous, "vector width"};
+  // The family's own accumulator is fp32, so the data type says it all.
+  spec.dims = {{Dim::Dtype, DType::Fp16}};
+  // 2: its MAD chain went to one accumulator (2.1.0), races other shapes (2.1.3,
+  // 3.0.2), and its fp16 round trip left the chain (2.1.4), since it first
+  // shipped.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   if (!dev.info.fp16Supported)
   {
-    test.skip("mp", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device");
+    test.skip("mp", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", "",
+              {{Dim::Width, 1}});
     return 0;
   }
 
@@ -537,7 +560,8 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
   float *out = sycl::malloc_device<float>(totalThreads, dev.stream);
   if (!out)
   {
-    test.skip("mp", ResultStatus::Error, "Failed to allocate output buffer");
+    test.skip("mp", ResultStatus::Error, "Failed to allocate output buffer", "",
+              {{Dim::Width, 1}});
     return -1;
   }
   const float A = 1.3f;
@@ -618,13 +642,15 @@ int OneapiPeak::runComputeMP(OneapiDevice &dev, benchmark_config_t &cfg)
   float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
   {
-    test.skip("mp", ResultStatus::Error, "kernel launch failed");
+    test.skip("mp", ResultStatus::Error, "kernel launch failed", "",
+              {{Dim::Width, 1}});
     sycl::free(out, dev.stream);
     return 0;
   }
-  test.emit("mp", raceScalarShapes(*this, dev, "mp", totalThreads, us, submitAlt, submitAltU,
-                                   submitAlt16, cfg.targetTimeUs,
-                                   forceIters ? specifiedIters : 0));
+  const float mp = raceScalarShapes(*this, dev, "mp", totalThreads, us, submitAlt, submitAltU,
+                                    submitAlt16, cfg.targetTimeUs,
+                                    forceIters ? specifiedIters : 0);
+  test.emit("mp", mp, nullptr, {{Dim::Width, 1}});
 
   sycl::free(out, dev.stream);
   return 0;
@@ -645,16 +671,23 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 {
   using bfloat16 = sycl::ext::oneapi::bfloat16;
 
-  auto test = currentDeviceScope->beginTest(
+  logger::TestSpec spec =
     {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
      Category::Unknown,
      "Peak rate of bf16 multiplies accumulated in fp32, without the matrix engine.  "
      "Devices without bf16 hardware emulate it, at a lower rate.",
-     TestShape::Homogeneous, "vector width"});
+     TestShape::Homogeneous, "vector width"};
+  // bfloat16-compute's own accumulator is bf16: this one is fp32.
+  spec.dims = {{Dim::Dtype, DType::Bf16}, {Dim::Acc, DType::Fp32}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races other shapes
+  // (2.1.3, 3.0.2) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   if (!dev.info.bf16Supported)
   {
-    test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device");
+    test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", "",
+              {{Dim::Width, 1}});
     return 0;
   }
 
@@ -665,7 +698,8 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
   float *out = sycl::malloc_device<float>(totalThreads, dev.stream);
   if (!out)
   {
-    test.skip("bf16", ResultStatus::Error, "Failed to allocate output buffer");
+    test.skip("bf16", ResultStatus::Error, "Failed to allocate output buffer", "",
+              {{Dim::Width, 1}});
     return -1;
   }
   const float A = 1.3f;
@@ -744,13 +778,15 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
   float us = runKernel(dev, submit, cfg.targetTimeUs, forceIters ? specifiedIters : 0);
   if (us <= 0.0f)
   {
-    test.skip("bf16", ResultStatus::Error, "kernel launch failed");
+    test.skip("bf16", ResultStatus::Error, "kernel launch failed", "",
+              {{Dim::Width, 1}});
     sycl::free(out, dev.stream);
     return 0;
   }
-  test.emit("bf16", raceScalarShapes(*this, dev, "bf16", totalThreads, us, submitAlt, submitAltU,
-                                     submitAlt16, cfg.targetTimeUs,
-                                     forceIters ? specifiedIters : 0));
+  const float bf16 = raceScalarShapes(*this, dev, "bf16", totalThreads, us, submitAlt,
+                                      submitAltU, submitAlt16, cfg.targetTimeUs,
+                                      forceIters ? specifiedIters : 0);
+  test.emit("bf16", bf16, nullptr, {{Dim::Width, 1}});
 
   sycl::free(out, dev.stream);
   return 0;
@@ -758,14 +794,21 @@ int OneapiPeak::runComputeBF16(OneapiDevice &dev, benchmark_config_t &cfg)
 #else
 int OneapiPeak::runComputeBF16(OneapiDevice &, benchmark_config_t &)
 {
-  auto test = currentDeviceScope->beginTest(
+  logger::TestSpec spec =
     {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
      Category::Unknown,
      "Peak rate of bf16 multiplies accumulated in fp32, without the matrix engine.  "
      "Devices without bf16 hardware emulate it, at a lower rate.",
-     TestShape::Homogeneous, "vector width"});
+     TestShape::Homogeneous, "vector width"};
+  // bfloat16-compute's own accumulator is bf16: this one is fp32.
+  spec.dims = {{Dim::Dtype, DType::Bf16}, {Dim::Acc, DType::Fp32}};
+  // 2: its MAD chain went to one accumulator (2.1.0) and races other shapes
+  // (2.1.3, 3.0.2) since it first shipped, which moved its numbers.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
   test.skip("bf16", ResultStatus::Unsupported,
-            "SYCL bfloat16 header not available in this oneAPI toolchain");
+            "SYCL bfloat16 header not available in this oneAPI toolchain", "",
+            {{Dim::Width, 1}});
   return 0;
 }
 #endif

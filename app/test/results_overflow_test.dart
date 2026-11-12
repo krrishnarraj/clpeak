@@ -62,10 +62,10 @@ void main() {
     addTearDown(tester.view.reset);
 
     final doc = RunDocument();
-    // Two runs, so the device selector chips are shown — the chip is the
-    // narrowest place the device name has to fit.
+    // Two devices of one backend, so its tab shows the device chips — the
+    // chip is the narrowest place the device name has to fit.
     _add(doc);
-    _add(doc, backend: 'CPU', device: 'Apple CPU (part 0x000)');
+    _add(doc, device: 'Apple CPU (part 0x000)');
 
     await tester.pumpWidget(_host(doc));
     await tester.pump();
@@ -74,12 +74,12 @@ void main() {
     expect(tester.takeException(), isNull);
 
     // Present in full, on however many lines it takes.
-    expect(find.text('Vulkan · $_longDevice'), findsOneWidget);
+    expect(find.text(_longDevice), findsOneWidget);
     expect(find.text(_longTest), findsOneWidget);
 
     // Nothing clamps them to one line.
     for (final text in [
-      tester.widget<Text>(find.text('Vulkan · $_longDevice')),
+      tester.widget<Text>(find.text(_longDevice)),
       tester.widget<Text>(find.text(_longTest)),
     ]) {
       expect(text.maxLines, isNull);

@@ -72,9 +72,11 @@ class LiveResultsScreen extends StatelessWidget {
                       'Some backends reported errors (status ${service.exitCode}). '
                       'Results below may be incomplete.',
                 ),
+              // The saved file once there is one: its Summary, the system
+              // and every processor's peaks, is only in the file.
               Expanded(
                   child: ResultsBody(
-                      document: service.document,
+                      document: service.savedDocument ?? service.document,
                       showDiagnostics: service.runVerbose)),
             ],
           ),

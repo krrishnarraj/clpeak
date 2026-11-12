@@ -262,6 +262,23 @@ XPUPEAK_FFI_EXPORT void xpupeak_set_on_screen(int on_screen);
 // call from any thread.
 XPUPEAK_FFI_EXPORT void xpupeak_set_paused(int paused);
 
+// ---- Facts only the app can read ----------------------------------------------------
+
+// What the platform tells only an app, for the `conditions` of every launch
+// after this call (docs/format-v4.md, Conditions): a JSON object in the
+// document's words, of which this build reads
+//   "power_source"    "ac" | "battery"   iOS: UIDevice.batteryState; Android:
+//                                        BatteryManager, where SELinux hides
+//                                        the power supplies from native code
+//   "low_power_mode"  true | false       Android: PowerManager.isPowerSaveMode
+// Each key the object holds replaces what the native probe read; one it
+// leaves out, or whose value is not one of those words, keeps the probe's.
+// Each call replaces the last, and NULL or "" clears them.  Call it just
+// before xpupeak_launch(): a run records the state it started in.  Mobile
+// only -- on desktop the engine process reads these itself.  Safe to call
+// from any thread.
+XPUPEAK_FFI_EXPORT void xpupeak_set_host_facts(const char *json);
+
 // ---- Engine process (desktop) ----------------------------------------------------
 //
 // The desktop app runs its catalog and its runs in `xpupeak-engine`, a process

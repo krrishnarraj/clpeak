@@ -75,6 +75,14 @@ inline std::string onnxPluginOrigin(const onnx_ep_info_t &ep)
 // API.
 std::vector<onnx_ep_info_t> onnxPluginDevices(const OrtRuntime &rt);
 
+// For each built-in provider in `eps` (no OrtEpDevice behind it), the
+// hardware device the environment pairs with it, when it pairs exactly one
+// of the provider's kind: its ids, vendor and metadata, which are what link
+// the device to the other backends' views of it.  One the environment pairs
+// with several (DirectML on a machine with two adapters) is left without.
+// Needs the 1.22 API and an environment; a no-op otherwise.
+void onnxAttachBuiltinHardware(const OrtRuntime &rt, std::vector<onnx_ep_info_t> &eps);
+
 // Attach the plugin provider behind `ep` to `so` with `kv` as its options.
 // Empty on success, otherwise the runtime's one-line reason.
 std::string onnxAppendPluginDevice(

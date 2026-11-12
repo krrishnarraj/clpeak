@@ -5,6 +5,7 @@
 #include "coreml_session.h"
 
 #include <common/coreml_cache.h>
+#include <common/hardware_link.h>
 #include <common/options.h>
 
 #import <CoreML/CoreML.h>
@@ -79,7 +80,7 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
         dev.coreCount = (int)[(MLNeuralEngineComputeDevice *)d totalCoreCount];
         dev.displayName = "Apple Neural Engine";
         dev.typeStr = "NPU";
-        dev.deviceType = DeviceType::Accelerator;
+        dev.deviceType = DeviceType::Npu;
         out.push_back(dev);   // accelerators first
         break;
       case CoremlDeviceKind::Gpu:
@@ -87,6 +88,8 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
         id<MTLDevice> mtl = [(MLGPUComputeDevice *)d metalDevice];
         dev.gpuIndex = gpuIndex++;
         dev.gpuName = mtl && mtl.name ? mtl.name.UTF8String : "GPU";
+        dev.gpuRegistryId = mtl ? (uint64_t)mtl.registryID : 0;
+        dev.gpuUnifiedMemory = mtl && mtl.hasUnifiedMemory;
         dev.displayName = "GPU via Core ML (" + dev.gpuName + ")";
         dev.typeStr = "GPU";
         dev.deviceType = DeviceType::Gpu;
@@ -107,6 +110,40 @@ std::vector<coreml_device_info_t> coremlDevices(std::string *why)
   if (out.empty() && why)
     *why = "Core ML reports no compute devices";
   return out;
+}
+
+// Who a compute device is (include/common/hardware_link.h): the Neural
+// Engine is the SoC's NPU, the GPU the Metal device Core ML names -- by its
+// registry ID, which the Metal backend reports for the same GPU -- and the
+// CPU the host.  What Core ML says of the hardware, and where the work runs.
+// A listing can ask it too.
+static void coremlIdentify(const coreml_device_info_t &dev, logger::Identity &ident,
+                           HardwareFacts &facts, RuntimeInfo &runtime)
+{
+  switch (dev.kind)
+  {
+  case CoremlDeviceKind::NeuralEngine:
+    ident.socNpu = true;
+    facts.vendorId = xpupeak::pciIdText(0x106b);   // Apple's, as for its GPU
+    if (dev.coreCount > 0)
+    {
+      facts.computeUnits = (unsigned)dev.coreCount;
+      facts.computeUnit  = "core";
+    }
+    runtime.accelerator = "neural_engine";
+    break;
+  case CoremlDeviceKind::Gpu:
+    ident.registryId = xpupeak::registryText(dev.gpuRegistryId);
+    ident.defaultGpu = ident.registryId.empty();
+    facts.vendorId   = xpupeak::pciIdText(0x106b);
+    facts.integrated = dev.gpuUnifiedMemory ? 1 : 0;
+    runtime.accelerator = "gpu";
+    break;
+  case CoremlDeviceKind::Cpu:
+    ident.host = true;
+    runtime.accelerator = "cpu";
+    break;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +203,10 @@ int CoreMLPeak::runAll()
     if (dev.coreCount > 0)
       details.push_back({"Neural Engine cores", std::to_string(dev.coreCount)});
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    RuntimeInfo runtime;
+    coremlIdentify(dev, identity, facts, runtime);
     auto deviceScope = backendScope.beginDevice({
         dev.displayName,
         "",   // platform defaults to the backend name
@@ -174,6 +215,9 @@ int CoreMLPeak::runAll()
         -1,
         idx,
         dev.deviceType,
+        identity,
+        facts,
+        runtime,
     });
     currentDeviceScope = &deviceScope;
 

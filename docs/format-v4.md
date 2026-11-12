@@ -169,10 +169,10 @@ Abbreviated; the values are illustrative.
 | `build` | C | what the binary is made of (below) |
 | `invocation` | C | how XpuPeak was asked to run (below). Every number is sensitive to it |
 | `system` | C | the machine (*System*) |
-| `conditions` | C | what the machine was doing (*Conditions*) *(V3)* |
+| `conditions` | C | what the machine was doing (*Conditions*) |
 | `annotations` | C | what only a person knows about the run (*Annotations*) |
 | `resumed` | C | present only for a run continued after its process ended part-way: one entry per part after the first (*Resumed runs*) |
-| `packages`, `processors` | C | the hardware (*Hardware*) *(V2)* |
+| `packages`, `processors` | C | the hardware (*Hardware*) |
 | `devices` | C | one entry per benchmarked device |
 | `ext` | — | experimental fields (*Compatibility*) |
 | `inventory` | D | `--verbose` only: what `--list-devices` would have shown (*Inventory*) |
@@ -203,34 +203,68 @@ and test: the run a leaderboard ranks. Choosing backends and devices
 ## System
 
 The machine, not its owner. Everything is optional: what the platform cannot
-answer is absent. *(V3 fills what the OS offers; today `os`, `arch`,
-`memory_bytes` and, as `soc`, the CPU brand.)*
+answer is absent, and what would identify the unit or its owner is never read
+(*Never recorded*).
 
 | key | class | meaning |
 |---|---|---|
 | `form_factor` | C | `mobile`, `laptop`, `desktop` or `server`. A reader takes an absent one as `desktop` |
 | `form_factor_detail` | C | finer, when known: `phone` or `tablet` under mobile, `tablet` under laptop (a Windows slate), `embedded` under desktop |
-| `form_factor_from` | C | what it was read from: `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, or `default` when nothing spoke for it |
-| `virtual` | C | `true` in a virtual machine (DMI and SMBIOS vendor strings, `/sys/hypervisor`, `kern.hv_vmm_present`) |
-| `translated` | C | `true` for an x86 binary under Rosetta or Prism |
-| `manufacturer` | C | `Apple`, `samsung`, DMI `sys_vendor` |
-| `model` | C | the model id: `MacBookPro18,3`, `iPhone16,1`, `SM-S921B`, DMI `product_name` |
-| `name` | C | the marketing name, **only as the OS gives it** ("MacBook Pro (14-inch, 2021)"). No table in the tool maps a model id to a name; where the OS gives none, a reader shows the model id or the `system.name` annotation |
-| `family`, `board` | C | DMI `product_family` / SMBIOS `SystemFamily`; the board, where the product name is an OEM placeholder ("System Product Name", "To Be Filled By O.E.M.") |
-| `soc` | C | "Apple M1 Pro", Android's `ro.soc.manufacturer` + `ro.soc.model`; the CPU brand where there is no SoC name |
-| `os` | C | `name`, `version` (the user-visible release), `build`, `kernel`, and on Linux `distribution` |
+| `form_factor_from` | C | what it was read from (below): `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, or `default` when nothing spoke for it |
+| `virtual` | C | `true` when the hardware that ran is not the system named: a virtual machine, an emulator or a simulator. The processors are then what the guest was shown |
+| `translated` | C | `true` for a binary run under a translator: an x86 build under Rosetta or Prism, an ARM build under Android's native bridge |
+| `manufacturer` | C | the system's maker as the OS spells it: `Apple`, `samsung`, DMI `sys_vendor` (`Dell Inc.`, `LENOVO`). Where the product name is a placeholder (below), the board's maker |
+| `brand` | C | the brand it is sold under, where it is not the maker's own name: Android's `ro.product.brand` (`Redmi` and `POCO` under `Xiaomi`) |
+| `model` | C | the model id: `MacBookPro18,3`, `iPhone16,1`, `SM-S921B`, DMI `product_name` (`XPS 15 9530`, or Lenovo's machine type, `21DD`), a device-tree board's model ("Raspberry Pi 5 Model B Rev 1.0") |
+| `codename` | C | the maker's name for the device: Android's `ro.product.device` (`e1s`) |
+| `name` | C | the marketing name, **only as the OS gives it** ("MacBook Pro (14-inch, 2021)"): Apple silicon's device tree, Android's `ro.product.marketname` where the OEM sets one, and the product version Lenovo keeps its name in ("ThinkPad X1 Carbon Gen 10"). No table in the tool maps a model id to a name. A display shows the `system.name` annotation, else `name`, else `model`, else `board`, else `soc` |
+| `family` | C | DMI `product_family` / SMBIOS `SystemFamily`: `XPS`, `ThinkPad X1 Carbon Gen 10` |
+| `board` | C | the board (DMI `board_name`, SMBIOS `BaseBoardProduct`), written only where the product name is a placeholder: the machine was built from parts, and the board is what names it |
+| `soc` | C | the SoC: "Apple M1 Pro", Android's `ro.soc.manufacturer` + `ro.soc.model` ("QTI SM8650"); the CPU brand where there is no SoC name |
+| `os` | C | `name`: `macOS`, `iOS`, `Android`, `Linux`, `Windows`, `Windows Server`. `version`, the user-visible release: `27.2`, `16`, Linux's `VERSION_ID` (`24.04`), `11 24H2`. `build`: `26B123`, `BP2A.250605.031`, `26100.2314`. `kernel`, the kernel's release where it is not the version (Darwin's, Linux's, Android's). On Linux `distribution`, os-release's `PRETTY_NAME` ("Ubuntu 24.04.1 LTS") |
 | `arch` | C | the binary's architecture: `arm64`, `x86_64` |
 | `memory_bytes` | C | physical memory |
 | `ext` | — | experimental fields |
 
+**Where it comes from**, per OS:
+
+| OS | identity | `soc` | form factor, and `form_factor_from` | `virtual`, `translated` |
+|---|---|---|---|---|
+| macOS | `Apple`; `hw.model`; IORegistry `IODeviceTree:/product` `product-name` (Apple silicon) | `product-soc-name`, else the CPU brand | an internal battery among IOKit's power sources: laptop, else desktop (`battery`) | `kern.hv_vmm_present`; `sysctl.proc_translated` |
+| iOS | `Apple`; `hw.machine`, or `SIMULATOR_MODEL_IDENTIFIER` in the simulator; no name | the CPU brand, where the OS gives one | mobile; `iPhone…` phone, `iPad…` tablet (`model`) | the simulator, whose hardware and kernel are the Mac's |
+| Android | `ro.product.manufacturer`, `.brand`, `.model`, `.device`; `ro.product.marketname`, its partition copies, `ro.config.marketing_name`, `ro.vendor.oplus.market.name` | `ro.soc.manufacturer` + `ro.soc.model` | mobile; tablet where `ro.build.characteristics` says `tablet`, else phone, and no detail for a TV, a watch or a car (`characteristics`; `os` where the property is empty) | the emulator (`ro.kernel.qemu`, `ro.boot.qemu`, `ro.hardware` `ranchu` or `goldfish`); a kernel of another ISA than the binary's |
+| Linux | DMI `sys_vendor`, `product_name`, `product_family`, `product_version`, `board_vendor`, `board_name`; on a board with no DMI, `/proc/device-tree/model`, made by the vendor its first `compatible` names | the CPU brand | DMI `chassis_type` (`chassis`), then ACPI's `pm_profile` (`platform_role`), then a battery under `/sys/class/power_supply` (`battery`), then a device-tree board (`device_tree`) | DMI vendor and product strings, `/sys/hypervisor`, the x86 `hypervisor` CPU flag, a `linux,dummy-virt` device tree; a kernel of another ISA than the binary's |
+| Windows | SMBIOS through `HKLM\HARDWARE\DESCRIPTION\System\BIOS`: `SystemManufacturer`, `SystemProductName`, `SystemFamily`, `SystemVersion`, `BaseBoardManufacturer`, `BaseBoardProduct` | the CPU brand | `PowerDeterminePlatformRoleEx` (`platform_role`), then a battery (`GetSystemPowerStatus`, `battery`) | SMBIOS vendor and product strings — not the CPUID hypervisor bit, which virtualization-based security sets on bare metal; `IsWow64Process2` |
+
+- **Chassis types**: 8, 9, 10, 14, 31, 32 → laptop; 17, 23, 25, 28, 29 →
+  server; 3–7, 13, 15, 35, 36 → desktop; 30 → mobile, tablet; 33, 34 →
+  desktop, embedded. Any other is no evidence.
+- **Platform roles** (Windows', and Linux's `pm_profile`, which is the same
+  ACPI field): desktop, workstation and appliance PC → desktop; mobile →
+  laptop; slate → laptop, tablet; the server roles → server.
+- **A device-tree board** with a battery is a laptop (an ARM Chromebook,
+  Linux on a MacBook); one without is an embedded desktop (a Raspberry Pi, a
+  Jetson).
+- **A placeholder** is what firmware writes where the OEM wrote nothing —
+  "System Product Name", "System manufacturer", "To Be Filled By O.E.M.",
+  "Default string", "Not Applicable" and their kind, or a string with no
+  letter or digit in it. It is never recorded as a maker, model or family.
+
 ## Conditions
 
-What the machine was doing, which changes every number *(V3)*: `power_source`
-(`ac` or `battery`), `low_power_mode` (macOS and iOS), `power_profile` (the
-OS's own name: Windows' overlay scheme, Linux's
-`/sys/firmware/acpi/platform_profile`), `cpu_governor` (Linux), and
-`thermal_start` / `thermal_end`, the OS's thermal state at the start and the
-end of the run in its own words. All C; each absent when not known.
+What the machine was doing, which changes every number. All C; each absent
+when not known.
+
+| key | meaning |
+|---|---|
+| `power_source` | `ac` or `battery`, as the run starts. macOS: what IOKit says it draws from. Windows: `GetSystemPowerStatus`. Linux: `/sys/class/power_supply` — an adapter online, else the battery's charging state; a machine with no battery at all runs on `ac`, but not a VM. iOS and Android: what the app passes in (`xpupeak_set_host_facts`), which Android reads natively too where SELinux shows it the supplies |
+| `low_power_mode` | `true` or `false`: Low Power Mode on macOS and iOS, energy saver on Windows, battery saver on Android (from the app) |
+| `power_profile` | the OS's own name for it. Windows: the power plan (`balanced`, `high-performance`, `power-saver`, `ultimate-performance`) and, under Balanced, the power-mode overlay instead (`best-power-efficiency`, `balanced`, `better-performance`, `best-performance`); a plan a user made reads `custom`, since its GUID is the install's own. Linux: `/sys/firmware/acpi/platform_profile` (`low-power`, `balanced`, `performance`, …) |
+| `cpu_governor` | Linux and Android: each cpufreq policy's `scaling_governor`, each distinct one once, in policy order and joined by `,` (`schedutil`, or `schedutil,performance` where the clusters differ) |
+| `thermal_start`, `thermal_end` | the OS's thermal state at the start and the end of the run, in its own words: Apple's `nominal`, `fair`, `serious`, `critical` (`NSProcessInfo`), Android's `none`, `light`, `moderate`, `severe`, `critical`, `emergency`, `shutdown` (`AThermal`). A desktop OS keeps no such state |
+
+A resumed run keeps the conditions its first part started in; `thermal_end`
+is the last part's.
 
 ## Annotations
 
@@ -254,27 +288,36 @@ Any other key is allowed; a reader shows what it does not know as written.
 
 ## Hardware
 
-*(V2 links the devices; V4 fills the CPU's facts.)*
-
 A **package** is one chip or card: an SoC, a CPU package, a discrete GPU. A
-**processor** is one CPU, GPU or NPU in a package. Ids are run-local and
-deterministic for one machine: the host package first, then by kind, then by
-first appearance in run order, so `gpu0` is the same GPU on every run there.
-A device that nothing links to another still gets a processor of its own.
+**processor** is one CPU, GPU or NPU in a package. Both are the linker's
+answer (*Linking*), written before the file is saved. Ids are run-local and
+deterministic for one machine: a processor's is its kind and its place among
+that kind's — `cpu0`, `gpu1`, `npu0`, `accelerator0` — counted over the host
+package's processors first, then the rest in order of first appearance in run
+order, so `gpu0` is the same GPU on every run there. Packages are `pkg0`, the
+host's, then one per processor outside it, in the same order. The host CPU
+processor is always there, whether or not a device ran on it, and a device
+that nothing links to another gets a processor of its own.
 
 `packages[]`, all C:
 
 | key | meaning |
 |---|---|
 | `id` | `pkg0`, `pkg1`, … |
-| `kind` | `soc` (the host CPU and whatever shares its package: an integrated GPU, an on-die NPU), `cpu` (a host CPU with nothing joined), `discrete` (a card) |
-| `vendor` | a vendor (*Vocabulary*), when known |
-| `name` | "Apple M1 Pro", "NVIDIA GeForce RTX 5060" |
+| `kind` | `soc` (the host CPU and whatever shares its package: an integrated GPU, an on-die NPU), `cpu` (a host CPU with nothing joined), `discrete` (a card). Absent for a package of its own whose processor no API says is integrated or not |
+| `vendor` | a vendor (*Vocabulary*), when known: the host package's from `system.soc`'s first word where it names one, else its CPU's |
+| `name` | "Apple M1 Pro", "NVIDIA GeForce RTX 5060": the host package's is `system.soc` where there is one, else its CPU's; another's, its processor's |
 | `ext` | experimental fields |
 
 `processors[]`, all C. The facts are written on the processor itself, merged
-from the most native backend that ran, in registry order; each device keeps
-its own API's (`devices[].facts`), so a consumer can merge them differently.
+from the most native backend that ran, in registry order: each field from the
+first device that gives it, `vendor_id` and `device_id` together from the
+first whose vendor id is a known PCI one, a count together with what it
+counts. The host CPU's come from the CPU backend's device alone — another
+backend's CPU driver reports its own vendor (Intel's OpenCL runtime on an AMD
+CPU) — or, when the CPU backend did not run, are the host's brand, thread
+count and ISA. Each device keeps its own API's (`devices[].facts`), so a
+consumer can merge them differently.
 
 | key | meaning |
 |---|---|
@@ -294,6 +337,27 @@ one per `core` (Intel's AMX) or one per `cluster` (Apple's AMX and M4's SME)
 Accelerate). Its readings are the CPU's `matrix-compute` and `gemm` readings;
 a per-cluster engine's all-core number does not scale with cores.
 
+**CPU facts** are the OS's and CPUID's word, for every CPU the OS has online,
+and never a cache size XpuPeak measured: a level the OS lists without a size
+has no `size_bytes`.
+
+- A **cluster** is one kind of core: a MIDR and the OS's capacity and clock on
+  Arm (a faster bin of one core is a cluster of its own), the PMU that claims
+  the CPU on x86 (Intel's P- and E-cores), and the caches it reads; Apple's
+  are its performance levels. They are listed fastest first, and `kind` goes
+  by rank: `performance` down to `efficiency`, with `prime` above them on Arm
+  and `low_power` below them on x86. A CPU of one kind of core has one
+  cluster and no `kind`. Its `max_mhz` is the fastest of its cores', absent
+  where the OS gives none (Apple silicon, Windows).
+- A cache is its cluster's, counted in the cluster's `instances`, unless more
+  than one kind of core, or every CPU, reads an instance of it: then it is in
+  the processor's `caches[]`. So a Threadripper's four CCX L3s are its one
+  cluster's, and a desktop Core's ring L3 is the processor's.
+- `microarch` is what the MIDR names. x86 has none: `cpuid` is kept as it is,
+  and naming a family and model is a reader's table, like a model id's name.
+- `features` are the words of the CPU feature list (*Vocabulary*), as the
+  running CPU and OS allow them, in the list's order.
+
 ## Device
 
 | key | class | meaning |
@@ -301,12 +365,12 @@ a per-cluster engine's all-core number does not scale with cores.
 | `backend`, `platform`, `name`, `device_index` | C | its identity within the run (below) |
 | `driver` | C | the driver's version: metadata, not identity |
 | `platform_index` | C | the platform's index, for a backend with platforms (OpenCL) |
-| `type` | C | what the device is: `gpu`, `cpu`, `npu`, `accelerator` or `unknown`. An ML runtime's NPU is `npu`; `accelerator` is for every other device that is neither *(V2 moves the NPUs to `npu`)* |
-| `processor` | C | the `id` of the processor it is a view of *(V2)* |
-| `link` | C | what linked it there (*Linking*) *(V2)* |
-| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes *(V2, V4)* |
-| `evidence` | C | the identity evidence that links it, never an identifier itself (*Linking*) *(V2)* |
-| `runtime` | C | an ML runtime's view of where it ran: `provider` (ONNX Runtime's execution provider), `accelerator` (LiteRT's accelerator, Core ML's compute device), `version` *(V2)* |
+| `type` | C | what the device is: `gpu`, `cpu`, `npu`, `accelerator` or `unknown`. An ML runtime's NPU is `npu`; `accelerator` is for every other device that is neither, Android's NNAPI among them |
+| `processor` | C | the `id` of the processor it is a view of |
+| `link` | C | what linked it there (*Linking*) |
+| `facts` | C | what its API reported, typed: the processor facts above, as far as the API goes, with `vendor_name` the vendor's own string as the API gives it (`NVIDIA Corporation`). A vendor id is the API's: Apple's OpenCL answers `1027f00`, a CPU driver its own maker's |
+| `evidence` | C | the identity evidence that links it, never an identifier itself (*Linking*) |
+| `runtime` | C | an ML runtime's view of where it ran: `provider` (ONNX Runtime's execution provider), `accelerator` (Core ML's compute device — `neural_engine`, `gpu`, `cpu` —, LiteRT's — `npu`, `gpu`, `cpu` —, OpenVINO's `device_type`), `version` (ONNX Runtime's; LiteRT and Core ML report none) |
 | `properties` | C / I | free-form facts the backend chose to report, `key` and `value` strings. The shape is contract; the content informational |
 | `tests` | C | the tests |
 | `ext` | — | experimental fields |
@@ -326,33 +390,67 @@ driver update.
 
 ### Linking
 
-*(V2 implements the linker and owns this section.)*
+Each backend passes, with each device, what its API says about who the
+device is, and what it says about the hardware (`facts`). Before the file is
+saved, the tool merges the devices that are views of one processor, by these
+rules and no others:
 
-Each backend passes the identity evidence its API gives with each device, and
-the tool merges the devices that share strong evidence into one processor:
-
+- **Host.** Every device that executes on the CPU is the host CPU: the CPU
+  backend, llvmpipe and lavapipe, PoCL, Intel's CPU runtime, oneAPI's CPU
+  device, and the CPU paths of ONNX Runtime, LiteRT and Core ML — every
+  device with `host: true` or of type `cpu`.
 - **Strong.** An equal UUID, LUID, PCI bus address or Metal registry ID
-  merges. UUIDs are compared verbatim and only ever add a link.
-- **Host.** Every device that executes on the CPU joins the host CPU: the CPU
-  backend, llvmpipe, PoCL, Intel's CPU runtime, oneAPI's CPU device, and the
-  CPU paths of ONNX Runtime, LiteRT and Core ML.
-- **SoC.** An ML runtime's NPU joins the SoC's NPU; an Android GPU delegate
-  joins the SoC's GPU.
-- **Sole.** A PCI vendor:device id, or being the platform's default GPU,
-  joins the only candidate of that kind and vendor — never one of several.
-- **Nothing else merges.** A device left alone gets a processor of its own.
+  merges. UUIDs are compared verbatim and only ever add a link: NVIDIA's
+  CUDA, Vulkan and OpenCL report one scheme, other vendors' APIs each their
+  own, so two different UUIDs say nothing. The PCI bus address is what links
+  a discrete part across vendors' APIs, the LUID a Windows adapter, the
+  registry ID an Apple GPU (Metal, and Core ML's GPU device, which names the
+  same `MTLDevice`).
+- **SoC.** An ML runtime's NPU (the Neural Engine, Hexagon, XDNA, Intel's
+  NPU, LiteRT's vendor dispatch libraries) is the SoC's NPU: all of them are
+  one processor, unless their vendors say otherwise. An Android GPU delegate
+  is the SoC's GPU: it joins the one integrated GPU another backend sees, or
+  is a processor of its own on the SoC. Android's NNAPI runs somewhere on the
+  SoC and names no one unit: an `accelerator` of its own, on the SoC.
+- **Sole.** The views of one vendor's GPU (NPU, accelerator) that nothing
+  else links merge when the run shows only one: no backend lists two of that
+  kind and vendor, and nothing says two of them are different devices — two
+  vendors, two PCI device ids, one integrated and one not, two different
+  LUIDs, PCI bus addresses or registry IDs, or one backend listing both. A
+  GPU whose vendor is unknown and that nothing identifies — the platform's
+  default GPU (LiteRT's WebGPU and Metal accelerators, which name no
+  adapter), a runtime that names none — joins the run's one GPU on the same
+  terms. Never one of several.
+- **Nothing else merges.** A device left alone is a processor of its own.
 
-`link` says which rule linked the device: `uuid`, `luid`, `pci_bus`,
-`registry`, `host`, `soc`, `sole`, or `own` for a processor of its own.
+A processor is in the host package when it is the host CPU, is on the SoC by
+the rules above, or is integrated (`facts.integrated`); otherwise it is a
+package of its own, `discrete` when its API says it is not integrated.
 
-`evidence` keeps what the linker saw, so better rules can re-link an old
-file: a token per strong identifier (`uuid`, `luid`, `pci_bus`,
-`registry`), and the weaker evidence as it is — `host: true`, `soc: "npu"`
-or `"gpu"`, `default_gpu: true`. **The tokens are HMACs under a key made per
-run**, which the result never holds (only the checkpoint does, for a resume).
-Two devices in one file can be seen to share an identifier; nothing
-correlates across files, and the raw values never leave the process. A key a
-newer build adds to `evidence` with a string value is a token.
+`link` says how a device came to its processor: the first of `uuid`, `luid`,
+`pci_bus` and `registry` it shares with another device there; `host` or
+`soc` for a device with that evidence; `sole` for one the sole rule joined,
+and for the device it joined; `own` for a processor of its own.
+
+`evidence` keeps what the linker saw, so that better rules can re-link an old
+file: a token per strong identifier (`uuid`, `luid`, `pci_bus`, `registry`),
+and the weaker evidence as it is — `host: true`, `soc: "npu"`, `"gpu"` or
+`"accelerator"`, `default_gpu: true`. **The tokens are HMACs under a key made
+per run**, which the result never holds (only the checkpoint does, for a
+resume): the first 64 bits of HMAC-SHA256 over the evidence key's name, a zero
+byte and the identifier in its one written form (a UUID as 32 lower-case hex
+digits, a LUID and a registry ID as 16, a PCI bus address as `0000:01:00.0`),
+as 16 hex digits. Two devices in one file can be seen to share an identifier;
+nothing correlates across files, and the raw values never leave the process
+— they are made into tokens as each device opens, so a checkpoint holds
+tokens too. A key a newer build adds to `evidence` with a string value is a
+token.
+
+Every decision is a `debug` line on the log under `--verbose` — `hardware:
+vulkan:0 (Apple M1 Pro) -> gpu0 by sole` — and so is every device a rule
+left apart that it might have joined, with the reason (`litert:0 not linked:
+its GPU is not named (Vulkan lists 2 GPUs)`). No line holds an identifier:
+what a library relays has its identifiers replaced by their tokens (*Log*).
 
 ## Test
 
@@ -423,7 +521,7 @@ file (*Compatibility*). The `shape` still says how to present a test; the
 dims say how to compare its readings.
 
 Most readings carry their dims as they are emitted; until the backends author
-them, a reading has only its test's family *(V4: CPU; V5: CUDA, ROCm,
+them, a reading has only its test's family *(V5: CUDA, ROCm,
 oneAPI, Metal; V6: Vulkan, OpenCL; V7: ONNX, Core ML, LiteRT)*.
 
 ### `revision`
@@ -543,6 +641,7 @@ rest.
 | `contention` | identity | `none`, `all` | `none` | whether every other thread competed for the same data |
 | `workload` | identity | `trivial_op`, `small_matmul`, `session_create`, `model_create` | — | what a dispatch-latency reading submits |
 | `kv` | identity | a data type | the reading's `dtype` | a transformer block's KV-cache type |
+| `bound` | identity | `throughput`, `latency` | `throughput` | what limits a compute kernel: enough independent chains to fill every pipe, as in every compute peak, or one chain whose every operation waits on the one before |
 | `width` | variant | a number | — | vector width, in elements |
 | `chains` | variant | a number | — | independent dependency chains in flight |
 | `isa` | variant | `scalar`, `sse2`, `ssse3`, `sse4_2`, `avx`, `avx2`, `avx512`, `avx10`, `amx`, `neon`, `sve`, `sve2`, `sme`, `sme2` | — | the instruction set a CPU kernel was written in |
@@ -616,6 +715,7 @@ Each family's category is the category its flag is listed under in
 | cluster kind | `prime`, `performance`, `efficiency`, `low_power` |
 | cache level | `l1d`, `l1i`, `l2`, `l3`, `slc` |
 | engine | `kind`: `matrix`; `scope`: `core`, `cluster`; `reached_by`: `instructions`, `library` |
+| CPU feature | x86: `sse2`, `ssse3`, `sse4_1`, `sse4_2`, `avx`, `avx2`, `fma`, `avx512f`, `avx512bw`, `avx512vl`, `avx512dq`, `avx512_vnni`, `avx512_bf16`, `avx512_fp16`, `avx_vnni`, `avx_vnni_int8`, `avx_vnni_int16`, `avx10`, `avx10_2`, `amx_tile`, `amx_int8`, `amx_bf16`, `amx_fp16`, `amx_fp8`, `vaes`; Arm: `neon`, `fp16`, `fhm`, `dotprod`, `bf16`, `i8mm`, `sve`, `sve2`, `sme`, `sme2`, `sme_f64f64`, `fp8dot4`; both: `aes`, `sha256`, `sha512`, `crc32`. One word per capability on every OS, the same word on both architectures where the capability is one; x86 words follow the Linux kernel's flags, Arm's are the FEAT_ names in lower case (`neon` for AdvSIMD) |
 | form factor | `mobile`, `laptop`, `desktop`, `server` |
 | form factor detail | `phone`, `tablet`, `embedded` |
 | `form_factor_from` | `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, `default` |
@@ -687,7 +787,7 @@ reproduces what the CLI printed.
 | `level` | `error` \| `warning` \| `info` \| `debug` |
 | `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
-| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
+| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found |
 
 What each level means, and when it is in the file:
 
@@ -832,16 +932,22 @@ Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
 
 ## The headline catalog
 
-Headlines are the measures worth a summary row or a leaderboard: "FP16
-matrix", "DRAM latency". They are not in the run document. They are data of
-their own, `app/assets/measures.json` (`"schema": "xpupeak/measures"`), with
-a `catalog_version` of its own, read by the app and embedded in the CLI
-*(V8 owns its content; V10 embeds it)*. Each headline names the processor
-kinds it applies to (`processors`), the `families` and the `quantity` it
-selects, and `dims`: a list of identity-dim objects, defaults filled in, of
-which a selected key must equal one. Its value on a processor is the best of
-the selected keys there, over every backend, and it names the backend that
-reached it.
+Headlines are the measures worth a summary row or a leaderboard: a
+processor's peak floating-point and integer compute, its memory bandwidth.
+They are not in the run document. They are data of their own,
+`app/assets/measures.json` (`"schema": "xpupeak/measures"`), with a
+`catalog_version` of its own, read by the app and embedded in the CLI
+*(V10 embeds it)*. Each headline has an `id`, a `title` and the `quantity`
+it selects, and may narrow that by the processor kinds it applies to
+(`processors`), the `families` it selects from, and `dims`: a list of
+identity-dim objects, defaults filled in, of which a selected key must equal
+one. Each of the three, absent, means any. Its value on a processor is the
+best reading of the selected keys there, over every backend, named with the
+backend and the reading it came from: a raw measurement, never a score. The
+catalog the app ships holds the flagship numbers its results summary shows
+for every processor: `peak-float` (`flops`, any family and dims, so a 2:4
+sparse NVFP4 reading counts), `peak-integer` (`ops`) and
+`peak-memory-bandwidth` (`global-memory-bandwidth`).
 
 ## Compatibility
 
@@ -939,8 +1045,12 @@ it ran on or the person who ran it, and no minor may add:
 - a GPU's UUID or LUID, a PCI bus address, a Metal registry ID — only their
   per-run tokens (*Linking*);
 - the key those tokens are made under, which only the checkpoint holds.
+- a power plan's GUID, which is unique to the install, and who and where an
+  OS build was made (Android's `ro.build.user` and `ro.build.host`, a local
+  build's `eng.<user>` id).
 
-The log is held to the same rule.
+The log is held to the same rule, a vendor runtime's relayed words included
+(*Log*).
 
 ## Conventions
 
@@ -976,7 +1086,7 @@ XpuPeak.
 | `"clpeak_version": "…"` | `"generator": {"name": "XpuPeak", "version": "…"}` |
 | `.clpeak.json` for a result (the app's files and these examples), with its `.clpeak.log` sidecar and `.clpeak.partial.json` checkpoint | `.xpupeak.json`, `.xpupeak.log`, `.xpupeak.partial.json` |
 | the app's history in `~/.clpeak` (`%USERPROFILE%\.clpeak`), or `<app documents>/clpeak` on a phone | `~/.xpupeak` (`%USERPROFILE%\.xpupeak`), or `<app documents>/xpupeak` |
-| `host`: `os`, `os_version`, `arch`, `cpu`, `logical_cores`, `memory_bytes` | `system`: `os.name`, `os.version`, `arch`, `soc` (the CPU brand), `memory_bytes`, with room for the model, its name and its form factor. The CPU's cores go to its processor |
+| `host`: `os`, `os_version`, `arch`, `cpu`, `logical_cores`, `memory_bytes` | `system`: the maker, model and marketing name, the SoC, the form factor, `virtual` and `translated`, the OS in detail, `arch`, `memory_bytes`. The CPU's cores go to its processor |
 | `build.backends`: names | objects with `kind` and `portable` |
 | — | `run_id`, `conditions`, `annotations`, `invocation.standard` |
 | — | `packages[]`, `processors[]`; on devices `processor`, `link`, `facts`, `evidence`, `runtime` |

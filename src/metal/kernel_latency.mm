@@ -1,6 +1,8 @@
 #ifdef ENABLE_METAL
 #include "mtl_internal.h"
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Kernel launch latency (Metal)
 // ---------------------------------------------------------------------------
@@ -19,6 +21,8 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
 
     const char *dispatchNote = "Host submit to kernel start, one way.";
     const char *roundtripNote = "Host submit to completion seen by the host.";
+    const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+    const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
     id<MTLComputePipelineState> pso = mtlGetPipeline(dev,
         mtl_kernels::kernel_latency_src,
@@ -26,8 +30,10 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
         "kernel_latency_noop");
     if (!pso)
     {
-        test.skip("dispatch", ResultStatus::Error, "Pipeline create failed", dispatchNote);
-        test.skip("roundtrip", ResultStatus::Error, "Pipeline create failed", roundtripNote);
+        test.skip("dispatch", ResultStatus::Error, "Pipeline create failed", dispatchNote,
+                  dispatchDims);
+        test.skip("roundtrip", ResultStatus::Error, "Pipeline create failed", roundtripNote,
+                  roundtripDims);
         return -1;
     }
 
@@ -82,16 +88,16 @@ int MetalPeak::runKernelLatency(MetalDevice &dev, benchmark_config_t &cfg)
     if (submitFailed)
     {
         test.skip("dispatch",  ResultStatus::Error, "MTLCommandBuffer execution failed",
-                  dispatchNote);
+                  dispatchNote, dispatchDims);
         test.skip("roundtrip", ResultStatus::Error, "MTLCommandBuffer execution failed",
-                  roundtripNote);
+                  roundtripNote, roundtripDims);
     }
     else
     {
         float dispatchUs = (float)(totalDispatchSec * 1e6 / iters);
-        test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote);
+        test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote, dispatchDims);
         float roundtripUs = (float)(totalRoundtripSec * 1e6 / iters);
-        test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote);
+        test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote, roundtripDims);
     }
 
     return 0;

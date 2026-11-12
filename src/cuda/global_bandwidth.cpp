@@ -3,6 +3,8 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
   const uint32_t blockSize = 256;
@@ -18,11 +20,17 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
-     Category::Unknown,
-     "Read bandwidth from GPU memory, over a buffer too large to cache.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec{"global_memory_bandwidth", "Global memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Read bandwidth from GPU memory, over a buffer too large to cache.",
+                        TestShape::Homogeneous, "vector width"};
+  // Only the bytes read are counted: the CPU backend's read row is the same
+  // measurement, which `op` is what tells apart from its copy and triad.
+  spec.dims = {{Dim::Op, dim::Op::Read}};
+  // 2: its working set is sized past the last-level cache since 2.1.4, which
+  // some caches had been answering.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
@@ -41,7 +49,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     const uint32_t widths[] = {1, 2, 4};
     for (int i = 0; i < 3; i++)
       test.skip(labels[i], ResultStatus::Error, "Failed to allocate buffers",
-                cudaWidthNote(widths[i]));
+                cudaWidthNote(widths[i]), {{Dim::Width, widths[i]}});
     if (inBuf)
       cuMemFree(inBuf);
     return -1;
@@ -76,7 +84,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
     CudaKernel k = dev.getKernel(cuda_kernels::global_bandwidth, v.kernelName);
     if (!k)
     {
-      test.skip(key, k.status, k.reason, cudaWidthNote(v.width));
+      test.skip(key, k.status, k.reason, cudaWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
 
@@ -90,7 +98,7 @@ int CudaPeak::runGlobalBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                          cfg.targetTimeUs, forceIters ? specifiedIters : 0);
     double bytes = (double)blocksU * blockSize * FETCH_PER_WI * v.width * sizeof(float);
     float bps = (float)(bytes / us * 1e6);
-    test.emit(key, bps, cudaWidthNote(v.width));
+    test.emit(key, bps, cudaWidthNote(v.width), {{Dim::Width, v.width}});
   }
 
   cuMemFree(inBuf);

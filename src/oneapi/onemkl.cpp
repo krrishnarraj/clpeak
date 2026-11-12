@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 #if __has_include(<sycl/ext/oneapi/bfloat16.hpp>)
 #include <sycl/ext/oneapi/bfloat16.hpp>
 #define XPUPEAK_ONEMKL_HAS_BF16 1
@@ -52,30 +54,46 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   const char *fp16Note = "fp16 inputs, fp16 or fp32 output.";
   const char *bf16Note = "bf16 inputs, fp32 accumulator.";
   const char *int8Note = "int8 inputs, int32 accumulator.";
+  // And its coordinates.  fp16's two outputs, and int8's two overloads (s8 x u8
+  // and s8 x s8), are forms of one measurement: the winner says which as its
+  // `form`, as cuBLASLt's raced algorithms say nothing at all.
+  const Dims fp32Dims = {{Dim::Dtype, DType::Fp32}};
+  const Dims fp64Dims = {{Dim::Dtype, DType::Fp64}};
+  const Dims fp16Dims = {{Dim::Dtype, DType::Fp16}};
+  const Dims bf16Dims = {{Dim::Dtype, DType::Bf16}};
+  const Dims int8Dims = {{Dim::Dtype, DType::Int8}};
 
-  auto test = currentDeviceScope->beginTest(
-        {"onemkl_gemm", "oneMKL GEMM peak", "flops", Category::Unknown,
-         "Peak GEMM rate through Intel's oneMKL library, on a large square problem.",
-         TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"onemkl_gemm", "oneMKL GEMM peak", "flops", Category::Unknown,
+                        "Peak GEMM rate through Intel's oneMKL library, on a large square problem.",
+                        TestShape::Heterogeneous, "data type"};
+  spec.dims = {{Dim::Impl, xpupeak::dim::Impl::Onemkl}};
+  // 2: each data type races oneMKL's overloads and layouts since 3.0.2.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
-  auto mklOpts = [&](const char *note) {
+  auto mklOpts = [&](const char *note, const Dims &dims) {
     logger::EmitOptions o;
     if (note) o.description = note;
+    o.dims = dims;
     return o;
   };
-  auto intOpts = [&](const char *note) {
-    logger::EmitOptions o;
-    if (note) o.description = note;
+  auto intOpts = [&](const char *note, const Dims &dims) {
+    logger::EmitOptions o = mklOpts(note, dims);
     o.unit = "ops";
     return o;
   };
 
 #ifndef XPUPEAK_ONEAPI_HAS_ONEMKL
-  test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp32Note));
-  test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp64Note));
-  test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(fp16Note));
-  test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time", mklOpts(bf16Note));
-  test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time", intOpts(int8Note));
+  test.skip("fp32", ResultStatus::Unsupported, "oneMKL not found at configure time",
+            mklOpts(fp32Note, fp32Dims));
+  test.skip("fp64", ResultStatus::Unsupported, "oneMKL not found at configure time",
+            mklOpts(fp64Note, fp64Dims));
+  test.skip("fp16", ResultStatus::Unsupported, "oneMKL not found at configure time",
+            mklOpts(fp16Note, fp16Dims));
+  test.skip("bf16", ResultStatus::Unsupported, "oneMKL not found at configure time",
+            mklOpts(bf16Note, bf16Dims));
+  test.skip("int8", ResultStatus::Unsupported, "oneMKL not found at configure time",
+            intOpts(int8Note, int8Dims));
   return 0;
 #else
   namespace mkl = oneapi::mkl;
@@ -97,8 +115,9 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   using GemmIssue = std::function<void(sycl::queue &, void *, void *, void *, void *, std::int64_t)>;
   struct GemmForm
   {
-    std::string name;
+    std::string name;   // as the reading's note says it: "fp16 out, TN"
     GemmIssue issue;
+    std::string form;   // as its `form` dim does, where forms raced: "fp16_out_tn"
   };
 
   // Run ONE GEMM dtype in full isolation: its own context + queue + buffers,
@@ -222,7 +241,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
       else
       {
         if (forms.size() > 1)
+        {
           opts.description += "  Fastest form: " + forms[best].name + ".";
+          opts.dims.set({Dim::Form, forms[best].form});
+        }
         test.emit(label, (float)(flops * 1.0e6 / meanUs), opts);
       }
     }
@@ -240,13 +262,17 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   // apart.
   using LayoutGemm = std::function<void(sycl::queue &, transpose, transpose, void *, void *,
                                         void *, void *, std::int64_t)>;
-  auto layouts = [](std::vector<GemmForm> &forms, const std::string &what, LayoutGemm gemm) {
+  auto layouts = [](std::vector<GemmForm> &forms, const std::string &what,
+                    const std::string &whatForm, LayoutGemm gemm) {
     for (transpose ta : {transpose::nontrans, transpose::trans})
       for (transpose tb : {transpose::nontrans, transpose::trans})
-        forms.push_back({what + ", " + (ta == transpose::trans ? "T" : "N") +
-                             (tb == transpose::trans ? "T" : "N"),
+      {
+        const bool tA = ta == transpose::trans, tB = tb == transpose::trans;
+        forms.push_back({what + ", " + (tA ? "T" : "N") + (tB ? "T" : "N"),
                          [=](sycl::queue &q, void *dA, void *dB, void *dC, void *dCo,
-                             std::int64_t n) { gemm(q, ta, tb, dA, dB, dC, dCo, n); }});
+                             std::int64_t n) { gemm(q, ta, tb, dA, dB, dC, dCo, n); },
+                         whatForm + "_" + (tA ? "t" : "n") + (tB ? "t" : "n")});
+      }
   };
 
   measure("fp32", D,
@@ -255,7 +281,7 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
                q, transpose::nontrans, transpose::nontrans, n, n, n, 1.0f,
                (const float *)dA, n, (const float *)dB, n, 0.0f, (float *)dC, n);
            }}},
-          mklOpts(fp32Note));
+          mklOpts(fp32Note, fp32Dims));
 
   if (dev.info.fp64Supported)
     measure("fp64", fp64Dim,
@@ -264,9 +290,10 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
                  q, transpose::nontrans, transpose::nontrans, n, n, n, 1.0,
                  (const double *)dA, n, (const double *)dB, n, 0.0, (double *)dC, n);
              }}},
-            mklOpts(fp64Note));
+            mklOpts(fp64Note, fp64Dims));
   else
-    test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device", mklOpts(fp64Note));
+    test.skip("fp64", ResultStatus::Unsupported, "fp64 not supported by this oneAPI device",
+              mklOpts(fp64Note, fp64Dims));
 
   // fp16 writes its result either as fp16 or as fp32.  That catalog lists no
   // matrix-engine kernel for DG2 that takes fp16 in to fp16 out -- its four
@@ -276,23 +303,26 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   if (dev.info.fp16Supported)
   {
     std::vector<GemmForm> forms;
-    layouts(forms, "fp16 out", [](sycl::queue &q, transpose ta, transpose tb,
-                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
+    layouts(forms, "fp16 out", "fp16_out",
+            [](sycl::queue &q, transpose ta, transpose tb,
+               void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
         q, ta, tb, n, n, n, sycl::half(1.0f),
         (const sycl::half *)dA, n, (const sycl::half *)dB, n,
         sycl::half(0.0f), (sycl::half *)dC, n);
     });
-    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, transpose tb,
-                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
+    layouts(forms, "fp32 out", "fp32_out",
+            [](sycl::queue &q, transpose ta, transpose tb,
+               void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
         q, ta, tb, n, n, n, 1.0f,
         (const sycl::half *)dA, n, (const sycl::half *)dB, n, 0.0f, (float *)dC, n);
     });
-    measure("fp16", D, forms, mklOpts(fp16Note));
+    measure("fp16", D, forms, mklOpts(fp16Note, fp16Dims));
   }
   else
-    test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device", mklOpts(fp16Note));
+    test.skip("fp16", ResultStatus::Unsupported, "fp16 not supported by this oneAPI device",
+              mklOpts(fp16Note, fp16Dims));
 
   // BF16: bf16 inputs, fp32 output + accumulate (HPA) -- the dtype combo the
   // Intel XMX bf16 GEMM peak is quoted against, matching joint_matrix.cpp.
@@ -301,19 +331,22 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   {
     using bfloat16 = sycl::ext::oneapi::bfloat16;
     std::vector<GemmForm> forms;
-    layouts(forms, "fp32 out", [](sycl::queue &q, transpose ta, transpose tb,
-                                  void *dA, void *dB, void *dC, void *, std::int64_t n) {
+    layouts(forms, "fp32 out", "fp32_out",
+            [](sycl::queue &q, transpose ta, transpose tb,
+               void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
         q, ta, tb, n, n, n, 1.0f,
         (const bfloat16 *)dA, n, (const bfloat16 *)dB, n, 0.0f, (float *)dC, n);
     });
-    measure("bf16", D, forms, mklOpts(bf16Note));
+    measure("bf16", D, forms, mklOpts(bf16Note, bf16Dims));
   }
   else
-    test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device", mklOpts(bf16Note));
+    test.skip("bf16", ResultStatus::Unsupported, "bf16 not supported by this oneAPI device",
+              mklOpts(bf16Note, bf16Dims));
 #else
   test.skip("bf16", ResultStatus::Unsupported,
-            "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note));
+            "SYCL bfloat16 header not available in this oneAPI toolchain", mklOpts(bf16Note,
+                                                                                   bf16Dims));
 #endif
 
   // INT8 through both of oneMKL's int8 entry points: gemm_bias (s8 x u8, its
@@ -324,26 +357,27 @@ int OneapiPeak::runOnemkl(OneapiDevice &dev, benchmark_config_t &)
   // 37.4-37.6 TN.
   if (!dev.info.xmxSupported)
     test.skip("int8", ResultStatus::Unsupported,
-              "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note));
+              "int8 GEMM requires Intel XMX (Arc/PVC/Battlemage)", intOpts(int8Note, int8Dims));
   else
   {
     std::vector<GemmForm> forms;
-    layouts(forms, "gemm_bias s8 x u8", [](sycl::queue &q, transpose ta, transpose tb,
-                                           void *dA, void *dB, void *dC, void *dCo,
-                                           std::int64_t n) {
+    layouts(forms, "gemm_bias s8 x u8", "gemm_bias_s8u8",
+            [](sycl::queue &q, transpose ta, transpose tb,
+               void *dA, void *dB, void *dC, void *dCo, std::int64_t n) {
       mkl::blas::column_major::gemm_bias(
         q, ta, tb, mkl::offset::fix, n, n, n, 1.0f,
         (const std::int8_t *)dA, n, (std::int8_t)0,
         (const std::uint8_t *)dB, n, (std::uint8_t)0,
         0.0f, (std::int32_t *)dC, n, (const std::int32_t *)dCo);
     });
-    layouts(forms, "gemm s8 x s8", [](sycl::queue &q, transpose ta, transpose tb,
-                                      void *dA, void *dB, void *dC, void *, std::int64_t n) {
+    layouts(forms, "gemm s8 x s8", "gemm_s8s8",
+            [](sycl::queue &q, transpose ta, transpose tb,
+               void *dA, void *dB, void *dC, void *, std::int64_t n) {
       mkl::blas::column_major::gemm(
         q, ta, tb, n, n, n, 1.0f,
         (const std::int8_t *)dA, n, (const std::int8_t *)dB, n, 0.0f, (std::int32_t *)dC, n);
     });
-    measure("int8", D, forms, intOpts(int8Note));
+    measure("int8", D, forms, intOpts(int8Note, int8Dims));
   }
 
   return 0;

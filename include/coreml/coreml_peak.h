@@ -80,6 +80,11 @@ struct coreml_device_info_t
   int coreCount = 0;         // ANE only
   int gpuIndex = -1;         // index into MTLCopyAllDevices order, GPU only
   std::string gpuName;       // Metal device name, GPU only
+  // The Metal device's registry ID, which links this device to the Metal
+  // backend's view of the same GPU, and whether its memory is unified.
+  // GPU only.
+  uint64_t gpuRegistryId = 0;
+  bool gpuUnifiedMemory = false;
 };
 
 class CoreMLPeak : public Peak

@@ -39,6 +39,8 @@
 #include <cmath>
 #include <cstring>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 // MetalDevice's impl is opaque in the public header; the full struct is
 // only visible inside mtl_peak.mm.  Re-declare it here so we can reach
 // dev.impl->device / queue without a header churn.  Layout MUST match
@@ -217,15 +219,33 @@ double timeMPSGraph(id<MTLCommandQueue> queue,
 
 int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest(
-        {"mps_gemm", "MPS GEMM peak", "flops", Category::Unknown,
-         "Peak GEMM rate through Apple's MPS library, on a large square problem.",
-         TestShape::Heterogeneous, "data type"});
+    logger::TestSpec spec{"mps_gemm", "MPS GEMM peak", "flops", Category::Unknown,
+                          "Peak GEMM rate through Apple's MPS library, on a large square problem.",
+                          TestShape::Heterogeneous, "data type"};
+    // MPSMatrixMultiplication runs fp32 and fp16; bf16 says it took MPSGraph.
+    spec.dims = {{Dim::Impl, dim::Impl::Mps}};
+    // 2: its problem size is measured per device since 2.1.0, no longer derived
+    // from the GPU core count.
+    spec.revision = 2;
+    auto test = currentDeviceScope->beginTest(spec);
+
+    // One note and one set of dims per dtype row, threaded through every emit
+    // and skip site below.  A, B and C share one dataType below, so fp16 and
+    // bf16 write their result in that type.  MPS does not document the
+    // accumulator it uses internally, so no row claims one beyond the usual.
+    const char *fp32Note = "fp32 inputs and accumulator.";
+    const char *fp16Note = "fp16 inputs and output.";
+    const char *bf16Note = "bf16 inputs and output (MPSGraph).  Needs M3 or newer.";
+    const Dims fp32Dims = {{Dim::Dtype, DType::Fp32}};
+    const Dims fp16Dims = {{Dim::Dtype, DType::Fp16}};
+    const Dims bf16Dims = {{Dim::Dtype, DType::Bf16}, {Dim::Impl, dim::Impl::Mpsgraph}};
 
     if (!dev.info.isAppleSilicon)
     {
-        test.skipAll({"fp32", "fp16", "bf16"}, ResultStatus::Unsupported,
-                      "MPS GEMM requires Apple silicon");
+        const char *why = "MPS GEMM requires Apple silicon";
+        test.skip("fp32", ResultStatus::Unsupported, why, fp32Note, fp32Dims);
+        test.skip("fp16", ResultStatus::Unsupported, why, fp16Note, fp16Dims);
+        test.skip("bf16", ResultStatus::Unsupported, why, bf16Note, bf16Dims);
         return 0;
     }
 
@@ -236,13 +256,6 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     const uint32_t M = D, N = D, K = D;
     const double  flops_per_iter = 2.0 * (double)M * (double)N * (double)K;
 
-    // One note per dtype row, threaded through every emit / skip site below.
-    // A, B and C share one dataType below, so fp16 and bf16 write their result
-    // in that type; MPS does not document the accumulator it uses internally.
-    const char *fp32Note = "fp32 inputs and accumulator.";
-    const char *fp16Note = "fp16 inputs and output.";
-    const char *bf16Note = "bf16 inputs and output (MPSGraph).  Needs M3 or newer.";
-
     // Pre-allocate the largest input set (fp32, 4 bytes) once; smaller dtypes
     // alias the same MTLBuffer with a different MPSMatrixDescriptor stride.
     const uint64_t maxInBytes = (uint64_t)M * K * 4;
@@ -250,9 +263,10 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
     id<MTLBuffer> bufB = makePrivateBuffer(mtlDev, (uint64_t)K * N * 4);
     if (!bufA || !bufB)
     {
-        test.skip("fp32", ResultStatus::Error, "Failed to allocate input buffers", fp32Note);
-        test.skip("fp16", ResultStatus::Error, "Failed to allocate input buffers", fp16Note);
-        test.skip("bf16", ResultStatus::Error, "Failed to allocate input buffers", bf16Note);
+        const char *why = "Failed to allocate input buffers";
+        test.skip("fp32", ResultStatus::Error, why, fp32Note, fp32Dims);
+        test.skip("fp16", ResultStatus::Error, why, fp16Note, fp16Dims);
+        test.skip("bf16", ResultStatus::Error, why, bf16Note, bf16Dims);
         return -1;
     }
     {
@@ -265,15 +279,15 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
         [cb waitUntilCompleted];
     }
 
-    auto runMatMul = [&](const char *label, const char *note, MPSDataType dt,
-                         uint32_t elemSize)
+    auto runMatMul = [&](const char *label, const char *note, const Dims &dims,
+                         MPSDataType dt, uint32_t elemSize)
     {
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                test.skip(label, ResultStatus::Error, "output alloc failed", note);
+                test.skip(label, ResultStatus::Error, "output alloc failed", note, dims);
                 return;
             }
 
@@ -308,7 +322,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSMatMul(queue, mm, matA, matB, matC, warmup);
             if (per_iter_us <= 0.0)
             {
-                test.skip(label, ResultStatus::Error, "timing probe failed", note);
+                test.skip(label, ResultStatus::Error, "timing probe failed", note, dims);
                 return;
             }
 
@@ -316,19 +330,19 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSMatMul(queue, mm, matA, matB, matC, iters);
             double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)rate, note);
+            test.emit(label, (float)rate, note, dims);
         }
     };
 
-    auto runGraphMatMul = [&](const char *label, const char *note, MPSDataType dt,
-                              uint32_t elemSize)
+    auto runGraphMatMul = [&](const char *label, const char *note, const Dims &dims,
+                              MPSDataType dt, uint32_t elemSize)
     {
         @autoreleasepool {
             const uint64_t outBytes = (uint64_t)M * N * elemSize;
             id<MTLBuffer> bufC = makePrivateBuffer(mtlDev, outBytes);
             if (!bufC)
             {
-                test.skip(label, ResultStatus::Error, "output alloc failed", note);
+                test.skip(label, ResultStatus::Error, "output alloc failed", note, dims);
                 return;
             }
 
@@ -355,7 +369,7 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double per_iter_us = timeMPSGraph(queue, g, feeds, results, warmup);
             if (per_iter_us <= 0.0)
             {
-                test.skip(label, ResultStatus::Error, "timing probe failed", note);
+                test.skip(label, ResultStatus::Error, "timing probe failed", note, dims);
                 return;
             }
 
@@ -363,19 +377,20 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
             double mean_us = timeMPSGraph(queue, g, feeds, results, iters);
             double rate = flops_per_iter * 1.0e6 / mean_us;
 
-            test.emit(label, (float)rate, note);
+            test.emit(label, (float)rate, note, dims);
         }
     };
 
-    auto reportUnsupported = [&](const char *label, const char *note, const char *msg)
+    auto reportUnsupported = [&](const char *label, const char *note, const Dims &dims,
+                                 const char *msg)
     {
-        test.skip(label, ResultStatus::Unsupported, msg, note);
+        test.skip(label, ResultStatus::Unsupported, msg, note, dims);
     };
 
     // ---- Run the dtype matrix --------------------------------------------
 
-    runMatMul("fp32", fp32Note, MPSDataTypeFloat32, 4);
-    runMatMul("fp16", fp16Note, MPSDataTypeFloat16, 2);
+    runMatMul("fp32", fp32Note, fp32Dims, MPSDataTypeFloat32, 4);
+    runMatMul("fp16", fp16Note, fp16Dims, MPSDataTypeFloat16, 2);
 
     // bf16: only via MPSGraph, and only on Apple9+ / OS support where the
     // path actually lowers to bf16 simdgroup_matrix.
@@ -386,20 +401,22 @@ int MetalPeak::runMpsGemm(MetalDevice &dev, benchmark_config_t &cfg)
 #endif
     {
         if (!dev.info.mpsGraphSupported)
-            reportUnsupported("bf16", bf16Note,
+            reportUnsupported("bf16", bf16Note, bf16Dims,
                               "MPSGraph is unavailable on this device (iOS Simulator)");
         else if (dev.info.mpsGraphBF16Supported)
-            runGraphMatMul("bf16", bf16Note, MPSDataTypeBFloat16, 2);
+            runGraphMatMul("bf16", bf16Note, bf16Dims, MPSDataTypeBFloat16, 2);
         else
-            reportUnsupported("bf16", bf16Note,
+            reportUnsupported("bf16", bf16Note, bf16Dims,
                               "bf16 requires Apple9 (M3) -- unsupported on this device");
     }
     else
     {
 #if TARGET_OS_IPHONE
-        reportUnsupported("bf16", bf16Note, "bf16 requires iOS 17 -- unsupported on this device");
+        reportUnsupported("bf16", bf16Note, bf16Dims,
+                          "bf16 requires iOS 17 -- unsupported on this device");
 #else
-        reportUnsupported("bf16", bf16Note, "bf16 requires macOS 14 -- unsupported on this device");
+        reportUnsupported("bf16", bf16Note, bf16Dims,
+                          "bf16 requires macOS 14 -- unsupported on this device");
 #endif
     }
 
@@ -421,12 +438,14 @@ int MetalPeak::runMpsAttention(MetalDevice &dev, benchmark_config_t &cfg)
     // B=1, H=16 heads, seq N=4096, head dim F=128 -- llama-class shape.
     const uint32_t H = 16, N = 4096, F = 128;
 
-    auto test = currentDeviceScope->beginTest(
-        {"mps_attention", "MPS attention SDPA (H16 S4096 D128)", "flops",
-         Category::Unknown,
-         "Fused fp16 scaled-dot-product attention through MPSGraph, at a fixed "
-         "shape.  FLOPs count only the QK^T and PV matmuls.",
-         TestShape::Homogeneous});
+    logger::TestSpec spec{"mps_attention", "MPS attention SDPA (H16 S4096 D128)", "flops",
+                          Category::Unknown,
+                          "Fused fp16 scaled-dot-product attention through MPSGraph, at a fixed "
+                          "shape.  FLOPs count only the QK^T and PV matmuls.",
+                          TestShape::Homogeneous};
+    // Its one reading, skips included, is fp16 through MPSGraph.
+    spec.dims = {{Dim::Dtype, DType::Fp16}, {Dim::Impl, dim::Impl::Mpsgraph}};
+    auto test = currentDeviceScope->beginTest(spec);
 
     if (!dev.info.isAppleSilicon)
     {

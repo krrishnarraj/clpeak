@@ -16,12 +16,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
+#include <common/vocabulary.h>
+
 #if defined(__APPLE__)
+#include <mach/machine.h>   // CPUFAMILY_ARM_*
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #elif defined(__linux__)
@@ -443,6 +448,308 @@ static std::vector<uint64_t> collectMidrs()
 #endif // (aarch64 || ARM64) && (linux || windows)
 
 // ---------------------------------------------------------------------------
+// The processor's facts (cpu_device_info_t::facts).  Linux and Windows
+// describe each online CPU and every cache instance the OS lists; the
+// clusters -- one per kind of core -- their kinds, and which caches the whole
+// processor shares are drawn from that here, the same way for both.  Apple's
+// performance levels come grouped already (detectCpuInfo).
+// ---------------------------------------------------------------------------
+namespace {
+
+// One logical CPU, as its platform describes it.
+struct TopoCpu
+{
+  int id = -1;
+  long long core = -1;      // its physical core, unique across packages; -1 unknown
+  uint64_t rank = 0;        // the OS's ranking: higher is faster
+  int maxMHz = 0;           // 0 where the OS does not say
+  uint64_t midr = 0;        // Arm: MIDR_EL1; 0 unknown
+  std::string tier;         // what makes two CPUs the same kind of core
+  std::string about;        // what the OS says of it, for the --verbose dump
+  std::string cache[4];     // the instances it reads: [0] L1d, [1] L1i, [2] L2, [3] L3
+};
+
+// One cache instance the OS lists, and the CPUs that read it.
+struct TopoCache
+{
+  int slot = 0;             // as TopoCpu::cache
+  uint64_t size = 0;        // 0: listed without one
+  unsigned line = 0;        // 0: not given
+  std::vector<int> cpus;
+};
+using TopoCaches = std::map<std::string, TopoCache>;
+
+const xpupeak::CacheLevel kSlotLevel[4] = {xpupeak::CacheLevel::L1d, xpupeak::CacheLevel::L1i,
+                                           xpupeak::CacheLevel::L2, xpupeak::CacheLevel::L3};
+const char *const kSlotName[4] = {"L1d", "L1i", "L2", "L3"};
+
+} // anonymous namespace
+
+// "64 KB", "12 MB"; "unsized" for a level the OS lists without a size.
+static std::string topoBytes(uint64_t b)
+{
+  char buf[32];
+  if (!b)
+    return "unsized";
+  if (b >= (1ull << 20) && !(b % (1ull << 20)))
+    std::snprintf(buf, sizeof(buf), "%llu MB", (unsigned long long)(b >> 20));
+  else if (b >= 1024 && !(b % 1024))
+    std::snprintf(buf, sizeof(buf), "%llu KB", (unsigned long long)(b >> 10));
+  else
+    std::snprintf(buf, sizeof(buf), "%llu B", (unsigned long long)b);
+  return buf;
+}
+
+// CPU ids as ranges: "0-3,8".
+[[maybe_unused]] static std::string cpuRanges(std::vector<int> ids)
+{
+  std::sort(ids.begin(), ids.end());
+  std::string out;
+  for (size_t i = 0; i < ids.size();)
+  {
+    size_t j = i;
+    while (j + 1 < ids.size() && ids[j + 1] == ids[j] + 1)
+      j++;
+    out += (out.empty() ? "" : ",") + std::to_string(ids[i]);
+    if (j > i)
+      out += "-" + std::to_string(ids[j]);
+    i = j + 1;
+  }
+  return out;
+}
+
+// The size of each cache `c` reads, as a kind of core's signature: "/32768/...".
+[[maybe_unused]] static std::string cacheSignature(const TopoCpu &c, const TopoCaches &caches)
+{
+  std::string out;
+  for (int s = 0; s < 4; s++)
+  {
+    auto it = c.cache[s].empty() ? caches.end() : caches.find(c.cache[s]);
+    out += "/" + std::to_string(it == caches.end() ? 0 : it->second.size);
+  }
+  return out;
+}
+
+// The microarchitecture a MIDR names, where the part table knows it.  x86
+// gets none: its CPUID family, model and stepping are stored as they are,
+// and naming them is a reader's table, as a model id's name is.
+[[maybe_unused]] static std::string microarchOf(uint64_t midr)
+{
+#if (defined(__aarch64__) || defined(_M_ARM64)) && (defined(__linux__) || defined(_WIN32))
+  if (const char *p = armPartName((unsigned)((midr >> 24) & 0xFF), (unsigned)((midr >> 4) & 0xFFF)))
+    return p;
+#endif
+  (void)midr;
+  return {};
+}
+
+// The clusters' kinds, fastest first.  None for a CPU of one kind of core.
+// By rank otherwise: the fastest is `performance` and the slowest
+// `efficiency`.  On Arm a prime core sits above the big ones -- the fastest of
+// three or more kinds, or the faster of two bins of one core (an 8 Elite's
+// Oryon) -- and on x86 a third, slowest kind is `low_power` (Intel's LP
+// E-cores), the kinds between it and the fastest `efficiency`.
+[[maybe_unused]] static void assignKinds(std::vector<CpuCluster> &cl,
+                                         const std::vector<uint64_t> &midr, bool arm)
+{
+  using xpupeak::ClusterKind;
+  const size_t n = cl.size();
+  if (n < 2)
+    return;
+  auto set = [&](size_t i, ClusterKind k) { cl[i].kind = xpupeak::toString(k); };
+  auto core = [](uint64_t m) { return m & 0xFF00FFF0ull; };   // implementer + part
+  for (size_t i = 0; i < n; i++)
+    set(i, ClusterKind::Performance);
+  set(n - 1, ClusterKind::Efficiency);
+  if (arm)
+  {
+    const bool oneCore = n == 2 && midr[0] && core(midr[0]) == core(midr[1]);
+    if (n >= 3 || oneCore)
+      set(0, ClusterKind::Prime);
+    if (oneCore)
+      set(1, ClusterKind::Performance);
+  }
+  else if (n >= 3)
+  {
+    for (size_t i = 1; i + 1 < n; i++)
+      set(i, ClusterKind::Efficiency);
+    set(n - 1, ClusterKind::LowPower);
+  }
+}
+
+// The --verbose lines for the facts' clusters, after those for what they
+// were drawn from: one per cluster, and the caches the processor shares.
+static void logClusters(cpu_device_info_t &info)
+{
+  const CpuFacts &f = info.facts;
+  auto cacheList = [](const std::vector<CacheInfo> &list) {
+    std::string out;
+    for (const CacheInfo &e : list)
+    {
+      out += std::string(out.empty() ? "" : ", ") + e.level + " " + topoBytes(e.sizeBytes);
+      if (e.instances)
+        out += " x" + std::to_string(e.instances);
+    }
+    return out.empty() ? std::string("none") : out;
+  };
+  for (size_t k = 0; k < f.clusters.size(); k++)
+  {
+    const CpuCluster &c = f.clusters[k];
+    std::string line = "cluster " + std::to_string(k) + ": " +
+                       (c.kind.empty() ? std::string("one kind of core") : c.kind) + ", " +
+                       std::to_string(c.cores) + " cores x " + std::to_string(c.threadsPerCore) +
+                       (c.threadsPerCore == 1 ? " thread" : " threads");
+    if (c.maxMhz)
+      line += ", " + std::to_string(c.maxMhz) + " MHz";
+    if (!c.microarch.empty())
+      line += ", " + c.microarch;
+    if (!c.midr.empty())
+      line += " (midr " + c.midr + ")";
+    info.topologyLines.push_back(line + "; caches " + cacheList(c.caches));
+  }
+  info.topologyLines.push_back("caches the whole processor shares: " + cacheList(f.caches));
+}
+
+// The facts' clusters, cores, threads and caches from the CPUs and cache
+// instances the OS lists, and the --verbose lines that show both.
+[[maybe_unused]] static void buildClusters(cpu_device_info_t &info,
+                                           const std::vector<TopoCpu> &cpus,
+                                           const TopoCaches &caches, bool arm)
+{
+  CpuFacts &f = info.facts;
+  if (cpus.empty())
+    return;
+
+  // The kinds of core, fastest first: by the best rank among each one's CPUs,
+  // the first seen winning a tie.
+  struct Tier
+  {
+    std::vector<size_t> members;
+    uint64_t rank = 0;
+  };
+  std::vector<Tier> tiers;
+  std::map<std::string, size_t> tierIndex;
+  for (size_t i = 0; i < cpus.size(); i++)
+  {
+    auto it = tierIndex.find(cpus[i].tier);
+    if (it == tierIndex.end())
+    {
+      it = tierIndex.emplace(cpus[i].tier, tiers.size()).first;
+      tiers.emplace_back();
+    }
+    Tier &t = tiers[it->second];
+    t.members.push_back(i);
+    t.rank = std::max(t.rank, cpus[i].rank);
+  }
+  std::vector<size_t> order(tiers.size());
+  for (size_t i = 0; i < order.size(); i++)
+    order[i] = i;
+  std::stable_sort(order.begin(), order.end(),
+                   [&](size_t a, size_t b) { return tiers[a].rank > tiers[b].rank; });
+
+  f.clusters.clear();
+  std::vector<uint64_t> midrs;
+  std::map<int, size_t> clusterOf;   // CPU id -> cluster
+  for (size_t k = 0; k < order.size(); k++)
+  {
+    const Tier &t = tiers[order[k]];
+    CpuCluster c;
+    std::set<long long> cores;
+    uint64_t midr = 0;
+    int mhz = 0;
+    for (size_t i : t.members)
+    {
+      const TopoCpu &u = cpus[i];
+      cores.insert(u.core >= 0 ? u.core : -1 - (long long)u.id);   // unknown: a core of its own
+      mhz = std::max(mhz, u.maxMHz);
+      if (!midr)
+        midr = u.midr;
+      clusterOf[u.id] = k;
+    }
+    c.cores          = (unsigned)cores.size();
+    c.threadsPerCore = (unsigned)((t.members.size() + cores.size() - 1) / cores.size());
+    c.maxMhz         = (unsigned)mhz;
+    if (midr)
+    {
+      char hex[16];
+      std::snprintf(hex, sizeof(hex), "%08llx", (unsigned long long)(midr & 0xFFFFFFFFull));
+      c.midr      = hex;
+      c.microarch = microarchOf(midr);
+    }
+    f.clusters.push_back(c);
+    midrs.push_back(midr);
+  }
+  assignKinds(f.clusters, midrs, arm);
+
+  // An instance is its cluster's own, or the whole processor's: read by more
+  // than one kind of core, or by every CPU there is.  Instances alike are
+  // counted together, smaller levels first.
+  std::vector<const TopoCache *> ordered;
+  for (const auto &kv : caches)
+    ordered.push_back(&kv.second);
+  std::stable_sort(ordered.begin(), ordered.end(), [](const TopoCache *a, const TopoCache *b) {
+    return a->slot != b->slot ? a->slot < b->slot : a->size > b->size;
+  });
+  auto add = [](std::vector<CacheInfo> &list, const TopoCache &c) {
+    const std::string level = xpupeak::toString(kSlotLevel[c.slot]);
+    for (CacheInfo &e : list)
+      if (e.level == level && e.sizeBytes == c.size && e.lineBytes == c.line)
+      {
+        e.instances++;
+        return;
+      }
+    CacheInfo e;
+    e.level     = level;
+    e.sizeBytes = c.size;
+    e.instances = 1;
+    e.lineBytes = c.line;
+    list.push_back(e);
+  };
+  f.caches.clear();
+  for (const TopoCache *c : ordered)
+  {
+    std::set<size_t> kinds;
+    size_t online = 0;
+    for (int id : c->cpus)
+    {
+      auto it = clusterOf.find(id);
+      if (it == clusterOf.end())
+        continue;
+      kinds.insert(it->second);
+      online++;
+    }
+    if (kinds.empty())
+      continue;
+    const bool whole = kinds.size() > 1 || (online == cpus.size() && cpus.size() > 1);
+    add(whole ? f.caches : f.clusters[*kinds.begin()].caches, *c);
+  }
+
+  f.threads = (unsigned)cpus.size();
+  f.cores   = 0;
+  for (const CpuCluster &c : f.clusters)
+    f.cores += c.cores;
+
+  // What the OS said of each CPU, then what was drawn from it.
+  for (const TopoCpu &t : cpus)
+  {
+    std::string caches_;
+    for (int s = 0; s < 4; s++)
+    {
+      auto it = t.cache[s].empty() ? caches.end() : caches.find(t.cache[s]);
+      if (it == caches.end())
+        continue;
+      caches_ += std::string(caches_.empty() ? "" : ", ") + kSlotName[s] + " " +
+                 topoBytes(it->second.size);
+      if (it->second.cpus.size() > 1)
+        caches_ += " [" + cpuRanges(it->second.cpus) + "]";
+    }
+    info.topologyLines.push_back("cpu" + std::to_string(t.id) + ": " + t.about + "; " +
+                                 (caches_.empty() ? std::string("no caches listed") : caches_));
+  }
+  logClusters(info);
+}
+
+// ---------------------------------------------------------------------------
 // Per-CPU topology: which CPU is fastest, and which cache instance every CPU
 // reads at each level.  The OS ranks the cores -- Linux `cpu_capacity`, else
 // the highest maximum clock; Windows `EfficiencyClass` -- and XpuPeak only
@@ -650,6 +957,22 @@ static void linuxTopology(cpu_device_info_t &info, const std::vector<uint64_t> &
   std::vector<CpuRecord> recs;
   std::map<uint32_t, std::string> phandles;
   bool phandlesRead = false;
+  // For the facts, what else the OS says of each CPU -- its core, its MIDR,
+  // which PMU claims it on an Intel hybrid -- beside `recs`, and of the cache
+  // instances: their line sizes, and the instruction caches the rows never
+  // use.
+  struct CpuExtra
+  {
+    long long core = -1;
+    int package = -1;
+    uint64_t midr = 0;
+    std::string l1i;
+  };
+  std::vector<CpuExtra> extras;
+  TopoCaches l1i;
+  std::map<std::string, unsigned> lineOf;
+  const std::vector<int> pmuCore = parseCpuList(readFile("/sys/devices/cpu_core/cpus"));
+  const std::vector<int> pmuAtom = parseCpuList(readFile("/sys/devices/cpu_atom/cpus"));
   auto dt = [&](int cpu) {
     if (!phandlesRead)
     {
@@ -676,6 +999,23 @@ static void linuxTopology(cpu_device_info_t &info, const std::vector<uint64_t> &
     r.rank   = (capacity << 32) | (maxKHz & 0xffffffffull);
     r.maxMHz = (int)(maxKHz / 1000);
 
+    CpuExtra x;
+    {
+      const std::string coreId = readFile((b + "topology/core_id").c_str());
+      const std::string pkgId  = readFile((b + "topology/physical_package_id").c_str());
+      const long core = coreId.empty() ? -1 : std::strtol(coreId.c_str(), nullptr, 10);
+      x.package = pkgId.empty() ? -1 : (int)std::strtol(pkgId.c_str(), nullptr, 10);
+      if (core >= 0)
+        x.core = ((long long)std::max(x.package, 0) << 32) | (long long)core;
+#if defined(__aarch64__)
+      // Read per CPU: the list collectMidrs() keeps stops at the first CPU
+      // without a register file, and an Android phone takes cores offline.
+      const std::string m = readFile((b + "regs/identification/midr_el1").c_str());
+      x.midr = !m.empty() ? std::strtoull(m.c_str(), nullptr, 16)
+                          : ((size_t)cpu < midrs.size() ? midrs[(size_t)cpu] : 0);
+#endif
+    }
+
     uint64_t sizes[4] = {0, 0, 0, 0};
     bool unsized = false;
     for (int idx = 0; idx < 16; idx++)
@@ -687,12 +1027,28 @@ static void linuxTopology(cpu_device_info_t &info, const std::vector<uint64_t> &
       const int level = std::atoi(lvl.c_str());
       const std::string type = readFile((ip + "type").c_str());
       const bool data = type.rfind("Data", 0) == 0;
-      if (level < 1 || level > 3 || !(data || (level > 1 && type.rfind("Unified", 0) == 0)))
-        continue;
       std::string shared = readFile((ip + "shared_cpu_list").c_str());
       shared.erase(shared.find_last_not_of(" \t\r\n") + 1);
-      r.key[level] = "L" + std::to_string(level) + ":" +
-                     (shared.empty() ? "cpu" + std::to_string(cpu) : shared);
+      const std::string sharers = shared.empty() ? "cpu" + std::to_string(cpu) : shared;
+      const unsigned line = (unsigned)std::atoi(readFile((ip + "coherency_line_size").c_str()).c_str());
+      // The instruction cache is a fact only: no row reads it.
+      if (level == 1 && type.rfind("Instruction", 0) == 0)
+      {
+        x.l1i = "L1i:" + sharers;
+        TopoCache &ic = l1i[x.l1i];
+        ic.slot = 1;
+        if (!ic.size)
+          ic.size = parseCacheSize(readFile((ip + "size").c_str()));
+        if (!ic.line)
+          ic.line = line;
+        ic.cpus.push_back(cpu);
+        continue;
+      }
+      if (level < 1 || level > 3 || !(data || (level > 1 && type.rfind("Unified", 0) == 0)))
+        continue;
+      r.key[level] = "L" + std::to_string(level) + ":" + sharers;
+      if (line)
+        lineOf[r.key[level]] = line;
       sizes[level] = parseCacheSize(readFile((ip + "size").c_str()));
       unsized = unsized || !sizes[level];
     }
@@ -717,6 +1073,7 @@ static void linuxTopology(cpu_device_info_t &info, const std::vector<uint64_t> &
       ci.cpus.push_back(cpu);
     }
     recs.push_back(r);
+    extras.push_back(x);
   }
 
   // No CPU listed an L3.  That is a real answer on most phones and every
@@ -735,6 +1092,74 @@ static void linuxTopology(cpu_device_info_t &info, const std::vector<uint64_t> &
           ci.size  = d.size;
           ci.cpus.push_back(r.id);
         }
+
+  // The facts, from every online CPU and every instance listed, before any
+  // size is measured.  A kind of core is its MIDR and the OS's capacity and
+  // clock on Arm, where a faster bin of one core is a cluster of its own; on
+  // x86 the PMU that claims it (Intel's P- and E-cores), since favoured cores
+  // of one kind boost higher without being another kind.  The caches it
+  // reads tell the rest apart (AMD's compact cores).
+  {
+#if defined(__aarch64__)
+    const bool arm = true;
+#else
+    const bool arm = false;
+#endif
+    TopoCaches caches = l1i;
+    for (const auto &kv : inst)
+    {
+      TopoCache &c = caches[kv.first];
+      c.slot = kv.second.level == 1 ? 0 : kv.second.level;
+      c.size = kv.second.size;
+      auto ln = lineOf.find(kv.first);
+      c.line = ln == lineOf.end() ? 0 : ln->second;
+      c.cpus = kv.second.cpus;
+    }
+    std::vector<TopoCpu> cpus;
+    std::set<int> packages;
+    for (size_t i = 0; i < recs.size(); i++)
+    {
+      const CpuRecord &r = recs[i];
+      const CpuExtra &x = extras[i];
+      TopoCpu t;
+      t.id     = r.id;
+      t.core   = x.core;
+      t.rank   = r.rank;
+      t.maxMHz = r.maxMHz;
+      t.midr   = x.midr;
+      t.cache[0] = r.key[1];
+      t.cache[1] = x.l1i;
+      t.cache[2] = r.key[2];
+      t.cache[3] = r.key[3];
+      if (x.package >= 0)
+        packages.insert(x.package);
+      const bool pCore = std::find(pmuCore.begin(), pmuCore.end(), r.id) != pmuCore.end();
+      const bool eCore = std::find(pmuAtom.begin(), pmuAtom.end(), r.id) != pmuAtom.end();
+      char about[160];
+      std::snprintf(about, sizeof(about), "package %d core %lld, capacity %llu, %d MHz", x.package,
+                    x.core >= 0 ? (x.core & 0xffffffffll) : -1ll,
+                    (unsigned long long)(r.rank >> 32), r.maxMHz);
+      t.about = about;
+      if (x.midr)
+      {
+        char m[32];
+        std::snprintf(m, sizeof(m), ", midr %08llx", (unsigned long long)(x.midr & 0xFFFFFFFFull));
+        t.about += m;
+      }
+      if (pCore || eCore)
+        t.about += pCore ? ", P-core" : ", E-core";
+      char tier[64];
+      if (arm)
+        std::snprintf(tier, sizeof(tier), "%llx/%llu", (unsigned long long)(x.midr & 0xFF0FFFF0ull),
+                      (unsigned long long)r.rank);
+      else
+        std::snprintf(tier, sizeof(tier), "pmu%d", pCore ? 1 : eCore ? 2 : 0);
+      t.tier = tier + cacheSignature(t, caches);
+      cpus.push_back(t);
+    }
+    info.sockets = (int)packages.size();
+    buildClusters(info, cpus, caches, arm);
+  }
 
   applyTopology(info, recs, inst, usable);
 
@@ -763,15 +1188,24 @@ struct WinCache
   uint64_t size;
   WORD group;
   KAFFINITY mask;
+  bool instruction;   // an L1i: a fact only, which no row reads
+  unsigned line;
+};
+// One GLPI core record: the logical processors that are its threads.
+struct WinCore
+{
+  WORD group;
+  KAFFINITY mask;
 };
 } // anonymous namespace
 
 // Windows: GLPI's cache records carry the mask of the processors sharing each
 // instance, and CPU sets rank the processors (EfficiencyClass: higher is
 // faster).  Group 0 only, which is all the pool's pinning addresses: a machine
-// with several processor groups keeps the pool's old order.
+// with several processor groups keeps the pool's old order, and its facts
+// have no clusters.
 static void windowsTopology(cpu_device_info_t &info, const std::vector<WinCache> &caches,
-                            const std::vector<uint64_t> &midrs)
+                            const std::vector<WinCore> &cores, const std::vector<uint64_t> &midrs)
 {
   if (GetActiveProcessorGroupCount() != 1)
     return;
@@ -815,7 +1249,7 @@ static void windowsTopology(cpu_device_info_t &info, const std::vector<WinCache>
   std::map<std::string, CacheInstance> inst;
   for (const WinCache &c : caches)
   {
-    if (c.group != 0 || c.level < 1 || c.level > 3)
+    if (c.group != 0 || c.level < 1 || c.level > 3 || c.instruction)
       continue;
     char key[48];
     std::snprintf(key, sizeof(key), "L%d:%llx", c.level, (unsigned long long)c.mask);
@@ -829,6 +1263,67 @@ static void windowsTopology(cpu_device_info_t &info, const std::vector<WinCache>
         ci.cpus.push_back(r.id);
       }
   }
+  // The facts, from every processor of group 0: a kind of core is its
+  // efficiency class, its MIDR on Arm, and the caches it reads.  GLPI gives
+  // no clock.
+  {
+#if defined(_M_ARM64) || defined(__aarch64__)
+    const bool arm = true;
+#else
+    const bool arm = false;
+#endif
+    TopoCaches tc;
+    for (const WinCache &c : caches)
+    {
+      if (c.group != 0 || c.level < 1 || c.level > 3)
+        continue;
+      char key[48];
+      std::snprintf(key, sizeof(key), "%c%d:%llx", c.instruction ? 'i' : 'd', c.level,
+                    (unsigned long long)c.mask);
+      TopoCache &t = tc[key];
+      t.slot = c.instruction ? 1 : (c.level == 1 ? 0 : c.level);   // only L1i is collected
+      t.size = c.size;
+      t.line = c.line;
+      t.cpus.clear();
+      for (const CpuRecord &r : recs)
+        if (c.mask & ((KAFFINITY)1 << r.id))
+          t.cpus.push_back(r.id);
+    }
+    std::vector<TopoCpu> cpus;
+    for (const CpuRecord &r : recs)
+    {
+      TopoCpu t;
+      t.id   = r.id;
+      t.rank = r.rank;
+      for (size_t k = 0; k < cores.size(); k++)
+        if (cores[k].group == 0 && (cores[k].mask & ((KAFFINITY)1 << r.id)))
+          t.core = (long long)k;
+#if defined(_M_ARM64) || defined(__aarch64__)
+      if ((size_t)r.id < midrs.size())
+        t.midr = midrs[(size_t)r.id];
+#endif
+      for (const auto &kv : tc)
+        if (std::find(kv.second.cpus.begin(), kv.second.cpus.end(), r.id) != kv.second.cpus.end())
+          t.cache[kv.second.slot] = kv.first;
+      char about[96];
+      std::snprintf(about, sizeof(about), "core %lld, efficiency class %llu", t.core,
+                    (unsigned long long)r.rank);
+      t.about = about;
+      if (t.midr)
+      {
+        char m[32];
+        std::snprintf(m, sizeof(m), ", midr %08llx", (unsigned long long)(t.midr & 0xFFFFFFFFull));
+        t.about += m;
+      }
+      char tier[64];
+      std::snprintf(tier, sizeof(tier), "%llu/%llx", (unsigned long long)r.rank,
+                    (unsigned long long)(t.midr & 0xFF0FFFF0ull));
+      t.tier = tier + cacheSignature(t, tc);
+      cpus.push_back(t);
+    }
+    buildClusters(info, cpus, tc, arm);
+  }
+
   applyTopology(info, recs, inst, usable);
 
   std::string part;
@@ -965,8 +1460,212 @@ void refreshCacheSizes(cpu_device_info_t &info)
 }
 
 // ---------------------------------------------------------------------------
+// The facts every platform gives the same way.
+// ---------------------------------------------------------------------------
+
+// The processor's instruction set, as `system.arch` spells it.
+static const char *archWord()
+{
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+  return "x86";
+#elif defined(__arm__) || defined(_M_ARM)
+  return "arm";
+#elif defined(__riscv) && __riscv_xlen == 64
+  return "riscv64";
+#else
+  return "";
+#endif
+}
+
+#if defined(__APPLE__)
+#if defined(__aarch64__)
+// Apple's AMX: the matrix unit beside each cluster, reached only through
+// Accelerate, that every Apple core family since the A13's has -- M1 to M3
+// among them.  From M4 the probe sees the same unit as SME instead.
+static bool appleAmx()
+{
+  switch ((uint32_t)sysctlU64("hw.cpufamily"))
+  {
+  case 0:
+  case CPUFAMILY_ARM_SWIFT:
+  case CPUFAMILY_ARM_CYCLONE:
+  case CPUFAMILY_ARM_TYPHOON:
+  case CPUFAMILY_ARM_TWISTER:
+  case CPUFAMILY_ARM_HURRICANE:
+  case CPUFAMILY_ARM_MONSOON_MISTRAL:
+  case CPUFAMILY_ARM_VORTEX_TEMPEST:
+    return false;
+  default:
+    return true;
+  }
+}
+#endif
+
+// Apple's facts: a cluster per performance level, as the OS groups its cores
+// -- there is no per-CPU topology to draw them from, and Apple silicon gives
+// no clock -- with each level's L1s and its L2s, one per `cpusperl2` CPUs.
+// An Intel Mac has no levels and gets one cluster of the sizes it reports.
+static void appleFacts(cpu_device_info_t &info)
+{
+  CpuFacts &f = info.facts;
+  const unsigned line = (unsigned)sysctlU64("hw.cachelinesize");
+  auto cache = [line](xpupeak::CacheLevel level, uint64_t size, unsigned instances) {
+    CacheInfo c;
+    c.level     = xpupeak::toString(level);
+    c.sizeBytes = size;
+    c.instances = instances;
+    c.lineBytes = line;
+    return c;
+  };
+  const uint64_t nLevels = sysctlU64("hw.nperflevels");
+  for (uint64_t lvl = 0; lvl < nLevels; lvl++)
+  {
+    auto key = [lvl](const char *name) {
+      char k[64];
+      std::snprintf(k, sizeof(k), "hw.perflevel%llu.%s", (unsigned long long)lvl, name);
+      return std::string(k);
+    };
+    const std::string name = sysctlStr(key("name").c_str());
+    const unsigned cores   = (unsigned)sysctlU64(key("physicalcpu").c_str());
+    const unsigned threads = (unsigned)sysctlU64(key("logicalcpu").c_str());
+    const unsigned perL2   = (unsigned)sysctlU64(key("cpusperl2").c_str());
+    const uint64_t l1d = sysctlU64(key("l1dcachesize").c_str());
+    const uint64_t l1i = sysctlU64(key("l1icachesize").c_str());
+    const uint64_t l2  = sysctlU64(key("l2cachesize").c_str());
+    CpuCluster c;
+    // The OS names its levels; a CPU of one level is one kind of core.
+    if (nLevels > 1)
+    {
+      if (name == "Performance")     c.kind = xpupeak::toString(xpupeak::ClusterKind::Performance);
+      else if (name == "Efficiency") c.kind = xpupeak::toString(xpupeak::ClusterKind::Efficiency);
+    }
+    c.cores          = cores;
+    c.threadsPerCore = cores ? (threads + cores - 1) / cores : 0;
+    if (l1d)
+      c.caches.push_back(cache(xpupeak::CacheLevel::L1d, l1d, cores));
+    if (l1i)
+      c.caches.push_back(cache(xpupeak::CacheLevel::L1i, l1i, cores));
+    if (l2)
+      c.caches.push_back(cache(xpupeak::CacheLevel::L2, l2,
+                               perL2 ? (threads + perL2 - 1) / perL2 : 0));
+    f.clusters.push_back(c);
+    info.topologyLines.push_back(
+        "perflevel" + std::to_string(lvl) + " " + name + ": " + std::to_string(cores) +
+        " cores, " + std::to_string(threads) + " threads; L1d " + topoBytes(l1d) + ", L1i " +
+        topoBytes(l1i) + ", L2 " + topoBytes(l2) + " per " + std::to_string(perL2) + " CPUs");
+  }
+  if (!nLevels)
+  {
+    CpuCluster c;
+    const unsigned cores = (unsigned)sysctlU64("hw.physicalcpu");
+    const unsigned threads = (unsigned)sysctlU64("hw.logicalcpu");
+    c.cores          = cores;
+    c.threadsPerCore = cores ? (threads + cores - 1) / cores : 0;
+    c.maxMhz         = (unsigned)(sysctlU64("hw.cpufrequency_max") / 1000000ull);
+    if (const uint64_t l1d = sysctlU64("hw.l1dcachesize"))
+      c.caches.push_back(cache(xpupeak::CacheLevel::L1d, l1d, 0));
+    if (const uint64_t l1i = sysctlU64("hw.l1icachesize"))
+      c.caches.push_back(cache(xpupeak::CacheLevel::L1i, l1i, 0));
+    if (const uint64_t l2 = sysctlU64("hw.l2cachesize"))
+      c.caches.push_back(cache(xpupeak::CacheLevel::L2, l2, 0));
+    if (const uint64_t l3 = sysctlU64("hw.l3cachesize"))
+      f.caches.push_back(cache(xpupeak::CacheLevel::L3, l3, 0));
+    f.clusters.push_back(c);
+  }
+  f.cores   = (unsigned)sysctlU64("hw.physicalcpu");
+  f.threads = (unsigned)sysctlU64("hw.logicalcpu");
+  info.sockets = (int)sysctlU64("hw.packages");
+  logClusters(info);
+}
+#endif
+
+// What every platform's facts share: the ISA, the probe's features, the
+// matrix engines, CPUID, and the totals where no topology gave them.
+static void commonFacts(cpu_device_info_t &info)
+{
+  CpuFacts &f = info.facts;
+  f.isa = archWord();
+  if (info.sockets > 0)
+    f.sockets = (unsigned)info.sockets;
+  if (!f.threads)
+    f.threads = (unsigned)info.logicalCores;
+  if (!f.cores)
+    f.cores = (unsigned)info.physicalCores;
+
+#if defined(XPUPEAK_CPU_X86)
+  {
+    uint32_t r[4];
+    cpuid(0, 0, r);
+    if (r[0] >= 1)
+    {
+      f.cpuidVendor = x86Vendor();
+      cpuid(1, 0, r);
+      const uint32_t eax = r[0];
+      int family = (int)((eax >> 8) & 0xF), model = (int)((eax >> 4) & 0xF);
+      if (family == 0xF)
+        family += (int)((eax >> 20) & 0xFF);
+      if (family == 0x6 || family >= 0xF)
+        model += (int)((eax >> 16) & 0xF) << 4;
+      f.cpuidFamily   = family;
+      f.cpuidModel    = model;
+      f.cpuidStepping = (int)(eax & 0xF);
+    }
+  }
+#endif
+
+  // In the vocabulary's order, from the runtime probe: what the running CPU
+  // and OS together allow.
+  using F = xpupeak::CpuFeature;
+  const xpupeak_cpu::CpuFeatures &x = xpupeak_cpu::cpuFeatures();
+  const std::pair<F, bool> has[] = {
+      {F::Sse2, x.sse2}, {F::Ssse3, x.ssse3}, {F::Sse4_1, x.sse41}, {F::Sse4_2, x.sse42},
+      {F::Avx, x.avx}, {F::Avx2, x.avx2}, {F::Fma, x.fma},
+      {F::Avx512f, x.avx512f}, {F::Avx512bw, x.avx512bw}, {F::Avx512vl, x.avx512vl},
+      {F::Avx512dq, x.avx512dq}, {F::Avx512Vnni, x.avx512vnni}, {F::Avx512Bf16, x.avx512bf16},
+      {F::Avx512Fp16, x.avx512fp16}, {F::AvxVnni, x.avxvnni}, {F::AvxVnniInt8, x.avxvnniint8},
+      {F::AvxVnniInt16, x.avxvnniint16}, {F::Avx10, x.avx10}, {F::Avx10_2, x.avx10_2_512},
+      {F::AmxTile, x.amx_tile}, {F::AmxInt8, x.amx_int8}, {F::AmxBf16, x.amx_bf16},
+      {F::AmxFp16, x.amx_fp16}, {F::AmxFp8, x.amx_fp8}, {F::Vaes, x.vaes},
+      {F::Neon, x.neon}, {F::Fp16, x.fp16}, {F::Fhm, x.fp16fml}, {F::Dotprod, x.dotprod},
+      {F::Bf16, x.bf16}, {F::I8mm, x.i8mm}, {F::Sve, x.sve}, {F::Sve2, x.sve2},
+      {F::Sme, x.sme}, {F::Sme2, x.sme2}, {F::SmeF64f64, x.smeF64F64}, {F::Fp8dot4, x.fp8dot4},
+      {F::Aes, x.aes}, {F::Sha256, x.sha256}, {F::Sha512, x.sha512}, {F::Crc32, x.crc32},
+  };
+  for (const auto &h : has)
+    if (h.second)
+      f.features.push_back(xpupeak::toString(h.first));
+
+  // A matrix engine is the CPU's, not a processor of its own: Intel's AMX
+  // tiles sit in every core; SME, and Apple's AMX before it, is a unit per
+  // cluster, so its all-core rate does not scale with cores.
+  auto engine = [&](const char *name, xpupeak::EngineScope scope, xpupeak::EngineReach reach) {
+    CpuEngine e;
+    e.kind      = xpupeak::toString(xpupeak::EngineKind::Matrix);
+    e.name      = name;
+    e.scope     = xpupeak::toString(scope);
+    e.reachedBy = xpupeak::toString(reach);
+    f.engines.push_back(e);
+  };
+  if (x.amx_tile)
+    engine("AMX", xpupeak::EngineScope::Core, xpupeak::EngineReach::Instructions);
+  if (x.sme)
+    engine(x.sme2 ? "SME2" : "SME", xpupeak::EngineScope::Cluster,
+           xpupeak::EngineReach::Instructions);
+#if defined(__APPLE__) && defined(__aarch64__)
+  else if (appleAmx())
+    engine("AMX", xpupeak::EngineScope::Cluster, xpupeak::EngineReach::Library);
+#endif
+}
+
+// ---------------------------------------------------------------------------
 void detectCpuInfo(cpu_device_info_t &info)
 {
+  info.facts = CpuFacts{};
+  info.topologyLines.clear();
   info.logicalCores = (int)std::thread::hardware_concurrency();
   if (info.logicalCores < 1)
     info.logicalCores = 1;
@@ -1028,6 +1727,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   info.clockMHz = (int)(hz / 1000000ull);
   if (info.vendor.empty() && info.name.rfind("Apple", 0) == 0)
     info.vendor = "Apple";
+  appleFacts(info);
 
 #elif defined(__linux__)
   std::string cpuinfo = readFile("/proc/cpuinfo");
@@ -1149,21 +1849,31 @@ void detectCpuInfo(cpu_device_info_t &info)
     {
       char *ptr = buf.data();
       char *end = ptr + len;
-      int physical = 0;
+      int physical = 0, packages = 0;
       std::vector<WinCache> caches;
+      std::vector<WinCore> coreMasks;
       while (ptr < end)
       {
         auto *e = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *>(ptr);
         if (e->Relationship == RelationProcessorCore)
+        {
           physical++;
+          if (e->Processor.GroupCount >= 1)
+            coreMasks.push_back({e->Processor.GroupMask[0].Group, e->Processor.GroupMask[0].Mask});
+        }
+        else if (e->Relationship == RelationProcessorPackage)
+          packages++;
         else if (e->Relationship == RelationCache)
         {
           const auto &c = e->Cache;
+          if (c.Type == CacheInstruction && c.Level == 1)
+            caches.push_back({1, (uint64_t)c.CacheSize, c.GroupMask.Group, c.GroupMask.Mask,
+                              true, (unsigned)c.LineSize});
           if (c.Type == CacheData || c.Type == CacheUnified)
           {
             if (c.Level <= 3 && (c.Level > 1 || c.Type == CacheData))
               caches.push_back({(int)c.Level, (uint64_t)c.CacheSize, c.GroupMask.Group,
-                                c.GroupMask.Mask});
+                                c.GroupMask.Mask, false, (unsigned)c.LineSize});
             if (c.Level == 1 && c.Type == CacheData)
             {
               info.l1dCacheBytes  = c.CacheSize;
@@ -1184,10 +1894,11 @@ void detectCpuInfo(cpu_device_info_t &info)
         ptr += e->Size;
       }
       info.physicalCores = physical;
+      info.sockets       = packages;
       // Rank the processors, order the pool fastest first, and point the
       // per-instance sizes at the ST core's caches rather than whichever
       // record came last.
-      windowsTopology(info, caches, midrs);
+      windowsTopology(info, caches, coreMasks, midrs);
     }
   }
 #else
@@ -1209,6 +1920,7 @@ void detectCpuInfo(cpu_device_info_t &info)
   // until probeCacheSizes() measures it, and the rows that would need one it
   // could not measure skip (cacheSizeGap).
   cacheTotals(info);
+  commonFacts(info);
 }
 
 const char *cacheSizeGap(const cpu_device_info_t &info, int level)

@@ -2,6 +2,8 @@
 
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
+
+using xpupeak::Dim;
 #include <string>
 
 // Raw WMMA (matrix-core) peak microbenchmarks for RDNA. Counterpart to mfma.cpp
@@ -31,6 +33,10 @@ struct WmmaEntry
   uint32_t M, N, K;
   bool isInt;           // output buffer element type
   const char *description;  // what this row is, next to the name
+  // The reading's data type; its tile is M x N x K above, and every row
+  // accumulates in the usual type (fp32, int32), so says no `acc`.  RDNA4's
+  // fp8 is the OCP encoding (rocmFp8Format).
+  xpupeak::DType dtype;
 };
 
 std::string archBaseOf(const std::string &a)
@@ -55,27 +61,32 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     {"fp16", "WMMA fp16xfp16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp16, "wmma_fp16",
      16, 16, 16, false,
-     "fp16 inputs, fp32 accumulator (WMMA 16x16x16)."},
+     "fp16 inputs, fp32 accumulator (WMMA 16x16x16).",
+     xpupeak::DType::Fp16},
     {"bf16", "WMMA bf16xbf16+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_bf16, "wmma_bf16",
      16, 16, 16, false,
-     "bf16 inputs, fp32 accumulator (WMMA 16x16x16)."},
+     "bf16 inputs, fp32 accumulator (WMMA 16x16x16).",
+     xpupeak::DType::Bf16},
     {"fp8_e4m3", "WMMA fp8(E4M3)xfp8(E4M3)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e4m3",
      16, 16, 16, false,
      "fp8 E4M3 inputs (more precision, less range), fp32 accumulator "
-     "(WMMA 16x16x16).  RDNA4 only."},
+     "(WMMA 16x16x16).  RDNA4 only.",
+     xpupeak::DType::Fp8E4m3},
     {"fp8_e5m2", "WMMA fp8(E5M2)xfp8(E5M2)+fp32 16x16x16", "flops",
      &rocm_kernels::wmma_fp8, "wmma_fp8_e5m2",
      16, 16, 16, false,
      "fp8 E5M2 inputs (more range, less precision), fp32 accumulator "
-     "(WMMA 16x16x16).  RDNA4 only."},
+     "(WMMA 16x16x16).  RDNA4 only.",
+     xpupeak::DType::Fp8E5m2},
   };
   static const WmmaEntry intEntries[] = {
     {"int8", "WMMA int8xint8+int32 16x16x16", "ops",
      &rocm_kernels::wmma_int8, "wmma_int8",
      16, 16, 16, true,
-     "int8 inputs, int32 accumulator (WMMA 16x16x16)."},
+     "int8 inputs, int32 accumulator (WMMA 16x16x16).",
+     xpupeak::DType::Int8},
   };
 
   const bool rdna = isRdnaWmmaFamily(archBaseOf(dev.info.archName));
@@ -92,10 +103,13 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
   // The reading's own note rides along on every path, and the integer reading
   // carries its own unit -- that override is what lets it share the test with
   // the floating-point ones instead of needing a twin.
-  auto unitOpts = [](const WmmaEntry &en) {
+  const std::string archBase = archBaseOf(dev.info.archName);
+  auto unitOpts = [&](const WmmaEntry &en) {
     logger::EmitOptions o;
     if (en.description) o.description = en.description;
     if (en.isInt) o.unit = "ops";
+    o.dims = {{Dim::Dtype, rocmFp8Format(en.dtype, archBase)},
+              {Dim::Tile, rocmTile(en.M, en.N, en.K)}};
     return o;
   };
 
@@ -114,7 +128,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     {
       test.skip(me.label, ResultStatus::Unsupported,
                 "WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; "
-                "absent on this architecture", me.description);
+                "absent on this architecture", unitOpts(me));
       continue;
     }
     if (!wave32)
@@ -177,7 +191,7 @@ int RocmPeak::runWmma(RocmDevice &dev, benchmark_config_t &cfg)
     {
       test.skip(me.label, ResultStatus::Unsupported,
                 "WMMA is an RDNA3+/RDNA4 (gfx11/gfx12) matrix-core feature; "
-                "absent on this architecture", me.description);
+                "absent on this architecture", unitOpts(me));
       continue;
     }
     if (!wave32)

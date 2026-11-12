@@ -4,6 +4,8 @@
 #include <common/common.h>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
 {
   unsigned int iters = forceIters ? specifiedIters
@@ -18,12 +20,14 @@ int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
   // share, so the one-way time cannot be taken.
   const char *dispatchNote = "Host submit to kernel start, one way.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
+  const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+  const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
   RocmKernel k = dev.getKernel(rocm_kernels::kernel_latency, "kernel_latency_noop");
   if (!k)
   {
-    test.skip("dispatch", k.status, k.reason, dispatchNote);
-    test.skip("roundtrip", k.status, k.reason, roundtripNote);
+    test.skip("dispatch", k.status, k.reason, dispatchNote, dispatchDims);
+    test.skip("roundtrip", k.status, k.reason, roundtripNote, roundtripDims);
     return -1;
   }
   hipFunction_t fn = k.fn;
@@ -53,15 +57,15 @@ int RocmPeak::runKernelLatency(RocmDevice &dev, benchmark_config_t &cfg)
   }
 
   test.skip("dispatch", ResultStatus::Unsupported,
-            "Not measurable via HIP runtime/module API", dispatchNote);
+            "Not measurable via HIP runtime/module API", dispatchNote, dispatchDims);
   if (submitFailed)
   {
     test.skip("roundtrip", ResultStatus::Error,
-              "hipModuleLaunchKernel/hipStreamSynchronize failed", roundtripNote);
+              "hipModuleLaunchKernel/hipStreamSynchronize failed", roundtripNote, roundtripDims);
   }
   else
   {
-    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote);
+    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote, roundtripDims);
   }
 
   return 0;

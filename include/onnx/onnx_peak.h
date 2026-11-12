@@ -163,6 +163,16 @@ struct onnx_ep_info_t
                                                              // it reports none
   std::string vendor;                                        // the hardware vendor the runtime reports
   std::vector<std::pair<std::string, std::string>> hardware; // device metadata, as reported
+
+  // The hardware device the runtime pairs with this one: a plugin device's
+  // own, and a built-in provider's when the environment pairs it with
+  // exactly one (onnxAttachBuiltinHardware).  Its PCI ids, vendor and
+  // metadata -- a LUID, a PCI address -- are what link the device to the
+  // other backends' views of the same silicon (include/common/hardware_link.h).
+  uint32_t hwVendorId = 0;
+  uint32_t hwDeviceId = 0;
+  std::string hwVendor;
+  std::vector<std::pair<std::string, std::string>> hwMetadata;
 };
 
 // One plugin execution-provider library to register on the runtime's

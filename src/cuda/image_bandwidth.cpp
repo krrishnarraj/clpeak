@@ -4,18 +4,23 @@
 #include <common/common.h>
 #include <algorithm>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
 {
-  auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
-     Category::Unknown,
-     "Read bandwidth through the texture units, reading each pixel of an "
-     "image once.",
-     TestShape::Homogeneous});
+  logger::TestSpec spec{"image_memory_bandwidth", "Image memory bandwidth", "bps",
+                        Category::Unknown,
+                        "Read bandwidth through the texture units, reading each pixel of an "
+                        "image once.",
+                        TestShape::Homogeneous};
+  // 2: both walk orders race since 2.1.4, the faster reported.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // RGBA float image, so one fetch returns a whole pixel: four 32-bit values,
   // hence the metric name.
   const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
+  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
 
   const int imgW = 4096, imgH = 4096;
   const uint32_t blockSize = 256;
@@ -35,7 +40,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CUarray arr;
   if (cuArrayCreate(&arr, &adesc) != CUDA_SUCCESS)
   {
-    test.skip("float4", ResultStatus::Error, "Image array create failed", fetchNote);
+    test.skip("float4", ResultStatus::Error, "Image array create failed", fetchNote, fetchDims);
     return -1;
   }
 
@@ -68,7 +73,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   if (cuTexObjectCreate(&tex, &rd, &td, nullptr) != CUDA_SUCCESS)
   {
     cuArrayDestroy(arr);
-    test.skip("float4", ResultStatus::Error, "Texture object create failed", fetchNote);
+    test.skip("float4", ResultStatus::Error, "Texture object create failed", fetchNote, fetchDims);
     return -1;
   }
 
@@ -78,7 +83,7 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
   CudaKernel k = dev.getKernel(cuda_kernels::image_bandwidth, "image_bandwidth");
   if (!k)
   {
-    test.skip("float4", k.status, k.reason, fetchNote);
+    test.skip("float4", k.status, k.reason, fetchNote, fetchDims);
     cuTexObjectDestroy(tex);
     cuArrayDestroy(arr);
     cuMemFree(outBuf);
@@ -106,9 +111,9 @@ int CudaPeak::runImageBandwidth(CudaDevice &dev, benchmark_config_t &cfg)
                rowBps, colBps);
 
   if (rowBps <= 0.0f && colBps <= 0.0f)
-    test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote);
+    test.skip("float4", ResultStatus::Error, "kernel launch failed", fetchNote, fetchDims);
   else
-    test.emit("float4", std::max(rowBps, colBps), fetchNote);
+    test.emit("float4", std::max(rowBps, colBps), fetchNote, fetchDims);
 
   cuTexObjectDestroy(tex);
   cuArrayDestroy(arr);

@@ -5,6 +5,8 @@
 #include <sycl/sycl.hpp>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 class kernel_latency_noop;
 
 // Host-observed empty-kernel roundtrip: submit + wait per iter.  Matches the
@@ -23,6 +25,8 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
 
   const char *dispatchNote = "Host submit to kernel start, one way.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
+  const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+  const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
   bool submitFailed = false;
 
@@ -66,11 +70,12 @@ int OneapiPeak::runKernelLatency(OneapiDevice &dev, benchmark_config_t &cfg)
   // GPUStartTime / GPUEndTime fields, so we report only the roundtrip and
   // skip the dispatch metric — consistent with how the ROCm backend reports.
   test.skip("dispatch", ResultStatus::Unsupported,
-            "Not measurable via SYCL runtime", dispatchNote);
+            "Not measurable via SYCL runtime", dispatchNote, dispatchDims);
   if (submitFailed)
-    test.skip("roundtrip", ResultStatus::Error, "SYCL submit/wait failed", roundtripNote);
+    test.skip("roundtrip", ResultStatus::Error, "SYCL submit/wait failed", roundtripNote,
+              roundtripDims);
   else
-    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote);
+    test.emit("roundtrip", (float)(totalRoundtripUs / iters * 1e-6), roundtripNote, roundtripDims);
 
   return 0;
 }

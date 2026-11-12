@@ -122,6 +122,20 @@ struct cpu_device_info_t {
   int  smeSVLBytes = 0;             // active SME streaming vector length in bytes (0 if no SME)
   bool emulatedX86OnArm = false;    // x86 binary translated on ARM64 (Prism/Rosetta/qemu-user):
                                     // CPUID describes the translator's virtual CPU, not the host
+
+  int sockets = 0;                  // CPU packages; 0 where the OS does not say
+
+  // The processor's facts as the file keeps them (docs/format-v4.md,
+  // Hardware): its clusters -- one per kind of core -- with their caches and
+  // clocks, the caches the whole processor shares, CPUID or MIDR, features
+  // and matrix engines.  The OS's and CPUID's word only, for every CPU the
+  // OS has online whatever this process may run on, and built before
+  // probeCacheSizes() runs, so a measured size never reaches them.
+  CpuFacts facts;
+  // What the facts were drawn from -- one line per CPU (Linux, Windows) or per
+  // performance level (Apple) -- and the clusters drawn: logged under
+  // --verbose, so a file's facts can be checked against what the OS said.
+  std::vector<std::string> topologyLines;
 };
 
 // Populate `info` from the host (cpu_device.cpp).

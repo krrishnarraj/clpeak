@@ -143,6 +143,10 @@ struct cuda_compute_variant_t
   const cuda_kernels::Blob *blob;// embedded fatbin (may be shared by sibling
                                  // variants emitting from one file)
   const char *description;       // what this one reading means (nullptr = undocumented)
+
+  // This reading's coordinates over the test's (include/common/AGENTS.md
+  // § dims): a vector width, a chain count.  Carried on every path.
+  Dims dims;
 };
 
 struct cuda_compute_desc_t
@@ -173,6 +177,7 @@ struct cuda_compute_desc_t
   // floating-point ones instead of living in a `-int` twin.
   const char *metricDescription;
   const char *metricUnit;
+  Dims        metricDims;        // its coordinates: a tensor-core row's dtype, acc, tile
   const char *kernelName;
   const cuda_kernels::Blob *blob;
 
@@ -204,6 +209,12 @@ struct cuda_compute_desc_t
   // Optional gates / attributes
   bool        skip;
   const char *skipMsg;
+
+  // What every reading of a test this desc opens shares -- a vector test's
+  // data type -- and the test's method revision; both travel to
+  // logger::TestSpec.  Unused when `scope` is set: its opener says them.
+  Dims dims;
+  int  revision = 1;
 };
 
 class CudaPeak : public Peak

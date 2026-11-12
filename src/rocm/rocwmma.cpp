@@ -3,21 +3,32 @@
 #include <rocm/rocm_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
 {
   // One test for all data types -- integer reading carries its own unit.
-  auto test = currentDeviceScope->beginTest(
-    {"rocwmma", "rocWMMA matrix multiply",
-     "flops", Category::Unknown,
-     "Peak matrix-core rate through AMD's rocWMMA library instead of the raw "
-     "WMMA or MFMA instructions.",
-     TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{"rocwmma", "rocWMMA matrix multiply",
+                        "flops", Category::Unknown,
+                        "Peak matrix-core rate through AMD's rocWMMA library instead of the raw "
+                        "WMMA or MFMA instructions.",
+                        TestShape::Heterogeneous, "data type"};
+  // The library is a variant of the matrix-compute measurement, not a family
+  // of its own: its rows compare with wmma's and mfma's.
+  spec.dims = {{Dim::Impl, dim::Impl::Rocwmma}};
+  auto test = currentDeviceScope->beginTest(spec);
+
+  // Each row's coordinates, on every emit and skip path.
+  const Dims fp16Dims = {{Dim::Dtype, DType::Fp16}, {Dim::Tile, "16x16x16"}};
+  const Dims int8Dims = {{Dim::Dtype, DType::Int8}, {Dim::Tile, "16x16x32"}};
 
 #ifndef XPUPEAK_ROCM_HAS_ROCWMMA
   {
     logger::EmitOptions o; o.description = "fp16 inputs, fp32 accumulator (rocWMMA 16x16x16).";
+    o.dims = fp16Dims;
     test.skip("fp16", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", o);
     logger::EmitOptions oi; oi.description = "int8 inputs, int32 accumulator (rocWMMA 16x16x32)."; oi.unit = "ops";
+    oi.dims = int8Dims;
     test.skip("int8", ResultStatus::Unsupported, "rocWMMA headers not found at configure time", oi);
   }
   return 0;
@@ -81,10 +92,12 @@ int RocmPeak::runRocwmma(RocmDevice &dev, benchmark_config_t &cfg)
 
   {
     logger::EmitOptions o; o.description = "fp16 inputs, fp32 accumulator (rocWMMA 16x16x16).";
+    o.dims = fp16Dims;
     runOne("fp16", "fp16", "rocwmma_fp16", rocm_kernels::rocwmma_fp16, 16u, sizeof(float), o);
   }
   {
     logger::EmitOptions o; o.description = "int8 inputs, int32 accumulator (rocWMMA 16x16x32)."; o.unit = "ops";
+    o.dims = int8Dims;
     runOne("int8", "int8", "rocwmma_int8", rocm_kernels::rocwmma_int8, 32u, sizeof(int), o);
   }
   return 0;

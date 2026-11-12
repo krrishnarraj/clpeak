@@ -23,7 +23,7 @@ static library.  Source files are Objective-C++ (`.mm`).
 
 | File | Purpose |
 |------|---------|
-| `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()` |
+| `mtl_peak.mm` | `MetalPeak` class: ctor, `runAll()`, `enumerate()`; `metalIdentify()`, who each device is (*Identity*) |
 | `mtl_device.mm` | `MetalDevice` class: ctor, `init()`, `cleanup()` + `copyXpuPeakMetalDevices()` helper |
 | `mtl_utils.mm` | `mtlGetLibrary()`, `mtlGetPipeline()` — Metal library/pipeline caching |
 | `compute_kernel.mm` | `MetalPeak::runComputeKernel()` + `mtlRunDispatches()` — shared compute-peak driver and GPU timing |
@@ -37,6 +37,16 @@ static library.  Source files are Objective-C++ (`.mm`).
 | `kernel_latency.mm` | `runKernelLatency` |
 | `mtl_kernels/` | Metal Shading Language kernels (`.metal`) embedded as C++ string literals |
 | `cmake/EmbedMetalKernels.cmake` | `embed_metal_kernels()` — .metal → C++ raw-string arrays |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`metalIdentify()` in
+`mtl_peak.mm`, read by `include/common/hardware_link.h`): its `registryID`,
+which Core ML's GPU device reports for the same `MTLDevice`, and as facts
+Apple's PCI vendor id (as MoltenVK reports the same GPU), the `Apple<N>`
+family as its arch, its core count and unified memory as integrated.
+Apple's OpenCL answers registry ID 0 on Apple silicon and MoltenVK's UUID
+matches nothing, so those two join this GPU by the sole rule.
 
 ## Test documentation
 
@@ -54,6 +64,31 @@ See `include/common/AGENTS.md` § Test documentation.  Metal specifics:
   `float`/`float2`/`float4`/… readings.
 - The `V` tables in `global_bandwidth.mm` / `local_bandwidth.mm` /
   `image_bandwidth.mm` carry their notes as a struct field.
+
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  Metal specifics:
+
+- `mtl_compute_desc_t::dims` and `::revision` (the test) and
+  `mtl_compute_variant_t::dims` (one reading) ride the descriptor beside the
+  descriptions; `runComputeKernel()` forwards them on every path, skips
+  included.
+- Vector tests carry their data type on the test and `width` per reading.
+- `simdgroup_matrix` carries its 8x8x8 `tile` on the test and each row's
+  `dtype`.
+- `mps_gemm` is `impl` mps, its bf16 row mpsgraph; `mps_attention` is
+  `{dtype: fp16, impl: mpsgraph}` on the test.
+- `global_memory_bandwidth` is `{op: read}` on the test and `width` per
+  reading; `image_memory_bandwidth` and `texture_sample_rate` take
+  `pixel_format` from their `V` tables; `kernel_launch_latency` is `op`
+  dispatch or roundtrip.
+- `skipAll()` records no dims, so it stays only where its readings differ in
+  a variant dim alone (a width sweep); readings that differ in an identity
+  dim skip one by one.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
 
 ## Architecture Note
 

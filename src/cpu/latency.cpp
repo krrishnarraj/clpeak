@@ -11,6 +11,8 @@
 #include <random>
 #include <vector>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -227,12 +229,15 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
       "to do -- each read's address comes from the previous read, so the "
       "hardware cannot start the next one early.",
       TestShape::Heterogeneous, "memory level"};
+  // One thread walks every chase, on the fastest core.
+  spec.dims = {{Dim::Scope, dim::Scope::Core}};
   auto test = currentDeviceScope->beginTest(spec);
 
   // `gap` is why a cache level has no working set (cacheSizeGap): no L3 is a
   // real answer, and a size the OS withheld is not guessed at -- a walk sized
   // for a made-up cache times some other level.
-  struct Level { const char *name; uint64_t bytes; const char *gap; const char *note; };
+  struct Level { const char *name; uint64_t bytes; const char *gap; const char *note;
+                 dim::Level where; };
   // The DRAM walk must clear every cache, not just the L3: where the last
   // level is the L2 (Apple Silicon, Snapdragon X) there is no L3 to size off.
   // Its 256 MB floor clears any phone's caches where the OS sizes none.
@@ -240,13 +245,13 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
                               std::max(info.l3TotalBytes, info.l3CacheBytes);
   const Level levels[] = {
     {"L1",   std::max<uint64_t>(info.l1dCacheBytes / 2, 8192), cacheSizeGap(info, 1),
-     "Reading from the small cache inside the core."},
+     "Reading from the small cache inside the core.", dim::Level::L1},
     {"L2",   std::max<uint64_t>(info.l2CacheBytes  / 2, 65536), cacheSizeGap(info, 2),
-     "Reading from the mid-level cache, after an L1 miss."},
+     "Reading from the mid-level cache, after an L1 miss.", dim::Level::L2},
     {"L3",   std::max<uint64_t>(info.l3CacheBytes / 2, 1u << 20), cacheSizeGap(info, 3),
-     "Reading from the last-level cache shared between cores."},
+     "Reading from the last-level cache shared between cores.", dim::Level::L3},
     {"DRAM", std::max<uint64_t>(cacheTotal * 4, 256ull << 20), nullptr,
-     "Reading from main memory at random -- the worst case."},
+     "Reading from main memory at random -- the worst case.", dim::Level::Dram},
   };
 
   // Run on worker 0 -- pinned to the fastest core, whose caches the levels
@@ -262,13 +267,15 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
 
   for (int i = 0; i < 4; i++)
   {
+    const Dims where{{Dim::Level, levels[i].where}};
     if (levels[i].gap)
-      test.skip(levels[i].name, ResultStatus::Unsupported, levels[i].gap, levels[i].note);
+      test.skip(levels[i].name, ResultStatus::Unsupported, levels[i].gap, levels[i].note,
+                where);
     else if (ns[(size_t)i] > 0)
-      test.emit(levels[i].name, (float)(ns[(size_t)i] * 1e-9), levels[i].note);
+      test.emit(levels[i].name, (float)(ns[(size_t)i] * 1e-9), levels[i].note, where);
     else
       test.skip(levels[i].name, ResultStatus::Error, "latency walk failed",
-                levels[i].note);
+                levels[i].note, where);
   }
 
   // Prefetch-assisted chase: the same DRAM-sized dependent-load walk with the
@@ -281,8 +288,10 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
     pool->run(1, [&](int) { nsLin = chaseLatencyNs(dramB, /*randomOrder=*/false); });
     const char *note = "Main memory again, but read in address order, so the "
                        "hardware can fetch ahead -- the best case DRAM gets.";
-    if (nsLin > 0) test.emit("DRAM linear", (float)(nsLin * 1e-9), note);
-    else           test.skip("DRAM linear", ResultStatus::Error, "latency walk failed", note);
+    const Dims linear{{Dim::Level, dim::Level::Dram}, {Dim::Pattern, dim::Pattern::Linear}};
+    if (nsLin > 0) test.emit("DRAM linear", (float)(nsLin * 1e-9), note, linear);
+    else           test.skip("DRAM linear", ResultStatus::Error, "latency walk failed", note,
+                             linear);
   }
 
   // Memory-level parallelism: effective ns/access over the DRAM working set
@@ -297,10 +306,12 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   const char *note32 = "Thirty-two chases at once -- deep enough that the core "
                        "runs out of room for further overlap, so the cost per "
                        "read stops falling.";
-  if (ns8 > 0)  test.emit("DRAM x8",  (float)(ns8 * 1e-9), note8);
-  else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed", note8);
-  if (ns32 > 0) test.emit("DRAM x32", (float)(ns32 * 1e-9), note32);
-  else          test.skip("DRAM x32", ResultStatus::Error, "latency walk failed", note32);
+  const Dims x8{{Dim::Level, dim::Level::Dram}, {Dim::InFlight, 8}};
+  const Dims x32{{Dim::Level, dim::Level::Dram}, {Dim::InFlight, 32}};
+  if (ns8 > 0)  test.emit("DRAM x8",  (float)(ns8 * 1e-9), note8, x8);
+  else          test.skip("DRAM x8",  ResultStatus::Error, "latency walk failed", note8, x8);
+  if (ns32 > 0) test.emit("DRAM x32", (float)(ns32 * 1e-9), note32, x32);
+  else          test.skip("DRAM x32", ResultStatus::Error, "latency walk failed", note32, x32);
 
   // TLB miss / page-walk: cache-resident nodes, one per page, across more
   // pages than any L2 TLB -- "cache hit + page walk" (vs the DRAM row, which
@@ -308,8 +319,11 @@ int CpuPeak::runMemoryLatency(benchmark_config_t &cfg)
   pool->run(1, [&](int) { nsTlb = tlbChaseNs(); });
   const char *noteTlb = "The address-translation cost on its own: the data is "
                         "cached, but every read lands on a different page.";
-  if (nsTlb > 0) test.emit("TLB miss", (float)(nsTlb * 1e-9), noteTlb);
-  else           test.skip("TLB miss", ResultStatus::Error, "latency walk failed", noteTlb);
+  // No level: the nodes sit in whichever cache holds a megabyte.
+  const Dims pages{{Dim::Pattern, dim::Pattern::PageStride}};
+  if (nsTlb > 0) test.emit("TLB miss", (float)(nsTlb * 1e-9), noteTlb, pages);
+  else           test.skip("TLB miss", ResultStatus::Error, "latency walk failed", noteTlb,
+                           pages);
   return 0;
 }
 

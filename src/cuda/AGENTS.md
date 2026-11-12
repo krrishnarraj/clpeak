@@ -26,7 +26,7 @@ Built as `peak_cuda` static library.
 
 | File | Purpose |
 |------|---------|
-| `cuda_peak.cpp` | `CudaPeak` class: ctor, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()` |
+| `cuda_peak.cpp` | `CudaPeak` class: ctor, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()`; `cudaIdentify()`, who each device is (*Identity*) |
 | `cuda_device.cpp` | `CudaDevice` class: `init()`, `cleanup()`, `getKernel()` (fatbin `cuModuleLoadData` + module caching; returns a `CudaKernel`, whose `status`/`reason` a runner skips with when it did not load: a stub the build never compiled, no code for this sm, or the driver's error) |
 | `compute_kernel.cpp` | `CudaPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -42,6 +42,17 @@ Built as `peak_cuda` static library.
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — nvcc `-fatbin` per arch group + byte embed |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
 | `cmake/nvccw.bat.in` | Windows nvcc wrapper: strips clang resource dirs from `INCLUDE` so nvcc-spawned `cl.exe` survives the ClangCL build env |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`cudaIdentify()` in
+`cuda_peak.cpp`, read by `include/common/hardware_link.h`): its UUID
+(`cuDeviceGetUuid`), its PCI address (the domain, bus and device
+attributes), on Windows its adapter LUID, and as facts its vendor (NVIDIA),
+`sm_` arch, SM count, clock, whether it is integrated and, if not, its
+memory.  NVIDIA's Vulkan and OpenCL drivers report the same UUID, which is
+what links the three; ONNX Runtime's CUDA plugin links by the PCI address.
+The helper needs only `cuInit`, so `enumerate()` can call it too.
 
 ## Test documentation
 
@@ -67,6 +78,34 @@ See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:
   the note and integer rows carry their own unit.
 - `cuda_blas.cpp` threads a `note` next to `label` through `runVariantAB` /
   `runVariant` / `runVariantFp4`.
+
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  CUDA specifics:
+
+- `cuda_compute_desc_t::dims` and `::revision` (the test it opens),
+  `::metricDims` (the single-variant path's reading) and
+  `cuda_compute_variant_t::dims` (one reading); `runComputeKernel()`
+  forwards them on every path.
+- Vector tests carry their data type on the test and `width` per reading;
+  `bfloat16_compute` is `{dtype: bf16, acc: fp32}`, and the int8-dot rows are
+  `chains`.
+- `wmma`: each block's `metricDims` say `dtype`, `acc` where it is fp16 (the
+  f16acc rows), `sparsity`, and `tile`, the instruction's M x N x K
+  (mma.sync m16n8k32 is "16x8x32").  `fp4_e2m1` is plain E2M1 with no block
+  scale, `mxf4_e2m1` and `nvf4_e2m1` are `mxfp4` and `nvfp4`, and `int8 k32`
+  is int8 at another `tile`.
+- `cublas_gemm` is `impl` cublaslt, and each row's dims sit beside its note
+  at the `runVariant` / `runVariantAB` / `runVariantFp4` call.  fp16 is
+  `{acc: fp16}` (CUBLAS_COMPUTE_16F); `fp8_e5m2` is E5M2 x E4M3, so
+  `{dtype: fp8_e5m2, weights: fp8_e4m3}`.
+- Bandwidth: global `{op: read}` and `width`, local `width`, image
+  `pixel_format: rgba32f`, transfer `{memory: pinned}` and `direction`.
+  Latency: `op`.
+- `revision` is 2 where a test's method changed, in a release after the test
+  first shipped (its history before a 3.0 rename included), in a way that
+  moved its numbers; the reason is beside the line that sets it.  1
+  otherwise.  The Vulkan and OpenCL backends count the same way.
 
 ## When You Change This Directory
 

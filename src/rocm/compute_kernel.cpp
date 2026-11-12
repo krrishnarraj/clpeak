@@ -7,10 +7,12 @@
 int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
                                const rocm_compute_desc_t &d)
 {
-  auto test = currentDeviceScope->beginTest(
-    {d.resultTag, d.title, d.unit, Category::Unknown,
-     d.description ? d.description : "",
-     d.shape, d.axis ? d.axis : ""});
+  logger::TestSpec spec{d.resultTag, d.title, d.unit, Category::Unknown,
+                        d.description ? d.description : "",
+                        d.shape, d.axis ? d.axis : ""};
+  spec.dims     = d.dims;
+  spec.revision = d.revision;
+  auto test = currentDeviceScope->beginTest(spec);
 
   struct Variant
   {
@@ -18,16 +20,18 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     const char *kernelName;
     const rocm_kernels::Blob *blob;
     const char *description;
+    Dims dims;
   };
   std::vector<Variant> variants;
   if (d.variants && d.numVariants > 0)
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].kernelName,
-                          d.variants[i].blob, d.variants[i].description});
+                          d.variants[i].blob, d.variants[i].description,
+                          d.variants[i].dims});
   else
     // Single-variant tests: the metric name restates the title, so the
     // test-level description covers it.
-    variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr});
+    variants.push_back({d.metricLabel, d.kernelName, d.blob, nullptr, d.metricDims});
 
   auto note = [](const char *text) { return text ? std::string(text) : std::string(); };
 
@@ -35,7 +39,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Unsupported,
-                d.skipMsg ? d.skipMsg : "Skipped", note(v.description));
+                d.skipMsg ? d.skipMsg : "Skipped", note(v.description), v.dims);
     return 0;
   }
 
@@ -56,7 +60,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
   {
     for (const auto &v : variants)
       test.skip(v.label, ResultStatus::Error, "Failed to allocate output buffer",
-                note(v.description));
+                note(v.description), v.dims);
     return -1;
   }
 
@@ -65,7 +69,7 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     RocmKernel k = dev.getKernel(*v.blob, v.kernelName, d.notBuilt);
     if (!k)
     {
-      test.skip(v.label, k.status, k.reason, note(v.description));
+      test.skip(v.label, k.status, k.reason, note(v.description), v.dims);
       continue;
     }
 
@@ -78,14 +82,14 @@ int RocmPeak::runComputeKernel(RocmDevice &dev, benchmark_config_t &cfg,
     if (us <= 0.0f)
     {
       test.skip(v.label, ResultStatus::Error, "kernel launch failed",
-                note(v.description));
+                note(v.description), v.dims);
       continue;
     }
 
     uint64_t totalThreads = (uint64_t)numBlocks * blockSize;
     float value = (float)((double)totalThreads * (double)d.workPerWI * 1e6 / us);
 
-    test.emit(v.label, value, note(v.description).c_str());
+    test.emit(v.label, value, note(v.description).c_str(), v.dims);
   }
 
   (void)hipFree(outputBuf);

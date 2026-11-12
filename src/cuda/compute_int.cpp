@@ -3,6 +3,8 @@
 #include <cuda/cuda_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 // ---------------------------------------------------------------------------
 // Integer compute benchmarks
 // ---------------------------------------------------------------------------
@@ -16,11 +18,16 @@ int CudaPeak::runComputeInt32(CudaDevice &dev, benchmark_config_t &cfg)
   cuda_compute_desc_t d = {};
   d.title = "Integer compute (32-bit IMAD)";
   d.resultTag = "integer_compute";
+  // 2: its MAD chain went from two ping-ponged registers to one accumulator
+  // (2.1.0) after it first shipped, which moved its numbers.
+  d.revision = 2;
   d.shape = TestShape::Homogeneous;
   d.axis = "vector width";
   d.unit = "ops";
   d.description = "Peak 32-bit integer arithmetic rate.";
+  d.dims = {{Dim::Dtype, DType::Int32}};
   d.metricLabel = "int";
+  d.metricDims = {{Dim::Width, 1}};
   d.kernelName = "compute_int32";
   d.blob = &cuda_kernels::compute_int32;
   d.workPerWI = COMPUTE_FP_WORK_PER_WI; // 4096 ops/thread (same scaling)
@@ -34,18 +41,21 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
 {
   static const cuda_compute_variant_t variants[] = {
       {"int8_dp", "compute_int8_dp", &cuda_kernels::compute_int8_dp,
-       "One dependent chain of dot products."},
+       "One dependent chain of dot products.", {{Dim::Chains, 1}}},
       {"int8_dp2", "compute_int8_dp2", &cuda_kernels::compute_int8_dp,
-       "2 independent chains."},
+       "2 independent chains.", {{Dim::Chains, 2}}},
       {"int8_dp4", "compute_int8_dp4", &cuda_kernels::compute_int8_dp,
-       "4 independent chains."},
+       "4 independent chains.", {{Dim::Chains, 4}}},
       {"int8_dp8", "compute_int8_dp8", &cuda_kernels::compute_int8_dp,
-       "8 independent chains."},
+       "8 independent chains.", {{Dim::Chains, 8}}},
   };
   int A = 4;
   cuda_compute_desc_t d = {};
   d.title = "INT8 dot-product compute (__dp4a)";
   d.resultTag = "integer_compute_int8_dp";
+  // 2: its chain stopped issuing an op beside each dot that the budget did not
+  // count (2.1.4), which had read it low.
+  d.revision = 2;
   d.shape = TestShape::Homogeneous;
   // Independent __dp4a chains, not wider vectors: each reading gives the
   // hardware more dot products to have in flight at once.
@@ -53,6 +63,7 @@ int CudaPeak::runComputeInt8DP(CudaDevice &dev, benchmark_config_t &cfg)
   d.unit = "ops";
   d.description = "Peak rate of the 4-way int8 dot-product instruction, "
                   "without the matrix engine.";
+  d.dims = {{Dim::Dtype, DType::Int8}};   // the family's int32 accumulator
   d.variants = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI = COMPUTE_INT8_DP_WORK_PER_WI;

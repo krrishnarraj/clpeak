@@ -1,18 +1,22 @@
 #ifdef ENABLE_METAL
 #include "mtl_internal.h"
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Image (texture) bandwidth (Metal -- MTLTexture + sampler)
 // ---------------------------------------------------------------------------
 
 int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
 {
-    auto test = currentDeviceScope->beginTest(
-        {"image_memory_bandwidth", "Image memory bandwidth", "bps",
-         Category::Unknown,
-         "Read bandwidth through the texture units, reading each pixel of an "
-         "image once.",
-         TestShape::Heterogeneous, "pixel format"});
+    logger::TestSpec spec{"image_memory_bandwidth", "Image memory bandwidth", "bps",
+                          Category::Unknown,
+                          "Read bandwidth through the texture units, reading each pixel of an "
+                          "image once.",
+                          TestShape::Heterogeneous, "pixel format"};
+    // 2: both walk orders race since 2.1.4, the faster reported.
+    spec.revision = 2;
+    auto test = currentDeviceScope->beginTest(spec);
 
     const NSUInteger imgW = 4096, imgH = 4096;
     const uint32_t tgSize = 256;
@@ -22,35 +26,37 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
     if (numGroups == 0) numGroups = 1;
     uint64_t globalThreads = (uint64_t)numGroups * tgSize;
 
+    struct V {
+        const char       *label;
+        const char       *kname;
+        MTLPixelFormat    fmt;
+        uint32_t          bytesPerPixel;
+        const char       *note;
+        dim::PixelFormat  px;     // the reading's pixel_format, an identity dim
+    };
+    const V vs[] = {
+        { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16,
+          "Four fp32 channels, 16 bytes per pixel.", dim::PixelFormat::Rgba32f },
+        { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8,
+          "Four fp16 channels, 8 bytes per pixel.", dim::PixelFormat::Rgba16f },
+        { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4,
+          "Four 8-bit unorm channels, 4 bytes per pixel.", dim::PixelFormat::Rgba8 },
+        { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4,
+          "One fp32 channel, 4 bytes per pixel.", dim::PixelFormat::R32f },
+    };
+
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
     if (!outBuf)
     {
-        test.skipAll({"rgba32f", "rgba16f", "rgba8", "r32f"},
-                      ResultStatus::Error, "Output buffer alloc failed");
+        for (const auto &v : vs)
+            test.skip(v.label, ResultStatus::Error, "Output buffer alloc failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
         return -1;
     }
 
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
-
-    struct V {
-        const char     *label;
-        const char     *kname;
-        MTLPixelFormat  fmt;
-        uint32_t        bytesPerPixel;
-        const char     *note;
-    };
-    const V vs[] = {
-        { "rgba32f", "image_bandwidth",       MTLPixelFormatRGBA32Float, 16,
-          "Four fp32 channels, 16 bytes per pixel." },
-        { "rgba16f", "image_bandwidth_half4", MTLPixelFormatRGBA16Float, 8,
-          "Four fp16 channels, 8 bytes per pixel." },
-        { "rgba8",   "image_bandwidth",       MTLPixelFormatRGBA8Unorm,  4,
-          "Four 8-bit unorm channels, 4 bytes per pixel." },
-        { "r32f",    "image_bandwidth_r32f",  MTLPixelFormatR32Float,    4,
-          "One fp32 channel, 4 bytes per pixel." },
-    };
 
     for (const auto &v : vs)
     {
@@ -62,7 +68,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
         if (!tex)
         {
-            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note);
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
             continue;
         }
 
@@ -84,7 +91,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::image_bandwidth_src,
             mtl_kernels::image_bandwidth_name, v.kname);
         if (!pso) {
-            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note);
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
             continue;
         }
 
@@ -154,7 +162,8 @@ int MetalPeak::runImageBandwidth(MetalDevice &dev, benchmark_config_t &cfg)
         float colBps = colUs > 0.0f ? (float)bytes / colUs * 1e6f : 0.0f;
         XPUPEAK_VLOG("image_memory_bandwidth %s: row-major %.1f, column-major %.1f B/s\n",
                      v.label, rowBps, colBps);
-        test.emit(v.label, std::max(rowBps, colBps), v.note);
+        test.emit(v.label, std::max(rowBps, colBps), v.note,
+                  {{Dim::PixelFormat, v.px}});
     }
 
     return 0;
@@ -185,30 +194,33 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
     if (numGroups == 0) numGroups = 1;
     globalThreads = (uint64_t)numGroups * tgSize;
 
+    struct V {
+        const char       *label;
+        const char       *kname;
+        MTLPixelFormat    fmt;
+        uint32_t          bytesPerPixel;
+        const char       *note;
+        dim::PixelFormat  px;     // the reading's pixel_format, an identity dim
+    };
+    const V vs[] = {
+        { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4,
+          "Four 8-bit unorm channels, 4 bytes per texel.", dim::PixelFormat::Rgba8 },
+        { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8,
+          "Four fp16 channels, 8 bytes per texel.", dim::PixelFormat::Rgba16f },
+    };
+
     id<MTLBuffer> outBuf = [dev.impl->device newBufferWithLength:globalThreads * sizeof(float)
                                                          options:MTLResourceStorageModeShared];
     if (!outBuf)
     {
-        test.skipAll({"rgba8", "rgba16f"}, ResultStatus::Error, "Output buffer alloc failed");
+        for (const auto &v : vs)
+            test.skip(v.label, ResultStatus::Error, "Output buffer alloc failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
         return -1;
     }
 
     MTLSize gridSize = MTLSizeMake(numGroups, 1, 1);
     MTLSize tgSizeM  = MTLSizeMake(tgSize, 1, 1);
-
-    struct V {
-        const char     *label;
-        const char     *kname;
-        MTLPixelFormat  fmt;
-        uint32_t        bytesPerPixel;
-        const char     *note;
-    };
-    const V vs[] = {
-        { "rgba8",   "texture_sample_rgba8",   MTLPixelFormatRGBA8Unorm,  4,
-          "Four 8-bit unorm channels, 4 bytes per texel." },
-        { "rgba16f", "texture_sample_rgba16f", MTLPixelFormatRGBA16Float, 8,
-          "Four fp16 channels, 8 bytes per texel." },
-    };
 
     for (const auto &v : vs)
     {
@@ -220,7 +232,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
         id<MTLTexture> tex = [dev.impl->device newTextureWithDescriptor:td];
         if (!tex)
         {
-            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note);
+            test.skip(v.label, ResultStatus::Error, "Texture alloc failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
             continue;
         }
         {
@@ -240,7 +253,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
             mtl_kernels::texture_sample_src,
             mtl_kernels::texture_sample_name, v.kname);
         if (!pso) {
-            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note);
+            test.skip(v.label, ResultStatus::Error, "Kernel compile failed", v.note,
+                      {{Dim::PixelFormat, v.px}});
             continue;
         }
 
@@ -286,7 +300,8 @@ int MetalPeak::runTextureSampleRate(MetalDevice &dev, benchmark_config_t &cfg)
         float us = (float)(gpuTimedUs / iters);
         uint64_t samples = (uint64_t)SAMPLES_PER_WI * globalThreads;
         float texels = (float)samples / us * 1e6f;   // samples/us -> samples/s
-        test.emit(v.label, texels, v.note);
+        test.emit(v.label, texels, v.note,
+                  {{Dim::PixelFormat, v.px}});
     }
 
     return 0;

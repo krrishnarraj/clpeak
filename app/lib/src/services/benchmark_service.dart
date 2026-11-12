@@ -12,6 +12,7 @@ import '../model/catalog.dart';
 import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import 'host_facts.dart';
 import 'process_exit.dart';
 import 'resume_offer.dart';
 import 'run_history_store.dart';
@@ -78,6 +79,13 @@ class BenchmarkService extends ChangeNotifier {
 
   RunDocument _document = RunDocument();
   RunDocument get document => _document;
+
+  /// The finished run's saved file, read back once it is written: what its
+  /// results screen shows, since only the file holds the system and the
+  /// hardware the run's devices were linked to.  Null while a run is in
+  /// flight, and for one that saved nothing.
+  RunDocument? _savedDocument;
+  RunDocument? get savedDocument => _savedDocument;
 
   RunSummary? _lastSummary;
   RunSummary? get lastSummary => _lastSummary;
@@ -439,6 +447,7 @@ class BenchmarkService extends ChangeNotifier {
     _doneDurationS = null;
     // The results screen exports this run's file, and none until it has one.
     _lastSummary = null;
+    _savedDocument = null;
     _resumeOffer = null;
     _startedAt = DateTime.now();
     _runId = id;
@@ -455,6 +464,9 @@ class BenchmarkService extends ChangeNotifier {
     final resultPath = await _history.filePathFor(id);
     _resultPath = resultPath;
 
+    // The power state the run starts in, which on a phone only the app can
+    // read (HostFacts).
+    if (HostFacts.supported) _engine.setHostFacts(await HostFacts.read());
     final run = _engine.start(args(resultPath));
     _run = run;
     run.events.listen(_onEvent, onDone: () async {
@@ -716,18 +728,23 @@ class BenchmarkService extends ChangeNotifier {
       final priorMs =
           prior == null ? 0 : (prior.durationSeconds * 1000).round();
       final done = _doneDurationS;
-      final summary = RunSummary.fromDocument(
-        id: _runId!,
-        fileName: RunHistoryStore.fileNameFor(_runId!),
-        doc: _document,
-        startedAt: firstStart,
-        // What the document says; the checkpoint's own time stops at its
-        // last write, short of where the part before ended.
-        durationMs: done != null
-            ? (done * 1000).round()
-            : priorMs + DateTime.now().difference(startedAt).inMilliseconds,
-        cancelled: cancelled,
-      );
+      RunSummary summarize(RunDocument doc) => RunSummary.fromDocument(
+            id: _runId!,
+            fileName: RunHistoryStore.fileNameFor(_runId!),
+            doc: doc,
+            startedAt: firstStart,
+            // What the document says; the checkpoint's own time stops at its
+            // last write, short of where the part before ended.
+            durationMs: done != null
+                ? (done * 1000).round()
+                : priorMs +
+                    DateTime.now().difference(startedAt).inMilliseconds,
+            cancelled: cancelled,
+          );
+      // The file, not the live document, is what the index describes: only
+      // it holds the system and the processors the devices were linked to.
+      _savedDocument = await _history.load(summarize(_document));
+      final summary = summarize(_savedDocument ?? _document);
       // Index first: History re-reads the store as soon as the run is
       // over, so the row must already be on disk.
       await _history.add(summary);
