@@ -33,6 +33,14 @@ if(APPLE)
 else()
     target_sources(peak_common PRIVATE coreml_cache_stub.cpp)
 endif()
+# The system and its conditions (include/common/host_info.h): the device
+# tree's product names and the power sources through IOKit on macOS, which
+# keep_awake below already links; the low-power mode and thermal state
+# through Foundation on macOS and iOS.
+if(APPLE)
+    target_sources(peak_common PRIVATE host_info_apple.mm)
+    set_source_files_properties(host_info_apple.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+endif()
 # A run holds the machine out of idle sleep (include/common/keep_awake.h):
 # Windows asks powrprof whether this is a Modern Standby machine; macOS takes
 # an IOKit power assertion, which iOS does not offer (the app holds the screen

@@ -169,7 +169,7 @@ Abbreviated; the values are illustrative.
 | `build` | C | what the binary is made of (below) |
 | `invocation` | C | how XpuPeak was asked to run (below). Every number is sensitive to it |
 | `system` | C | the machine (*System*) |
-| `conditions` | C | what the machine was doing (*Conditions*) *(V3)* |
+| `conditions` | C | what the machine was doing (*Conditions*) |
 | `annotations` | C | what only a person knows about the run (*Annotations*) |
 | `resumed` | C | present only for a run continued after its process ended part-way: one entry per part after the first (*Resumed runs*) |
 | `packages`, `processors` | C | the hardware (*Hardware*) |
@@ -203,34 +203,68 @@ and test: the run a leaderboard ranks. Choosing backends and devices
 ## System
 
 The machine, not its owner. Everything is optional: what the platform cannot
-answer is absent. *(V3 fills what the OS offers; today `os`, `arch`,
-`memory_bytes` and, as `soc`, the CPU brand.)*
+answer is absent, and what would identify the unit or its owner is never read
+(*Never recorded*).
 
 | key | class | meaning |
 |---|---|---|
 | `form_factor` | C | `mobile`, `laptop`, `desktop` or `server`. A reader takes an absent one as `desktop` |
 | `form_factor_detail` | C | finer, when known: `phone` or `tablet` under mobile, `tablet` under laptop (a Windows slate), `embedded` under desktop |
-| `form_factor_from` | C | what it was read from: `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, or `default` when nothing spoke for it |
-| `virtual` | C | `true` in a virtual machine (DMI and SMBIOS vendor strings, `/sys/hypervisor`, `kern.hv_vmm_present`) |
-| `translated` | C | `true` for an x86 binary under Rosetta or Prism |
-| `manufacturer` | C | `Apple`, `samsung`, DMI `sys_vendor` |
-| `model` | C | the model id: `MacBookPro18,3`, `iPhone16,1`, `SM-S921B`, DMI `product_name` |
-| `name` | C | the marketing name, **only as the OS gives it** ("MacBook Pro (14-inch, 2021)"). No table in the tool maps a model id to a name; where the OS gives none, a reader shows the model id or the `system.name` annotation |
-| `family`, `board` | C | DMI `product_family` / SMBIOS `SystemFamily`; the board, where the product name is an OEM placeholder ("System Product Name", "To Be Filled By O.E.M.") |
-| `soc` | C | "Apple M1 Pro", Android's `ro.soc.manufacturer` + `ro.soc.model`; the CPU brand where there is no SoC name |
-| `os` | C | `name`, `version` (the user-visible release), `build`, `kernel`, and on Linux `distribution` |
+| `form_factor_from` | C | what it was read from (below): `model`, `os`, `characteristics`, `battery`, `platform_role`, `chassis`, `device_tree`, or `default` when nothing spoke for it |
+| `virtual` | C | `true` when the hardware that ran is not the system named: a virtual machine, an emulator or a simulator. The processors are then what the guest was shown |
+| `translated` | C | `true` for a binary run under a translator: an x86 build under Rosetta or Prism, an ARM build under Android's native bridge |
+| `manufacturer` | C | the system's maker as the OS spells it: `Apple`, `samsung`, DMI `sys_vendor` (`Dell Inc.`, `LENOVO`). Where the product name is a placeholder (below), the board's maker |
+| `brand` | C | the brand it is sold under, where it is not the maker's own name: Android's `ro.product.brand` (`Redmi` and `POCO` under `Xiaomi`) |
+| `model` | C | the model id: `MacBookPro18,3`, `iPhone16,1`, `SM-S921B`, DMI `product_name` (`XPS 15 9530`, or Lenovo's machine type, `21DD`), a device-tree board's model ("Raspberry Pi 5 Model B Rev 1.0") |
+| `codename` | C | the maker's name for the device: Android's `ro.product.device` (`e1s`) |
+| `name` | C | the marketing name, **only as the OS gives it** ("MacBook Pro (14-inch, 2021)"): Apple silicon's device tree, Android's `ro.product.marketname` where the OEM sets one, and the product version Lenovo keeps its name in ("ThinkPad X1 Carbon Gen 10"). No table in the tool maps a model id to a name. A display shows the `system.name` annotation, else `name`, else `model`, else `board`, else `soc` |
+| `family` | C | DMI `product_family` / SMBIOS `SystemFamily`: `XPS`, `ThinkPad X1 Carbon Gen 10` |
+| `board` | C | the board (DMI `board_name`, SMBIOS `BaseBoardProduct`), written only where the product name is a placeholder: the machine was built from parts, and the board is what names it |
+| `soc` | C | the SoC: "Apple M1 Pro", Android's `ro.soc.manufacturer` + `ro.soc.model` ("QTI SM8650"); the CPU brand where there is no SoC name |
+| `os` | C | `name`: `macOS`, `iOS`, `Android`, `Linux`, `Windows`, `Windows Server`. `version`, the user-visible release: `27.2`, `16`, Linux's `VERSION_ID` (`24.04`), `11 24H2`. `build`: `26B123`, `BP2A.250605.031`, `26100.2314`. `kernel`, the kernel's release where it is not the version (Darwin's, Linux's, Android's). On Linux `distribution`, os-release's `PRETTY_NAME` ("Ubuntu 24.04.1 LTS") |
 | `arch` | C | the binary's architecture: `arm64`, `x86_64` |
 | `memory_bytes` | C | physical memory |
 | `ext` | — | experimental fields |
 
+**Where it comes from**, per OS:
+
+| OS | identity | `soc` | form factor, and `form_factor_from` | `virtual`, `translated` |
+|---|---|---|---|---|
+| macOS | `Apple`; `hw.model`; IORegistry `IODeviceTree:/product` `product-name` (Apple silicon) | `product-soc-name`, else the CPU brand | an internal battery among IOKit's power sources: laptop, else desktop (`battery`) | `kern.hv_vmm_present`; `sysctl.proc_translated` |
+| iOS | `Apple`; `hw.machine`, or `SIMULATOR_MODEL_IDENTIFIER` in the simulator; no name | the CPU brand, where the OS gives one | mobile; `iPhone…` phone, `iPad…` tablet (`model`) | the simulator, whose hardware and kernel are the Mac's |
+| Android | `ro.product.manufacturer`, `.brand`, `.model`, `.device`; `ro.product.marketname`, its partition copies, `ro.config.marketing_name`, `ro.vendor.oplus.market.name` | `ro.soc.manufacturer` + `ro.soc.model` | mobile; tablet where `ro.build.characteristics` says `tablet`, else phone, and no detail for a TV, a watch or a car (`characteristics`; `os` where the property is empty) | the emulator (`ro.kernel.qemu`, `ro.boot.qemu`, `ro.hardware` `ranchu` or `goldfish`); a kernel of another ISA than the binary's |
+| Linux | DMI `sys_vendor`, `product_name`, `product_family`, `product_version`, `board_vendor`, `board_name`; on a board with no DMI, `/proc/device-tree/model`, made by the vendor its first `compatible` names | the CPU brand | DMI `chassis_type` (`chassis`), then ACPI's `pm_profile` (`platform_role`), then a battery under `/sys/class/power_supply` (`battery`), then a device-tree board (`device_tree`) | DMI vendor and product strings, `/sys/hypervisor`, the x86 `hypervisor` CPU flag, a `linux,dummy-virt` device tree; a kernel of another ISA than the binary's |
+| Windows | SMBIOS through `HKLM\HARDWARE\DESCRIPTION\System\BIOS`: `SystemManufacturer`, `SystemProductName`, `SystemFamily`, `SystemVersion`, `BaseBoardManufacturer`, `BaseBoardProduct` | the CPU brand | `PowerDeterminePlatformRoleEx` (`platform_role`), then a battery (`GetSystemPowerStatus`, `battery`) | SMBIOS vendor and product strings — not the CPUID hypervisor bit, which virtualization-based security sets on bare metal; `IsWow64Process2` |
+
+- **Chassis types**: 8, 9, 10, 14, 31, 32 → laptop; 17, 23, 25, 28, 29 →
+  server; 3–7, 13, 15, 35, 36 → desktop; 30 → mobile, tablet; 33, 34 →
+  desktop, embedded. Any other is no evidence.
+- **Platform roles** (Windows', and Linux's `pm_profile`, which is the same
+  ACPI field): desktop, workstation and appliance PC → desktop; mobile →
+  laptop; slate → laptop, tablet; the server roles → server.
+- **A device-tree board** with a battery is a laptop (an ARM Chromebook,
+  Linux on a MacBook); one without is an embedded desktop (a Raspberry Pi, a
+  Jetson).
+- **A placeholder** is what firmware writes where the OEM wrote nothing —
+  "System Product Name", "System manufacturer", "To Be Filled By O.E.M.",
+  "Default string", "Not Applicable" and their kind, or a string with no
+  letter or digit in it. It is never recorded as a maker, model or family.
+
 ## Conditions
 
-What the machine was doing, which changes every number *(V3)*: `power_source`
-(`ac` or `battery`), `low_power_mode` (macOS and iOS), `power_profile` (the
-OS's own name: Windows' overlay scheme, Linux's
-`/sys/firmware/acpi/platform_profile`), `cpu_governor` (Linux), and
-`thermal_start` / `thermal_end`, the OS's thermal state at the start and the
-end of the run in its own words. All C; each absent when not known.
+What the machine was doing, which changes every number. All C; each absent
+when not known.
+
+| key | meaning |
+|---|---|
+| `power_source` | `ac` or `battery`, as the run starts. macOS: what IOKit says it draws from. Windows: `GetSystemPowerStatus`. Linux: `/sys/class/power_supply` — an adapter online, else the battery's charging state; a machine with no battery at all runs on `ac`, but not a VM. iOS and Android: what the app passes in (`xpupeak_set_host_facts`), which Android reads natively too where SELinux shows it the supplies |
+| `low_power_mode` | `true` or `false`: Low Power Mode on macOS and iOS, energy saver on Windows, battery saver on Android (from the app) |
+| `power_profile` | the OS's own name for it. Windows: the power plan (`balanced`, `high-performance`, `power-saver`, `ultimate-performance`) and, under Balanced, the power-mode overlay instead (`best-power-efficiency`, `balanced`, `better-performance`, `best-performance`); a plan a user made reads `custom`, since its GUID is the install's own. Linux: `/sys/firmware/acpi/platform_profile` (`low-power`, `balanced`, `performance`, …) |
+| `cpu_governor` | Linux and Android: each cpufreq policy's `scaling_governor`, each distinct one once, in policy order and joined by `,` (`schedutil`, or `schedutil,performance` where the clusters differ) |
+| `thermal_start`, `thermal_end` | the OS's thermal state at the start and the end of the run, in its own words: Apple's `nominal`, `fair`, `serious`, `critical` (`NSProcessInfo`), Android's `none`, `light`, `moderate`, `severe`, `critical`, `emergency`, `shutdown` (`AThermal`). A desktop OS keeps no such state |
+
+A resumed run keeps the conditions its first part started in; `thermal_end`
+is the last part's.
 
 ## Annotations
 
@@ -990,6 +1024,9 @@ it ran on or the person who ran it, and no minor may add:
 - a GPU's UUID or LUID, a PCI bus address, a Metal registry ID — only their
   per-run tokens (*Linking*);
 - the key those tokens are made under, which only the checkpoint holds.
+- a power plan's GUID, which is unique to the install, and who and where an
+  OS build was made (Android's `ro.build.user` and `ro.build.host`, a local
+  build's `eng.<user>` id).
 
 The log is held to the same rule, a vendor runtime's relayed words included
 (*Log*).
@@ -1028,7 +1065,7 @@ XpuPeak.
 | `"clpeak_version": "…"` | `"generator": {"name": "XpuPeak", "version": "…"}` |
 | `.clpeak.json` for a result (the app's files and these examples), with its `.clpeak.log` sidecar and `.clpeak.partial.json` checkpoint | `.xpupeak.json`, `.xpupeak.log`, `.xpupeak.partial.json` |
 | the app's history in `~/.clpeak` (`%USERPROFILE%\.clpeak`), or `<app documents>/clpeak` on a phone | `~/.xpupeak` (`%USERPROFILE%\.xpupeak`), or `<app documents>/xpupeak` |
-| `host`: `os`, `os_version`, `arch`, `cpu`, `logical_cores`, `memory_bytes` | `system`: `os.name`, `os.version`, `arch`, `soc` (the CPU brand), `memory_bytes`, with room for the model, its name and its form factor. The CPU's cores go to its processor |
+| `host`: `os`, `os_version`, `arch`, `cpu`, `logical_cores`, `memory_bytes` | `system`: the maker, model and marketing name, the SoC, the form factor, `virtual` and `translated`, the OS in detail, `arch`, `memory_bytes`. The CPU's cores go to its processor |
 | `build.backends`: names | objects with `kind` and `portable` |
 | — | `run_id`, `conditions`, `annotations`, `invocation.standard` |
 | — | `packages[]`, `processors[]`; on devices `processor`, `link`, `facts`, `evidence`, `runtime` |

@@ -9,7 +9,9 @@ shared library / Apple framework.
 - The C ABI? → `xpupeak_ffi.h` (catalog JSON, blocking `xpupeak_launch` with a
   streaming event callback, `xpupeak_request_cancel`, `xpupeak_set_on_screen`
   (a run waits while the app is off screen), `xpupeak_set_paused` (and while
-  it is paused), the runtime setters:
+  it is paused), `xpupeak_set_host_facts` (what only a mobile app can read for
+  the run's `conditions`: the power source, Android's battery saver), the
+  runtime setters:
   `xpupeak_set_onnx_library` / `_ep_libraries` / `_winml`, `xpupeak_set_litert_*`,
   each with a `xpupeak_copy_*_status_json`). There is no saved-result
   loader: result files are JSON in the shape the GUI renders, so it reads them

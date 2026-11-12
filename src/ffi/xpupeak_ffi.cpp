@@ -267,6 +267,11 @@ void xpupeak_set_paused(int paused)
     xpupeak::setRunPaused(paused != 0);
 }
 
+void xpupeak_set_host_facts(const char *json)
+{
+    setHostFacts(json ? json : "");
+}
+
 int xpupeak_launch(int argc, const char **argv,
                    XpuPeakEventCallback on_event, void *user_data)
 {
@@ -371,6 +376,7 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         combined.meta.build.config = XPUPEAK_BUILD_CONFIG;
 #endif
         combined.meta.system        = probeSystem();
+        combined.meta.conditions    = probeConditions();
         combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
     }
     // The sidecar: every entry on disk as it happens, for the native crash
@@ -443,6 +449,7 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
 
     combined.meta.cancelled = cancelled;
     combined.meta.durationS = checkpoint.runningS();
+    finishConditions(combined.meta.conditions);
     if (resuming)
         combined.meta.resumed.push_back(checkpoint.partRecord(combined));
     runLog.finish();
