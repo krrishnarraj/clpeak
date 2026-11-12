@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Image (texture) bandwidth (Vulkan)
 // ---------------------------------------------------------------------------
@@ -28,6 +30,10 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.description =
       "Image read bandwidth, reading each pixel once.";
   testSpec.shape = TestShape::Homogeneous;
+  // Revision 2: since it first shipped, consecutive dispatches stopped
+  // overlapping and the row became the fastest of several walk orders
+  // (2.1.4), fetched by texel rather than sampled (3.0.0).
+  testSpec.revision = 2;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t imgW = 4096, imgH = 4096;
@@ -266,8 +272,9 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   vkUpdateDescriptorSets(dev.device, 2, ws, 0, nullptr);
 
   // The image is RGBA32F, so one fetch returns a whole pixel: four 32-bit
-  // values, hence the metric name.
+  // values, hence the metric name -- a pixel format, not a vector width.
   const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
+  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
 
   // The walk shapes raced.  A row-major sweep and its transpose both hand a
   // warp a 1D run of texels, which is what a linear surface wants; a driver
@@ -336,9 +343,9 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   if (best <= 0.0f)
     test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-              fetchNote);
+              fetchNote, fetchDims);
   else
-    test.emit("float4", best, fetchNote);
+    test.emit("float4", best, fetchNote, fetchDims);
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);
   vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);

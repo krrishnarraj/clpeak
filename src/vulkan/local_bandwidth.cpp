@@ -4,6 +4,8 @@
 #include <common/common.h>
 #include <cstring>
 
+using xpupeak::Dim;
+
 // ---------------------------------------------------------------------------
 // Local memory bandwidth (Vulkan -- shared memory)
 // ---------------------------------------------------------------------------
@@ -21,6 +23,9 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "Bandwidth of shared memory, the scratchpad a workgroup shares.";
   testSpec.shape = TestShape::Homogeneous;
   testSpec.axis  = "vector width";
+  // Revision 2: since it first shipped, a barrier keeps consecutive dispatches
+  // from overlapping, which the byte count assumes they do not (2.1.4).
+  testSpec.revision = 2;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   const uint32_t wgSize = 256;
@@ -90,7 +95,7 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ') key.pop_back();
       test.skip(key, ResultStatus::Error, "Pipeline creation failed",
-                vkWidthNote(v.width));
+                vkWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     float us = runKernel(dev, pipe, pipeLayout, descSet, numGroups,
@@ -101,14 +106,14 @@ int vkPeak::runLocalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     if (us <= 0.0f)
     {
       test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                vkWidthNote(v.width));
+                vkWidthNote(v.width), {{Dim::Width, v.width}});
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes.
     uint64_t bytes = (uint64_t)LMEM_REPS * 2 * v.width * sizeof(float) * globalWIs;
     float bps = (float)bytes / us * 1e6f;
-    test.emit(key, bps, vkWidthNote(v.width));
+    test.emit(key, bps, vkWidthNote(v.width), {{Dim::Width, v.width}});
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

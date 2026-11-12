@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <string>
 
+using xpupeak::Dim;
+
 // ---------------------------------------------------------------------------
 // Unified compute benchmark -- replaces compute_sp/hp/dp/integer/intfast/char/short
 // ---------------------------------------------------------------------------
@@ -15,7 +17,7 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
                            const std::string &displayName, const std::string &resultTag,
                            const std::string &kernelPrefix, const std::string &typeName,
                            const std::string &unit, const std::string &description,
-                           unsigned int workPerWI,
+                           const Dims &dims, unsigned int workPerWI,
                            unsigned int wgsPerCU, size_t elemSize)
 {
   auto run = admit(which);
@@ -34,15 +36,31 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
     if (widths[w] > 1)
       labels[w] += std::to_string(widths[w]);
   }
-  // int8_dp's widths are independent chains, not vectors (see its kernels).
+  // int8_dp's widths are independent chains, not vectors (see its kernels):
+  // its rows are `chains`, as the Vulkan backend's are, and every other
+  // family's `width`.
+  const bool chains = which == Benchmark::ComputeInt8DP;
   auto rowNote = [&](int w) {
-    return which == Benchmark::ComputeInt8DP ? clChainNote(widths[w]) : clWidthNote(widths[w]);
+    return chains ? clChainNote(widths[w]) : clWidthNote(widths[w]);
+  };
+  auto rowDims = [&](int w) -> Dims {
+    return {{chains ? Dim::Chains : Dim::Width, widths[w]}};
   };
 
-  auto test = currentDeviceScope->beginTest(
-    {resultTag, displayName, unit, Category::Unknown, description,
-     // Every test routed through here is one kernel at five vector widths.
-     TestShape::Homogeneous, "vector width"});
+  // Every test routed through here is one kernel at five vector widths, or
+  // int8_dp's five chain counts.
+  logger::TestSpec spec = {resultTag, displayName, unit, Category::Unknown, description,
+                           TestShape::Homogeneous,
+                           chains ? "chains in flight" : "vector width"};
+  spec.dims = dims;
+  // Revision 2: every family routed here has moved since it first shipped,
+  // for reasons that were not the hardware -- its chains went from ping-pong
+  // to one accumulator and then raced in two shapes (2.1.0, 2.1.3), the float
+  // families' affine chain raced at sub-group 16 too (3.0.2), mp amortised its
+  // fp16 round trip (2.1.4), and int8_dp's chain stopped issuing an op its
+  // budget did not count (2.1.4) and raced a four-accumulator cycle (3.0.2).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // Feature gates
   if (which == Benchmark::ComputeHP && !devInfo.halfSupported)
@@ -298,13 +316,13 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
           }
         }
 
-        test.emit(labels[w], throughput, rowNote(w));
+        test.emit(labels[w], throughput, rowNote(w), rowDims(w));
 
       }
       catch (cl::Error &error)
       {
         std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-        test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
+        test.skip(labels[w], ResultStatus::Error, reason, rowNote(w), rowDims(w));
       }
     }
   }
@@ -321,18 +339,18 @@ int clPeak::runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
       for (int w = 0; w < 5; w++)
         test.skip(labels[w], ResultStatus::Unsupported,
                   "device's OpenCL compiler did not build these kernels",
-                  rowNote(w));
+                  rowNote(w), rowDims(w));
       return 0;
     }
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason, rowNote(w));
+      test.skip(labels[w], ResultStatus::Error, reason, rowNote(w), rowDims(w));
     return -1;
   }
   catch (std::exception &e)
   {
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, e.what(), rowNote(w));
+      test.skip(labels[w], ResultStatus::Error, e.what(), rowNote(w), rowDims(w));
     return -1;
   }
 

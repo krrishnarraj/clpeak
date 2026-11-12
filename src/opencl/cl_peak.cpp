@@ -411,13 +411,17 @@ int clPeak::runAll()
         cl::CommandQueue queue = cl::CommandQueue(ctx, devices[d], queueCreateProps);
 
         // ---- Compute (GFLOPS/TFLOPS + GOPS/TOPS) ---------------------------
+        // Each family's data type rides on its test; its accumulator is the
+        // family's own (vocabulary.h), so none says one.  Note "int8" below
+        // is an 8-wide int32 vector -- the dims, not the labels, say which.
+        using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
         runComputeTest(queue, prog(Benchmark::ComputeSP),
                        buildError(Benchmark::ComputeSP),
                        devInfo, cfg, Benchmark::ComputeSP,
                        "Single-precision compute", "single_precision_compute",
                        "compute_sp", "float", "flops",
                        "Peak fp32 arithmetic rate of the device's ALUs, with no memory "
-                       "traffic.",
+                       "traffic.", {{Dim::Dtype, DType::Fp32}},
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         runComputeTest(queue, prog(Benchmark::ComputeHP),
@@ -426,6 +430,7 @@ int clPeak::runAll()
                        "Half-precision compute", "half_precision_compute",
                        "compute_hp", "half", "flops",
                        "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.",
+                       {{Dim::Dtype, DType::Fp16}},
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_half));
 
         runComputeTest(queue, prog(Benchmark::ComputeDP),
@@ -433,16 +438,17 @@ int clPeak::runAll()
                        devInfo, cfg, Benchmark::ComputeDP,
                        "Double-precision compute", "double_precision_compute",
                        "compute_dp", "double", "flops",
-                       "Peak fp64 arithmetic rate.",
+                       "Peak fp64 arithmetic rate.", {{Dim::Dtype, DType::Fp64}},
                        COMPUTE_FP_WORK_PER_WI, cfg.computeDPWgsPerCU, sizeof(cl_double));
 
+        // fp16 inputs into fp32: the family's own accumulator.
         runComputeTest(queue, prog(Benchmark::ComputeMP),
                        buildError(Benchmark::ComputeMP),
                        devInfo, cfg, Benchmark::ComputeMP,
                        "Mixed-precision compute fp16xfp16+fp32", "mixed_precision_compute",
                        "compute_mp", "mp", "flops",
                        "Peak rate of fp16 multiplies accumulated in fp32, "
-                       "without the matrix engine.",
+                       "without the matrix engine.", {{Dim::Dtype, DType::Fp16}},
                        COMPUTE_FP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_float));
 
         runComputeTest(queue, prog(Benchmark::ComputeInt),
@@ -450,16 +456,17 @@ int clPeak::runAll()
                        devInfo, cfg, Benchmark::ComputeInt,
                        "Integer compute", "integer_compute",
                        "compute_integer", "int", "ops",
-                       "Peak 32-bit integer arithmetic rate.",
+                       "Peak 32-bit integer arithmetic rate.", {{Dim::Dtype, DType::Int32}},
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
+        // mad24 multiplies the low 24 bits of 32-bit operands.
         runComputeTest(queue, prog(Benchmark::ComputeIntFast),
                        buildError(Benchmark::ComputeIntFast),
                        devInfo, cfg, Benchmark::ComputeIntFast,
                        "Integer compute Fast 24bit", "integer_compute_fast",
                        "compute_intfast", "int", "ops",
                        "Peak rate of mad24, the integer multiply-add on 24-bit "
-                       "operands.",
+                       "operands.", {{Dim::Dtype, DType::Int24}},
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         runComputeTest(queue, prog(Benchmark::ComputeChar),
@@ -467,7 +474,7 @@ int clPeak::runAll()
                        devInfo, cfg, Benchmark::ComputeChar,
                        "Integer char (8bit) compute", "integer_compute_char",
                        "compute_char", "char", "ops",
-                       "Peak 8-bit integer arithmetic rate.",
+                       "Peak 8-bit integer arithmetic rate.", {{Dim::Dtype, DType::Int8}},
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_char));
 
         runComputeTest(queue, prog(Benchmark::ComputeShort),
@@ -475,16 +482,17 @@ int clPeak::runAll()
                        devInfo, cfg, Benchmark::ComputeShort,
                        "Integer short (16bit) compute", "integer_compute_short",
                        "compute_short", "short", "ops",
-                       "Peak 16-bit integer arithmetic rate.",
+                       "Peak 16-bit integer arithmetic rate.", {{Dim::Dtype, DType::Int16}},
                        COMPUTE_INT_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_short));
 
+        // int8 inputs into an int32 accumulator: the family's usual.
         runComputeTest(queue, prog(Benchmark::ComputeInt8DP),
                        buildError(Benchmark::ComputeInt8DP),
                        devInfo, cfg, Benchmark::ComputeInt8DP,
                        "INT8 dot-product compute", "integer_compute_int8_dp",
                        "compute_int8_dp", "int8_dp", "ops",
                        "Peak rate of the 4-way int8 dot-product instruction, "
-                       "without the matrix engine.",
+                       "without the matrix engine.", {{Dim::Dtype, DType::Int8}},
                        COMPUTE_INT8_DP_WORK_PER_WI, cfg.computeWgsPerCU, sizeof(cl_int));
 
         // ---- Phase 3: bandwidth ----------------------------------------
@@ -502,8 +510,14 @@ int clPeak::runAll()
             {"kernel_launch_latency", "Kernel launch latency", "s",
              Category::Unknown,
              "Time to launch a small kernel, the fixed cost every dispatch pays."});
-          test.skipAll({"dispatch", "roundtrip"}, ResultStatus::Unsupported,
-                       "No profiling queue support");
+          // One skip each, not skipAll: `op` is what tells the two apart,
+          // and a skipped reading still says which measurement is missing.
+          test.skip("dispatch", ResultStatus::Unsupported, "No profiling queue support",
+                    "Host submit to kernel start, one way.",
+                    {{Dim::Op, dim::Op::Dispatch}});
+          test.skip("roundtrip", ResultStatus::Unsupported, "No profiling queue support",
+                    "Host submit to completion seen by the host.",
+                    {{Dim::Op, dim::Op::Roundtrip}});
         }
 
         currentDeviceScope = nullptr;

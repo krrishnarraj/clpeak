@@ -1,5 +1,7 @@
 #include <opencl/cl_peak.h>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed_lo, timed_go, timed, bps;
@@ -18,11 +20,19 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
   // Opened before the sizing diagnostic below, so that line lands under
   // this test's header rather than under the previous test's readings.
-  auto test = currentDeviceScope->beginTest(
-    {"global_memory_bandwidth", "Global memory bandwidth", "bps",
-     Category::Unknown,
-     "Read bandwidth from device memory, over a buffer too large to cache.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec = {"global_memory_bandwidth", "Global memory bandwidth", "bps",
+                           Category::Unknown,
+                           "Read bandwidth from device memory, over a buffer too large "
+                           "to cache.",
+                           TestShape::Homogeneous, "vector width"};
+  // A read, said as the CPU backend's STREAM rows say theirs, so a CPU device
+  // (PoCL, Intel's CPU runtime) lines up with that backend's read row.
+  spec.dims = {{Dim::Op, dim::Op::Read}};
+  // Revision 2: since it first shipped, the working set has been sized past
+  // the last-level cache the device reports, where a large cache used to
+  // hold the whole buffer (2.1.4).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // The one number that decides whether this test measured memory or cache:
   // the timed phase re-reads the same buffer, so a working set that fits behind
@@ -118,7 +128,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
                    ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
                    ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
 
-      test.emit(labels[w], bps, clWidthNote(widths[w]));
+      test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
      }
   }
   catch (cl::Error &error)
@@ -127,7 +137,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     const int widths[] = {1, 2, 4, 8, 16};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
+                {{Dim::Width, widths[w]}});
 
     delete[] arr;
     return -1;
@@ -137,7 +148,8 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
     const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
     const int widths[] = {1, 2, 4, 8, 16};
     for (int w = 0; w < 5; w++)
-      test.skip(labels[w], ResultStatus::Error, "Out of memory", clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, "Out of memory", clWidthNote(widths[w]),
+                {{Dim::Width, widths[w]}});
     delete[] arr;
     return -1;
   }

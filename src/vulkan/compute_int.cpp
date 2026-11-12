@@ -3,6 +3,8 @@
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 // ---------------------------------------------------------------------------
 // Integer compute benchmarks.
 // Each is a thin wrapper that fills a vk_compute_desc_t and delegates to
@@ -14,14 +16,14 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "int",   vk_shaders::compute_int32_v1, vk_shaders::compute_int32_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_int32_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_int32_v1) },
 #ifdef VK_HAS_COMPUTE_INT32_V2
     { "int2",  vk_shaders::compute_int32_v2, vk_shaders::compute_int32_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_int32_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_int32_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT32_V4
     { "int4",  vk_shaders::compute_int32_v4, vk_shaders::compute_int32_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_int32_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_int32_v4) },
 #endif
   };
   int32_t A = 4;
@@ -32,6 +34,7 @@ int vkPeak::runComputeInt32(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak 32-bit integer arithmetic rate.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  d.dims        = {{Dim::Dtype, DType::Int32}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT_WORK_PER_WI;
@@ -47,20 +50,20 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   // v1 = one dp4a chain per thread, v2/v4 = two/four independent ones.  Each
   // is raced in both of shaders/dp4a_chain.glsl's shapes, the second at two
-  // subgroup widths too.
+  // subgroup widths too.  So each row is `chains`, never `width`.
   static const vk_compute_variant_t variants[] = {
     { "int8_dp",  vk_shaders::compute_int8_dp_v1, vk_shaders::compute_int8_dp_v1_size,
       "One dependent chain of dot products.",
-      VK_ALT_SHADER(compute_int8_dp_v1) },
+      {{Dim::Chains, 1}}, VK_ALT_SHADER(compute_int8_dp_v1) },
 #ifdef VK_HAS_COMPUTE_INT8_DP_V2
     { "int8_dp2", vk_shaders::compute_int8_dp_v2, vk_shaders::compute_int8_dp_v2_size,
       "2 independent chains.",
-      VK_ALT_SHADER(compute_int8_dp_v2) },
+      {{Dim::Chains, 2}}, VK_ALT_SHADER(compute_int8_dp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_INT8_DP_V4
     { "int8_dp4", vk_shaders::compute_int8_dp_v4, vk_shaders::compute_int8_dp_v4_size,
       "4 independent chains.",
-      VK_ALT_SHADER(compute_int8_dp_v4) },
+      {{Dim::Chains, 4}}, VK_ALT_SHADER(compute_int8_dp_v4) },
 #endif
   };
   int32_t A = 4;
@@ -74,6 +77,8 @@ int vkPeak::runComputeInt8DP(VulkanDevice &dev, benchmark_config_t &cfg)
   // Independent chains, not wider vectors: each reading gives the hardware
   // more dot products to have in flight at once.
   d.axis        = "chains in flight";
+  // int8 inputs into an int32 accumulator: the family's usual.
+  d.dims        = {{Dim::Dtype, DType::Int8}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.workPerWI   = COMPUTE_INT8_DP_WORK_PER_WI;

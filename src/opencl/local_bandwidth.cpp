@@ -1,5 +1,7 @@
 #include <opencl/cl_peak.h>
 
+using xpupeak::Dim;
+
 int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, bps;
@@ -63,7 +65,7 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       {
         test.skip(labels[w], ResultStatus::Unsupported,
                   "Local memory too small for a float8 scratchpad at this work-group size",
-                  clWidthNote(widths[w]));
+                  clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
         continue;
       }
 
@@ -78,14 +80,15 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
       uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
       bps = (float)bytesPerCall / timed * 1e6f;
 
-      test.emit(labels[w], bps, clWidthNote(widths[w]));
+      test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
     }
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
     for (int w = 0; w < 4; w++)
-      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]));
+      test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
+                {{Dim::Width, widths[w]}});
     return -1;
   }
 

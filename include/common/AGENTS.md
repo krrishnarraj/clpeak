@@ -64,8 +64,9 @@ Rules that span every backend:
 - **Authored where measured.** On the `TestSpec`, the `emit()` / `skip()`
   call, or the table the loop walks — the variant tables of the ML backends,
   a runner's descriptor — never in a mapping table somewhere else. The same
-  label means different things in different backends: Vulkan's `int8_dp2` is
-  `chains`, OpenCL's `width`.
+  label means different things in different backends: OpenCL's
+  integer-compute `int8` is `{width: 8}` on an int32 test, Vulkan's coopmat
+  `int8` is `{dtype: int8}`.
 - **Every identity dim that is not at its default.** Two readings compare
   when their family, quantity and non-default identity dims match, so a
   missing `acc: fp16` merges an fp16-accumulate reading into the fp32 one. A
@@ -193,7 +194,8 @@ or a parameter (`clPeak::runComputeTest`) — so the runner forwards them on
 every path, skips included.  A phrase shared by several readings gets one
 helper per backend (`mtlWidthNote()`, `vkWidthNote()`, …), never a
 cross-backend table: the same label means different things in different
-backends.  Vulkan's `int8_dp2` is a second *chain*, not a wider vector.
+backends.  OpenCL's integer-compute `int8` is an 8-wide int32 vector, not
+the data type; `int8_dp2` is a second *chain*, not a wider vector.
 
 Where a test reports a value by a non-obvious convention, the description is
 the place to say so — ROCm's `smfmac` counts its sparse work as

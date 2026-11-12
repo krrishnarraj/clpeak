@@ -522,7 +522,7 @@ dims say how to compare its readings.
 
 Most readings carry their dims as they are emitted; until the backends author
 them, a reading has only its test's family *(V5: CUDA, ROCm,
-oneAPI, Metal; V6: Vulkan, OpenCL; V7: ONNX, Core ML, LiteRT)*.
+oneAPI, Metal; V7: ONNX, Core ML, LiteRT)*.
 
 ### `revision`
 
@@ -653,8 +653,9 @@ rest.
 
 How today's labels map, for example: `float` → `{dtype: fp32}` (on the
 test); `mp` → fp16 with the family's fp32 accumulator; `bf16_2` →
-`{width: 2}`; OpenCL's `int8_dp4` → `{width: 4}` but Vulkan's →
-`{chains: 4}`; `fp16 f16acc` → `{dtype: fp16, acc: fp16}`; `fp8_e4m3 2:4` →
+`{width: 2}`; `int8_dp4` → `{chains: 4}` (independent chains, in Vulkan and
+OpenCL alike), but OpenCL's integer-compute `int8` → `{width: 8}` on an
+int32 test; `fp16 f16acc` → `{dtype: fp16, acc: fp16}`; `fp8_e4m3 2:4` →
 `{dtype: fp8_e4m3, sparsity: "2:4"}`; `nvf4_e2m1` and `nvfp4` → `nvfp4`;
 `int8_weight` → `{dtype: fp16, weights: int8}`; `int4_lut` →
 `{dtype: fp16, weights: int4, quant: lut}`; `int8_qdq` → `{dtype: int8,

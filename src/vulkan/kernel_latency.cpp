@@ -12,6 +12,8 @@
 #include <time.h>
 #endif
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Kernel launch latency (Vulkan) -- two metrics:
 //
@@ -40,6 +42,8 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
 
   const char *dispatchNote = "Host submit to kernel start, one way.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
+  const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+  const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
@@ -274,27 +278,27 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (submitFailed)
   {
     test.skip("dispatch", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-              dispatchNote);
+              dispatchNote, dispatchDims);
   }
   else if (dispatchSamples > 0)
   {
     float dispatchUs = (float)(totalDispatchUs / dispatchSamples);
-    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote);
+    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote, dispatchDims);
   }
   else
   {
     test.skip("dispatch", ResultStatus::Unsupported,
-               "Needs VK_EXT_calibrated_timestamps", dispatchNote);
+               "Needs VK_EXT_calibrated_timestamps", dispatchNote, dispatchDims);
   }
   if (submitFailed)
   {
     test.skip("roundtrip", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-              roundtripNote);
+              roundtripNote, roundtripDims);
   }
   else
   {
     double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
-    test.emit("roundtrip", (float)(avgRoundtripUs * 1e-6), roundtripNote);
+    test.emit("roundtrip", (float)(avgRoundtripUs * 1e-6), roundtripNote, roundtripDims);
   }
 
   vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
