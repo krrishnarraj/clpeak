@@ -1,0 +1,1076 @@
+{
+  "schema": "xpupeak/run",
+  "format_version": 4,
+  "format_minor": 0,
+  "run_id": "6f1c2e8a-0d4b-4a59-9a77-3b1f0c2d9e10",
+  "generator": {
+    "name": "XpuPeak",
+    "version": "4.0.0-40-gabc1234"
+  },
+  "generated_at": "2026-11-09T14:03:11Z",
+  "duration_s": 148.24,
+  "build": {
+    "backends": [
+      {
+        "name": "Metal",
+        "kind": "gpu"
+      },
+      {
+        "name": "Vulkan",
+        "kind": "gpu",
+        "portable": true
+      },
+      {
+        "name": "OpenCL",
+        "kind": "gpu",
+        "portable": true
+      },
+      {
+        "name": "CPU",
+        "kind": "cpu"
+      },
+      {
+        "name": "CoreML",
+        "kind": "ai"
+      },
+      {
+        "name": "LiteRT",
+        "kind": "ai"
+      },
+      {
+        "name": "ONNX",
+        "kind": "ai",
+        "portable": true
+      }
+    ],
+    "config": "Release"
+  },
+  "invocation": {
+    "argv": [
+      "xpupeak",
+      "-o",
+      "run.xpupeak.json"
+    ],
+    "target_time_us": 500000,
+    "target_time_us_cpu": 2000000,
+    "target_time_us_ml_gpu": 1000000,
+    "warmup": 2,
+    "categories": [
+      "compute",
+      "crypto",
+      "string",
+      "bandwidth",
+      "latency",
+      "ai"
+    ],
+    "standard": true
+  },
+  "system": {
+    "form_factor": "laptop",
+    "form_factor_from": "battery",
+    "manufacturer": "Apple",
+    "model": "MacBookPro18,3",
+    "name": "MacBook Pro (14-inch, 2021)",
+    "soc": "Apple M1 Pro",
+    "os": {
+      "name": "macOS",
+      "version": "27.2",
+      "build": "27C5047d",
+      "kernel": "Darwin 27.2.0"
+    },
+    "arch": "arm64",
+    "memory_bytes": 34359738368
+  },
+  "conditions": {
+    "power_source": "ac",
+    "low_power_mode": false,
+    "thermal_start": "nominal",
+    "thermal_end": "fair"
+  },
+  "annotations": {
+    "cooling": "stock"
+  },
+  "packages": [
+    {
+      "id": "pkg0",
+      "kind": "soc",
+      "vendor": "apple",
+      "name": "Apple M1 Pro"
+    }
+  ],
+  "processors": [
+    {
+      "id": "cpu0",
+      "kind": "cpu",
+      "package": "pkg0",
+      "vendor": "apple",
+      "vendor_name": "Apple",
+      "name": "Apple M1 Pro",
+      "isa": "arm64",
+      "cores": 10,
+      "threads": 10,
+      "clusters": [
+        {
+          "kind": "performance",
+          "cores": 8,
+          "threads_per_core": 1,
+          "max_mhz": 3228,
+          "microarch": "Firestorm",
+          "caches": [
+            {
+              "level": "l1d",
+              "size_bytes": 131072,
+              "instances": 8,
+              "line_bytes": 128
+            },
+            {
+              "level": "l2",
+              "size_bytes": 12582912,
+              "instances": 2,
+              "line_bytes": 128
+            }
+          ]
+        },
+        {
+          "kind": "efficiency",
+          "cores": 2,
+          "threads_per_core": 1,
+          "max_mhz": 2064,
+          "microarch": "Icestorm",
+          "caches": [
+            {
+              "level": "l1d",
+              "size_bytes": 65536,
+              "instances": 2,
+              "line_bytes": 128
+            },
+            {
+              "level": "l2",
+              "size_bytes": 4194304,
+              "instances": 1,
+              "line_bytes": 128
+            }
+          ]
+        }
+      ],
+      "caches": [
+        {
+          "level": "slc",
+          "size_bytes": 25165824,
+          "instances": 1,
+          "line_bytes": 128
+        }
+      ],
+      "engines": [
+        {
+          "kind": "matrix",
+          "name": "AMX",
+          "scope": "cluster",
+          "reached_by": "library"
+        }
+      ],
+      "features": [
+        "neon",
+        "fp16",
+        "dotprod",
+        "fhm",
+        "aes",
+        "sha2",
+        "sha512",
+        "crc32"
+      ]
+    },
+    {
+      "id": "gpu0",
+      "kind": "gpu",
+      "package": "pkg0",
+      "vendor": "apple",
+      "vendor_name": "Apple",
+      "name": "Apple M1 Pro",
+      "vendor_id": "106b",
+      "arch": "Apple7",
+      "integrated": true,
+      "compute_units": 16,
+      "compute_unit": "core",
+      "memory_bytes": 34359738368
+    },
+    {
+      "id": "npu0",
+      "kind": "npu",
+      "package": "pkg0",
+      "vendor": "apple",
+      "vendor_name": "Apple",
+      "name": "Apple Neural Engine",
+      "compute_units": 16,
+      "compute_unit": "core"
+    }
+  ],
+  "devices": [
+    {
+      "backend": "Metal",
+      "platform": "Metal",
+      "name": "Apple M1 Pro",
+      "driver": "macOS 27.2",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "registry",
+      "facts": {
+        "vendor_id": "106b",
+        "arch": "Apple7",
+        "integrated": true,
+        "compute_units": 16
+      },
+      "evidence": {"registry": "9f2c41d0a7e3b5c8"},
+      "properties": [
+        {
+          "key": "Apple family",
+          "value": "Apple7"
+        },
+        {
+          "key": "Unified memory",
+          "value": "32 GB"
+        }
+      ],
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float",
+              "dims": {"width": 1},
+              "value": 4.98e+12
+            },
+            {
+              "id": "float2",
+              "dims": {"width": 2},
+              "value": 5.12e+12
+            },
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 5.21e+12
+            }
+          ]
+        },
+        {
+          "id": "half_precision_compute",
+          "title": "Half-precision compute",
+          "benchmark": "half-precision-compute",
+          "dims": {"dtype": "fp16"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp16 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "half",
+              "dims": {"width": 1},
+              "value": 5.02e+12
+            },
+            {
+              "id": "half4",
+              "dims": {"width": 4},
+              "value": 5.3e+12
+            }
+          ]
+        },
+        {
+          "id": "simdgroup_matrix",
+          "title": "simdgroup_matrix peak",
+          "benchmark": "matrix-compute",
+          "revision": 2,
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Matrix-multiply speed through the GPU's simdgroup matrices.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 4.1e+12
+            },
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 2.62e+12
+            },
+            {
+              "id": "bf16",
+              "dims": {"dtype": "bf16"},
+              "status": "unsupported",
+              "reason": "bf16 simdgroup matrices need M3 or newer"
+            }
+          ]
+        },
+        {
+          "id": "mps_gemm",
+          "title": "MPS GEMM peak",
+          "benchmark": "gemm",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Metal Performance Shaders' tuned matrix multiply.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32", "impl": "mps"},
+              "value": 4.58e+12
+            },
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16", "impl": "mps"},
+              "value": 4.35e+12
+            },
+            {
+              "id": "int8",
+              "dims": {"dtype": "int8"},
+              "status": "unsupported",
+              "reason": "MPS has no int8 matrix multiply",
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float",
+              "dims": {"width": 1},
+              "value": 1.82e+11
+            },
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.94e+11
+            }
+          ]
+        },
+        {
+          "id": "kernel_launch_latency",
+          "title": "Kernel launch latency",
+          "benchmark": "kernel-launch-latency",
+          "category": "latency",
+          "shape": "heterogeneous",
+          "direction": "lower_is_better",
+          "quantity": "seconds",
+          "unit": "s",
+          "description": "The fixed cost of handing the GPU one kernel.",
+          "metrics": [
+            {
+              "id": "dispatch",
+              "dims": {"op": "dispatch"},
+              "value": 5.2e-06
+            },
+            {
+              "id": "roundtrip",
+              "dims": {"op": "roundtrip"},
+              "value": 0.000112
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "Vulkan",
+      "platform": "Vulkan",
+      "name": "Apple M1 Pro",
+      "driver": "MoltenVK 1.4.1",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "sole",
+      "facts": {
+        "vendor_id": "106b",
+        "integrated": true
+      },
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 5.05e+12
+            }
+          ]
+        },
+        {
+          "id": "coopmat",
+          "title": "Cooperative-matrix peak",
+          "benchmark": "matrix-compute",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Matrix-multiply speed through VK_KHR_cooperative_matrix.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16", "form": "sg32"},
+              "value": 3.6e+12
+            },
+            {
+              "id": "fp16 f16acc",
+              "dims": {"dtype": "fp16", "acc": "fp16", "form": "sg32"},
+              "value": 3.92e+12
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.97e+11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "OpenCL",
+      "platform": "Apple",
+      "name": "Apple M1 Pro",
+      "driver": "1.2 (Oct 19 2026 21:05:31)",
+      "type": "gpu",
+      "platform_index": 0,
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "sole",
+      "facts": {
+        "vendor_id": "106b",
+        "integrated": true
+      },
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 4.9e+12
+            }
+          ]
+        },
+        {
+          "id": "integer_compute",
+          "title": "Integer compute",
+          "benchmark": "integer-compute",
+          "dims": {"dtype": "int32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "ops",
+          "unit": "OPS",
+          "description": "Peak int32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "int",
+              "dims": {"width": 1},
+              "value": 1.25e+12
+            },
+            {
+              "id": "int4",
+              "dims": {"width": 4},
+              "value": 1.31e+12
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.85e+11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "CPU",
+      "platform": "CPU",
+      "name": "Apple M1 Pro",
+      "type": "cpu",
+      "device_index": 0,
+      "processor": "cpu0",
+      "link": "host",
+      "facts": {
+        "isa": "arm64",
+        "cores": 10,
+        "threads": 10
+      },
+      "evidence": {"host": true},
+      "properties": [
+        {
+          "key": "Cores",
+          "value": "8P + 2E"
+        },
+        {
+          "key": "RAM",
+          "value": "32.0 GB"
+        }
+      ],
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "variant": "NEON",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32", "isa": "neon", "simd_bits": 128},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 FMA throughput.",
+          "metrics": [
+            {
+              "id": "float ST",
+              "dims": {"scope": "core"},
+              "value": 1.03e+11
+            },
+            {
+              "id": "float MT",
+              "value": 8.6e+11
+            }
+          ]
+        },
+        {
+          "id": "double_precision_compute",
+          "title": "Double-precision compute",
+          "variant": "NEON",
+          "benchmark": "double-precision-compute",
+          "dims": {"dtype": "fp64", "isa": "neon", "simd_bits": 128},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp64 FMA throughput.",
+          "metrics": [
+            {
+              "id": "double ST",
+              "dims": {"scope": "core"},
+              "value": 5.15e+10
+            },
+            {
+              "id": "double MT",
+              "value": 4.3e+11
+            }
+          ]
+        },
+        {
+          "id": "integer_dot_product",
+          "title": "Integer dot product",
+          "variant": "NEON",
+          "benchmark": "int8-dot-product-compute",
+          "dims": {"isa": "neon", "simd_bits": 128},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "ops",
+          "unit": "OPS",
+          "description": "Packed int8 dot products (SDOT).",
+          "metrics": [
+            {
+              "id": "int8_dp ST",
+              "dims": {"dtype": "int8", "scope": "core"},
+              "value": 4.1e+11
+            },
+            {
+              "id": "int8_dp MT",
+              "dims": {"dtype": "int8"},
+              "value": 3.4e+12
+            }
+          ]
+        },
+        {
+          "id": "accelerate_gemm",
+          "title": "Accelerate GEMM peak",
+          "benchmark": "gemm",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Accelerate's matrix multiply, which runs on the AMX units.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32", "impl": "accelerate"},
+              "value": 2.3e+12
+            },
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16", "impl": "accelerate"},
+              "value": 2.18e+12
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Memory bandwidth (STREAM)",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "heterogeneous",
+          "axis": "operation",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "DRAM bandwidth from every core.",
+          "metrics": [
+            {
+              "id": "read",
+              "dims": {"op": "read"},
+              "value": 1.18e+11
+            },
+            {
+              "id": "copy",
+              "dims": {"op": "copy"},
+              "value": 1.02e+11
+            },
+            {
+              "id": "triad",
+              "dims": {"op": "triad"},
+              "value": 1.09e+11
+            },
+            {
+              "id": "read ST",
+              "dims": {"op": "read", "scope": "core"},
+              "value": 6.1e+10
+            }
+          ]
+        },
+        {
+          "id": "memory_latency",
+          "title": "Memory latency (pointer-chase)",
+          "benchmark": "memory-latency",
+          "category": "latency",
+          "shape": "heterogeneous",
+          "axis": "memory level",
+          "direction": "lower_is_better",
+          "quantity": "seconds",
+          "unit": "s",
+          "description": "What the wait for one memory read costs.",
+          "metrics": [
+            {
+              "id": "L1",
+              "dims": {"level": "l1"},
+              "value": 9.4e-10
+            },
+            {
+              "id": "L2",
+              "dims": {"level": "l2"},
+              "value": 5.2e-09
+            },
+            {
+              "id": "SLC",
+              "dims": {"level": "slc"},
+              "value": 3.1e-08
+            },
+            {
+              "id": "DRAM",
+              "dims": {"level": "dram"},
+              "value": 9.6e-08
+            },
+            {
+              "id": "DRAM x8",
+              "dims": {"level": "dram", "in_flight": 8},
+              "value": 1.4e-08
+            }
+          ]
+        },
+        {
+          "id": "aes_encrypt",
+          "title": "AES-128 encrypt",
+          "variant": "ARMv8 AES",
+          "benchmark": "aes",
+          "category": "crypto",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "AES-128 in CTR mode through the AES instructions.",
+          "metrics": [
+            {
+              "id": "aes128 ST",
+              "dims": {"scope": "core"},
+              "value": 6.9e+09
+            },
+            {
+              "id": "aes128 MT",
+              "value": 4.8e+10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "CoreML",
+      "platform": "CoreML",
+      "name": "Apple Neural Engine",
+      "driver": "macOS 27.2",
+      "type": "npu",
+      "device_index": 0,
+      "processor": "npu0",
+      "link": "soc",
+      "runtime": {"accelerator": "neural_engine"},
+      "evidence": {"soc": "npu"},
+      "tests": [
+        {
+          "id": "coreml_gemm",
+          "title": "Core ML matmul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A matrix multiply compiled by Core ML.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 1.1e+13
+            },
+            {
+              "id": "int8_weight",
+              "dims": {"dtype": "fp16", "weights": "int8"},
+              "value": 1.06e+13
+            },
+            {
+              "id": "int8",
+              "dims": {"dtype": "int8", "quant": "qdq"},
+              "status": "unsupported",
+              "reason": "int8 activations run faster only on A17 Pro, M4 and later",
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        },
+        {
+          "id": "coreml_conv",
+          "title": "Core ML convolution peak",
+          "benchmark": "convolution",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "convolution shape",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "2-D convolution through Core ML.",
+          "metrics": [
+            {
+              "id": "fp16_conv3x3s2",
+              "dims": {"dtype": "fp16", "layer": "conv3x3s2"},
+              "value": 7.9e+12
+            },
+            {
+              "id": "fp16_conv1x1",
+              "dims": {"dtype": "fp16", "layer": "conv1x1"},
+              "value": 8.6e+12
+            }
+          ]
+        },
+        {
+          "id": "coreml_block_prefill",
+          "title": "Transformer block, prefill",
+          "benchmark": "transformer-block",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "prompt length",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "One decoder block over a 512-token prompt.",
+          "metrics": [
+            {
+              "id": "fp16_prefill_s512",
+              "dims": {"dtype": "fp16", "phase": "prefill", "context": 512},
+              "value": 5.4e+12
+            }
+          ]
+        },
+        {
+          "id": "coreml_dispatch_latency",
+          "title": "Core ML dispatch latency",
+          "benchmark": "kernel-launch-latency",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "direction": "lower_is_better",
+          "quantity": "seconds",
+          "unit": "s",
+          "description": "The fixed cost of one prediction.",
+          "metrics": [
+            {
+              "id": "trivial_op",
+              "dims": {"workload": "trivial_op"},
+              "value": 0.000212
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "CoreML",
+      "platform": "CoreML",
+      "name": "Apple M1 Pro",
+      "driver": "macOS 27.2",
+      "type": "gpu",
+      "device_index": 1,
+      "processor": "gpu0",
+      "link": "registry",
+      "runtime": {"accelerator": "gpu"},
+      "evidence": {"registry": "9f2c41d0a7e3b5c8"},
+      "tests": [
+        {
+          "id": "coreml_gemm",
+          "title": "Core ML matmul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A matrix multiply compiled by Core ML.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 3.9e+12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "CoreML",
+      "platform": "CoreML",
+      "name": "CPU",
+      "driver": "macOS 27.2",
+      "type": "cpu",
+      "device_index": 2,
+      "processor": "cpu0",
+      "link": "host",
+      "runtime": {"accelerator": "cpu"},
+      "evidence": {"host": true},
+      "tests": [
+        {
+          "id": "coreml_gemm",
+          "title": "Core ML matmul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A matrix multiply compiled by Core ML.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 1.42e+12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "LiteRT",
+      "platform": "LiteRT 2.3.0",
+      "name": "GPU (Metal)",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "sole",
+      "runtime": {"accelerator": "gpu", "version": "2.3.0"},
+      "evidence": {"default_gpu": true},
+      "tests": [
+        {
+          "id": "litert_gemm",
+          "title": "LiteRT matmul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A fully-connected layer through LiteRT.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 3.1e+12
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "ONNX",
+      "platform": "ONNX Runtime 1.31.0",
+      "name": "Apple CoreML (Neural Engine)",
+      "type": "npu",
+      "device_index": 0,
+      "processor": "npu0",
+      "link": "soc",
+      "runtime": {"provider": "CoreMLExecutionProvider", "version": "1.31.0"},
+      "evidence": {"soc": "npu"},
+      "tests": [
+        {
+          "id": "onnx_gemm",
+          "title": "ONNX MatMul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A MatMul graph through ONNX Runtime.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 9.1e+12
+            },
+            {
+              "id": "int8_qdq",
+              "dims": {"dtype": "int8", "quant": "qdq"},
+              "value": 6.2e+12,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "ONNX",
+      "platform": "ONNX Runtime 1.31.0",
+      "name": "CPU",
+      "type": "cpu",
+      "device_index": 1,
+      "processor": "cpu0",
+      "link": "host",
+      "runtime": {"provider": "CPUExecutionProvider", "version": "1.31.0"},
+      "evidence": {"host": true},
+      "tests": [
+        {
+          "id": "onnx_gemm",
+          "title": "ONNX MatMul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A MatMul graph through ONNX Runtime.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 6.4e+11
+            },
+            {
+              "id": "int8_qdq",
+              "dims": {"dtype": "int8", "quant": "qdq"},
+              "value": 1.9e+12,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "log": [
+    {"elapsed_s": 0.31, "level": "info", "message": "Backend: Metal"},
+    {"elapsed_s": 0.42, "level": "info", "backend": "Metal", "device": "Apple M1 Pro", "device_index": 0, "message": "Device 0: Apple M1 Pro"},
+    {"elapsed_s": 96.5, "level": "warning", "backend": "CoreML", "device": "Apple Neural Engine", "device_index": 0, "test": "coreml_gemm", "message": "coreml_gemm: int8 activations run faster only on A17 Pro, M4 and later"}
+  ]
+}

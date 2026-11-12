@@ -4,6 +4,7 @@
 #include <common/options.h>
 #include <common/inventory.h>
 #include <common/common.h>
+#include <common/hardware_link.h>
 #include <algorithm>
 #include <cstdio>
 #include <sstream>
@@ -18,6 +19,50 @@ static const char *cuErrStr(CUresult r)
   const char *s = nullptr;
   cuGetErrorString(r, &s);
   return s ? s : "unknown CUDA error";
+}
+
+// Who the device is, as the driver says -- its UUID, its PCI address, on
+// Windows its adapter LUID -- and what it says of the hardware
+// (include/common/hardware_link.h).  NVIDIA's Vulkan and OpenCL drivers
+// report the same UUID, which is what links the three.  Needs only cuInit,
+// so a listing can ask it too.
+static void cudaIdentify(CUdevice d, logger::Identity &id, HardwareFacts &facts)
+{
+  CUuuid uuid;
+  if (cuDeviceGetUuid(&uuid, d) == CUDA_SUCCESS)
+    id.uuid = xpupeak::uuidText(reinterpret_cast<const unsigned char *>(uuid.bytes));
+#if defined(_WIN32)
+  char luid[8] = {0};
+  unsigned int nodeMask = 0;
+  if (cuDeviceGetLuid(luid, &nodeMask, d) == CUDA_SUCCESS)
+    id.luid = xpupeak::luidText(reinterpret_cast<const unsigned char *>(luid));
+#endif
+  int domain = 0, bus = 0, slot = 0;
+  if (cuDeviceGetAttribute(&domain, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, d) == CUDA_SUCCESS &&
+      cuDeviceGetAttribute(&bus, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID, d) == CUDA_SUCCESS &&
+      cuDeviceGetAttribute(&slot, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, d) == CUDA_SUCCESS)
+    id.pciBus = xpupeak::pciBusText((unsigned)domain, (unsigned)bus, (unsigned)slot, 0);
+
+  facts.vendorId = xpupeak::pciIdText(0x10de);   // CUDA's devices are NVIDIA's
+  int major = 0, minor = 0, sms = 0, clockKHz = 0, integrated = 0;
+  if (cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, d) == CUDA_SUCCESS &&
+      cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, d) == CUDA_SUCCESS)
+    facts.arch = "sm_" + std::to_string(major) + std::to_string(minor);
+  if (cuDeviceGetAttribute(&sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, d) == CUDA_SUCCESS && sms > 0)
+  {
+    facts.computeUnits = (unsigned)sms;
+    facts.computeUnit  = "SM";
+  }
+  if (cuDeviceGetAttribute(&clockKHz, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, d) == CUDA_SUCCESS && clockKHz > 0)
+    facts.clockMhz = (unsigned)(clockKHz / 1000);
+  if (cuDeviceGetAttribute(&integrated, CU_DEVICE_ATTRIBUTE_INTEGRATED, d) == CUDA_SUCCESS)
+  {
+    facts.integrated = integrated ? 1 : 0;
+    // An integrated part's memory is the system's (Jetson, GB10).
+    size_t mem = 0;
+    if (!integrated && cuDeviceTotalMem(&mem, d) == CUDA_SUCCESS)
+      facts.memoryBytes = mem;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +184,9 @@ int CudaPeak::runAll()
     if (forceIters)
       cfg.kernelLatencyIters = specifiedIters;
 
+    logger::Identity identity;
+    HardwareFacts facts;
+    cudaIdentify(dev.device, identity, facts);
     auto deviceScope = backendScope.beginDevice({
       dev.info.deviceName,
       "",   // platform defaults to "CUDA"
@@ -151,7 +199,9 @@ int CudaPeak::runAll()
       },
       -1,
       idx,
-      dev.info.deviceType
+      dev.info.deviceType,
+      identity,
+      facts,
     });
     currentDeviceScope = &deviceScope;
 

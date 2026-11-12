@@ -1,4 +1,5 @@
 #include <opencl/cl_peak.h>
+#include <common/hardware_link.h>
 #include <common/inventory.h>
 #include <common/options.h>
 #include <common/common.h>
@@ -59,6 +60,125 @@ bool offersSubGroup16(const cl::Device &device)
   return std::find(sizes.begin(), sizes.end(), (size_t)16) != sizes.end();
 }
 
+// The identity queries, by value: Apple's framework headers and older
+// Khronos ones do not carry every extension's names.
+const cl_device_info kDeviceUuidKhr        = 0x106A;   // cl_khr_device_uuid
+const cl_device_info kDeviceLuidValidKhr   = 0x106C;
+const cl_device_info kDeviceLuidKhr        = 0x106D;
+const cl_device_info kDevicePciBusInfoKhr  = 0x410F;   // cl_khr_pci_bus_info
+const cl_device_info kComputeCapMajorNv    = 0x4000;   // cl_nv_device_attribute_query
+const cl_device_info kComputeCapMinorNv    = 0x4001;
+const cl_device_info kPciBusIdNv           = 0x4008;
+const cl_device_info kPciSlotIdNv          = 0x4009;   // device << 3 | function
+const cl_device_info kPciDomainIdNv        = 0x400A;
+const cl_device_info kTopologyAmd          = 0x4037;   // cl_amd_device_attribute_query
+#if defined(__APPLE__)
+const cl_device_info kRegistryIdApple      = 0x10000030;   // the IOKit registryID
+#endif
+
+// Who the device is, as the driver says -- cl_khr_device_uuid's UUID and
+// LUID, a PCI address by whichever of the three extensions the driver has,
+// on macOS the registry ID Metal reports for the same GPU -- and what it
+// says of the hardware (include/common/hardware_link.h).  A CPU device
+// (PoCL, Intel's CPU runtime) is the host CPU.  A listing can ask it too.
+void openclIdentify(const cl::Device &device, const device_info_t &info, logger::Identity &id,
+                    HardwareFacts &facts)
+{
+  const cl_device_id d = device();
+  std::string ext;
+  try
+  {
+    ext = device.getInfo<CL_DEVICE_EXTENSIONS>();
+  }
+  catch (cl::Error &)
+  {
+  }
+  auto has = [&](const char *e) { return ext.find(e) != std::string::npos; };
+  id.host = info.deviceType == DeviceType::Cpu;
+
+  cl_uint vendor = 0;
+  if (clGetDeviceInfo(d, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) == CL_SUCCESS)
+    facts.vendorId = xpupeak::pciIdText(vendor);
+  try
+  {
+    facts.vendorName = device.getInfo<CL_DEVICE_VENDOR>();
+    trimString(facts.vendorName);
+  }
+  catch (cl::Error &)
+  {
+  }
+
+  if (has("cl_khr_device_uuid"))
+  {
+    cl_uchar uuid[16] = {0};
+    if (clGetDeviceInfo(d, kDeviceUuidKhr, sizeof(uuid), uuid, nullptr) == CL_SUCCESS)
+      id.uuid = xpupeak::uuidText(uuid);
+    cl_bool luidValid = CL_FALSE;
+    cl_uchar luid[8] = {0};
+    if (clGetDeviceInfo(d, kDeviceLuidValidKhr, sizeof(luidValid), &luidValid, nullptr) == CL_SUCCESS &&
+        luidValid && clGetDeviceInfo(d, kDeviceLuidKhr, sizeof(luid), luid, nullptr) == CL_SUCCESS)
+      id.luid = xpupeak::luidText(luid);
+  }
+  if (has("cl_khr_pci_bus_info"))
+  {
+    struct { cl_uint domain, bus, device, function; } pci = {};
+    if (clGetDeviceInfo(d, kDevicePciBusInfoKhr, sizeof(pci), &pci, nullptr) == CL_SUCCESS)
+      id.pciBus = xpupeak::pciBusText(pci.domain, pci.bus, pci.device, pci.function);
+  }
+  if (id.pciBus.empty() && has("cl_nv_device_attribute_query"))
+  {
+    cl_uint bus = 0, slot = 0, domain = 0;
+    if (clGetDeviceInfo(d, kPciBusIdNv, sizeof(bus), &bus, nullptr) == CL_SUCCESS &&
+        clGetDeviceInfo(d, kPciSlotIdNv, sizeof(slot), &slot, nullptr) == CL_SUCCESS)
+    {
+      // An older driver has no domain query: domain 0, where nearly every GPU is.
+      if (clGetDeviceInfo(d, kPciDomainIdNv, sizeof(domain), &domain, nullptr) != CL_SUCCESS)
+        domain = 0;
+      id.pciBus = xpupeak::pciBusText(domain, bus, slot >> 3, slot & 7);
+    }
+  }
+  if (id.pciBus.empty() && has("cl_amd_device_attribute_query"))
+  {
+    union { struct { cl_uint type; cl_uint data[5]; } raw;
+            struct { cl_uint type; cl_char unused[17]; cl_char bus, device, function; } pcie; } topo = {};
+    if (clGetDeviceInfo(d, kTopologyAmd, sizeof(topo), &topo, nullptr) == CL_SUCCESS &&
+        topo.raw.type == 1)   // CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD
+      id.pciBus = xpupeak::pciBusText(0, (unsigned char)topo.pcie.bus,
+                                      (unsigned char)topo.pcie.device,
+                                      (unsigned char)topo.pcie.function);
+  }
+#if defined(__APPLE__)
+  {
+    cl_ulong reg = 0;
+    if (clGetDeviceInfo(d, kRegistryIdApple, sizeof(reg), &reg, nullptr) == CL_SUCCESS)
+      id.registryId = xpupeak::registryText(reg);
+  }
+#endif
+
+  if (has("cl_nv_device_attribute_query"))
+  {
+    cl_uint major = 0, minor = 0;
+    if (clGetDeviceInfo(d, kComputeCapMajorNv, sizeof(major), &major, nullptr) == CL_SUCCESS &&
+        clGetDeviceInfo(d, kComputeCapMinorNv, sizeof(minor), &minor, nullptr) == CL_SUCCESS && major)
+      facts.arch = "sm_" + std::to_string(major) + std::to_string(minor);
+  }
+  if (info.deviceType == DeviceType::Gpu)
+  {
+    cl_bool unified = CL_FALSE;
+    if (clGetDeviceInfo(d, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(unified), &unified, nullptr) ==
+        CL_SUCCESS)
+      facts.integrated = unified ? 1 : 0;
+  }
+  if (info.numCUs)
+  {
+    facts.computeUnits = info.numCUs;
+    facts.computeUnit  = xpupeak::computeUnitName(facts, info.deviceType);
+  }
+  facts.clockMhz = info.maxClockFreq;
+  if (facts.integrated == 0)
+    facts.memoryBytes = info.maxGlobalSize;   // a discrete part's own
+}
+
 } // namespace
 
 int clPeak::runAll()
@@ -114,6 +234,9 @@ int clPeak::runAll()
         if (forceIters)
           cfg.kernelLatencyIters = specifiedIters;
 
+        logger::Identity identity;
+        HardwareFacts facts;
+        openclIdentify(devices[d], devInfo, identity, facts);
         auto deviceScope = backendScope.beginDevice({
           devInfo.deviceName,
           platformName,
@@ -124,7 +247,9 @@ int clPeak::runAll()
           },
           static_cast<int>(p),
           deviceIndex,
-          devInfo.deviceType
+          devInfo.deviceType,
+          identity,
+          facts,
         });
         currentDeviceScope = &deviceScope;
 

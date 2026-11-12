@@ -1,5 +1,7 @@
+import 'hardware.dart';
 import 'result_model.dart';
 
+export 'hardware.dart';
 export 'result_model.dart' show formatValue;
 
 /// One test's readings on one device.
@@ -159,7 +161,39 @@ class DeviceRun {
   /// file's device object when a saved run is reopened.
   List<({String key, String value})> props = [];
 
+  // What the saved file adds about the device (docs/format-v4.md, Device).
+  // A live run's devices have none of it until the run is linked and
+  // saved; the results screen shows the saved file once there is one.
+
+  /// What the device is: `gpu`, `cpu`, `npu`, `accelerator`, `unknown` --
+  /// or a newer build's word, as written.  Empty where nothing said.
+  String type = '';
+
+  /// The platform's index, for a backend with platforms (OpenCL); -1
+  /// where there is none.
+  int platformIndex = -1;
+
+  /// The id of the processor ([ProcessorInfo]) this device is a view of;
+  /// empty where the file links none.
+  String processor = '';
+
+  /// What linked it there: `uuid`, `pci_bus`, `host`, `soc`, `sole`, …
+  String link = '';
+
+  /// What its own API reported.
+  HardwareFacts facts = const HardwareFacts();
+
+  /// The identity evidence that linked it: tokens, never identifiers.
+  Map<String, Object> evidence = const {};
+
+  /// An ML runtime's view of where it ran.
+  RuntimeInfo runtime = const RuntimeInfo();
+
   final List<CategoryGroup> categories = [];
+
+  /// Every test, in category order.
+  Iterable<TestResult> get tests =>
+      categories.expand((g) => g.tests);
 
   /// Driver is metadata, not identity — a saved run stays comparable across a
   /// driver update — but the index is, so two same-named devices stay two rows
@@ -407,7 +441,60 @@ class RunMeta {
     this.system = const {},
     this.argv = const [],
     this.resumed = const [],
+    this.formatMinor = 0,
+    this.runId = '',
+    this.standard = false,
+    this.buildConfig = '',
+    this.buildBackends = const [],
+    this.systemInfo = const SystemInfo(),
+    this.conditions = const RunConditions(),
+    this.annotations = const {},
   });
+
+  /// The additive revision of format 4 the file was written in.
+  final int formatMinor;
+
+  /// A random id per run, kept across `--resume`.
+  final String runId;
+
+  /// The run used this build's default budgets and ran everything: the run
+  /// a ranking takes (`invocation.standard`).
+  final bool standard;
+
+  /// The CMake configuration the binary was built in, when stamped.
+  final String buildConfig;
+
+  /// [builtBackends] with their kinds.
+  final List<BuildBackend> buildBackends;
+
+  /// [system], typed.
+  final SystemInfo systemInfo;
+
+  /// What the machine was doing.
+  final RunConditions conditions;
+
+  /// Facts only a person knows (`annotations`): a flat map of strings, of
+  /// which `system.name` names a machine the OS does not.
+  final Map<String, String> annotations;
+
+  /// The system as a person would name it: the `system.name` annotation,
+  /// the name its user gave it; else the marketing name the OS gave; else
+  /// the model id, the board or the SoC.  Never a name looked up from the
+  /// model id -- that map is not the app's to keep (docs/format-v4.md,
+  /// System).  Empty where the file says nothing of it.
+  String get systemName {
+    final s = systemInfo;
+    for (final name in [
+      annotations['system.name']?.trim() ?? '',
+      s.name,
+      s.model,
+      s.board,
+      s.soc,
+    ]) {
+      if (name.isNotEmpty) return name;
+    }
+    return '';
+  }
 
   /// What wrote the file, and which version of it.
   final GeneratorInfo generator;
@@ -450,35 +537,63 @@ class RunMeta {
   /// process ended part-way; empty for a run done in one go.
   final List<ResumedPart> resumed;
 
-  factory RunMeta.fromJson(Map<String, dynamic> m) => RunMeta(
-        generator: GeneratorInfo.fromJson(m['generator']),
-        generatedAt: m['generated_at'] as String? ?? '',
-        durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
-        cancelled: m['cancelled'] as bool? ?? false,
-        verbose: (m['invocation'] as Map<String, dynamic>?)?['verbose']
-                as bool? ??
-            false,
-        builtBackends: [
-          // Each `{name, kind, portable}`.
-          for (final b in ((m['build'] as Map<String, dynamic>?)?['backends']
-                  as List? ??
-              const []))
-            if (b is Map && b['name'] is String)
-              b['name'] as String
-            else if (b is String)
-              b,
-        ],
-        system: (m['system'] as Map<String, dynamic>?) ?? const {},
-        argv: [
-          ...((m['invocation'] as Map<String, dynamic>?)?['argv'] as List? ??
-                  const [])
-              .cast<String>(),
-        ],
-        resumed: [
-          for (final r in (m['resumed'] as List? ?? const []))
-            ResumedPart.fromJson(r as Map<String, dynamic>),
-        ],
-      );
+  factory RunMeta.fromJson(Map<String, dynamic> m) {
+    final build = m['build'] is Map ? m['build'] as Map : const {};
+    final invocation =
+        m['invocation'] is Map ? m['invocation'] as Map : const {};
+    final backends = [
+      // Each `{name, kind, portable}`.
+      for (final b in (build['backends'] is List
+          ? build['backends'] as List
+          : const []))
+        if (b is Map && b['name'] is String)
+          BuildBackend(
+            name: b['name'] as String,
+            kind: b['kind'] is String ? b['kind'] as String : '',
+            portable: b['portable'] == true,
+          )
+        else if (b is String)
+          BuildBackend(name: b),
+    ];
+    final annotations = m['annotations'];
+    return RunMeta(
+      generator: GeneratorInfo.fromJson(m['generator']),
+      generatedAt: m['generated_at'] as String? ?? '',
+      durationSeconds: (m['duration_s'] as num?)?.toDouble() ?? 0,
+      cancelled: m['cancelled'] as bool? ?? false,
+      verbose: invocation['verbose'] == true,
+      builtBackends: [for (final b in backends) b.name],
+      system: m['system'] is Map<String, dynamic>
+          ? m['system'] as Map<String, dynamic>
+          : const {},
+      argv: [
+        for (final a in (invocation['argv'] is List
+            ? invocation['argv'] as List
+            : const []))
+          if (a is String) a,
+      ],
+      resumed: [
+        for (final r in (m['resumed'] as List? ?? const []))
+          ResumedPart.fromJson(r as Map<String, dynamic>),
+      ],
+      formatMinor: (m['format_minor'] as num?)?.toInt() ?? 0,
+      runId: m['run_id'] as String? ?? '',
+      standard: invocation['standard'] == true,
+      buildConfig: build['config'] is String ? build['config'] as String : '',
+      buildBackends: backends,
+      systemInfo: SystemInfo.fromJson(m['system']),
+      conditions: RunConditions.fromJson(m['conditions']),
+      // A flat map of strings; a value of another kind is shown as written.
+      annotations: {
+        if (annotations is Map)
+          for (final e in annotations.entries)
+            if (e.key is String && e.value != null)
+              e.key as String: e.value is String
+                  ? e.value as String
+                  : e.value.toString(),
+      },
+    );
+  }
 }
 
 /// A whole benchmark session: one or more device runs, in emission order.
@@ -492,7 +607,32 @@ class RunDocument {
   final List<LogEntry> log = [];
   RunMeta? meta;
 
+  /// The hardware the devices are views of (docs/format-v4.md, Hardware):
+  /// the chips and cards, and the processors in them, in the file's order
+  /// -- the host package first.  Empty for a live run until it is saved,
+  /// and for a file whose devices nothing linked.
+  final List<PackageInfo> packages = [];
+  final List<ProcessorInfo> processors = [];
+
   bool get isEmpty => runs.isEmpty;
+
+  ProcessorInfo? processorById(String id) {
+    for (final p in processors) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  PackageInfo? packageById(String id) {
+    for (final p in packages) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// Every backend's view of processor [id], in run order.
+  List<DeviceRun> devicesOf(String id) =>
+      [for (final r in runs) if (r.processor == id) r];
 
   /// Tests recorded, over every device.
   int get testCount => runs.fold(
@@ -523,6 +663,13 @@ class RunDocument {
   factory RunDocument.fromJson(Map<String, dynamic> doc) {
     final out = RunDocument();
     out.meta = RunMeta.fromJson(doc);
+    for (final p in (doc['packages'] is List ? doc['packages'] as List : const [])) {
+      out.packages.add(PackageInfo.fromJson(p));
+    }
+    for (final p
+        in (doc['processors'] is List ? doc['processors'] as List : const [])) {
+      out.processors.add(ProcessorInfo.fromJson(p));
+    }
 
     for (final d in (doc['devices'] as List? ?? const [])) {
       final dm = d as Map<String, dynamic>;
@@ -540,6 +687,13 @@ class RunDocument {
             value: p['value'] as String? ?? '',
           ),
       ];
+      run.type = dm['type'] is String ? dm['type'] as String : '';
+      run.platformIndex = (dm['platform_index'] as num?)?.toInt() ?? -1;
+      run.processor = dm['processor'] is String ? dm['processor'] as String : '';
+      run.link = dm['link'] is String ? dm['link'] as String : '';
+      run.facts = HardwareFacts.fromJson(dm['facts']);
+      run.evidence = evidenceFromJson(dm['evidence']);
+      run.runtime = RuntimeInfo.fromJson(dm['runtime']);
       for (final t in (dm['tests'] as List? ?? const [])) {
         final tm = t as Map<String, dynamic>;
         final test = run.openTest(TestHeader.fromJson(tm));

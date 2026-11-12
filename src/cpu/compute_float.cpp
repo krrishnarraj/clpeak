@@ -13,54 +13,59 @@ using xpupeak_cpu::kernelMenu;
 
 int CpuPeak::runComputeSP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"single_precision_compute", "Single-precision compute", "flops",
+  emitVariants(*this, withDims({"single_precision_compute", "Single-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 32-bit fractional numbers -- the "
                        "ordinary float type most programs use.  The data stays in "
                        "registers, so only the CPU's vector units limit the rate."},
+                        {{Dim::Dtype, DType::Fp32}}),
                "float", kernelMenu().fp32, "no SIMD fp32 path for this CPU", cfg);
   return 0;
 }
 
 int CpuPeak::runComputeDP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"double_precision_compute", "Double-precision compute", "flops",
+  emitVariants(*this, withDims({"double_precision_compute", "Double-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 64-bit fractional numbers, the "
                        "high-accuracy type scientific and engineering code relies on."},
+                        {{Dim::Dtype, DType::Fp64}}),
                "double", kernelMenu().fp64, "no SIMD fp64 path for this CPU", cfg);
   return 0;
 }
 
 int CpuPeak::runComputeHP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"half_precision_compute", "Half-precision compute", "flops",
+  emitVariants(*this, withDims({"half_precision_compute", "Half-precision compute", "flops",
                        Category::Unknown,
                        "Peak arithmetic speed on 16-bit fractional numbers -- half the "
                        "size of a normal float, and common in graphics and AI.  Needs "
                        "real 16-bit instructions, not conversion to 32-bit and back."},
+                        {{Dim::Dtype, DType::Fp16}}),
                "half", kernelMenu().fp16, "no native fp16 arithmetic on this CPU", cfg);
   return 0;
 }
 
 int CpuPeak::runComputeBF16(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
+  emitVariants(*this, withDims({"bfloat16_compute", "BF16 compute bf16xbf16+fp32", "flops",
                        Category::Unknown,
                        "Peak speed of the bfloat16 dot-product instruction, which "
                        "multiplies pairs of 16-bit AI-format numbers and adds the "
                        "results into a 32-bit running total."},
+                        {{Dim::Dtype, DType::Bf16}, {Dim::Acc, DType::Fp32}}),
                "bf16", kernelMenu().bf16, "no bf16 dot instruction on this CPU", cfg);
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
   // Native full-rate bf16 vector FMA is AVX10.2-only (x86 exclusive) -- a
   // genuinely different peak from the bf16 dot above (real bf16 multiply-add, no
   // fp32-accumulate widening).  Only emit it on an x86 build; on ARM there is no
   // native-bf16-FMA instruction, so the row would be meaningless noise.
-  emitVariants(*this, {"bfloat16_fma_compute", "BF16 FMA compute bf16xbf16+bf16", "flops",
+  emitVariants(*this, withDims({"bfloat16_fma_compute", "BF16 FMA compute bf16xbf16+bf16", "flops",
                        Category::Unknown,
                        "Peak speed of true bfloat16 multiply-add, which keeps the "
                        "answer in 16 bits instead of widening it to 32.  Only the "
                        "newest x86 chips (AVX10.2) have the instruction."},
+                        {{Dim::Dtype, DType::Bf16}}),
                "bf16_fma", kernelMenu().bf16fma,
                "no native bf16 vector FMA (AVX10.2) on this CPU", cfg);
 #endif
@@ -85,26 +90,31 @@ int CpuPeak::runComputeDivSqrt(benchmark_config_t &cfg)
               "-- and the gap between CPU generations here is much larger.",
               TestShape::Heterogeneous, "operation"},
              {{ "fdiv fp32", "Division on 32-bit floats.",
-                "no SIMD fp32 divide path for this CPU", &kernelMenu().div32 },
+                "no SIMD fp32 divide path for this CPU", &kernelMenu().div32, nullptr,
+                {{Dim::Dtype, DType::Fp32}, {Dim::Op, dim::Op::Fdiv}} },
               { "fdiv fp64", "Division on 64-bit floats, usually around half "
                              "the 32-bit rate.",
-                "no SIMD fp64 divide path for this CPU", &kernelMenu().div64 },
+                "no SIMD fp64 divide path for this CPU", &kernelMenu().div64, nullptr,
+                {{Dim::Dtype, DType::Fp64}, {Dim::Op, dim::Op::Fdiv}} },
               { "fsqrt fp32", "Square root on 32-bit floats.",
-                "no SIMD fp32 sqrt path for this CPU", &kernelMenu().sqrt32 },
+                "no SIMD fp32 sqrt path for this CPU", &kernelMenu().sqrt32, nullptr,
+                {{Dim::Dtype, DType::Fp32}, {Dim::Op, dim::Op::Fsqrt}} },
               { "fsqrt fp64", "Square root on 64-bit floats.",
-                "no SIMD fp64 sqrt path for this CPU", &kernelMenu().sqrt64 }},
+                "no SIMD fp64 sqrt path for this CPU", &kernelMenu().sqrt64, nullptr,
+                {{Dim::Dtype, DType::Fp64}, {Dim::Op, dim::Op::Fsqrt}} }},
              cfg);
   return 0;
 }
 
 int CpuPeak::runComputeMP(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "flops",
+  emitVariants(*this, withDims({"mixed_precision_compute", "Mixed-precision compute fp16xfp16+fp32", "flops",
                        Category::Unknown,
                        "Peak speed when the CPU multiplies 16-bit numbers but keeps "
                        "the running total in 32 bits -- the accuracy-preserving "
                        "pattern AI code uses, done in one instruction with no "
                        "conversion step."},
+                        {{Dim::Dtype, DType::Fp16}}),
                "mp", kernelMenu().mp, "no conversion-free fp16xfp16+fp32 widening FMA on this CPU", cfg);
   return 0;
 }
@@ -115,12 +125,14 @@ int CpuPeak::runComputeFP8DP(benchmark_config_t &cfg)
   // Native fp8 vector dot is ARM-only today (FEAT_FP8DOT4 -- NVIDIA Vera first;
   // x86 has no fp8 *vector* instruction, only the AMX-FP8 tile path, which is
   // its own matrix row).  Only emit on an arm64 build, mirroring how the
-  // x86-only bf16-FMA row is handled.
-  emitVariants(*this, {"fp8_dot_product_compute", "FP8 dot-product compute fp8xfp8+fp32", "flops",
+  // x86-only bf16-FMA row is handled.  The kernels program FPMR with
+  // __arm_fpm_init(), which selects E5M2 for both operands.
+  emitVariants(*this, withDims({"fp8_dot_product_compute", "FP8 dot-product compute fp8xfp8+fp32", "flops",
                        Category::Unknown,
                        "Peak speed of the 8-bit float dot product, the narrowest "
                        "number format a CPU can multiply directly.  Only the newest "
                        "Arm cores have the instruction."},
+                        {{Dim::Dtype, DType::Fp8E5m2}}),
                "fp8_dp", kernelMenu().fp8dp, "no fp8 dot instruction (FEAT_FP8DOT4) on this CPU", cfg);
 #else
   (void)cfg;

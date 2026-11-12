@@ -263,8 +263,9 @@ bool CpuFacts::empty() const
 
 bool HardwareFacts::empty() const
 {
-    return vendorId.empty() && deviceId.empty() && arch.empty() && !computeUnits &&
-           computeUnit.empty() && !clockMhz && !memoryBytes && integrated < 0 && cpu.empty();
+    return vendorId.empty() && deviceId.empty() && vendorName.empty() && arch.empty() &&
+           !computeUnits && computeUnit.empty() && !clockMhz && !memoryBytes && integrated < 0 &&
+           cpu.empty();
 }
 
 BuildBackend buildBackendFor(Backend b)
@@ -482,7 +483,9 @@ void writeSystem(JsonWriter &w, const SystemInfo &s)
     if (s.isVirtual)  w.boolean("virtual", true);
     if (s.translated) w.boolean("translated", true);
     w.strIf("manufacturer", s.manufacturer);
+    w.strIf("brand",        s.brand);
     w.strIf("model",        s.model);
+    w.strIf("codename",     s.codename);
     w.strIf("name",         s.name);
     w.strIf("family",       s.family);
     w.strIf("board",        s.board);
@@ -752,6 +755,7 @@ void writeFacts(JsonWriter &w, const HardwareFacts &f)
 {
     w.strIf("vendor_id", f.vendorId);
     w.strIf("device_id", f.deviceId);
+    w.strIf("vendor_name", f.vendorName);
     w.strIf("arch", f.arch);
     if (f.integrated >= 0) w.boolean("integrated", f.integrated != 0);
     if (f.computeUnits) w.uint("compute_units", f.computeUnits);
@@ -1115,7 +1119,9 @@ void readSystem(const JsonValue &v, SystemInfo &s)
     s.isVirtual        = v.flag("virtual");
     s.translated       = v.flag("translated");
     s.manufacturer     = v.str("manufacturer");
+    s.brand            = v.str("brand");
     s.model            = v.str("model");
+    s.codename         = v.str("codename");
     s.name             = v.str("name");
     s.family           = v.str("family");
     s.board            = v.str("board");
@@ -1167,6 +1173,7 @@ void readFacts(const JsonValue &v, HardwareFacts &f)
     if (!v.isObject()) return;
     f.vendorId     = v.str("vendor_id");
     f.deviceId     = v.str("device_id");
+    f.vendorName   = v.str("vendor_name");
     f.arch         = v.str("arch");
     f.integrated   = readTri(v, "integrated");
     f.computeUnits = readUint(v, "compute_units");
@@ -1454,6 +1461,7 @@ void readDocument(const JsonValue &root, RunDocument &out)
             proc.vendorName = p.str("vendor_name");
             proc.name       = p.str("name");
             readFacts(p, proc.facts);
+            proc.facts.vendorName.clear();   // the processor's own, read above
             proc.ext        = readExt(p);
             out.processors.push_back(std::move(proc));
         }

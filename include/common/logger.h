@@ -145,17 +145,22 @@ public:
   // processor (docs/format-v4.md, Linking).  The identifiers are raw and
   // stay in the process -- a GPU's UUID is in effect a serial number -- so
   // the document gets tokens of them, never the values
-  // (DeviceEvidence::tokens).  The flags identify nothing and are kept as
-  // they are.
+  // (DeviceEvidence::tokens), made as the device opens under the run's key
+  // (xpupeak::evidenceFrom, include/common/hardware_link.h).  Each is in the
+  // one form every API's is written in -- xpupeak::uuidText(), luidText(),
+  // pciBusText(), registryText() -- or the same identifier read through two
+  // APIs gives two tokens.  The flags identify nothing and are kept as they
+  // are.
   struct Identity {
-    std::string uuid;             // the API's device UUID, as hex
-    std::string luid;             // Windows' adapter LUID, as hex
-    std::string pciBus;           // "0000:01:00.0": domain, bus, device, function
-    std::string registryId;       // Metal's registryID
+    std::string uuid;             // the API's device UUID: uuidText()
+    std::string luid;             // Windows' adapter LUID: luidText()
+    std::string pciBus;           // "0000:01:00.0": pciBusText()
+    std::string registryId;       // Metal's registryID: registryText()
     bool host       = false;      // executes on the host CPU: a CPU driver, an ML runtime's CPU path
     bool socNpu     = false;      // is the SoC's NPU
     bool socGpu     = false;      // is the SoC's GPU (an Android GPU delegate)
     bool defaultGpu = false;      // is the platform's default GPU (LiteRT WebGPU, Core ML on Metal)
+    bool socAccelerator = false;  // runs on the SoC, on no one unit it names (Android NNAPI)
   };
 
   struct DeviceSpec {

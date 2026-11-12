@@ -22,7 +22,7 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 
 | File | Purpose |
 |------|---------|
-| `vk_peak.cpp` | `vkPeak` class: ctor, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()` |
+| `vk_peak.cpp` | `vkPeak` class: ctor, `initInstance()`, `cleanup()`, `runKernel()`, `runAll()`, `enumerate()`; `vulkanIdentify()`, who each device is (*Identity*) |
 | `vulkan_device.cpp` | `VulkanDevice` class: `init()` (4-step: basic info → CU count → optional features → logical device), `cleanup()`, `createBuffer()`, `createComputePipeline()`, `submitAndWait()`, `zeroBuffer()` |
 | `compute_kernel.cpp` | `vkPeak::runComputeKernel()` — shared compute-peak driver: buffer/descriptor/pipeline scaffolding used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -38,6 +38,19 @@ and GLSL compute shaders (in `shaders/`).  Built as `peak_vulkan` static library
 | `shaders/coopmat_chain.glsl` | The MulAdd run every coopmat shader runs (`CM_TA`/`CM_TB`/`CM_TC`, `CM_DECLARE`, `CM_MMA_TRIP`, `CM_STORE_ALL`) on one accumulator or four — and why it is shaped that way |
 | `shaders/dp4a_chain.glsl` | The dot-product chains every `compute_int8_dp_v*` shader runs (`DP_DECL_X`, `DP_CHAIN_DECL`, `DP_CHAIN_16`, `DP_CHAIN_SUM`): an accumulator pair or a four-accumulator cycle — and the rules both keep |
 | `cmake/CompileShaders.cmake` | `compile_shaders()` — glslc → SPIR-V → embedded C++ arrays |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`vulkanIdentify()` in
+`vk_peak.cpp`, read by `include/common/hardware_link.h`): `deviceUUID` and,
+on Windows, `deviceLUID` (`VkPhysicalDeviceIDProperties`), its PCI address
+where `VK_EXT_pci_bus_info` gives it, and as facts its vendor and device ids,
+integrated or discrete, the compute units the vendor's own extension counts
+(SM, CU, core) and a discrete part's device-local heap.  A CPU device
+(llvmpipe, lavapipe) is the host CPU.  NVIDIA's UUID is CUDA's; MoltenVK's
+matches nothing, so on Apple silicon the device joins Metal's GPU by the
+sole rule.  The helper takes only the `VkPhysicalDevice`, so `enumerate()`
+can call it too.
 
 ## Test documentation
 

@@ -1,0 +1,1029 @@
+{
+  "schema": "xpupeak/run",
+  "format_version": 4,
+  "format_minor": 0,
+  "run_id": "2b9d4c71-8e30-4f15-b6a2-91c7e05d3f48",
+  "generator": {
+    "name": "XpuPeak",
+    "version": "4.0.0-40-gabc1234"
+  },
+  "generated_at": "2026-11-09T16:41:07Z",
+  "duration_s": 412.9,
+  "build": {
+    "backends": [
+      {
+        "name": "CUDA",
+        "kind": "gpu"
+      },
+      {
+        "name": "Vulkan",
+        "kind": "gpu",
+        "portable": true
+      },
+      {
+        "name": "OpenCL",
+        "kind": "gpu",
+        "portable": true
+      },
+      {
+        "name": "CPU",
+        "kind": "cpu"
+      },
+      {
+        "name": "LiteRT",
+        "kind": "ai"
+      },
+      {
+        "name": "ONNX",
+        "kind": "ai",
+        "portable": true
+      }
+    ],
+    "config": "Release"
+  },
+  "invocation": {
+    "argv": [
+      "xpupeak",
+      "-o",
+      "run.xpupeak.json"
+    ],
+    "target_time_us": 500000,
+    "target_time_us_cpu": 2000000,
+    "target_time_us_ml_gpu": 1000000,
+    "warmup": 2,
+    "categories": [
+      "compute",
+      "crypto",
+      "string",
+      "bandwidth",
+      "latency",
+      "ai"
+    ],
+    "standard": true
+  },
+  "system": {
+    "form_factor": "desktop",
+    "form_factor_from": "chassis",
+    "manufacturer": "ASUSTeK COMPUTER INC.",
+    "board": "Pro WS WRX80E-SAGE SE WIFI",
+    "soc": "AMD Ryzen Threadripper PRO 3955WX 16-Cores",
+    "os": {
+      "name": "Linux",
+      "version": "24.04",
+      "kernel": "6.14.0-35-generic",
+      "distribution": "Ubuntu 24.04.3 LTS"
+    },
+    "arch": "x86_64",
+    "memory_bytes": 137438953472
+  },
+  "conditions": {
+    "power_source": "ac",
+    "cpu_governor": "schedutil",
+    "power_profile": "performance"
+  },
+  "annotations": {
+    "gpu_board": "ASUS Dual",
+    "system.name": "Threadripper workstation"
+  },
+  "packages": [
+    {
+      "id": "pkg0",
+      "kind": "cpu",
+      "vendor": "amd",
+      "name": "AMD Ryzen Threadripper PRO 3955WX 16-Cores"
+    },
+    {
+      "id": "pkg1",
+      "kind": "discrete",
+      "vendor": "nvidia",
+      "name": "NVIDIA GeForce RTX 5060"
+    }
+  ],
+  "processors": [
+    {
+      "id": "cpu0",
+      "kind": "cpu",
+      "package": "pkg0",
+      "vendor": "amd",
+      "vendor_name": "AuthenticAMD",
+      "name": "AMD Ryzen Threadripper PRO 3955WX 16-Cores",
+      "isa": "x86_64",
+      "cores": 16,
+      "threads": 32,
+      "sockets": 1,
+      "cpuid": {"vendor": "AuthenticAMD", "family": 23, "model": 49, "stepping": 0},
+      "clusters": [
+        {
+          "cores": 16,
+          "threads_per_core": 2,
+          "max_mhz": 4300,
+          "microarch": "Zen 2",
+          "caches": [
+            {
+              "level": "l1d",
+              "size_bytes": 32768,
+              "instances": 16,
+              "line_bytes": 64
+            },
+            {
+              "level": "l2",
+              "size_bytes": 524288,
+              "instances": 16,
+              "line_bytes": 64
+            }
+          ]
+        }
+      ],
+      "caches": [
+        {
+          "level": "l3",
+          "size_bytes": 16777216,
+          "instances": 4,
+          "line_bytes": 64
+        }
+      ],
+      "features": [
+        "sse2",
+        "ssse3",
+        "sse4_2",
+        "avx",
+        "avx2",
+        "fma",
+        "aes",
+        "sha",
+        "crc32"
+      ]
+    },
+    {
+      "id": "gpu0",
+      "kind": "gpu",
+      "package": "pkg1",
+      "vendor": "nvidia",
+      "vendor_name": "NVIDIA",
+      "name": "NVIDIA GeForce RTX 5060",
+      "vendor_id": "10de",
+      "device_id": "2d05",
+      "arch": "sm_120",
+      "integrated": false,
+      "compute_units": 30,
+      "compute_unit": "SM",
+      "clock_mhz": 2497,
+      "memory_bytes": 8150581248
+    }
+  ],
+  "devices": [
+    {
+      "backend": "CUDA",
+      "platform": "CUDA",
+      "name": "NVIDIA GeForce RTX 5060",
+      "driver": "580.95.05",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "uuid",
+      "facts": {
+        "vendor_id": "10de",
+        "device_id": "2d05",
+        "arch": "sm_120",
+        "integrated": false,
+        "compute_units": 30,
+        "compute_unit": "SM",
+        "clock_mhz": 2497,
+        "memory_bytes": 8150581248
+      },
+      "evidence": {"pci_bus": "7e05b9d1c2a84f36", "uuid": "c3a91f0e5b7d2864"},
+      "properties": [
+        {
+          "key": "Compute capability",
+          "value": "12.0"
+        },
+        {
+          "key": "VRAM",
+          "value": "7773 MB"
+        }
+      ],
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float",
+              "dims": {"width": 1},
+              "value": 1.89e+13
+            },
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.92e+13
+            }
+          ]
+        },
+        {
+          "id": "half_precision_compute",
+          "title": "Half-precision compute",
+          "benchmark": "half-precision-compute",
+          "dims": {"dtype": "fp16"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp16 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "half2",
+              "dims": {"width": 2},
+              "value": 1.93e+13
+            }
+          ]
+        },
+        {
+          "id": "wmma",
+          "title": "Tensor cores (WMMA / mma.sync)",
+          "benchmark": "matrix-compute",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Matrix-multiply speed through the tensor cores.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 4.77e+13
+            },
+            {
+              "id": "fp16 f16acc",
+              "dims": {"dtype": "fp16", "acc": "fp16"},
+              "value": 9.5e+13
+            },
+            {
+              "id": "bf16",
+              "dims": {"dtype": "bf16"},
+              "value": 4.77e+13
+            },
+            {
+              "id": "tf32",
+              "dims": {"dtype": "tf32"},
+              "value": 2.38e+13
+            },
+            {
+              "id": "fp8_e4m3",
+              "dims": {"dtype": "fp8_e4m3"},
+              "value": 1.58e+14
+            },
+            {
+              "id": "fp8_e4m3 2:4",
+              "dims": {"dtype": "fp8_e4m3", "sparsity": "2:4"},
+              "value": 3.16e+14
+            },
+            {
+              "id": "nvfp4",
+              "dims": {"dtype": "nvfp4"},
+              "value": 3.165e+14
+            },
+            {
+              "id": "nvfp4 2:4",
+              "dims": {"dtype": "nvfp4", "sparsity": "2:4"},
+              "value": 6.33e+14
+            },
+            {
+              "id": "int8",
+              "dims": {"dtype": "int8"},
+              "value": 1.58e+14,
+              "unit": "OPS",
+              "quantity": "ops"
+            },
+            {
+              "id": "int8 2:4",
+              "dims": {"dtype": "int8", "sparsity": "2:4"},
+              "value": 3.16e+14,
+              "unit": "OPS",
+              "quantity": "ops"
+            },
+            {
+              "id": "int4",
+              "dims": {"dtype": "int4"},
+              "status": "unsupported",
+              "reason": "sm_120 has no int4 mma",
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        },
+        {
+          "id": "cublas_gemm",
+          "title": "cuBLASLt GEMM peak",
+          "benchmark": "gemm",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "cuBLASLt's tuned matrix multiply.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32", "impl": "cublaslt"},
+              "value": 1.71e+13
+            },
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16", "impl": "cublaslt"},
+              "value": 4.41e+13
+            },
+            {
+              "id": "int8",
+              "dims": {"dtype": "int8", "impl": "cublaslt"},
+              "value": 1.46e+14,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float",
+              "dims": {"width": 1},
+              "value": 4.08e+11
+            },
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 4.21e+11
+            }
+          ]
+        },
+        {
+          "id": "transfer_bandwidth",
+          "title": "Transfer bandwidth",
+          "benchmark": "transfer-bandwidth",
+          "category": "bandwidth",
+          "shape": "heterogeneous",
+          "axis": "direction",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Host to device and back over PCIe.",
+          "metrics": [
+            {
+              "id": "h2d",
+              "dims": {"direction": "h2d", "memory": "pinned"},
+              "value": 2.62e+10
+            },
+            {
+              "id": "d2h",
+              "dims": {"direction": "d2h", "memory": "pinned"},
+              "value": 2.71e+10
+            }
+          ]
+        },
+        {
+          "id": "kernel_launch_latency",
+          "title": "Kernel launch latency",
+          "benchmark": "kernel-launch-latency",
+          "category": "latency",
+          "shape": "heterogeneous",
+          "direction": "lower_is_better",
+          "quantity": "seconds",
+          "unit": "s",
+          "description": "The fixed cost of handing the GPU one kernel.",
+          "metrics": [
+            {
+              "id": "dispatch",
+              "dims": {"op": "dispatch"},
+              "value": 2.4e-06
+            },
+            {
+              "id": "roundtrip",
+              "dims": {"op": "roundtrip"},
+              "value": 9.8e-06
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "Vulkan",
+      "platform": "Vulkan",
+      "name": "NVIDIA GeForce RTX 5060",
+      "driver": "580.95.5",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "uuid",
+      "facts": {
+        "vendor_id": "10de",
+        "device_id": "2d05",
+        "integrated": false
+      },
+      "evidence": {"pci_bus": "7e05b9d1c2a84f36", "uuid": "c3a91f0e5b7d2864"},
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.9e+13
+            }
+          ]
+        },
+        {
+          "id": "coopmat",
+          "title": "Cooperative-matrix peak",
+          "benchmark": "matrix-compute",
+          "category": "compute",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Matrix-multiply speed through VK_KHR_cooperative_matrix.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16", "form": "sg32"},
+              "value": 4.71e+13
+            },
+            {
+              "id": "fp16 f16acc",
+              "dims": {"dtype": "fp16", "acc": "fp16", "form": "sg32"},
+              "value": 9.38e+13
+            },
+            {
+              "id": "int8",
+              "dims": {"dtype": "int8", "form": "sg32"},
+              "value": 1.55e+14,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 4.13e+11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "Vulkan",
+      "platform": "Vulkan",
+      "name": "llvmpipe (LLVM 19.1.1, 256 bits)",
+      "driver": "Mesa 25.0.7",
+      "type": "cpu",
+      "device_index": 1,
+      "processor": "cpu0",
+      "link": "host",
+      "evidence": {"host": true},
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float8",
+              "dims": {"width": 8},
+              "value": 4.6e+11
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 5.2e+10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "OpenCL",
+      "platform": "NVIDIA CUDA",
+      "name": "NVIDIA GeForce RTX 5060",
+      "driver": "580.95.05",
+      "type": "gpu",
+      "platform_index": 0,
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "uuid",
+      "evidence": {"uuid": "c3a91f0e5b7d2864"},
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 1.88e+13
+            }
+          ]
+        },
+        {
+          "id": "integer_compute_int8_dp",
+          "title": "int8 dot product",
+          "benchmark": "int8-dot-product-compute",
+          "dims": {"dtype": "int8"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "ops",
+          "unit": "OPS",
+          "description": "Packed int8 dot products (dp4a).",
+          "metrics": [
+            {
+              "id": "int8_dp4",
+              "dims": {"width": 4},
+              "value": 7.4e+13
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float4",
+              "dims": {"width": 4},
+              "value": 4.02e+11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "OpenCL",
+      "platform": "Portable Computing Language",
+      "name": "pthread-AMD Ryzen Threadripper PRO 3955WX 16-Cores",
+      "driver": "PoCL 6.0",
+      "type": "cpu",
+      "platform_index": 1,
+      "device_index": 1,
+      "processor": "cpu0",
+      "link": "host",
+      "evidence": {"host": true},
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32"},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 multiply-add throughput.",
+          "metrics": [
+            {
+              "id": "float16",
+              "dims": {"width": 16},
+              "value": 1.21e+12
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Global memory bandwidth",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "homogeneous",
+          "axis": "vector width",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "Device-memory read bandwidth.",
+          "metrics": [
+            {
+              "id": "float8",
+              "dims": {"width": 8},
+              "value": 8.9e+10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "CPU",
+      "platform": "CPU",
+      "name": "AMD Ryzen Threadripper PRO 3955WX 16-Cores",
+      "type": "cpu",
+      "device_index": 0,
+      "processor": "cpu0",
+      "link": "host",
+      "facts": {
+        "isa": "x86_64",
+        "cores": 16,
+        "threads": 32,
+        "sockets": 1
+      },
+      "evidence": {"host": true},
+      "properties": [
+        {
+          "key": "Cores",
+          "value": "16 (32 threads)"
+        },
+        {
+          "key": "RAM",
+          "value": "128.0 GB"
+        }
+      ],
+      "tests": [
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "variant": "AVX2+FMA",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32", "isa": "avx2", "simd_bits": 256},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 FMA throughput.",
+          "metrics": [
+            {
+              "id": "float ST",
+              "dims": {"scope": "core"},
+              "value": 1.37e+11
+            },
+            {
+              "id": "float MT",
+              "value": 2.05e+12
+            }
+          ]
+        },
+        {
+          "id": "single_precision_compute",
+          "title": "Single-precision compute",
+          "variant": "SSE2",
+          "benchmark": "single-precision-compute",
+          "dims": {"dtype": "fp32", "isa": "sse2", "simd_bits": 128},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp32 FMA throughput.",
+          "metrics": [
+            {
+              "id": "float ST",
+              "dims": {"scope": "core"},
+              "value": 3.4e+10
+            },
+            {
+              "id": "float MT",
+              "value": 5.2e+11
+            }
+          ]
+        },
+        {
+          "id": "double_precision_compute",
+          "title": "Double-precision compute",
+          "variant": "AVX2+FMA",
+          "benchmark": "double-precision-compute",
+          "dims": {"dtype": "fp64", "isa": "avx2", "simd_bits": 256},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "Peak fp64 FMA throughput.",
+          "metrics": [
+            {
+              "id": "double MT",
+              "value": 1.02e+12
+            }
+          ]
+        },
+        {
+          "id": "integer_dot_product",
+          "title": "Integer dot product",
+          "variant": "AVX2",
+          "benchmark": "int8-dot-product-compute",
+          "dims": {"isa": "avx2", "simd_bits": 256},
+          "category": "compute",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "ops",
+          "unit": "OPS",
+          "description": "Packed integer dot products (VPMADDUBSW / VPMADDWD).",
+          "metrics": [
+            {
+              "id": "int8_dp ST",
+              "dims": {"dtype": "int8", "scope": "core"},
+              "value": 2.6e+11
+            },
+            {
+              "id": "int8_dp MT",
+              "dims": {"dtype": "int8"},
+              "value": 3.9e+12
+            },
+            {
+              "id": "int16_dp MT",
+              "benchmark": "int16-dot-product-compute",
+              "dims": {"dtype": "int16"},
+              "value": 1.95e+12
+            }
+          ]
+        },
+        {
+          "id": "global_memory_bandwidth",
+          "title": "Memory bandwidth (STREAM)",
+          "benchmark": "global-memory-bandwidth",
+          "category": "bandwidth",
+          "shape": "heterogeneous",
+          "axis": "operation",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "DRAM bandwidth from every core.",
+          "metrics": [
+            {
+              "id": "read",
+              "dims": {"op": "read"},
+              "value": 1.13e+11
+            },
+            {
+              "id": "copy",
+              "dims": {"op": "copy"},
+              "value": 9.4e+10
+            },
+            {
+              "id": "triad",
+              "dims": {"op": "triad"},
+              "value": 1.06e+11
+            }
+          ]
+        },
+        {
+          "id": "memory_latency",
+          "title": "Memory latency (pointer-chase)",
+          "benchmark": "memory-latency",
+          "category": "latency",
+          "shape": "heterogeneous",
+          "axis": "memory level",
+          "direction": "lower_is_better",
+          "quantity": "seconds",
+          "unit": "s",
+          "description": "What the wait for one memory read costs.",
+          "metrics": [
+            {
+              "id": "L1",
+              "dims": {"level": "l1"},
+              "value": 1e-09
+            },
+            {
+              "id": "L3",
+              "dims": {"level": "l3"},
+              "value": 1.1e-08
+            },
+            {
+              "id": "DRAM",
+              "dims": {"level": "dram"},
+              "value": 9.1e-08
+            }
+          ]
+        },
+        {
+          "id": "sha256_hash",
+          "title": "SHA-256",
+          "variant": "SHA-NI",
+          "benchmark": "sha256",
+          "category": "crypto",
+          "shape": "homogeneous",
+          "axis": "threads",
+          "direction": "higher_is_better",
+          "quantity": "bytes_per_second",
+          "unit": "B/s",
+          "description": "SHA-256 compression through the SHA extensions.",
+          "metrics": [
+            {
+              "id": "sha256 MT",
+              "value": 3.1e+10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "LiteRT",
+      "platform": "LiteRT 2.3.0",
+      "name": "WebGPU (NVIDIA GeForce RTX 5060)",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "sole",
+      "runtime": {"accelerator": "gpu", "version": "2.3.0"},
+      "evidence": {"default_gpu": true},
+      "tests": [
+        {
+          "id": "litert_gemm",
+          "title": "LiteRT matmul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A fully-connected layer through LiteRT.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 2.9e+13
+            },
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 1.2e+13
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "ONNX",
+      "platform": "ONNX Runtime 1.31.0",
+      "name": "NVIDIA CUDA (NVIDIA GeForce RTX 5060)",
+      "type": "gpu",
+      "device_index": 0,
+      "processor": "gpu0",
+      "link": "pci_bus",
+      "runtime": {"provider": "CUDAExecutionProvider", "version": "1.31.0"},
+      "evidence": {"pci_bus": "7e05b9d1c2a84f36"},
+      "tests": [
+        {
+          "id": "onnx_gemm",
+          "title": "ONNX MatMul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A MatMul graph through ONNX Runtime.",
+          "metrics": [
+            {
+              "id": "fp16",
+              "dims": {"dtype": "fp16"},
+              "value": 4.2e+13
+            },
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 1.65e+13
+            },
+            {
+              "id": "int8_qdq",
+              "dims": {"dtype": "int8", "quant": "qdq"},
+              "value": 1.21e+14,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "backend": "ONNX",
+      "platform": "ONNX Runtime 1.31.0",
+      "name": "CPU",
+      "type": "cpu",
+      "device_index": 1,
+      "processor": "cpu0",
+      "link": "host",
+      "runtime": {"provider": "CPUExecutionProvider", "version": "1.31.0"},
+      "evidence": {"host": true},
+      "tests": [
+        {
+          "id": "onnx_gemm",
+          "title": "ONNX MatMul peak",
+          "benchmark": "gemm",
+          "category": "ai",
+          "shape": "heterogeneous",
+          "axis": "data type",
+          "direction": "higher_is_better",
+          "quantity": "flops",
+          "unit": "FLOPS",
+          "description": "A MatMul graph through ONNX Runtime.",
+          "metrics": [
+            {
+              "id": "fp32",
+              "dims": {"dtype": "fp32"},
+              "value": 1.62e+12
+            },
+            {
+              "id": "int8_qdq",
+              "dims": {"dtype": "int8", "quant": "qdq"},
+              "value": 4.4e+12,
+              "unit": "OPS",
+              "quantity": "ops"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "log": [
+    {"elapsed_s": 0.22, "level": "info", "message": "Backend: CUDA"},
+    {"elapsed_s": 0.35, "level": "info", "backend": "CUDA", "device": "NVIDIA GeForce RTX 5060", "device_index": 0, "message": "Device 0: NVIDIA GeForce RTX 5060"}
+  ]
+}

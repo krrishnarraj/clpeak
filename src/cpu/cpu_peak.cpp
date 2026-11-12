@@ -329,6 +329,10 @@ int CpuPeak::runAll()
   probeCacheSizes(info, *pool);
   if (xpupeak::verboseEnabled())
   {
+    // What the OS says of the topology, and the clusters the facts draw
+    // from it, so a file's facts can be checked against both.
+    for (const std::string &line : info.topologyLines)
+      XPUPEAK_VLOG("[cpu] topology: %s\n", line.c_str());
     std::string order;
     for (const cpu_core_t &c : info.cores)
       order += " cpu" + std::to_string(c.id);
@@ -389,8 +393,16 @@ int CpuPeak::runAll()
   if (info.totalMemBytes)
     props.push_back({"RAM", fmtBytes(info.totalMemBytes)});
 
-  auto deviceScope = backendScope.beginDevice({
-    info.name, "", "", props, -1, 0, DeviceType::Cpu});
+  // The host CPU, and its facts: the CPU processor takes its facts from this
+  // device alone (docs/format-v4.md, Hardware).
+  // Its vendor's own string -- CPUID's, the MIDR implementer's name, Apple's
+  // -- is the one an Apple CPU, with neither CPUID nor a MIDR to read, is
+  // known by.
+  logger::DeviceSpec spec{info.name, "", "", props, -1, 0, DeviceType::Cpu};
+  spec.identity.host    = true;
+  spec.facts.cpu        = info.facts;
+  spec.facts.vendorName = info.vendor;
+  auto deviceScope = backendScope.beginDevice(spec);
   currentDeviceScope = &deviceScope;
 
   // The header counts the usable CPUs; the run log names them.

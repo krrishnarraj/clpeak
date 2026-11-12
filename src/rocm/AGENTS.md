@@ -30,7 +30,7 @@ ROCm headers. Built as `peak_rocm` static library.
 
 | File | Purpose |
 |------|---------|
-| `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()` |
+| `rocm_peak.cpp` | `RocmPeak` class: ctor, `initRuntime()`, `runKernel()`, `runAll()`, `enumerate()`; `rocmIdentify()`, who each device is (*Identity*) |
 | `rocm_device.cpp` | `RocmDevice` class: `init()`, `cleanup()`, `getKernel()` (code-object `hipModuleLoadData` + module caching; reads the bundle header to tell a GPU the build has no code for (Error) from one a kernel's arch group leaves out (Unsupported)) |
 | `compute_kernel.cpp` | `RocmPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -49,6 +49,17 @@ ROCm headers. Built as `peak_rocm` static library.
 | `rocm_kernels/` | HIP kernel sources (`.hip`), AOT-compiled to code objects and embedded as byte arrays |
 | `cmake/EmbedRocmKernels.cmake` | `embed_rocm_kernels()` — hipcc `--genco` per gfx group + byte embed; probes (and caches) which archs hipcc and rocWMMA can build |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`rocmIdentify()` in
+`rocm_peak.cpp`, read by `include/common/hardware_link.h`): its PCI address
+from `hipDeviceProp_t`, which is what links an AMD GPU to its Vulkan and
+OpenCL views, its HIP UUID (a scheme of HIP's own; the runtime's `GPU-XX`
+placeholder for a card with no unique id is refused, since every such card
+would share it), and as facts its vendor (AMD), `gfx` arch, CU count, clock,
+whether it is an APU and, if not, its memory.  `enumerate()` already holds
+the properties it takes.
 
 ## Test documentation
 

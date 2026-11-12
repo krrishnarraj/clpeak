@@ -116,10 +116,20 @@ class Units {
   const Units({
     required this.symbol,
     required this.quantity,
+    this.quantityName = '',
   });
 
   final String symbol;
   final Quantity quantity;
+
+  /// The quantity as the file spells it, a newer build's included: what a
+  /// measure key carries, where [quantity] would fold every word this build
+  /// does not know into `unknown`.  Empty when nothing was written.
+  final String quantityName;
+
+  /// [quantityName], or the tag of [quantity] for units built in code.
+  String get quantityTag =>
+      quantityName.isNotEmpty ? quantityName : quantity.tag;
 
   static const empty = Units(symbol: '', quantity: Quantity.unknown);
 
@@ -128,7 +138,20 @@ class Units {
   factory Units.fromJson(Map<String, dynamic> m) => Units(
         symbol: m['unit'] as String? ?? '',
         quantity: Quantity.fromTag(m['quantity'] as String? ?? ''),
+        quantityName: m['quantity'] as String? ?? '',
       );
+}
+
+/// A `dims` object (docs/format-v4.md): a reading's coordinates, each a
+/// string or a whole number.  A value of another kind, which only a newer
+/// build or a hand edit would write, is kept as it reads rather than
+/// dropped: it still says the reading is not like one without it.
+Map<String, Object> dimsFromJson(Object? json) {
+  if (json is! Map) return const {};
+  return {
+    for (final e in json.entries)
+      if (e.key is String && e.value != null) e.key as String: e.value as Object,
+  };
 }
 
 /// SI prefixes, smallest first.  A unit symbol is `<prefix><base>`, so
@@ -209,6 +232,8 @@ class MetricResult {
     this.description = '',
     this.units,
     this.direction,
+    this.benchmark = '',
+    this.dims = const {},
   });
 
   /// Stable slug within the test, e.g. "fp8_e4m3".
@@ -216,6 +241,14 @@ class MetricResult {
 
   /// Display form; empty means the id is the label.
   final String label;
+
+  /// The reading's family, set only when it is not its test's -- the CPU's
+  /// `integer_dot_product` holds int8 and int16 rows of two families.
+  final String benchmark;
+
+  /// The reading's coordinates, over its test's ([TestHeader.dims]), which
+  /// they add to and win over.
+  final Map<String, Object> dims;
 
   final ResultStatus status;
   final double value; // meaningful only when status == ok
@@ -254,6 +287,8 @@ class MetricResult {
         direction: m.containsKey('direction')
             ? Direction.fromString(m['direction'] as String? ?? '')
             : null,
+        benchmark: m['benchmark'] as String? ?? '',
+        dims: dimsFromJson(m['dims']),
       );
 }
 
@@ -270,10 +305,25 @@ class TestHeader {
     this.shape = TestShape.heterogeneous,
     this.direction = Direction.higherIsBetter,
     this.units = Units.empty,
+    this.benchmark = '',
+    this.revision = 1,
+    this.dims = const {},
   });
 
   final String id;
   final String title;
+
+  /// The family the test measures, by its flag name (`gemm`,
+  /// `matrix-compute`): what is measured, the same for every backend.
+  final String benchmark;
+
+  /// The test's methodology version, 1 where the file says none.  Readings
+  /// of two revisions of one test are not compared.
+  final int revision;
+
+  /// The coordinates every reading of the test shares: a vector test's data
+  /// type, a CPU test's ISA.
+  final Map<String, Object> dims;
 
   /// Runtime qualifier that is not part of the test's identity — the CPU
   /// backend's detected ISA, a GPU arch.  Two variants of one test are two
@@ -304,6 +354,9 @@ class TestHeader {
         shape: TestShape.fromString(m['shape'] as String? ?? ''),
         direction: Direction.fromString(m['direction'] as String? ?? ''),
         units: Units.fromJson(m),
+        benchmark: m['benchmark'] as String? ?? '',
+        revision: _revision(m['revision']),
+        dims: dimsFromJson(m['dims']),
       );
 
   /// From a `test_begin` / `test_skipped` event, which names the test `test`
@@ -318,5 +371,12 @@ class TestHeader {
         shape: TestShape.fromString(m['shape'] as String? ?? ''),
         direction: Direction.fromString(m['direction'] as String? ?? ''),
         units: Units.fromJson(m),
+        benchmark: m['benchmark'] as String? ?? '',
+        revision: _revision(m['revision']),
+        dims: dimsFromJson(m['dims']),
       );
+
+  /// Absent means 1, the first.
+  static int _revision(Object? v) =>
+      v is num && v.toInt() > 1 ? v.toInt() : 1;
 }

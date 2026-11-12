@@ -108,6 +108,16 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Native bindings / event decoding? → `lib/src/ffi/` (`xpupeak_bindings.dart`,
   `xpupeak_events.dart`; threading contract in `xpupeak_runner.dart` —
   `NativeCallable.listener` + `Isolate.run`, `done` event = drain barrier)
+- A phone run's power state in `conditions`? → `HostFacts`
+  (`lib/src/services/host_facts.dart`), with its platform halves in
+  `MainActivity.kt` and `ios/Runner/AppDelegate.swift` (channel
+  `kr.XpuPeak/system`): Android's power source (the sticky
+  `ACTION_BATTERY_CHANGED`) and battery saver, iOS's power source
+  (`UIDevice.batteryState`; the native side reads Low Power Mode there).
+  `BenchmarkService` reads them just before every launch and hands them to
+  `xpupeak_set_host_facts` (`XpuPeakEngine.setHostFacts`), leaving out what
+  the platform could not answer.  Desktop never calls it: the engine
+  process reads these itself, and the setter is not forwarded to it
 - Where do the catalog and runs execute? → `XpuPeakEngine`
   (`lib/src/ffi/xpupeak_engine.dart`).  Desktop: a `xpupeak-engine` process
   per catalog and per run (`ChildProcessEngine` / `ChildRun`; one JSON event
@@ -184,11 +194,48 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   screen -- and `main()` clears a stale one at launch.  Its status-bar icon
   is generated with the rest (`tools/icons/generate_icons.py`)
 - Run grouping / formatting? → `lib/src/model/run_document.dart`; the run's
-  `system` (OS, architecture, model) is `RunMeta.system`, its OS line
-  `osName` / `osVersion` / `arch`
-- Headline measures (a processor's peaks)? → `assets/measures.json`, the
-  starter catalog, which nothing reads yet; its format is
-  `docs/format-v4.md` § The headline catalog
+  `system` (OS, architecture, model) is `RunMeta.system`, typed as
+  `RunMeta.systemInfo`, its name as a person reads it `RunMeta.systemName`
+  (the `system.name` annotation, else the OS's name, the model id, …), its
+  OS line `osName` / `osVersion` / `arch`.  The hardware is
+  `RunDocument.packages` / `.processors` and each `DeviceRun`'s `processor`,
+  `link`, `facts`, `evidence`, `runtime` (`lib/src/model/hardware.dart`);
+  each test's `benchmark` (family), `revision` and `dims`, and each
+  reading's `dims` and family override, are on `TestHeader` /
+  `MetricResult`.  The vocabulary's mirror is `lib/src/model/vocabulary.dart`
+  -- for reasoning only: the model keeps every word as the file spells it,
+  so a newer build's words show as written
+- A processor's peaks, best of backends, measure keys? → the measure engine,
+  `lib/src/model/measures.dart` (`RunMeasures.of(doc)`: per processor, the
+  best reading of every measure key overall and per backend, with the
+  reading it came from), pure Dart, by the algorithm `docs/format-v4.md`
+  fixes -- a C++ engine in the CLI must give the same answers.  What the
+  results summary shows is the headline catalog, `assets/measures.json`
+  (`HeadlineCatalog`, `lib/src/model/headlines.dart`; format in
+  `docs/format-v4.md` § The headline catalog): peak floating-point and
+  integer compute, each with the data type it was reached at, and peak
+  memory bandwidth -- raw readings, never a derived score.  The engine's
+  answers are checked against hand-worked ones on the fixtures in
+  `test/fixtures/` (`test/measures_test.dart`)
+- What the results screen shows? → `ResultsBody` is tabs: for a finished
+  run (one read from a file: `document.meta` set) **Summary** first --
+  `SystemPanel` and a `FlagshipCard` per processor
+  (`lib/src/ui/results/summary_view.dart`), each number tappable for every
+  backend's best -- then a tab per backend with its device view (device
+  chips where the backend reached several).  A live run has only the
+  backend tabs, following the device in flight; the just-finished screen
+  shows `BenchmarkService.savedDocument`, the file read back, since only it
+  holds the hardware.  A file whose devices nothing linked is summarised
+  device by device, and says so
+- A run's details (`annotations`)? → History's Details action
+  (`lib/src/ui/history/details_editor.dart`): the recommended keys and any
+  others the file holds, written into the file's own text by
+  `withAnnotations()` (`lib/src/model/document_edit.dart`), which replaces
+  only that member and keeps every other byte and every key it does not
+  know; a cancelled run's checkpoint gets them too, since `--resume` starts
+  from it.  The index row is rebuilt from the file, so the list shows the
+  name.  The list tile shows the system's name and form factor, and its
+  processors where the file has them (`RunSummary`)
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
   explanation per dialog: `_InfoGlyph` → `_showInfoDialog()` in
@@ -349,7 +396,7 @@ the platform dirs:
   `kotlin/kr/clpeak/`; only what the user sees says XpuPeak
 - `android/app/src/main/AndroidManifest.xml` — `uses-native-library
   libOpenCL.so`, POST_NOTIFICATIONS
-- `ios/Runner/AppDelegate.swift` — the `RunNotice` channel
+- `ios/Runner/AppDelegate.swift` — the `RunNotice` and `HostFacts` channels
 - every platform's app icon — all generated by
   `tools/icons/generate_icons.py` (needs Pillow) from the XpuPeak
   wordmark in `tools/icons/xpupeak_master_1024.png` (both repo-root `tools/`,

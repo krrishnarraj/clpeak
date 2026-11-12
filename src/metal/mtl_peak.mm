@@ -2,6 +2,30 @@
 
 #include "mtl_internal.h"
 
+#include <common/hardware_link.h>
+
+// Who the device is -- its registry ID, which Core ML's GPU device and
+// Apple's OpenCL report for the same GPU -- and what Metal says of it
+// (include/common/hardware_link.h).  A listing can ask it too.
+static void metalIdentify(id<MTLDevice> device, const mtl_device_info_t &info,
+                          logger::Identity &ident, HardwareFacts &facts)
+{
+    ident.registryId = xpupeak::registryText(device.registryID);
+    if (info.appleFamily > 0)
+    {
+        // Apple's own GPU, under Apple's PCI vendor id: MoltenVK reports the
+        // same GPU with it.
+        facts.vendorId = xpupeak::pciIdText(0x106b);
+        facts.arch     = "Apple" + std::to_string(info.appleFamily);
+    }
+    if (info.gpuCoreCount > 0)
+    {
+        facts.computeUnits = info.gpuCoreCount;
+        facts.computeUnit  = "core";
+    }
+    facts.integrated = device.hasUnifiedMemory ? 1 : 0;
+}
+
 // ---------------------------------------------------------------------------
 // MetalPeak
 // ---------------------------------------------------------------------------
@@ -63,6 +87,9 @@ int MetalPeak::runAll()
         std::stringstream familySS;
         familySS << "Apple" << dev.info.appleFamily;
 
+        logger::Identity identity;
+        HardwareFacts facts;
+        metalIdentify(impl->allDevices[d], dev.info, identity, facts);
         auto deviceScope = backendScope.beginDevice({
             dev.info.deviceName,
             "",
@@ -76,7 +103,9 @@ int MetalPeak::runAll()
              },
             -1,
             static_cast<int>(d),
-            dev.info.deviceType
+            dev.info.deviceType,
+            identity,
+            facts,
         });
         currentDeviceScope = &deviceScope;
 

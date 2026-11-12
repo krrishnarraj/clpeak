@@ -10,10 +10,11 @@ using xpupeak_cpu::kernels;
 
 int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 {
-  emitVariants(*this, {"integer_compute", "Integer compute", "ops",
-                       Category::Unknown,
-                       "Peak speed on 32-bit whole numbers -- the arithmetic behind "
-                       "array indexing, hashing, compression and address math."},
+  emitVariants(*this, withDims({"integer_compute", "Integer compute", "ops",
+                                Category::Unknown,
+                                "Peak speed on 32-bit whole numbers -- the arithmetic behind "
+                                "array indexing, hashing, compression and address math."},
+                               {{Dim::Dtype, DType::Int32}}),
                "int", kernelMenu().int32, "no SIMD int32 path for this CPU", cfg);
   return 0;
 }
@@ -30,6 +31,11 @@ int CpuPeak::runComputeInt32(benchmark_config_t &cfg)
 // x86-only (NEON and SVE have no 16-bit dot), so on ARM the family is the
 // int8 row alone rather than a permanently unsupported int16 row nobody can
 // fix.
+//
+// The two widths share the test, so each row names its data type.  x86's
+// VPDPBUSD multiplies unsigned by signed bytes where SDOT and VPDPBSSD take
+// two signed ones; all are `int8`, since the signedness changes nothing the
+// rate is compared on.
 namespace {
 
 std::vector<FamilyRow> int8DotRows()
@@ -39,7 +45,8 @@ std::vector<FamilyRow> int8DotRows()
         "Four 8-bit products summed in one instruction -- the workhorse of "
         "quantized (compressed) neural networks running on the CPU.",
         "no int8 dot instruction on this CPU",
-        &xpupeak_cpu::kernelMenu().int8dp },
+        &xpupeak_cpu::kernelMenu().int8dp, nullptr,
+        {{Dim::Dtype, DType::Int8}} },
   };
 }
 
@@ -54,7 +61,8 @@ std::vector<FamilyRow> int16DotRows()
         "Two 16-bit products summed in one instruction -- the wider cousin, "
         "for work where 8 bits loses too much accuracy.",
         "no int16 dot instruction on this CPU",
-        &xpupeak_cpu::kernelMenu().int16dp });
+        &xpupeak_cpu::kernelMenu().int16dp, nullptr,
+        {{Dim::Dtype, DType::Int16}} });
 #endif
   return rows;
 }
@@ -98,11 +106,16 @@ int CpuPeak::runComputeIntDiv(benchmark_config_t &cfg)
                         "narrow scalar unit and usually the slowest instruction on "
                         "the chip.",
                         TestShape::Homogeneous, "threads"};
+  // One scalar kernel on general registers, whatever the TU: its ISA dims
+  // say so, with no variant to tell ISAs apart.
+  spec.dims = {{Dim::Dtype, DType::Uint64}, {Dim::Isa, dim::Isa::Scalar},
+               {Dim::SimdBits, 8 * (int)sizeof(void *)}};
   auto test = currentDeviceScope->beginTest(spec);
   if (v.fn)
     emitCompute(*this, test, "u64", v, cfg);
   else
-    test.skip("u64 ST", ResultStatus::Unsupported, "no integer divide kernel");
+    test.skip("u64 ST", ResultStatus::Unsupported, "no integer divide kernel", "",
+              {{Dim::Scope, dim::Scope::Core}});
   return 0;
 }
 

@@ -32,7 +32,8 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
           "bfloat16 -- the AI-oriented 16-bit format, and the one every matrix "
           "engine supports first.",
           "no CPU bf16 matrix engine (AMX / BFMMLA / SME) on this CPU",
-          &kernelMenu().mat_fp },
+          &kernelMenu().mat_fp, nullptr,
+          {{Dim::Dtype, DType::Bf16}} },
     };
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86) || \
@@ -45,7 +46,8 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
           "Ordinary half precision, which keeps more digits than bf16 over a "
           "narrower range.",
           "no CPU fp16 matrix engine (AMX-FP16 / SME) on this CPU",
-          &kernelMenu().mat_fp16 });
+          &kernelMenu().mat_fp16, nullptr,
+          {{Dim::Dtype, DType::Fp16}} });
 #endif
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
     // fp8 matrix is AMX-only (Diamond Rapids) -- x86 exclusive, so only emit it
@@ -53,9 +55,10 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
     // instruction for this dtype today, so the row would be noise.
     rows.push_back(
         { "fp8",
-          "8-bit floats, the narrowest format the engine multiplies directly.",
+          "8-bit floats, the narrowest format the engine multiplies directly.",  // E4M3 (HF8)
           "no CPU fp8 matrix engine (AMX-FP8) on this CPU",
-          &kernelMenu().mat_fp8 });
+          &kernelMenu().mat_fp8, nullptr,
+          {{Dim::Dtype, DType::Fp8E4m3}} });
 #elif defined(__aarch64__) || defined(_M_ARM64)
     // fp32/fp64 matrix are SME-only (fp32 FMOPA is base SME; fp64 needs
     // FEAT_SME_F64F64, which Apple M4+ has) -- ARM exclusive: no x86 engine
@@ -65,12 +68,14 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
           "Full 32-bit precision, which only Arm's SME engine offers -- x86 "
           "tiles stop at 16 bits.",
           "no CPU fp32 matrix engine (SME) on this CPU",
-          &kernelMenu().mat_fp32 });
+          &kernelMenu().mat_fp32, nullptr,
+          {{Dim::Dtype, DType::Fp32}} });
     rows.push_back(
         { "fp64",
           "64-bit precision, for scientific work rather than AI.",
           "no CPU fp64 matrix engine (SME F64F64) on this CPU",
-          &kernelMenu().mat_fp64 });
+          &kernelMenu().mat_fp64, nullptr,
+          {{Dim::Dtype, DType::Fp64}} });
 #endif
 
   rows.push_back(
@@ -79,7 +84,7 @@ int CpuPeak::runCpuMatrix(benchmark_config_t &cfg)
         "run on -- and the fastest thing the engine does.",
         "no CPU int8 matrix engine (AMX / I8MM / SME) on this CPU",
         &kernelMenu().mat_int8,
-        "ops" });
+        "ops", {{Dim::Dtype, DType::Int8}} });
 
   emitFamily(*this, base, rows, cfg);
   return 0;

@@ -26,7 +26,7 @@ Built as `peak_cuda` static library.
 
 | File | Purpose |
 |------|---------|
-| `cuda_peak.cpp` | `CudaPeak` class: ctor, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()` |
+| `cuda_peak.cpp` | `CudaPeak` class: ctor, `initDriver()`, `runKernel()`, `runAll()`, `enumerate()`; `cudaIdentify()`, who each device is (*Identity*) |
 | `cuda_device.cpp` | `CudaDevice` class: `init()`, `cleanup()`, `getKernel()` (fatbin `cuModuleLoadData` + module caching; returns a `CudaKernel`, whose `status`/`reason` a runner skips with when it did not load: a stub the build never compiled, no code for this sm, or the driver's error) |
 | `compute_kernel.cpp` | `CudaPeak::runComputeKernel()` — shared compute-peak driver: buffer allocation, variant dispatch, used by all `runCompute*` wrappers |
 | `compute_float.cpp` | `runComputeSP`, `runComputeHP`, `runComputeDP`, `runComputeMP`, `runComputeBF16` |
@@ -42,6 +42,17 @@ Built as `peak_cuda` static library.
 | `cmake/EmbedCudaKernels.cmake` | `embed_cuda_kernels()` — nvcc `-fatbin` per arch group + byte embed |
 | `cmake/EmbedBin.cmake` | build-time `-P` script: binary → C++ `Blob` byte array |
 | `cmake/nvccw.bat.in` | Windows nvcc wrapper: strips clang resource dirs from `INCLUDE` so nvcc-spawned `cl.exe` survives the ClangCL build env |
+
+## Identity
+
+Each device reports who it is with its `beginDevice()` (`cudaIdentify()` in
+`cuda_peak.cpp`, read by `include/common/hardware_link.h`): its UUID
+(`cuDeviceGetUuid`), its PCI address (the domain, bus and device
+attributes), on Windows its adapter LUID, and as facts its vendor (NVIDIA),
+`sm_` arch, SM count, clock, whether it is integrated and, if not, its
+memory.  NVIDIA's Vulkan and OpenCL drivers report the same UUID, which is
+what links the three; ONNX Runtime's CUDA plugin links by the PCI address.
+The helper needs only `cuInit`, so `enumerate()` can call it too.
 
 ## Test documentation
 
