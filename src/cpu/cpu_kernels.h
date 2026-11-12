@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <common/vocabulary.h>
+
 // ===========================================================================
 // Runtime ISA dispatch.  The compute / read kernels are compiled once per
 // feature TU (cpu_kernels_tu.cpp built N times with different -m/-arch flags;
@@ -20,7 +22,10 @@ namespace xpupeak_cpu {
 
 // Runtime CPU feature flags (filled by detectFeatures() in cpu_dispatch.cpp).
 struct CpuFeatures {
-  // x86
+  // x86.  sse2 / ssse3 / sse41 gate no TU of their own (the floor is SSE2,
+  // and sse42 implies the other two); they are read for the processor's
+  // `features`.
+  bool sse2 = false, ssse3 = false, sse41 = false;
   bool sse42 = false, avx = false, avx2 = false, fma = false;
   bool avx512f = false, avx512bw = false, avx512vl = false, avx512dq = false;
   bool avx512vnni = false, avx512bf16 = false, avx512fp16 = false;
@@ -130,10 +135,15 @@ const CpuKernelTable &kernels();
 // One compute variant tagged with its canonical ISA label (e.g. "AVX-512").
 // The label lives here, not in ChainVariant, so it can differ per kernel slot
 // for the same TU (a feature TU's int8dp is "AVX-512 VNNI" while its base fp32
-// would be "AVX-512").
+// would be "AVX-512").  Beside it, the two dims the label stands for, authored
+// with it at the menu push (kernelMenu()): the instruction set the kernel is
+// written in -- a feature such as VNNI or DotProd is the processor's, so
+// AVX-VNNI is an `avx2` kernel -- and the width of the registers it works on.
 struct IsaVariant {
   ChainVariant v;
   const char  *isa = "";
+  xpupeak::dim::Isa isaDim = xpupeak::dim::Isa::Scalar;   // the test's `isa`
+  int          simdBits = 0;                                // its `simd_bits`
 };
 
 // A kernel the running CPU has the feature for, but this binary cannot run --

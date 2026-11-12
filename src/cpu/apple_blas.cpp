@@ -36,6 +36,8 @@
 #include <cstring>
 #include <vector>
 
+using xpupeak::Dim; using xpupeak::DType; namespace dim = xpupeak::dim;
+
 namespace {
 
 double nowUs()
@@ -127,7 +129,8 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
          "single-thread row.",
          // Precision and problem size both vary, so no one noun heads the
          // column -- but none of the three readings stands for the others.
-         TestShape::Heterogeneous, "", Direction::FromUnit, engine});
+         TestShape::Heterogeneous, "", Direction::FromUnit, engine,
+         {{Dim::Impl, dim::Impl::Accelerate}}});
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -164,15 +167,25 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
     const char *spNote = "Best 32-bit result over a sweep of matrix sizes; the "
                          "coprocessor is fastest at one particular size.";
     const char *dpNote = "Best 64-bit result over the same size sweep.";
-    if (sp.peakFlops > 0.0) test.emit("sgemm", (float)sp.peakFlops, spNote);
-    else                     test.skip("sgemm", ResultStatus::Error, "sgemm sweep failed", spNote);
+    // Each reading names its data type, and the size it was best at.
+    if (sp.peakFlops > 0.0)
+      test.emit("sgemm", (float)sp.peakFlops, spNote,
+                {{Dim::Dtype, DType::Fp32}, {Dim::ProblemSize, sp.peakN}});
+    else
+      test.skip("sgemm", ResultStatus::Error, "sgemm sweep failed", spNote,
+                {{Dim::Dtype, DType::Fp32}});
     // Large-N sustained row only when the 8k size actually ran (RAM-gated).
     if (sp.largestN >= 8192)
       test.emit("sgemm 8k", (float)sp.largestFlops,
                 "The 32-bit rate on 8192x8192 matrices -- what large, realistic "
-                "problems actually sustain.");
-    if (dp.peakFlops > 0.0) test.emit("dgemm", (float)dp.peakFlops, dpNote);
-    else                     test.skip("dgemm", ResultStatus::Error, "dgemm sweep failed", dpNote);
+                "problems actually sustain.",
+                {{Dim::Dtype, DType::Fp32}, {Dim::ProblemSize, sp.largestN}});
+    if (dp.peakFlops > 0.0)
+      test.emit("dgemm", (float)dp.peakFlops, dpNote,
+                {{Dim::Dtype, DType::Fp64}, {Dim::ProblemSize, dp.peakN}});
+    else
+      test.skip("dgemm", ResultStatus::Error, "dgemm sweep failed", dpNote,
+                {{Dim::Dtype, DType::Fp64}});
   }
 
   // ---- BNNS matmul: fp16 / bf16 (+ int8 unsupported row) ----
@@ -182,7 +195,8 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
          Category::Unknown,
          "Matrix-multiply speed through Apple's BNNS library, the only public "
          "route to reduced-precision (16-bit) matrix maths on Apple Silicon.",
-         TestShape::Heterogeneous, "data type", Direction::FromUnit, engine});
+         TestShape::Heterogeneous, "data type", Direction::FromUnit, engine,
+         {{Dim::Impl, dim::Impl::Bnns}}});
 
     const char *fp16Note = "16-bit float inputs.";
     const char *bf16Note = "bfloat16 inputs, the AI-oriented 16-bit format.  On "
@@ -195,7 +209,7 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
       auto runBnns = [&](BNNSDataType dt, size_t elemBytes, const char *label)
-                         -> double {
+                         -> SweepResult {
         SweepResult r = sweep({512, 1024, 2048, 4096}, elemBytes,
                               info.totalMemBytes, label, [&](uint64_t n) {
           std::vector<char> a(n * n * elemBytes, 0), b(n * n * elemBytes, 0),
@@ -222,31 +236,41 @@ int CpuPeak::runAppleBlas(benchmark_config_t &cfg)
             BNNSMatMul(false, false, 1.0f, &da, &db, &dc, wkp, nullptr);
           });
         });
-        return r.peakFlops;
+        return r;
       };
 
-      double fp16 = runBnns(BNNSDataTypeFloat16, 2, "bnns fp16");
-      if (fp16 > 0.0) test.emit("fp16", (float)fp16, fp16Note);
-      else            test.skip("fp16", ResultStatus::Unsupported,
-                                "BNNSMatMul rejected fp16 operands", fp16Note);
+      const SweepResult fp16 = runBnns(BNNSDataTypeFloat16, 2, "bnns fp16");
+      if (fp16.peakFlops > 0.0)
+        test.emit("fp16", (float)fp16.peakFlops, fp16Note,
+                  {{Dim::Dtype, DType::Fp16}, {Dim::ProblemSize, fp16.peakN}});
+      else
+        test.skip("fp16", ResultStatus::Unsupported, "BNNSMatMul rejected fp16 operands",
+                  fp16Note, {{Dim::Dtype, DType::Fp16}});
 
-      double bf16 = runBnns(BNNSDataTypeBFloat16, 2, "bnns bf16");
-      if (bf16 > 0.0) test.emit("bf16", (float)bf16, bf16Note);
-      else            test.skip("bf16", ResultStatus::Unsupported,
-                                "BNNSMatMul rejected bf16 operands", bf16Note);
+      const SweepResult bf16 = runBnns(BNNSDataTypeBFloat16, 2, "bnns bf16");
+      if (bf16.peakFlops > 0.0)
+        test.emit("bf16", (float)bf16.peakFlops, bf16Note,
+                  {{Dim::Dtype, DType::Bf16}, {Dim::ProblemSize, bf16.peakN}});
+      else
+        test.skip("bf16", ResultStatus::Unsupported, "BNNSMatMul rejected bf16 operands",
+                  bf16Note, {{Dim::Dtype, DType::Bf16}});
 #pragma clang diagnostic pop
     }
     else
     {
       test.skip("fp16", ResultStatus::Unsupported,
-                "BNNSMatMul needs macOS 13 / iOS 16", fp16Note);
+                "BNNSMatMul needs macOS 13 / iOS 16", fp16Note, {{Dim::Dtype, DType::Fp16}});
       test.skip("bf16", ResultStatus::Unsupported,
-                "BNNSMatMul needs macOS 13 / iOS 16", bf16Note);
+                "BNNSMatMul needs macOS 13 / iOS 16", bf16Note, {{Dim::Dtype, DType::Bf16}});
     }
 
+    // In the ops it would have been measured in, not the test's flops.
+    logger::EmitOptions int8Opts;
+    int8Opts.description = int8Note;
+    int8Opts.unit        = "ops";
+    int8Opts.dims        = {{Dim::Dtype, DType::Int8}};
     test.skip("int8", ResultStatus::Unsupported,
-              "BNNS exposes no int8 GEMM (quantized inference layers only)",
-              int8Note);
+              "BNNS exposes no int8 GEMM (quantized inference layers only)", int8Opts);
   }
 
   return 0;
