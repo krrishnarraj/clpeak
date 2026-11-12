@@ -98,6 +98,20 @@ const std::string &processEvidenceKey();
 // opens, with the run's key, so a checkpoint already holds tokens.
 DeviceEvidence evidenceFrom(const logger::Identity &id, const std::string &keyHex);
 
+// The key a run's tokens are made under: the running run's
+// (RunCheckpoint::evidenceKey()), else this process's.
+std::string currentEvidenceKey();
+
+// A library's message with every identifier in it -- a PCI bus address, a
+// UUID, a LUID or registry ID written after its name -- replaced by its
+// token under the run's key ("<pci_bus 7e05b9d1c2a84f36>"), the one the
+// device's evidence holds.  A vendor runtime's verbose log names the
+// devices it found (ONNX Runtime's "Discovered OrtHardwareDevice {...
+// pci_bus_id=0000:01:00.0}"), and the run's log is held to the same rule as
+// the document: what the logger and the run log record from a library
+// (a non-empty source) passes through here.
+std::string scrubIdentifiers(const std::string &message);
+
 // ---- The linker --------------------------------------------------------------
 
 // One device as the linker sees it.

@@ -61,8 +61,7 @@ std::string trimmed(const std::string &s)
 // takes this process's key instead: its tokens still never are the values.
 DeviceEvidence evidenceOf(const logger::Identity &id)
 {
-    const RunCheckpoint *run = RunCheckpoint::current();
-    return xpupeak::evidenceFrom(id, run ? run->evidenceKey() : std::string());
+    return xpupeak::evidenceFrom(id, xpupeak::currentEvidenceKey());
 }
 
 } // namespace
@@ -188,6 +187,9 @@ void logger::log(xpupeak::LogLevel level, std::string message, std::string sourc
             message.back() == ' '  || message.back() == '\t'))
         message.pop_back();
     if (message.empty()) return;
+    // A library's own words may name a device by its identifiers, which the
+    // log never holds (xpupeak::scrubIdentifiers).
+    if (!source.empty()) message = xpupeak::scrubIdentifiers(message);
 
     LogEvent e = makeEvent(LogEvent::Kind::Log);
     e.log.level       = level;

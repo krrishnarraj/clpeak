@@ -396,7 +396,8 @@ token.
 Every decision is a `debug` line on the log under `--verbose` — `hardware:
 vulkan:0 (Apple M1 Pro) -> gpu0 by sole` — and so is every device a rule
 left apart that it might have joined, with the reason (`litert:0 not linked:
-its GPU is not named (Vulkan lists 2 GPUs)`). No line holds an identifier.
+its GPU is not named (Vulkan lists 2 GPUs)`). No line holds an identifier:
+what a library relays has its identifiers replaced by their tokens (*Log*).
 
 ## Test
 
@@ -731,7 +732,7 @@ reproduces what the CLI printed.
 | `level` | `error` \| `warning` \| `info` \| `debug` |
 | `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
-| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure |
+| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found |
 
 What each level means, and when it is in the file:
 
@@ -984,7 +985,8 @@ it ran on or the person who ran it, and no minor may add:
   per-run tokens (*Linking*);
 - the key those tokens are made under, which only the checkpoint holds.
 
-The log is held to the same rule.
+The log is held to the same rule, a vendor runtime's relayed words included
+(*Log*).
 
 ## Conventions
 

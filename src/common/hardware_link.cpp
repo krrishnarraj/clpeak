@@ -2,6 +2,7 @@
 #include <common/common.h>      // XPUPEAK_VLOG
 #include <common/host_info.h>   // probeHost
 #include <common/options.h>     // backendFromName, backendInfo
+#include <common/run_checkpoint.h>  // the run's evidence key
 
 #include <algorithm>
 #include <cctype>
@@ -358,6 +359,165 @@ DeviceEvidence evidenceFrom(const logger::Identity &id, const std::string &keyHe
                                : "";
     e.defaultGpu = id.defaultGpu;
     return e;
+}
+
+std::string currentEvidenceKey()
+{
+    const RunCheckpoint *run = RunCheckpoint::current();
+    return run && !run->evidenceKey().empty() ? run->evidenceKey() : processEvidenceKey();
+}
+
+// ── Scrubbing a library's message ───────────────────────────────────────────
+
+namespace {
+
+bool isHex(char c) { return hexDigit(c) >= 0; }
+bool isWordChar(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+
+size_t hexRun(const std::string &s, size_t at)
+{
+    size_t n = 0;
+    while (at + n < s.size() && isHex(s[at + n])) n++;
+    return n;
+}
+
+// "0000:01:00.0", the domain 4 to 8 digits (nvidia-smi writes 8).
+bool matchPci(const std::string &s, size_t at, size_t &len)
+{
+    const size_t d = hexRun(s, at);
+    if (d < 4 || d > 8) return false;
+    size_t i = at + d;
+    if (i >= s.size() || s[i] != ':' || hexRun(s, i + 1) != 2) return false;
+    i += 3;
+    if (i >= s.size() || s[i] != ':' || hexRun(s, i + 1) != 2) return false;
+    i += 3;
+    if (i + 1 >= s.size() || s[i] != '.' || s[i + 1] < '0' || s[i + 1] > '7') return false;
+    i += 2;
+    if (i < s.size() && isWordChar(s[i])) return false;
+    len = i - at;
+    return true;
+}
+
+// 8-4-4-4-12 hex digits, or 32 together.
+bool matchUuid(const std::string &s, size_t at, size_t &len, std::string &hex)
+{
+    static const size_t groups[] = {8, 4, 4, 4, 12};
+    size_t i = at;
+    hex.clear();
+    bool dashed = true;
+    for (size_t g = 0; g < 5 && dashed; g++)
+    {
+        if (hexRun(s, i) < groups[g]) { dashed = false; break; }
+        hex += s.substr(i, groups[g]);
+        i += groups[g];
+        if (g < 4)
+        {
+            if (i >= s.size() || s[i] != '-') { dashed = false; break; }
+            i++;
+        }
+    }
+    if (dashed && (i >= s.size() || !isWordChar(s[i])))
+    {
+        len = i - at;
+        return true;
+    }
+    if (hexRun(s, at) == 32 && (at + 32 >= s.size() || !isWordChar(s[at + 32])))
+    {
+        hex = s.substr(at, 32);
+        len = 32;
+        return true;
+    }
+    return false;
+}
+
+// "LUID=1234", "luid: 0x4d2", "registryID 4294969843": the number after a
+// name, which is the identifier.
+bool matchNamedNumber(const std::string &s, size_t at, const char *name, size_t &numAt,
+                      size_t &numLen, std::uint64_t &value)
+{
+    const size_t n = std::strlen(name);
+    if (at + n > s.size()) return false;
+    for (size_t k = 0; k < n; k++)
+        if (std::tolower(static_cast<unsigned char>(s[at + k])) != name[k]) return false;
+    size_t i = at + n;
+    if (i < s.size() && isWordChar(s[i]) && !(s[i] == '_' || std::isdigit((unsigned char)s[i])))
+        return false;
+    while (i < s.size() && (s[i] == '"' || s[i] == '=' || s[i] == ':' || s[i] == ' ' || s[i] == '_'))
+        i++;
+    const bool hex = i + 1 < s.size() && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X');
+    const size_t from = hex ? i + 2 : i;
+    size_t j = from;
+    while (j < s.size() && (hex ? isHex(s[j]) : std::isdigit(static_cast<unsigned char>(s[j])) != 0))
+        j++;
+    if (j == from || j - from > (hex ? 16u : 20u) || (j < s.size() && isWordChar(s[j])))
+        return false;
+    value = std::strtoull(s.substr(from, j - from).c_str(), nullptr, hex ? 16 : 10);
+    if (!value) return false;
+    numAt  = i;
+    numLen = j - i;
+    return true;
+}
+
+} // namespace
+
+std::string scrubIdentifiers(const std::string &message)
+{
+    // Most lines hold nothing of the kind: leave them as they are, uncopied.
+    bool maybe = false;
+    for (char c : message)
+        if (c == ':' || c == '-' || c == '=')
+        {
+            maybe = true;
+            break;
+        }
+    if (!maybe && message.size() < 32) return message;
+
+    const std::string key = currentEvidenceKey();
+    auto token = [&](const char *kind, const std::string &canonical) {
+        return std::string("<") + kind + " " + evidenceToken(key, kind, canonical) + ">";
+    };
+    std::string out;
+    out.reserve(message.size());
+    size_t i = 0;
+    while (i < message.size())
+    {
+        const bool boundary = i == 0 || !isWordChar(message[i - 1]);
+        if (boundary)
+        {
+            size_t len = 0, numAt = 0, numLen = 0;
+            std::uint64_t value = 0;
+            std::string hex;
+            if (matchPci(message, i, len))
+            {
+                const std::string canonical = pciBusFromText(message.substr(i, len));
+                out += canonical.empty() ? std::string("<pci_bus>") : token("pci_bus", canonical);
+                i += len;
+                continue;
+            }
+            if (matchUuid(message, i, len, hex))
+            {
+                for (char &c : hex) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                out += token("uuid", hex);
+                i += len;
+                continue;
+            }
+            const char *const named[][2] = {{"luid", "luid"}, {"registryid", "registry"},
+                                            {"registry id", "registry"}};
+            bool done = false;
+            for (const auto &nm : named)
+                if (matchNamedNumber(message, i, nm[0], numAt, numLen, value))
+                {
+                    out += message.substr(i, numAt - i);
+                    out += token(nm[1], registryText(value));
+                    i = numAt + numLen;
+                    done = true;
+                    break;
+                }
+            if (done) continue;
+        }
+        out += message[i++];
+    }
+    return out;
 }
 
 // ── The linker ─────────────────────────────────────────────────────────────
