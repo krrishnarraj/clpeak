@@ -493,11 +493,12 @@ private:
   // != 0 short-circuits calibration (matches --iters).
   //
   // serialize inserts a shader-memory barrier between the batched dispatches.
-  // The bandwidth tests need it: their byte count assumes one pass over the
-  // buffer or image, and Vulkan otherwise lets consecutive dispatches overlap,
-  // putting two passes over the same data in flight at once.  The compute
-  // tests pass false -- nothing there is read twice, so the barrier would only
-  // cost them the tail overlap between dispatches (~2% of the peak).
+  // The global and image bandwidth tests need it: their byte count assumes
+  // one pass over the buffer or image, and Vulkan otherwise lets consecutive
+  // dispatches overlap, putting two passes over the same data in flight at
+  // once.  The compute and local-memory tests pass false -- nothing there is
+  // read twice, so the barrier would only cost them the tail overlap between
+  // dispatches (~2% of the peak; a tenth of MoltenVK's local float reading).
   float runKernel(VulkanDevice &dev, VkPipeline pipeline,
                   VkPipelineLayout pipeLayout,
                   VkDescriptorSet descriptorSet,
