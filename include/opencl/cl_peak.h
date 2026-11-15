@@ -43,12 +43,12 @@ static inline const char *clChainNote(int chains)
 }
 
 // The source of the program a test runs (defined in cl_kernels.cpp): a
-// compute family behind the chain macros it expands, the global-bandwidth
-// kernels the latency test borrows, or one of the local, image and int8
-// programs.  Empty for a test with no kernel of its own.  One program per test,
-// and only the selected tests', because on a cold driver cache the compile is
-// most of a device's setup -- an Arc A380 spent ~45 s on all of them as one --
-// and separate programs build side by side (runAll).
+// compute family behind the chain macros it expands, or one of the global,
+// local, image, int8 and latency programs.  Empty for a test with no kernel
+// of its own.  One program per test, and only the selected tests', because on
+// a cold driver cache the compile is most of a device's setup -- an Arc A380
+// spent ~45 s on all of them as one -- and separate programs build side by
+// side (runAll).
 std::string clGetTestKernels(Benchmark which);
 
 class clPeak : public Peak

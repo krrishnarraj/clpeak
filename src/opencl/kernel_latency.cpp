@@ -13,7 +13,10 @@ using xpupeak::Dim; namespace dim = xpupeak::dim;
 //   roundtrip : std::chrono around enqueueNDRangeKernel + finish().
 //               Full host submit -> GPU complete -> signal back.
 //
-// Both are reported so users can compare apples-to-apples across backends.
+// Both launch one work-item of an empty kernel
+// (kernels/kernel_latency_kernels.cl), as the other backends' latency tests
+// do, so the roundtrip carries no kernel run time and both readings compare
+// across backends.
 // ---------------------------------------------------------------------------
 
 int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
@@ -22,16 +25,18 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
   if (!run)
     return 0;
 
-  cl::Context ctx = queue.getInfo<CL_QUEUE_CONTEXT>();
-  cl_uint numItems = (devInfo.maxWGSize) * (devInfo.numCUs) * FETCH_PER_WI;
-  cl::NDRange globalSize = (numItems / FETCH_PER_WI);
-  cl::NDRange localSize  = devInfo.maxWGSize;
   unsigned int iters = forceIters ? specifiedIters : cfg.kernelLatencyIters;
 
-  auto test = currentDeviceScope->beginTest(
-    {"kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
-     "Time to launch a small kernel, the fixed cost every dispatch pays.",
-     TestShape::Heterogeneous});
+  logger::TestSpec spec = {
+    "kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
+    "Time to launch an empty kernel, the fixed cost every dispatch pays.",
+    TestShape::Heterogeneous};
+  // Revision 2: since it first shipped, the launch has become an empty kernel
+  // at one work-item, as in every other backend, where it was global
+  // bandwidth's float kernel over numCUs x maxWGSize work-items and the
+  // roundtrip carried its run time (4.0.0).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   const char *dispatchNote = "Host submit to kernel start, one way.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
@@ -44,20 +49,12 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     // loader dereferences one rather than returning CL_INVALID_PROGRAM.
     if (!prog())
       throw cl::Error(CL_INVALID_PROGRAM, "clCreateKernel");
-    cl::Buffer inputBuf  = cl::Buffer(ctx, CL_MEM_READ_ONLY,  (numItems * sizeof(float)));
-    cl::Buffer outputBuf = cl::Buffer(ctx, CL_MEM_WRITE_ONLY, (numItems * sizeof(float)));
-
-    cl::Kernel kernel(prog, "global_bandwidth_v1_local_offset");
-    kernel.setArg(0, inputBuf);
-    kernel.setArg(1, outputBuf);
-
-    // Direct enqueue site (not via run_kernel): clamp explicitly so a kernel
-    // work-group limit below the device max does not fail with -54.
-    clampToKernelWG(queue.getInfo<CL_QUEUE_DEVICE>(), kernel, globalSize, localSize);
+    cl::Kernel kernel(prog, "kernel_latency_noop");
+    const cl::NDRange one(1);
 
     // Warmup
-    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
-    queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, one, one);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, one, one);
     queue.finish();
 
     double totalDispatchUs  = 0;
@@ -66,7 +63,7 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     {
       cl::Event timeEvent;
       auto t0 = std::chrono::high_resolution_clock::now();
-      queue.enqueueNDRangeKernel(kernel, cl::NullRange, globalSize, localSize, nullptr, &timeEvent);
+      queue.enqueueNDRangeKernel(kernel, cl::NullRange, one, one, nullptr, &timeEvent);
       queue.finish();
       auto t1 = std::chrono::high_resolution_clock::now();
 

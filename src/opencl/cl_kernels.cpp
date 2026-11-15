@@ -59,13 +59,18 @@ static const std::string stringifiedInt8DpKernels =
 #include "kernels/compute_int8_dp_kernels.cl"
     ;
 
+static const std::string latencyKernels =
+#include "kernels/kernel_latency_kernels.cl"
+    ;
+
 std::string clGetTestKernels(Benchmark which)
 {
   switch (which)
   {
   case Benchmark::GlobalBW:
-  case Benchmark::KernelLatency:
     return globalBandwidthKernels;
+  case Benchmark::KernelLatency:
+    return latencyKernels;
   case Benchmark::LocalBW:
     return stringifiedLocalKernels;
   case Benchmark::ImageBW:

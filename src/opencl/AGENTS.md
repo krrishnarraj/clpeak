@@ -27,7 +27,7 @@ OpenCL C kernels (in `kernels/`).  Built as `peak_opencl` static library.
 | `local_bandwidth.cpp` | `runLocalBandwidthTest()` — local memory bandwidth |
 | `image_bandwidth.cpp` | `runImageBandwidthTest()` — image object bandwidth |
 | `transfer_bandwidth.cpp` | `runTransferBandwidthTest()` — host↔device transfer |
-| `kernel_latency.cpp` | `runKernelLatency()` — single-dispatch kernel latency |
+| `kernel_latency.cpp` | `runKernelLatency()` — launch latency of an empty kernel at one work-item (`kernels/kernel_latency_kernels.cl`) |
 | `kernels/` | OpenCL C kernel sources (`.cl` files) |
 | `kernels/mad_chain.cl` | The alternate MAD chains (`AF*` affine, `RT*` rotating) every `compute_*_alt_v*` kernel expands.  Included first in `cl_kernels.cpp` so the macros exist before use |
 | `cmake/` | `BuildSdk.cmake` — SDK fallback finder |
@@ -77,7 +77,8 @@ See `include/common/AGENTS.md` § `dims`.  OpenCL specifics:
   `width` alone.
 - `revision` is 2 where a test's method changed in a release after it first
   shipped, in a way that moved its numbers (the compute families, global and
-  image bandwidth); the reason is beside the line that sets it.  1 otherwise.
+  image bandwidth, kernel launch latency); the reason is beside the line that
+  sets it.  1 otherwise.
 
 ## Chain shapes
 
