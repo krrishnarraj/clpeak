@@ -143,7 +143,19 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    log->note("Failed to allocate buffer\n");
+    // Every reading still gets its row.  A caller racing builds of one
+    // reading takes a 0 instead, as for a failed dispatch, and reports the
+    // race itself; this note is then all that says why.
+    for (const auto &v : variants)
+    {
+      if (d.reading)
+      {
+        *d.reading = 0.0f;
+        log->note(note(v.label) + ": failed to allocate buffer\n");
+      }
+      else
+        test.skip(v.label, ResultStatus::Error, "Failed to allocate buffer", emitOpts(v));
+    }
     return -1;
   }
 

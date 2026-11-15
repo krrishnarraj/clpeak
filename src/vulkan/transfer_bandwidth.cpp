@@ -46,6 +46,22 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.axis  = "direction";
   auto test = currentDeviceScope->beginTest(testSpec);
 
+  // The two readings.  The host side is a HOST_VISIBLE allocation: memory the
+  // driver mapped for the device to reach directly, which is what the other
+  // backends' pinned buffers are, so the readings say `memory: pinned` as
+  // theirs do.
+  struct Row { const char *metric; const char *note; dim::Direction direction; };
+  const Row h2d = {"h2d", "Host to device.", dim::Direction::H2d};
+  const Row d2h = {"d2h", "Device to host.", dim::Direction::D2h};
+  auto rowDims = [](const Row &r) -> Dims
+  { return {{Dim::Direction, r.direction}, {Dim::Memory, dim::Memory::Pinned}}; };
+  // A setup failure measures neither direction, and each still gets its row.
+  auto skipBoth = [&](const char *reason)
+  {
+    for (const Row *r : {&h2d, &d2h})
+      test.skip(r->metric, ResultStatus::Error, reason, r->note, rowDims(*r));
+  };
+
   VkBuffer hostBuf = VK_NULL_HANDLE;
   VkBuffer devBuf = VK_NULL_HANDLE;
   VkDeviceMemory hostMem = VK_NULL_HANDLE;
@@ -60,7 +76,7 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         devBuf, devMem))
   {
-    log->note("Failed to allocate transfer buffers\n");
+    skipBoth("Failed to allocate transfer buffers");
     if (hostBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, hostBuf, nullptr);
     if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
     if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
@@ -186,27 +202,20 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return totalUs / static_cast<float>(iters);
   };
 
-  // The host side is a HOST_VISIBLE allocation: memory the driver mapped for
-  // the device to reach directly, which is what the other backends' pinned
-  // buffers are, so the readings say `memory: pinned` as theirs do.
-  auto reportCopy = [&](const char *metric, const char *note, dim::Direction direction,
-                        float us)
+  auto reportCopy = [&](const Row &r, float us)
   {
-    const Dims dims = {{Dim::Direction, direction}, {Dim::Memory, dim::Memory::Pinned}};
     if (us <= 0.0f)
     {
-      test.skip(metric, ResultStatus::Error,
-                 "vkQueueSubmit/WaitIdle failed or timer returned zero", note, dims);
+      test.skip(r.metric, ResultStatus::Error,
+                 "vkQueueSubmit/WaitIdle failed or timer returned zero", r.note, rowDims(r));
       return;
     }
     float bps = (float)bytes / us * 1e6f;
-    test.emit(metric, bps, note, dims);
+    test.emit(r.metric, bps, r.note, rowDims(r));
   };
 
-  reportCopy("h2d", "Host to device.", dim::Direction::H2d,
-             runCopy(hostBuf, devBuf));
-  reportCopy("d2h", "Device to host.", dim::Direction::D2h,
-             runCopy(devBuf, hostBuf));
+  reportCopy(h2d, runCopy(hostBuf, devBuf));
+  reportCopy(d2h, runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)
     vkDestroyQueryPool(dev.device, queryPool, nullptr);

@@ -36,6 +36,15 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   testSpec.revision = 2;
   auto test = currentDeviceScope->beginTest(testSpec);
 
+  // The image is RGBA32F, so one fetch returns a whole pixel: four 32-bit
+  // values, hence the metric name -- a pixel format, not a vector width.
+  const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
+  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
+  // The test's one reading, for a failure that leaves it unmeasured --
+  // in setup as much as in the dispatch.
+  auto skipReading = [&](const char *reason)
+  { test.skip("float4", ResultStatus::Error, reason, fetchNote, fetchDims); };
+
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
   // Size the dispatch so each pixel is read exactly once per launch,
@@ -61,7 +70,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   VkImage img;
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
   {
-    log->note("Image create failed\n");
+    skipReading("Image creation failed");
     return -1;
   }
 
@@ -78,7 +87,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   if (typeIdx == UINT32_MAX)
   {
-    log->note("No device-local memory type for the image\n");
+    skipReading("No device-local memory type for the image");
     vkDestroyImage(dev.device, img, nullptr);
     return -1;
   }
@@ -92,13 +101,13 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   // time a dispatch against unbound memory and report the result as bandwidth.
   if (vkAllocateMemory(dev.device, &aI, nullptr, &imgMem) != VK_SUCCESS)
   {
-    log->note("Image memory alloc failed\n");
+    skipReading("Failed to allocate image memory");
     vkDestroyImage(dev.device, img, nullptr);
     return -1;
   }
   if (vkBindImageMemory(dev.device, img, imgMem, 0) != VK_SUCCESS)
   {
-    log->note("Image memory bind failed\n");
+    skipReading("Failed to bind image memory");
     vkDestroyImage(dev.device, img, nullptr);
     vkFreeMemory(dev.device, imgMem, nullptr);
     return -1;
@@ -115,7 +124,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
     {
-      log->note("Staging buffer alloc failed\n");
+      skipReading("Failed to allocate staging buffer");
       vkDestroyImage(dev.device, img, nullptr);
       vkFreeMemory(dev.device, imgMem, nullptr);
       return -1;
@@ -209,7 +218,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(outBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
   {
-    log->note("Output buffer alloc failed\n");
+    skipReading("Failed to allocate output buffer");
     vkDestroySampler(dev.device, sampler, nullptr);
     vkDestroyImageView(dev.device, imgView, nullptr);
     vkDestroyImage(dev.device, img, nullptr);
@@ -270,11 +279,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   ws[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   ws[1].pBufferInfo = &bi;
   vkUpdateDescriptorSets(dev.device, 2, ws, 0, nullptr);
-
-  // The image is RGBA32F, so one fetch returns a whole pixel: four 32-bit
-  // values, hence the metric name -- a pixel format, not a vector width.
-  const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
-  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
 
   // The walk shapes raced.  A row-major sweep and its transpose both hand a
   // warp a 1D run of texels, which is what a linear surface wants; a driver
@@ -342,8 +346,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   }
 
   if (best <= 0.0f)
-    test.skip("float4", ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-              fetchNote, fetchDims);
+    skipReading("vkQueueSubmit/WaitIdle failed");
   else
     test.emit("float4", best, fetchNote, fetchDims);
 

@@ -51,6 +51,29 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                (unsigned long long)(numItems * sizeof(float) >> 20),
                (unsigned long long)(dev.info.heapSize >> 20));
 
+  struct GBVar { const char *label; const uint32_t *spv; size_t sz; uint32_t width; };
+  const GBVar variants[] = {
+    {"float ",  vk_shaders::global_bandwidth_v1, vk_shaders::global_bandwidth_v1_size, 1},
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V2
+    {"float2",  vk_shaders::global_bandwidth_v2, vk_shaders::global_bandwidth_v2_size, 2},
+#endif
+#ifdef VK_HAS_GLOBAL_BANDWIDTH_V4
+    {"float4",  vk_shaders::global_bandwidth_v4, vk_shaders::global_bandwidth_v4_size, 4},
+#endif
+  };
+
+  // A setup failure measures no width, and every one still gets its row.
+  auto skipEveryWidth = [&](const char *reason)
+  {
+    for (const auto &v : variants)
+    {
+      std::string key(v.label);
+      while (!key.empty() && key.back() == ' ') key.pop_back();
+      test.skip(key, ResultStatus::Error, reason, vkWidthNote(v.width),
+                {{Dim::Width, v.width}});
+    }
+  };
+
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
   VkDeviceMemory inputMem, outputMem;
@@ -64,7 +87,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    XPUPEAK_VLOG("Failed to allocate buffers\n");
+    skipEveryWidth("Failed to allocate buffers");
     return -1;
   }
 
@@ -80,7 +103,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
     {
-      XPUPEAK_VLOG("Failed to allocate staging buffer\n");
+      skipEveryWidth("Failed to allocate staging buffer");
       vkDestroyBuffer(dev.device, inputBuf, nullptr);
       vkFreeMemory(dev.device, inputMem, nullptr);
       vkDestroyBuffer(dev.device, outputBuf, nullptr);
@@ -145,17 +168,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   VkPipelineLayout pipeLayout;
   vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
-
-  struct GBVar { const char *label; const uint32_t *spv; size_t sz; uint32_t width; };
-  const GBVar variants[] = {
-    {"float ",  vk_shaders::global_bandwidth_v1, vk_shaders::global_bandwidth_v1_size, 1},
-#ifdef VK_HAS_GLOBAL_BANDWIDTH_V2
-    {"float2",  vk_shaders::global_bandwidth_v2, vk_shaders::global_bandwidth_v2_size, 2},
-#endif
-#ifdef VK_HAS_GLOBAL_BANDWIDTH_V4
-    {"float4",  vk_shaders::global_bandwidth_v4, vk_shaders::global_bandwidth_v4_size, 4},
-#endif
-  };
 
   // Descriptor pool + set
   VkDescriptorPoolSize poolSize = {};

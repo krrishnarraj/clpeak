@@ -44,6 +44,12 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   const char *roundtripNote = "Host submit to completion seen by the host.";
   const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
   const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
+  // A setup failure measures neither, and each still gets its row.
+  auto skipBoth = [&](const char *reason)
+  {
+    test.skip("dispatch", ResultStatus::Error, reason, dispatchNote, dispatchDims);
+    test.skip("roundtrip", ResultStatus::Error, reason, roundtripNote, roundtripDims);
+  };
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
@@ -51,7 +57,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
   {
-    XPUPEAK_VLOG("pipeline layout creation failed\n");
+    skipBoth("Pipeline layout creation failed");
     return -1;
   }
 
@@ -64,7 +70,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
   {
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("shader module creation failed\n");
+    skipBoth("Shader module creation failed");
     return -1;
   }
 
@@ -80,7 +86,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   {
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("compute pipeline creation failed\n");
+    skipBoth("Pipeline creation failed");
     return -1;
   }
 
@@ -155,7 +161,7 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     vkDestroyPipeline(dev.device, pipeline, nullptr);
     vkDestroyShaderModule(dev.device, shaderModule, nullptr);
     vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("command buffer allocation failed\n");
+    skipBoth("Command buffer allocation failed");
     return -1;
   }
 
