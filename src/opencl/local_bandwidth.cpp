@@ -39,6 +39,12 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     return 0;
   }
 
+  // Each width gets exactly one reading.  The sweep records them in order, so
+  // `w` is also the first width with no reading yet: a failure outside the
+  // sweep (the buffer, the kernels) skips only the widths from there on, never
+  // one already measured, whose id would then hold two readings.
+  int w = 0;
+
   try
   {
     // A program that failed to build is a null handle, and an older ICD
@@ -51,14 +57,15 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
     const char *knames[] = {"local_bandwidth_v1", "local_bandwidth_v2", "local_bandwidth_v4", "local_bandwidth_v8"};
 
     cl::Kernel kernels[4];
-    for (int w = 0; w < 4; w++)
+    for (int k = 0; k < 4; k++)
     {
-      kernels[w] = cl::Kernel(prog, knames[w]);
-      kernels[w].setArg(0, outputBuf);
-      kernels[w].setArg(1, cl::Local(devInfo.maxWGSize * widths[w] * sizeof(cl_float)));
+      kernels[k] = cl::Kernel(prog, knames[k]);
+      kernels[k].setArg(0, outputBuf);
+      kernels[k].setArg(1, cl::Local(devInfo.maxWGSize * widths[k] * sizeof(cl_float)));
     }
 
-    for (int w = 0; w < 4; w++)
+    // A width that fails records its own error, and the next one still runs.
+    for (; w < 4; w++)
     {
       // float8 requires enough local memory
       if (widths[w] == 8 && devInfo.localMemSize < devInfo.maxWGSize * 8 * sizeof(cl_float))
@@ -69,24 +76,33 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
         continue;
       }
 
-      // Reset each iteration: run_kernel may clamp global/local for a kernel
-      // whose work-group limit is below the device max.
-      globalSize = globalWIs;
-      localSize  = devInfo.maxWGSize;
+      try
+      {
+        // Reset each iteration: run_kernel may clamp global/local for a kernel
+        // whose work-group limit is below the device max.
+        globalSize = globalWIs;
+        localSize  = devInfo.maxWGSize;
 
-      timed = run_kernel(queue, kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
+        timed = run_kernel(queue, kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
 
-      // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
-      uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
-      bps = (float)bytesPerCall / timed * 1e6f;
+        // Each rep: 1 write + 1 read per WI = 2 * width * sizeof(float) bytes per WI
+        uint64_t bytesPerCall = (uint64_t)LMEM_REPS * 2 * widths[w] * sizeof(cl_float) * ndRangeTotal(globalSize);
+        bps = (float)bytesPerCall / timed * 1e6f;
 
-      test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
+        test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
+      }
+      catch (cl::Error &error)
+      {
+        std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+        test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
+                  {{Dim::Width, widths[w]}});
+      }
     }
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    for (int w = 0; w < 4; w++)
+    for (; w < 4; w++)
       test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
                 {{Dim::Width, widths[w]}});
     return -1;
