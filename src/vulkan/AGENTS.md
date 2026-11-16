@@ -114,6 +114,12 @@ See `include/common/AGENTS.md` § `dims`.  Vulkan specifics:
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.
+- A test's setup checks every call that can fail and ends the test through
+  its skip helper, which records every reading the test would have produced
+  as an error with the failure as its reason.  Each object it makes gets a
+  `ScopeExit` (`vk_peak.h`) on the next line, holding the call that frees it,
+  so a failure part-way frees exactly what was made and the test keeps no
+  cleanup list of its own.
 - If you add a new `.comp` shader → add to `XPUPEAK_VK_SHADERS` in `CMakeLists.txt`
   and declare its extern in the `vk_shaders` namespace (`include/vulkan/vk_peak.h`).
 - Shaders compile to **SPIR-V 1.5** (`--target-env=vulkan1.2`), not 1.6.  At 1.6

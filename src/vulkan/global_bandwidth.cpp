@@ -73,6 +73,13 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                 {{Dim::Width, v.width}});
     }
   };
+  // What setup made until then is freed on the way out, by the ScopeExit
+  // beside each object.
+  auto fail = [&](const char *reason)
+  {
+    skipEveryWidth(reason);
+    return -1;
+  };
 
   // Create input + output buffers
   VkBuffer inputBuf, outputBuf;
@@ -81,19 +88,26 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(numItems * sizeof(float),
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                        inputBuf, inputMem) ||
-      !dev.createBuffer(numItems * sizeof(float),
+                        inputBuf, inputMem))
+    return fail("Failed to allocate buffers");
+  ScopeExit freeInput([&] {
+    vkDestroyBuffer(dev.device, inputBuf, nullptr);
+    vkFreeMemory(dev.device, inputMem, nullptr);
+  });
+  if (!dev.createBuffer(numItems * sizeof(float),
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
-  {
-    skipEveryWidth("Failed to allocate buffers");
-    return -1;
-  }
+    return fail("Failed to allocate buffers");
+  ScopeExit freeOutput([&] {
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+  });
 
   // Fill the input buffer with pseudo-random data to defeat hardware memory
   // compression.  Upload via a host-visible staging buffer then copy to the
-  // device-local input buffer.
+  // device-local input buffer.  The staging buffer is gone by the end of this
+  // block, before anything is timed.
   {
     VkBuffer stagingBuf;
     VkDeviceMemory stagingMem;
@@ -102,17 +116,16 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
-    {
-      skipEveryWidth("Failed to allocate staging buffer");
-      vkDestroyBuffer(dev.device, inputBuf, nullptr);
-      vkFreeMemory(dev.device, inputMem, nullptr);
-      vkDestroyBuffer(dev.device, outputBuf, nullptr);
-      vkFreeMemory(dev.device, outputMem, nullptr);
-      return -1;
-    }
+      return fail("Failed to allocate staging buffer");
+    ScopeExit freeStaging([&] {
+      vkDestroyBuffer(dev.device, stagingBuf, nullptr);
+      vkFreeMemory(dev.device, stagingMem, nullptr);
+    });
 
     void *stagingMap = nullptr;
-    vkMapMemory(dev.device, stagingMem, 0, numItems * sizeof(float), 0, &stagingMap);
+    if (vkMapMemory(dev.device, stagingMem, 0, numItems * sizeof(float), 0,
+                    &stagingMap) != VK_SUCCESS)
+      return fail("Failed to map staging buffer");
     populate((float *)stagingMap, numItems);
     vkUnmapMemory(dev.device, stagingMem);
 
@@ -123,23 +136,26 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     cmdAI.commandBufferCount = 1;
 
     VkCommandBuffer cmdBuf;
-    vkAllocateCommandBuffers(dev.device, &cmdAI, &cmdBuf);
+    if (vkAllocateCommandBuffers(dev.device, &cmdAI, &cmdBuf) != VK_SUCCESS)
+      return fail("Command buffer allocation failed");
+    ScopeExit freeCmdBuf([&] {
+      vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+    });
 
     VkCommandBufferBeginInfo cmdBI = {};
     cmdBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cmdBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmdBuf, &cmdBI);
+    // An upload that did not run leaves the input as the driver handed it
+    // over, which is what the fill is there to rule out.
+    if (vkBeginCommandBuffer(cmdBuf, &cmdBI) != VK_SUCCESS)
+      return fail("Failed to upload input buffer");
 
     VkBufferCopy copyRegion = {};
     copyRegion.size = numItems * sizeof(float);
     vkCmdCopyBuffer(cmdBuf, stagingBuf, inputBuf, 1, &copyRegion);
 
-    vkEndCommandBuffer(cmdBuf);
-    dev.submitAndWait(cmdBuf);
-    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
-
-    vkDestroyBuffer(dev.device, stagingBuf, nullptr);
-    vkFreeMemory(dev.device, stagingMem, nullptr);
+    if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS || dev.submitAndWait(cmdBuf) != VK_SUCCESS)
+      return fail("Failed to upload input buffer");
   }
 
   // Descriptor set layout (2 bindings: input + output)
@@ -159,7 +175,11 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   dsLayoutCI.pBindings = bindings;
 
   VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+  if (vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout) != VK_SUCCESS)
+    return fail("Descriptor set layout creation failed");
+  ScopeExit freeDsLayout([&] {
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  });
 
   VkPipelineLayoutCreateInfo pipeLayoutCI = {};
   pipeLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -167,7 +187,11 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   pipeLayoutCI.pSetLayouts = &dsLayout;
 
   VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+  if (vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout) != VK_SUCCESS)
+    return fail("Pipeline layout creation failed");
+  ScopeExit freePipeLayout([&] {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  });
 
   // Descriptor pool + set
   VkDescriptorPoolSize poolSize = {};
@@ -181,7 +205,11 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   dpCI.pPoolSizes = &poolSize;
 
   VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+  if (vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool) != VK_SUCCESS)
+    return fail("Descriptor pool creation failed");
+  ScopeExit freeDescPool([&] {
+    vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  });
 
   VkDescriptorSetAllocateInfo dsAI = {};
   dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -189,8 +217,10 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   dsAI.descriptorSetCount = 1;
   dsAI.pSetLayouts = &dsLayout;
 
+  // Freed with its pool.
   VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+  if (vkAllocateDescriptorSets(dev.device, &dsAI, &descSet) != VK_SUCCESS)
+    return fail("Descriptor set allocation failed");
 
   VkDescriptorBufferInfo bufInfos[2] = {};
   bufInfos[0].buffer = inputBuf;
@@ -244,15 +274,6 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     test.emit(key, bps, vkWidthNote(v.width), {{Dim::Width, v.width}});
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
-
-  // Cleanup
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, inputBuf, nullptr);
-  vkFreeMemory(dev.device, inputMem, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
 
   return 0;
 }

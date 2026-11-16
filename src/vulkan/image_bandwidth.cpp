@@ -44,6 +44,13 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   // in setup as much as in the dispatch.
   auto skipReading = [&](const char *reason)
   { test.skip("float4", ResultStatus::Error, reason, fetchNote, fetchDims); };
+  // What setup made until then is freed on the way out, by the ScopeExit
+  // beside each object.
+  auto fail = [&](const char *reason)
+  {
+    skipReading(reason);
+    return -1;
+  };
 
   const uint32_t imgW = 4096, imgH = 4096;
   const uint32_t wgSize = 256;
@@ -69,10 +76,8 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   VkImage img;
   if (vkCreateImage(dev.device, &imgCI, nullptr, &img) != VK_SUCCESS)
-  {
-    skipReading("Image creation failed");
-    return -1;
-  }
+    return fail("Image creation failed");
+  ScopeExit freeImg([&] { vkDestroyImage(dev.device, img, nullptr); });
 
   // Allocate device-local memory for the image.
   VkMemoryRequirements imReq;
@@ -86,11 +91,7 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     { typeIdx = i; break; }
 
   if (typeIdx == UINT32_MAX)
-  {
-    skipReading("No device-local memory type for the image");
-    vkDestroyImage(dev.device, img, nullptr);
-    return -1;
-  }
+    return fail("No device-local memory type for the image");
 
   VkMemoryAllocateInfo aI = {};
   aI.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -100,20 +101,16 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   // A quarter-gigabyte image is a real allocation on a phone: bail rather than
   // time a dispatch against unbound memory and report the result as bandwidth.
   if (vkAllocateMemory(dev.device, &aI, nullptr, &imgMem) != VK_SUCCESS)
-  {
-    skipReading("Failed to allocate image memory");
-    vkDestroyImage(dev.device, img, nullptr);
-    return -1;
-  }
+    return fail("Failed to allocate image memory");
+  // Freed just before the image is destroyed: Vulkan lets memory go while
+  // still bound to an object that nothing uses again.
+  ScopeExit freeImgMem([&] { vkFreeMemory(dev.device, imgMem, nullptr); });
   if (vkBindImageMemory(dev.device, img, imgMem, 0) != VK_SUCCESS)
-  {
-    skipReading("Failed to bind image memory");
-    vkDestroyImage(dev.device, img, nullptr);
-    vkFreeMemory(dev.device, imgMem, nullptr);
-    return -1;
-  }
+    return fail("Failed to bind image memory");
 
-  // Upload pseudo-random data to defeat hardware memory compression.
+  // Upload pseudo-random data to defeat hardware memory compression.  The
+  // staging buffer is gone by the end of this block, before anything is
+  // timed.
   {
     VkDeviceSize stagingBytes = (VkDeviceSize)imgW * (VkDeviceSize)imgH * 16;
     VkBuffer stagingBuf;
@@ -123,14 +120,14 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                           stagingBuf, stagingMem))
-    {
-      skipReading("Failed to allocate staging buffer");
-      vkDestroyImage(dev.device, img, nullptr);
-      vkFreeMemory(dev.device, imgMem, nullptr);
-      return -1;
-    }
+      return fail("Failed to allocate staging buffer");
+    ScopeExit freeStaging([&] {
+      vkDestroyBuffer(dev.device, stagingBuf, nullptr);
+      vkFreeMemory(dev.device, stagingMem, nullptr);
+    });
     void *stagingMap = nullptr;
-    vkMapMemory(dev.device, stagingMem, 0, stagingBytes, 0, &stagingMap);
+    if (vkMapMemory(dev.device, stagingMem, 0, stagingBytes, 0, &stagingMap) != VK_SUCCESS)
+      return fail("Failed to map staging buffer");
     populate((float *)stagingMap, (size_t)imgW * (size_t)imgH * 4);
     vkUnmapMemory(dev.device, stagingMem);
 
@@ -140,11 +137,18 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     cbAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbAI.commandBufferCount = 1;
     VkCommandBuffer transCmd;
-    vkAllocateCommandBuffers(dev.device, &cbAI, &transCmd);
+    if (vkAllocateCommandBuffers(dev.device, &cbAI, &transCmd) != VK_SUCCESS)
+      return fail("Command buffer allocation failed");
+    ScopeExit freeTransCmd([&] {
+      vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &transCmd);
+    });
     VkCommandBufferBeginInfo cbBI = {};
     cbBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cbBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(transCmd, &cbBI);
+    // An upload that did not run leaves the image as the driver handed it
+    // over, which is what the fill is there to rule out.
+    if (vkBeginCommandBuffer(transCmd, &cbBI) != VK_SUCCESS)
+      return fail("Failed to upload image");
 
     // UNDEFINED -> TRANSFER_DST_OPTIMAL
     VkImageMemoryBarrier b0 = {};
@@ -187,12 +191,8 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
                          0, nullptr, 0, nullptr, 1, &b1);
 
-    vkEndCommandBuffer(transCmd);
-    dev.submitAndWait(transCmd);
-    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &transCmd);
-
-    vkDestroyBuffer(dev.device, stagingBuf, nullptr);
-    vkFreeMemory(dev.device, stagingMem, nullptr);
+    if (vkEndCommandBuffer(transCmd) != VK_SUCCESS || dev.submitAndWait(transCmd) != VK_SUCCESS)
+      return fail("Failed to upload image");
   }
 
   VkImageViewCreateInfo ivCI = {};
@@ -201,7 +201,9 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   ivCI.format = VK_FORMAT_R32G32B32A32_SFLOAT;
   ivCI.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   VkImageView imgView;
-  vkCreateImageView(dev.device, &ivCI, nullptr, &imgView);
+  if (vkCreateImageView(dev.device, &ivCI, nullptr, &imgView) != VK_SUCCESS)
+    return fail("Image view creation failed");
+  ScopeExit freeImgView([&] { vkDestroyImageView(dev.device, imgView, nullptr); });
 
   VkSamplerCreateInfo smCI = {};
   smCI.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -212,19 +214,18 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   smCI.unnormalizedCoordinates = VK_TRUE;
   VkSampler sampler;
-  vkCreateSampler(dev.device, &smCI, nullptr, &sampler);
+  if (vkCreateSampler(dev.device, &smCI, nullptr, &sampler) != VK_SUCCESS)
+    return fail("Sampler creation failed");
+  ScopeExit freeSampler([&] { vkDestroySampler(dev.device, sampler, nullptr); });
 
   VkBuffer outBuf; VkDeviceMemory outMem;
   if (!dev.createBuffer(outBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, outBuf, outMem))
-  {
-    skipReading("Failed to allocate output buffer");
-    vkDestroySampler(dev.device, sampler, nullptr);
-    vkDestroyImageView(dev.device, imgView, nullptr);
-    vkDestroyImage(dev.device, img, nullptr);
-    vkFreeMemory(dev.device, imgMem, nullptr);
-    return -1;
-  }
+    return fail("Failed to allocate output buffer");
+  ScopeExit freeOut([&] {
+    vkDestroyBuffer(dev.device, outBuf, nullptr);
+    vkFreeMemory(dev.device, outMem, nullptr);
+  });
 
   VkDescriptorSetLayoutBinding bs[2] = {};
   bs[0].binding = 0; bs[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -235,7 +236,11 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   dslCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   dslCI.bindingCount = 2; dslCI.pBindings = bs;
   VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout);
+  if (vkCreateDescriptorSetLayout(dev.device, &dslCI, nullptr, &dsLayout) != VK_SUCCESS)
+    return fail("Descriptor set layout creation failed");
+  ScopeExit freeDsLayout([&] {
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  });
 
   VkPushConstantRange walkRange = {};
   walkRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -247,7 +252,11 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   plCI.setLayoutCount = 1; plCI.pSetLayouts = &dsLayout;
   plCI.pushConstantRangeCount = 1; plCI.pPushConstantRanges = &walkRange;
   VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout);
+  if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
+    return fail("Pipeline layout creation failed");
+  ScopeExit freePipeLayout([&] {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  });
 
   VkDescriptorPoolSize ps[2] = {
     {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
@@ -257,13 +266,19 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   dpCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   dpCI.maxSets = 1; dpCI.poolSizeCount = 2; dpCI.pPoolSizes = ps;
   VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+  if (vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool) != VK_SUCCESS)
+    return fail("Descriptor pool creation failed");
+  ScopeExit freeDescPool([&] {
+    vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  });
 
   VkDescriptorSetAllocateInfo dsAI = {};
   dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   dsAI.descriptorPool = descPool; dsAI.descriptorSetCount = 1; dsAI.pSetLayouts = &dsLayout;
+  // Freed with its pool.
   VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+  if (vkAllocateDescriptorSets(dev.device, &dsAI, &descSet) != VK_SUCCESS)
+    return fail("Descriptor set allocation failed");
 
   VkDescriptorImageInfo ii = {};
   ii.imageView = imgView; ii.sampler = sampler;
@@ -350,15 +365,6 @@ int vkPeak::runImageBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   else
     test.emit("float4", best, fetchNote, fetchDims);
 
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outBuf, nullptr);
-  vkFreeMemory(dev.device, outMem, nullptr);
-  vkDestroySampler(dev.device, sampler, nullptr);
-  vkDestroyImageView(dev.device, imgView, nullptr);
-  vkDestroyImage(dev.device, img, nullptr);
-  vkFreeMemory(dev.device, imgMem, nullptr);
   return 0;
 }
 

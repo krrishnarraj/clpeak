@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <utility>
 #include <bitset>
 #include <common/common.h>
 #include <common/logger.h>
@@ -227,6 +228,24 @@ static inline const char *vkWidthNote(uint32_t width)
   }
 }
 
+// Runs `fn` as the scope it is declared in exits.  A test's setup declares
+// one right after each object it makes, holding the call that frees it, so a
+// setup failure returns having freed exactly what was made, newest first, as
+// the test's own return does.  A handle whose create failed -- which that
+// call leaves undefined -- is never read.
+template <typename F>
+class ScopeExit
+{
+public:
+  explicit ScopeExit(F f) : fn(std::move(f)) {}
+  ~ScopeExit() { fn(); }
+  ScopeExit(const ScopeExit &) = delete;
+  ScopeExit &operator=(const ScopeExit &) = delete;
+
+private:
+  F fn;
+};
+
 // Manages a single Vulkan device for benchmarking
 class VulkanDevice
 {
@@ -243,7 +262,8 @@ public:
   bool init(VkInstance inst, VkPhysicalDevice physDev);
   void cleanup();
 
-  // Allocate a device-local buffer
+  // A buffer with memory of `memProps` bound to it.  On any failure both
+  // handles come back VK_NULL_HANDLE, with nothing of it left allocated.
   bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                     VkMemoryPropertyFlags memProps,
                     VkBuffer &buffer, VkDeviceMemory &memory);

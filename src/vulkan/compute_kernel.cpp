@@ -151,17 +151,27 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   globalWIs = (uint64_t)numGroups * wgSize;
   uint64_t bufferBytes = (uint64_t)numGroups * bytesPerWG;
 
+  // A setup failure measures no variant, and every one takes failReading's
+  // path.  What setup made until then is freed on the way out, by the
+  // ScopeExit beside each object.
+  auto fail = [&](const char *reason)
+  {
+    for (const auto &v : variants)
+      failReading(v, reason);
+    return -1;
+  };
+
   VkBuffer outputBuf;
   VkDeviceMemory outputMem;
   if (!dev.createBuffer(bufferBytes,
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
-  {
-    for (const auto &v : variants)
-      failReading(v, "Failed to allocate buffer");
-    return -1;
-  }
+    return fail("Failed to allocate buffer");
+  ScopeExit freeOutput([&] {
+    vkDestroyBuffer(dev.device, outputBuf, nullptr);
+    vkFreeMemory(dev.device, outputMem, nullptr);
+  });
 
   VkDescriptorSetLayoutBinding binding = {};
   binding.binding = 0;
@@ -175,7 +185,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   dsLayoutCI.pBindings = &binding;
 
   VkDescriptorSetLayout dsLayout;
-  vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout);
+  if (vkCreateDescriptorSetLayout(dev.device, &dsLayoutCI, nullptr, &dsLayout) != VK_SUCCESS)
+    return fail("Descriptor set layout creation failed");
+  ScopeExit freeDsLayout([&] {
+    vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
+  });
 
   VkPushConstantRange pushRange = {};
   pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -193,7 +207,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   }
 
   VkPipelineLayout pipeLayout;
-  vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout);
+  if (vkCreatePipelineLayout(dev.device, &pipeLayoutCI, nullptr, &pipeLayout) != VK_SUCCESS)
+    return fail("Pipeline layout creation failed");
+  ScopeExit freePipeLayout([&] {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  });
 
   VkDescriptorPoolSize poolSize = {};
   poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -206,7 +224,11 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   dpCI.pPoolSizes = &poolSize;
 
   VkDescriptorPool descPool;
-  vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool);
+  if (vkCreateDescriptorPool(dev.device, &dpCI, nullptr, &descPool) != VK_SUCCESS)
+    return fail("Descriptor pool creation failed");
+  ScopeExit freeDescPool([&] {
+    vkDestroyDescriptorPool(dev.device, descPool, nullptr);
+  });
 
   VkDescriptorSetAllocateInfo dsAI = {};
   dsAI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -214,8 +236,10 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   dsAI.descriptorSetCount = 1;
   dsAI.pSetLayouts = &dsLayout;
 
+  // Freed with its pool.
   VkDescriptorSet descSet;
-  vkAllocateDescriptorSets(dev.device, &dsAI, &descSet);
+  if (vkAllocateDescriptorSets(dev.device, &dsAI, &descSet) != VK_SUCCESS)
+    return fail("Descriptor set allocation failed");
 
   VkDescriptorBufferInfo bufInfo = {};
   bufInfo.buffer = outputBuf;
@@ -414,12 +438,6 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     else
       test.emit(v.label, value, emitOpts(v));
   }
-
-  vkDestroyDescriptorPool(dev.device, descPool, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-  vkDestroyDescriptorSetLayout(dev.device, dsLayout, nullptr);
-  vkDestroyBuffer(dev.device, outputBuf, nullptr);
-  vkFreeMemory(dev.device, outputMem, nullptr);
 
   return 0;
 }

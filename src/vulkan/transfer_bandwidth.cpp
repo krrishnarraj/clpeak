@@ -61,6 +61,13 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     for (const Row *r : {&h2d, &d2h})
       test.skip(r->metric, ResultStatus::Error, reason, r->note, rowDims(*r));
   };
+  // What setup made until then is freed on the way out, by the ScopeExit
+  // beside each object.
+  auto fail = [&](const char *reason)
+  {
+    skipBoth(reason);
+    return -1;
+  };
 
   VkBuffer hostBuf = VK_NULL_HANDLE;
   VkBuffer devBuf = VK_NULL_HANDLE;
@@ -70,25 +77,28 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   if (!dev.createBuffer(bytes,
                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                        hostBuf, hostMem) ||
-      !dev.createBuffer(bytes,
+                        hostBuf, hostMem))
+    return fail("Failed to allocate transfer buffers");
+  ScopeExit freeHost([&] {
+    vkDestroyBuffer(dev.device, hostBuf, nullptr);
+    vkFreeMemory(dev.device, hostMem, nullptr);
+  });
+  if (!dev.createBuffer(bytes,
                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         devBuf, devMem))
-  {
-    skipBoth("Failed to allocate transfer buffers");
-    if (hostBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, hostBuf, nullptr);
-    if (hostMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, hostMem, nullptr);
-    if (devBuf != VK_NULL_HANDLE) vkDestroyBuffer(dev.device, devBuf, nullptr);
-    if (devMem != VK_NULL_HANDLE) vkFreeMemory(dev.device, devMem, nullptr);
-    return -1;
-  }
+    return fail("Failed to allocate transfer buffers");
+  ScopeExit freeDev([&] {
+    vkDestroyBuffer(dev.device, devBuf, nullptr);
+    vkFreeMemory(dev.device, devMem, nullptr);
+  });
 
   // Fill the host-visible buffer with pseudo-random data to defeat hardware
   // memory compression on both H2D and D2H paths.
   {
     void *hostMap = nullptr;
-    vkMapMemory(dev.device, hostMem, 0, bytes, 0, &hostMap);
+    if (vkMapMemory(dev.device, hostMem, 0, bytes, 0, &hostMap) != VK_SUCCESS)
+      return fail("Failed to map host buffer");
     populate((float *)hostMap, bytes / sizeof(float));
     vkUnmapMemory(dev.device, hostMem);
   }
@@ -100,8 +110,14 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
   allocInfo.commandBufferCount = 1;
 
   VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf);
+  if (vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf) != VK_SUCCESS)
+    return fail("Command buffer allocation failed");
+  ScopeExit freeCmdBuf([&] {
+    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  });
 
+  // Without a query pool -- none asked for, or none made -- every copy is
+  // timed on the host clock instead.
   VkQueryPool queryPool = VK_NULL_HANDLE;
   if (canUseTimestamps)
   {
@@ -109,8 +125,13 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     qpCI.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
     qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qpCI.queryCount = 2;
-    vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool);
+    if (vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool) != VK_SUCCESS)
+      queryPool = VK_NULL_HANDLE;   // a failed create leaves it undefined
   }
+  ScopeExit freeQueryPool([&] {
+    if (queryPool != VK_NULL_HANDLE)
+      vkDestroyQueryPool(dev.device, queryPool, nullptr);
+  });
 
   auto runCopy = [&](VkBuffer src, VkBuffer dst) -> float
   {
@@ -216,14 +237,6 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
 
   reportCopy(h2d, runCopy(hostBuf, devBuf));
   reportCopy(d2h, runCopy(devBuf, hostBuf));
-
-  if (queryPool != VK_NULL_HANDLE)
-    vkDestroyQueryPool(dev.device, queryPool, nullptr);
-  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
-  vkDestroyBuffer(dev.device, hostBuf, nullptr);
-  vkFreeMemory(dev.device, hostMem, nullptr);
-  vkDestroyBuffer(dev.device, devBuf, nullptr);
-  vkFreeMemory(dev.device, devMem, nullptr);
 
   return 0;
 }
