@@ -930,6 +930,243 @@ Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
 `fp16`, `fp64` the backend could answer. The keys are those of
 `include/common/inventory.h`, which is the one serializer for both uses.
 
+## Reading a run as hardware
+
+The document keeps the order the run produced it in: backend by backend,
+device by device. A reader that wants the hardware — a compare, a site that
+collects results — turns it around by the processor every device names.
+Nothing in this section or the next is stored in the file: a reader derives
+it, so better rules reach old files for free (*Compatibility*).
+
+### By processor
+
+- **The machine** is `system`, one per file.
+- **The hardware** is `packages[]` and `processors[]`: each processor names
+  its `package`, and each device its `processor`. A processor's devices are
+  the backends' views of it, and its readings are all of theirs, each keeping
+  the backend, device and test it came from.
+- **A device with no `processor`**, or one naming a processor the file does
+  not list, is a processor of its own. **A processor no device names** was
+  not measured but is part of the machine: the host CPU, when the CPU backend
+  did not run.
+- **Ids are the run's.** `gpu0` in two runs of one machine is one GPU when
+  both runs saw the same devices (*Hardware*). Across machines an id is only
+  a label, and processors pair by kind and model (below).
+- **`link` and `evidence`** are the linker's answer and what it saw. A reader
+  with rules of its own can re-link a file from them and the devices'
+  `facts`; a token means something only beside the tokens of its own file.
+
+An M1 Pro's eleven devices make one package, `pkg0` (`soc`), and three
+processors: `cpu0` (the CPU backend, and the CPU paths of Core ML, LiteRT and
+ONNX Runtime), `gpu0` (Metal, Vulkan, OpenCL, and Core ML's and LiteRT's GPU
+paths) and `npu0` (Core ML's Neural Engine and ONNX Runtime's CoreML
+provider). This lists each processor's devices:
+
+```console
+jq '.devices | group_by(.processor) | map({processor: .[0].processor, devices: map("\(.backend):\(.device_index)")})' run.xpupeak.json
+```
+
+A table of readings flattens the same tree: one row per reading, with the
+run's `run_id`, the processor and its package, the processor's model
+(below), the backend, the device's `name` and `device_index`, the test's key
+(`id@variant`) and `revision`, and the reading's family, quantity, unit,
+direction, effective dims (*Comparing runs*), and value or status.
+
+### Models
+
+Processors of two machines are one part when their models match: a site
+groups runs by the model, and a compare pairs processors by kind and then by
+model. The file holds the facts a model is read from; the model, like a peak,
+is the reader's to derive. The recommended reading:
+
+| processor | its model | because |
+|---|---|---|
+| a CPU | `vendor`, `name`, and each cluster's `cores` (or `cores`); where the name is generic, `cpuid`'s `family` and `model` (x86) or the clusters' `midr` (ARM) | one name covers parts binned to fewer cores: an Apple M1 Pro has 8+2 or 6+2 |
+| an integrated GPU (`integrated: true`) | its package's `name`, and its `compute_units` | the SoC names its GPU, binned by cores too (an M1 Pro's has 14 or 16), and an API's ids for it need not name a part: on an M1 Pro, Vulkan's device id is `64` |
+| a discrete GPU | `vendor_id` and `device_id`, else `vendor` and `name` | the PCI device id names the part |
+| an NPU, an accelerator | `vendor`, `name`, and its package's `name` | the SoC names it: the Neural Engine of an M1 Pro |
+
+`vendor` is a word of the vocabulary; `name`, `vendor_name` and the other
+facts are as the APIs spell them, so a reader that keys on a name compares it
+as written. A system's model is its `manufacturer` and `model` (`Apple`,
+`MacBookPro18,3`; `samsung`, `SM-S921B`), or its `board` where it was built
+from parts. A display calls it by the `system.name` annotation, else `name`,
+else `model`, `board` or `soc` (*System*). Naming a model id — `SM-S921B` is
+a Galaxy S24 — is the reader's job, never the tool's.
+
+## Comparing runs
+
+What compares in a file is its readings, by what they measured. Peaks, the
+best of backends, headlines and rankings are all derived from the readings by
+the rules below, which this document fixes so that every reader — the app,
+the CLI's `--compare`, a site — derives the same.
+
+### Measure keys
+
+A reading's **measure key** is what it measured, in words every backend
+shares. For each reading that has a `value`:
+
+1. **Family**: the reading's `benchmark`, else its test's.
+2. **Quantity**: the reading's `quantity`, else its test's, as written.
+3. **Dims**: the test's `dims` with the reading's over them — a key in both
+   takes the reading's value. These are its **effective dims**.
+4. **Data type**: the effective `dtype`, else the family's (*Families*), else
+   none.
+5. **Identity dims**: each effective dim whose key is identity (*Dim keys*),
+   and each whose key the reader does not know, except where the value is
+   the key's default for this family and data type. Variant dims (`width`,
+   `chains`, `isa`, `simd_bits`, `impl`, `form`, `tile`, `problem_size`)
+   never count: the best is taken over them.
+6. **Text**: a string as written, a whole number in decimal (`2048`, also
+   where the file says `2048.0`).
+7. **Key**: the family, the quantity, then `key=value` for each identity dim
+   in order of key by code unit, joined by `|`.
+
+Each key's default is in the *Dim keys* table: `dtype` is the family's own
+data type, for a family of one; `acc` follows the family's rule; `weights`
+and `kv` are the reading's data type; the others that have one are a fixed
+word or number (`sparsity: dense`, `scope: device`, `in_flight: 1`). A key
+with no default — `level`, `op`, `direction`, `working_set`, … — counts
+wherever it is present. A family or a
+data type the reader does not know gives what it can: no `dtype` default; for
+`acc`, the usual accumulator of a known data type, and no default for an
+unknown one.
+
+- Metal's `simdgroup_matrix` → `fp16` `{dtype: fp16}`:
+  `matrix-compute|flops|dtype=fp16`.
+- `fp16 f16acc` `{dtype: fp16, acc: fp16}`:
+  `matrix-compute|flops|acc=fp16|dtype=fp16`. With `acc: fp32`, the usual
+  accumulator, the same reading is `matrix-compute|flops|dtype=fp16`.
+- `fp8_e4m3 2:4` `{dtype: fp8_e4m3, sparsity: "2:4"}`:
+  `matrix-compute|flops|dtype=fp8_e4m3|sparsity=2:4`.
+- The CPU's `single_precision_compute@NEON`, whose test has `{dtype: fp32,
+  isa: neon, simd_bits: 128}`: `float ST` `{scope: core}` is
+  `single-precision-compute|flops|scope=core`, and `float MT` is
+  `single-precision-compute|flops`. The ISA is variant, so a CPU's NEON and
+  SVE variants reach the same keys, and the better is the CPU's.
+- `mp` with no dims: `mixed-precision-compute|flops` (its fp16 data type and
+  fp32 accumulator are the family's).
+- The CPU's `memory_latency`, a pointer chase on one core whose test has
+  `{scope: core}`: `DRAM x8` `{level: dram, in_flight: 8}` is
+  `memory-latency|seconds|in_flight=8|level=dram|scope=core`.
+- `int8_qdq`, in OPS, `{dtype: int8, quant: qdq}`:
+  `gemm|ops|dtype=int8|quant=qdq`.
+- `fp16_decode_kv2048` `{dtype: fp16, phase: decode, context: 2048}`:
+  `transformer-block|bytes_per_second|context=2048|dtype=fp16|phase=decode`.
+
+Two readings with one key measured the same thing, whatever backend, device
+or run they come from — unless they are readings of one backend's test at
+two revisions (below).
+
+### The best of a key
+
+On a processor, the **best** of a key is its best reading over every device
+of that processor, by the reading's `direction`: the largest value where
+higher is better, the smallest where lower is. It is that processor's peak
+for the key, and the best of each backend beside it is that backend's. The
+headline catalog (below) selects among these bests.
+
+- **Ties** go to the first reading in this order: backend name, device index,
+  test key (`id@variant`), reading id; names and ids by code unit, the index
+  as a number. Never the order the file lists them in.
+- **Provenance.** A best is a reading: it names its backend, device, test and
+  reading, and a view shows them with the value.
+- **Contradictions.** Readings of one key that disagree on `direction` — only
+  a file that contradicts itself has them — take the direction of the first
+  in the order above.
+
+### Two runs side by side
+
+A compare pairs two runs' processors by kind, then by model (*Models*), and a
+person may re-pair them. For each pair it sets the keys both sides have side
+by side: each side's best, with the backend that reached it, and their ratio,
+turned by the key's direction so that above 1 is better. The keys of one side
+alone follow. Where both bests are readings of one backend's test at two
+revisions, it says "method changed" instead of a ratio. One device in two
+runs of one machine, before and after a driver update, compares reading by
+reading instead: by backend, device name and the occurrence of that name,
+test key and reading id.
+
+### Revisions
+
+A test's `revision` (absent, `1`) is its method's version. Readings of one
+backend's test — the same `backend` and test `id`, whatever the `variant` —
+at two revisions are not compared: a compare says "method changed" instead of
+a ratio. A ranking keeps, for each backend's test, the newest revision it has
+seen, and ranks the readings at it alone: the others were measured another
+way, before a kernel fix or under another counting rule, and may be off by a
+factor (the Metal simdgroup fold read 4× high). The best of a key on one
+processor can still draw on several tests, each at its own revision.
+
+### Which runs rank
+
+A file says how it was made. A ranking that lists runs from many machines
+takes only runs made the same way:
+
+| | what it says | in a ranking |
+|---|---|---|
+| `invocation.standard` absent | the budgets, warm-up or iterations were changed (`iters` is set), or the tests narrowed (`tests`) | out |
+| `cancelled: true` | stopped part-way: a test it never reached is not missing from the hardware | out |
+| `build.config` other than `Release` | a `Debug` build's host-side work runs unoptimised; absent, the build did not say | out |
+| `system.translated: true` | an x86 binary under Rosetta or Prism, an ARM one under Android's native bridge | out, at least for its CPU's readings |
+| `system.virtual: true` | the processors are what a VM, an emulator or a simulator showed: features may be masked, a topology made up | apart |
+| `resumed` | complete, but measured in parts, at other times and maybe other temperatures; a part with `skipped` recorded a crash instead of a reading | in, marked |
+| `conditions` | battery power, low-power mode, a thermal state that rose | in, shown; low-power runs may be set apart |
+
+A ranking may also want a released `generator.version` (`4.0.0`): a
+development build (`4.0.0-40-gabc1234`, `-dirty`, `unknown`) runs code no
+release has.
+
+### One run, one record
+
+`run_id` names the run: files with one `run_id` are one run, and a site keeps
+one record of it. A run's file changes after it is first saved in two ways
+only — `--resume` continues it (more readings, another `resumed` part,
+`cancelled` gone), and a person edits its `annotations` — so a site keeps the
+latest state: the file that holds every reading of the other and more, and
+the annotations of the latest upload. Two files of one `run_id` whose
+readings differ where both have one are not two states of one run: one of
+them was edited (*Trust*, below). A `run_id` is random per run and names no
+machine and no person: two runs of one machine have two, and nothing in a
+file joins them, by design.
+
+### Runs from many people
+
+**Annotations** are what a person said about a run (*Annotations*), never a
+measurement. A display may call a system by its `system.name` annotation, but
+grouping, filtering and ranking go by what the tool read. Annotations are
+text someone typed: a site escapes them, bounds their length, and shows them
+as that person's words. Its upload form may write the recommended keys and
+keys of its own; a reader shows a key it does not know as written.
+
+**Privacy.** What a file never holds is the *Never recorded* list. A path is
+where a person's name can still reach a file: a home directory is named after
+its user, and some paths are written whole — the program's own in
+`invocation.argv`, an output or library path given on the command line, a
+cache or temporary folder in a log line. So a site publishes less than it
+keeps:
+
+- `log` and `inventory` are for maintainers (D): a site drops them, or keeps
+  them for the uploader alone.
+- `invocation.argv` (I): a site keeps the flags and drops the paths.
+- `evidence` tokens join devices within one file, and nothing else.
+- `annotations` hold whatever a person typed, a name included.
+
+**Trust.** A file is JSON anyone can edit. Nothing in it is signed, and the
+schema checks only its shape, so a site checks what it receives:
+
+- **Against its peers.** A reading far above the same key's on the same model
+  is suspect, and so is any reading above what the hardware can do: the tool
+  counts only arithmetic that ran, so a rate above the hardware's peak is a
+  bug or an edit.
+- **Against itself.** Each backend's best of a key on one processor checks
+  the others: one far above the rest is suspect, and the best of backends
+  would carry it to the top. A file whose readings repeat another `run_id`'s
+  is a copy.
+- **Provenance, always.** Every number a site shows names the run, backend,
+  test and reading it came from, and the `generator` version that measured
+  it; and what the tool read stays apart from what a person typed.
+
 ## The headline catalog
 
 Headlines are the measures worth a summary row or a leaderboard: a
@@ -967,6 +1204,12 @@ files written by development builds are not migrated.
   families, quantities, sections.
 - **A minor may not**: remove, rename or retype a key; change a key's or a
   value's meaning; change a default; or make an optional key required.
+- **Words keep their form.** Every value of a list here — a data type, a dim
+  key or word, a family, a kind, a vendor, a quantity, a status, a feature —
+  is lowercase ASCII letters and digits joined by `_`, `-`, `.` or `:`
+  (`fp8_e4m3`, `2:4`, `single-precision-compute`), and so is every word a
+  minor adds. A dim's value is a string or a whole number. So a reader, and
+  the schema, can take a word they have never seen.
 - **Readers** accept any minor of their major, and say when a file comes from
   a newer one ("written by a newer XpuPeak; some details aren't shown"). They
   treat what they don't know as opaque and never fail on it: an unknown key
@@ -1022,9 +1265,25 @@ files written by development builds are not migrated.
   repeated runs, say, or a container that holds this document beside large
   optional data.
 
-**Checked by machine** *(V11)*: a JSON Schema per minor, open to unknown
-keys, and golden files — one real document from each released minor, read by
-both loaders, with their expected measure keys and best of backends.
+**What every file has.** `schema`, `format_version`, `run_id`, `generator`
+(its `name` and `version`), `generated_at` and `devices`; every device its
+`backend`, `name`, `type` and `tests`; every test its `id`, `benchmark`,
+`quantity`, `unit`, `direction` and `metrics`; every reading its `id`, and a
+`value` or else a `status`, never both; every package its `id`, and every
+processor its `id` and `kind`. Everything else is optional, and stays so.
+
+**Checked by machine.** [`format-v4.schema.json`](format-v4.schema.json),
+beside this document, is the run document's JSON Schema (draft 2020-12). It
+checks the keys' types, what every file has, and the form of a word, a
+timestamp, a `run_id`, a hex id and a token. It is open: a key it does not
+know passes anywhere, and so does any word of the right form, so every file
+of format 4 validates against the schema of every minor, and each minor
+revises it only by adding. A file that fails it was written wrong, not by a
+newer build. What JSON cannot say stays in this document's words: that a
+device's `processor` is in `processors[]`, what a reading means. It leaves
+`log` and `inventory` unchecked (D). **Golden files** *(V11, from V12's
+runs)*: one real document from each released minor, read by both loaders,
+with its expected measure keys and best of backends.
 
 **Rewriting keeps the unknown.** A tool that edits a document — the app
 adding annotations — edits the JSON in place and keeps every key it does not

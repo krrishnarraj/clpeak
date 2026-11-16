@@ -1,0 +1,467 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://krrishnarraj.github.io/xpupeak/format-v4.schema.json",
+  "title": "XpuPeak run document, format 4.0",
+  "description": "One run of XpuPeak, as `xpupeak -o` writes it (`\"schema\": \"xpupeak/run\"`). The specification is format-v4.md beside this file; this schema checks what JSON can check. It is open: a key it does not know passes anywhere, and a vocabulary word passes when it is shaped like one, so every file of format 4, at any minor, validates against the schema of every minor. Each description gives the key's class: contract (C), informational (I) or diagnostic (D).",
+  "$comment": "Revised in place by each minor of format 4, and only by adding. Never close an object (additionalProperties: false) or a word list (enum): a newer minor's keys and words must pass.",
+  "type": "object",
+  "required": ["schema", "format_version", "run_id", "generator", "generated_at", "devices"],
+  "properties": {
+    "schema": {
+      "description": "C. Always `xpupeak/run`. A checkpoint (`xpupeak/run-partial`) or a sidecar header (`xpupeak/run-log`) is not a result.",
+      "const": "xpupeak/run"
+    },
+    "format_version": {
+      "description": "C. Always 4. A reader rejects any other value outright.",
+      "const": 4
+    },
+    "format_minor": {
+      "description": "C. The additive revision the file was written in; absent means 0. A reader accepts every minor.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "description": "C. A random UUID per run, kept across --resume: one run uploaded twice has one run_id. It identifies the run, not who ran it.",
+      "$ref": "#/$defs/uuid"
+    },
+    "generator": {
+      "description": "C. What wrote the file.",
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"description": "C. `XpuPeak`.", "type": "string"},
+        "version": {"description": "C. The git-describe of the build: a release (`4.0.0`), a development build (`4.0.0-40-gabc1234`, maybe `-dirty`), or `unknown` for a build made outside git.", "type": "string"}
+      }
+    },
+    "generated_at": {
+      "description": "C. When the run started, ISO-8601 UTC. log[].elapsed_s counts from it.",
+      "$ref": "#/$defs/timestamp"
+    },
+    "duration_s": {
+      "description": "I. Seconds the run spent running; a resumed run's parts summed.",
+      "$ref": "#/$defs/seconds"
+    },
+    "cancelled": {
+      "description": "C. True only for a run stopped part-way: a test it never reached is not missing from the hardware.",
+      "type": "boolean"
+    },
+    "build": {"$ref": "#/$defs/build"},
+    "invocation": {"$ref": "#/$defs/invocation"},
+    "system": {"$ref": "#/$defs/system"},
+    "conditions": {"$ref": "#/$defs/conditions"},
+    "annotations": {
+      "description": "C. Facts only a person knows, as a flat map of strings: never filled by the tool, and never a measured fact. Recommended keys: system.name, cooling, power_limit, overclock, memory, gpu_board, notes.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "resumed": {
+      "description": "C. One entry per part after the first, for a run continued after its process ended part-way.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/resumedPart"}
+    },
+    "packages": {
+      "description": "C. Chips and cards: an SoC, a CPU package, a discrete GPU.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/package"}
+    },
+    "processors": {
+      "description": "C. The CPUs, GPUs and NPUs in the packages, each with run-local id (cpu0, gpu0, npu0) and its merged facts.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/processor"}
+    },
+    "devices": {
+      "description": "C. One entry per benchmarked device: one backend's view of a processor.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/device"}
+    },
+    "ext": {"$ref": "#/$defs/ext"},
+    "inventory": {
+      "description": "D. --verbose only: the device catalog taken before the run. Not checked: its shape may change in any release, and a site may drop it on ingest."
+    },
+    "log": {
+      "description": "D. The diagnostic stream, in order. Not checked: its shape may change in any release, and a site may drop it on ingest."
+    }
+  },
+
+  "$defs": {
+    "word": {
+      "description": "A vocabulary word: lowercase ASCII letters and digits, joined by `_`, `-`, `.` or `:` (fp8_e4m3, 2:4, single-precision-compute). Lists only grow, so any word of this shape passes; format-v4.md lists the words in use.",
+      "type": "string",
+      "pattern": "^[a-z0-9]+([_.:-][a-z0-9]+)*$"
+    },
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "timestamp": {
+      "description": "ISO-8601 UTC, to the second or finer: 2026-11-09T14:03:11Z.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "seconds": {"type": "number", "minimum": 0},
+    "count": {"type": "integer", "minimum": 0},
+    "hex": {
+      "description": "Lower-case hexadecimal, no prefix: 10de, 2d05.",
+      "type": "string",
+      "pattern": "^[0-9a-f]+$"
+    },
+    "ext": {
+      "description": "Experimental fields. Readers ignore them; a tool that rewrites a document keeps them whole. Keys inside may change in any release.",
+      "type": "object"
+    },
+
+    "build": {
+      "description": "C. What the binary is made of.",
+      "type": "object",
+      "properties": {
+        "backends": {
+          "description": "C. Every backend compiled in, in run order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {"description": "C. As devices[].backend names it: Metal, CoreML, ONNX.", "type": "string", "minLength": 1},
+              "kind": {"description": "C. gpu, cpu or ai.", "$ref": "#/$defs/word"},
+              "portable": {"description": "C. True for a layer that runs on more than one vendor's silicon (Vulkan, OpenCL, ONNX).", "type": "boolean"}
+            }
+          }
+        },
+        "config": {"description": "C. The CMake configuration it was built in: Release, Debug, ...", "type": "string"}
+      }
+    },
+
+    "invocation": {
+      "description": "C. How the run was asked for; every number is sensitive to it.",
+      "type": "object",
+      "properties": {
+        "argv": {"description": "I. The command line.", "type": "array", "items": {"type": "string"}},
+        "target_time_us": {"description": "C. --max-time-gpu, in microseconds.", "$ref": "#/$defs/count"},
+        "target_time_us_cpu": {"description": "C. --max-time-cpu, in microseconds.", "$ref": "#/$defs/count"},
+        "target_time_us_ml_gpu": {"description": "C. --max-time-ml-gpu, in microseconds.", "$ref": "#/$defs/count"},
+        "warmup": {"description": "C. Warm-up runs per measurement.", "$ref": "#/$defs/count"},
+        "iters": {"description": "C. Present only when the iteration count was pinned with -i; absent, each test calibrated to its budget.", "$ref": "#/$defs/count"},
+        "categories": {"description": "C. The categories enabled.", "type": "array", "items": {"$ref": "#/$defs/word"}},
+        "tests": {"description": "C. Present only when the run was narrowed to tests, by their flag names.", "type": "array", "items": {"$ref": "#/$defs/word"}},
+        "verbose": {"description": "C. True when --verbose was on.", "type": "boolean"},
+        "standard": {"description": "C. True for a run with this build's default budgets, warm-up and iterations that ran every category and test; absent means not standard.", "type": "boolean"}
+      }
+    },
+
+    "system": {
+      "description": "C. The machine, not its owner. Everything optional.",
+      "type": "object",
+      "properties": {
+        "form_factor": {"description": "C. mobile, laptop, desktop or server; absent reads as desktop.", "$ref": "#/$defs/word"},
+        "form_factor_detail": {"description": "C. phone, tablet, embedded.", "$ref": "#/$defs/word"},
+        "form_factor_from": {"description": "C. The evidence: model, os, characteristics, battery, platform_role, chassis, device_tree, default.", "$ref": "#/$defs/word"},
+        "virtual": {"description": "C. True in a virtual machine.", "type": "boolean"},
+        "translated": {"description": "C. True for an x86 binary under Rosetta or Prism.", "type": "boolean"},
+        "manufacturer": {"description": "C. The system's maker as the OS spells it.", "type": "string"},
+        "brand": {"description": "C. The brand it is sold under, where it is not the maker's own name (Android).", "type": "string"},
+        "model": {"description": "C. The model id: MacBookPro18,3, SM-S921B, a DMI product name.", "type": "string"},
+        "codename": {"description": "C. The maker's name for the device (Android's ro.product.device).", "type": "string"},
+        "name": {"description": "C. The marketing name, only as the OS gives it.", "type": "string"},
+        "family": {"description": "C.", "type": "string"},
+        "board": {"description": "C. The board, written only where the product name is a placeholder.", "type": "string"},
+        "soc": {"description": "C. The SoC's name, else the CPU brand.", "type": "string"},
+        "os": {
+          "description": "C. name (macOS, iOS, Android, Linux, Windows, Windows Server), version, build, kernel, distribution.",
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"},
+            "build": {"type": "string"},
+            "kernel": {"type": "string"},
+            "distribution": {"type": "string"}
+          }
+        },
+        "arch": {"description": "C. The binary's architecture: arm64, x86_64.", "type": "string"},
+        "memory_bytes": {"description": "C. Physical memory.", "$ref": "#/$defs/count"},
+        "ext": {"$ref": "#/$defs/ext"}
+      }
+    },
+
+    "conditions": {
+      "description": "C. What the machine was doing. Each key absent when not known.",
+      "type": "object",
+      "properties": {
+        "power_source": {"description": "C. ac or battery.", "$ref": "#/$defs/word"},
+        "low_power_mode": {"description": "C.", "type": "boolean"},
+        "power_profile": {"description": "C. The OS's own name for it.", "type": "string"},
+        "cpu_governor": {"description": "C. Linux.", "type": "string"},
+        "thermal_start": {"description": "C. The OS's thermal state at the start, in its own words.", "type": "string"},
+        "thermal_end": {"description": "C. The same at the end.", "type": "string"},
+        "ext": {"$ref": "#/$defs/ext"}
+      }
+    },
+
+    "place": {
+      "type": "object",
+      "required": ["backend"],
+      "properties": {
+        "backend": {"type": "string"},
+        "device": {"type": "string"},
+        "device_index": {"$ref": "#/$defs/count"},
+        "test": {"description": "The test's key: id, or id@variant.", "type": "string"}
+      }
+    },
+
+    "resumedPart": {
+      "type": "object",
+      "required": ["at", "elapsed_s"],
+      "properties": {
+        "at": {"description": "C. When the part started.", "$ref": "#/$defs/timestamp"},
+        "elapsed_s": {"description": "C. The same moment on the log's clock.", "$ref": "#/$defs/seconds"},
+        "after": {"description": "C. Why the part before ended, when known.", "type": "string"},
+        "from": {"description": "C. The first test the part measured.", "$ref": "#/$defs/place"},
+        "skipped": {"description": "C. --skip-crashed only: where the part before died.", "$ref": "#/$defs/place"}
+      }
+    },
+
+    "package": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"description": "C. pkg0, pkg1, ...", "type": "string", "minLength": 1},
+        "kind": {"description": "C. soc, cpu or discrete.", "$ref": "#/$defs/word"},
+        "vendor": {"description": "C.", "$ref": "#/$defs/word"},
+        "name": {"description": "C.", "type": "string"},
+        "ext": {"$ref": "#/$defs/ext"}
+      }
+    },
+
+    "facts": {
+      "description": "C. Typed hardware facts. On a processor they are merged and written on the processor itself; on a device (devices[].facts) they are what that device's API reported.",
+      "type": "object",
+      "properties": {
+        "vendor_name": {"description": "C. The vendor's own string, as the API gives it.", "type": "string"},
+        "vendor_id": {"description": "C. The API's vendor id: a PCI or Khronos id, or the API's own (Apple's OpenCL answers 1027f00).", "$ref": "#/$defs/hex"},
+        "device_id": {"description": "C. PCI device id: a model's, not a unit's.", "$ref": "#/$defs/hex"},
+        "arch": {"description": "C. sm_120, gfx1201, Apple7.", "type": "string"},
+        "integrated": {"description": "C.", "type": "boolean"},
+        "compute_units": {"description": "C.", "$ref": "#/$defs/count"},
+        "compute_unit": {"description": "C. What one is called: SM, CU, Xe-core, core.", "type": "string"},
+        "clock_mhz": {"description": "C.", "$ref": "#/$defs/count"},
+        "memory_bytes": {"description": "C.", "$ref": "#/$defs/count"},
+        "isa": {"description": "C. A CPU's: arm64, x86_64.", "$ref": "#/$defs/word"},
+        "cores": {"description": "C.", "$ref": "#/$defs/count"},
+        "threads": {"description": "C.", "$ref": "#/$defs/count"},
+        "sockets": {"description": "C.", "$ref": "#/$defs/count"},
+        "cpuid": {
+          "description": "C. x86.",
+          "type": "object",
+          "properties": {
+            "vendor": {"description": "The CPUID vendor string, as the CPU gives it.", "type": "string"},
+            "family": {"$ref": "#/$defs/count"},
+            "model": {"$ref": "#/$defs/count"},
+            "stepping": {"$ref": "#/$defs/count"}
+          }
+        },
+        "clusters": {"description": "C.", "type": "array", "items": {"$ref": "#/$defs/cluster"}},
+        "caches": {"description": "C. The caches the whole processor shares.", "type": "array", "items": {"$ref": "#/$defs/cache"}},
+        "engines": {"description": "C. Matrix engines of a CPU.", "type": "array", "items": {"$ref": "#/$defs/engine"}},
+        "features": {"description": "C. One normalised list: neon, dotprod, i8mm, avx512_vnni, amx_tile, ...", "type": "array", "items": {"$ref": "#/$defs/word"}}
+      }
+    },
+    "cluster": {
+      "type": "object",
+      "properties": {
+        "kind": {"description": "prime, performance, efficiency, low_power.", "$ref": "#/$defs/word"},
+        "cores": {"$ref": "#/$defs/count"},
+        "threads_per_core": {"$ref": "#/$defs/count"},
+        "max_mhz": {"$ref": "#/$defs/count"},
+        "microarch": {"type": "string"},
+        "midr": {"type": "string"},
+        "caches": {"type": "array", "items": {"$ref": "#/$defs/cache"}}
+      }
+    },
+    "cache": {
+      "type": "object",
+      "required": ["level"],
+      "properties": {
+        "level": {"description": "l1d, l1i, l2, l3, slc.", "$ref": "#/$defs/word"},
+        "size_bytes": {"description": "The size of one.", "$ref": "#/$defs/count"},
+        "instances": {"$ref": "#/$defs/count"},
+        "line_bytes": {"$ref": "#/$defs/count"}
+      }
+    },
+    "engine": {
+      "type": "object",
+      "properties": {
+        "kind": {"description": "matrix.", "$ref": "#/$defs/word"},
+        "name": {"description": "AMX, SME.", "type": "string"},
+        "scope": {"description": "core or cluster.", "$ref": "#/$defs/word"},
+        "reached_by": {"description": "instructions or library.", "$ref": "#/$defs/word"}
+      }
+    },
+
+    "processor": {
+      "allOf": [
+        {"$ref": "#/$defs/facts"},
+        {
+          "type": "object",
+          "required": ["id", "kind"],
+          "properties": {
+            "id": {"description": "C. cpu0, gpu0, npu0: run-local, deterministic for one machine.", "type": "string", "minLength": 1},
+            "kind": {"description": "C. cpu, gpu, npu or accelerator.", "$ref": "#/$defs/word"},
+            "package": {"description": "C. Its package's id.", "type": "string"},
+            "vendor": {"description": "C.", "$ref": "#/$defs/word"},
+            "vendor_name": {"description": "C. The vendor's own string.", "type": "string"},
+            "name": {"description": "C.", "type": "string"},
+            "ext": {"$ref": "#/$defs/ext"}
+          }
+        }
+      ]
+    },
+
+    "evidence": {
+      "description": "C. The identity evidence that linked the device, never an identifier: a per-run token for each strong identifier, and the weaker evidence as it is. A key a newer build adds with a string value is a token.",
+      "type": "object",
+      "properties": {
+        "uuid": {"$ref": "#/$defs/token"},
+        "luid": {"$ref": "#/$defs/token"},
+        "pci_bus": {"$ref": "#/$defs/token"},
+        "registry": {"$ref": "#/$defs/token"},
+        "host": {"description": "It executes on the host CPU.", "type": "boolean"},
+        "soc": {"description": "npu, gpu or accelerator: it is the SoC's.", "$ref": "#/$defs/word"},
+        "default_gpu": {"description": "It is the platform's default GPU.", "type": "boolean"}
+      }
+    },
+    "token": {
+      "description": "The first 64 bits of an HMAC-SHA256 of the identifier under a key made per run, as 16 lower-case hex digits: equal tokens in one file are one identifier, and nothing correlates across files.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+
+    "device": {
+      "type": "object",
+      "required": ["backend", "name", "type", "tests"],
+      "properties": {
+        "backend": {"description": "C. Part of the device's identity within the run.", "type": "string", "minLength": 1},
+        "platform": {"description": "C. Identity; absent means the backend's name.", "type": "string"},
+        "name": {"description": "C. Identity.", "type": "string"},
+        "device_index": {"description": "C. Identity: the backend's own numbering, as --list-devices prints it.", "$ref": "#/$defs/count"},
+        "platform_index": {"description": "C. For a backend with platforms (OpenCL).", "$ref": "#/$defs/count"},
+        "driver": {"description": "C. Metadata, not identity.", "type": "string"},
+        "type": {"description": "C. What it is: gpu, cpu, npu, accelerator or unknown.", "$ref": "#/$defs/word"},
+        "processor": {"description": "C. The id of the processor it is a view of.", "type": "string"},
+        "link": {"description": "C. The rule that linked it: uuid, luid, pci_bus, registry, host, soc, sole, own.", "$ref": "#/$defs/word"},
+        "runtime": {
+          "description": "C. An ML runtime's view of where it ran.",
+          "type": "object",
+          "properties": {
+            "provider": {"description": "ONNX Runtime's execution provider.", "type": "string"},
+            "accelerator": {"description": "LiteRT's accelerator, Core ML's compute device.", "type": "string"},
+            "version": {"type": "string"}
+          }
+        },
+        "facts": {"$ref": "#/$defs/facts"},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "properties": {
+          "description": "C / I. Free-form facts the backend chose to report: the shape is contract, the content informational.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["key", "value"],
+            "properties": {"key": {"type": "string"}, "value": {"type": "string"}}
+          }
+        },
+        "tests": {"description": "C.", "type": "array", "items": {"$ref": "#/$defs/test"}},
+        "ext": {"$ref": "#/$defs/ext"}
+      }
+    },
+
+    "test": {
+      "type": "object",
+      "required": ["id", "benchmark", "quantity", "unit", "direction", "metrics"],
+      "properties": {
+        "id": {"description": "C. Stable across machines and runs; never reused for another measurement.", "type": "string", "minLength": 1},
+        "title": {"description": "I.", "type": "string"},
+        "variant": {"description": "C. A runtime qualifier that is not part of the measurement's identity; the test's key is id@variant.", "type": "string"},
+        "benchmark": {"description": "C. The family: the Benchmark it measures, by its flag name.", "$ref": "#/$defs/word"},
+        "revision": {"description": "C. The test's methodology version; absent means 1.", "type": "integer", "minimum": 1},
+        "dims": {"description": "C. The coordinates every reading of the test shares.", "$ref": "#/$defs/dims"},
+        "category": {"description": "C. compute, crypto, string, bandwidth, latency, ai, unknown.", "$ref": "#/$defs/word"},
+        "shape": {"description": "C. homogeneous or heterogeneous.", "$ref": "#/$defs/word"},
+        "axis": {"description": "I. What varies across the readings.", "type": "string"},
+        "direction": {"description": "C. higher_is_better or lower_is_better.", "$ref": "#/$defs/word"},
+        "quantity": {"description": "C. What the values count: flops, ops, bytes_per_second, seconds, items_per_second, ratio, count, unknown.", "$ref": "#/$defs/word"},
+        "unit": {"description": "C. The display symbol of the SI unit the values are in.", "type": "string"},
+        "description": {"description": "I.", "type": "string"},
+        "duration_s": {"description": "I.", "$ref": "#/$defs/seconds"},
+        "metrics": {"description": "C. The readings.", "type": "array", "items": {"$ref": "#/$defs/metric"}},
+        "ext": {"$ref": "#/$defs/ext"}
+      }
+    },
+
+    "metric": {
+      "description": "One reading: a value, or a status with its reason, never both.",
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"description": "C. Stable within the test; never reused for another measurement.", "type": "string", "minLength": 1},
+        "label": {"description": "I. Absent means the id.", "type": "string"},
+        "benchmark": {"description": "C. The reading's family, present only when it is not its test's.", "$ref": "#/$defs/word"},
+        "dims": {"description": "C. The reading's coordinates, over its test's.", "$ref": "#/$defs/dims"},
+        "value": {"description": "C. The reading, in the unit; present exactly when it succeeded.", "type": "number"},
+        "status": {
+          "description": "C. unsupported, skipped or error; omitted for a successful reading.",
+          "allOf": [{"$ref": "#/$defs/word"}, {"not": {"const": "ok"}}]
+        },
+        "reason": {"description": "I. Why, for a reading that did not succeed.", "type": "string"},
+        "description": {"description": "I.", "type": "string"},
+        "unit": {"description": "C. Present, with quantity, only where this reading overrides its test's.", "type": "string"},
+        "quantity": {"description": "C. Present, with unit, only where this reading overrides its test's.", "$ref": "#/$defs/word"},
+        "direction": {"description": "C. Present only where this reading overrides its test's.", "$ref": "#/$defs/word"},
+        "ext": {"$ref": "#/$defs/ext"}
+      },
+      "oneOf": [
+        {"required": ["value"], "not": {"required": ["status"]}},
+        {"required": ["status"], "not": {"required": ["value"]}}
+      ],
+      "dependentRequired": {"unit": ["quantity"], "quantity": ["unit"]}
+    },
+
+    "dims": {
+      "description": "C. A reading's coordinates: string or whole-number values under word keys. A key not listed here is identity, and its value is a string or a whole number. The classes and defaults are in format-v4.md (Vocabulary, Dim keys).",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/word"},
+      "additionalProperties": {"type": ["string", "integer"]},
+      "properties": {
+        "dtype": {"description": "identity; default: the family's data type.", "$ref": "#/$defs/word"},
+        "weights": {"description": "identity; default: the reading's dtype.", "$ref": "#/$defs/word"},
+        "acc": {"description": "identity; default: the family's accumulator rule.", "$ref": "#/$defs/word"},
+        "kv": {"description": "identity; default: the reading's dtype.", "$ref": "#/$defs/word"},
+        "quant": {"description": "identity; default none.", "$ref": "#/$defs/word"},
+        "sparsity": {"description": "identity; default dense.", "$ref": "#/$defs/word"},
+        "scope": {"description": "identity; default device.", "$ref": "#/$defs/word"},
+        "level": {"description": "identity.", "$ref": "#/$defs/word"},
+        "pattern": {"description": "identity; default random.", "$ref": "#/$defs/word"},
+        "op": {"description": "identity.", "$ref": "#/$defs/word"},
+        "direction": {"description": "identity.", "$ref": "#/$defs/word"},
+        "memory": {"description": "identity.", "$ref": "#/$defs/word"},
+        "layer": {"description": "identity.", "$ref": "#/$defs/word"},
+        "pixel_format": {"description": "identity.", "$ref": "#/$defs/word"},
+        "phase": {"description": "identity.", "$ref": "#/$defs/word"},
+        "contention": {"description": "identity; default none.", "$ref": "#/$defs/word"},
+        "workload": {"description": "identity.", "$ref": "#/$defs/word"},
+        "bound": {"description": "identity; default throughput.", "$ref": "#/$defs/word"},
+        "threads_per_core": {"description": "identity.", "$ref": "#/$defs/count"},
+        "in_flight": {"description": "identity; default 1.", "$ref": "#/$defs/count"},
+        "working_set": {"description": "identity; bytes.", "$ref": "#/$defs/count"},
+        "context": {"description": "identity; tokens.", "$ref": "#/$defs/count"},
+        "width": {"description": "variant.", "$ref": "#/$defs/count"},
+        "chains": {"description": "variant.", "$ref": "#/$defs/count"},
+        "isa": {"description": "variant.", "$ref": "#/$defs/word"},
+        "simd_bits": {"description": "variant.", "$ref": "#/$defs/count"},
+        "impl": {"description": "variant.", "$ref": "#/$defs/word"},
+        "form": {"description": "variant; free text.", "type": "string"},
+        "tile": {"description": "variant; free text.", "type": "string"},
+        "problem_size": {"description": "variant.", "$ref": "#/$defs/count"}
+      }
+    }
+  }
+}

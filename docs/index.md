@@ -275,6 +275,12 @@ script can say `--no-cuda` on a Mac. Runs saved with `-o` use the
 [result format](format-v4.html) that the app's history and `--compare` read
 back. `clpeak` still works too: the same command under its 3.x name.
 
+A program that reads saved runs, such as a site that collects results, finds
+in the same document how to
+[read a run as hardware](format-v4.html#reading-a-run-as-hardware) and
+[compare runs](format-v4.html#comparing-runs), and can check a file against
+its [JSON Schema](format-v4.schema.json).
+
 ## <a id="bugs"></a>Reporting a bug
 
 Numbers that look wrong, missing devices and crashes are all worth reporting.
