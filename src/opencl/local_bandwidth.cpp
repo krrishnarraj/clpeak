@@ -2,6 +2,34 @@
 
 using xpupeak::Dim;
 
+// Under Apple's OpenCL this reads about half of Metal's figure at float on
+// Apple silicon.  The cost is in how that driver compiles the kernels'
+// barrier(CLK_LOCAL_MEM_FENCE), not in the kernels: it costs what Metal's
+// threadgroup_barrier(mem_flags::mem_device) costs, a fence on device memory
+// the loop never touches.  Metal's own kernel reads 2.86 TB/s at float with
+// mem_threadgroup or mem_none, and 1.47 with mem_device, as this test does.
+// OpenCL's CLK_LOCAL_MEM_FENCE is 1 and CLK_GLOBAL_MEM_FENCE 2, which are
+// Metal's mem_device and mem_threadgroup, so flags passed through unmapped
+// would give these timings.  That is an inference: the driver's program
+// binary holds only the source.  On an M1 Pro (macOS 27.2.1), copies of these
+// kernels on this test's grid, with every work-item's result checked, in TB/s
+// at float / float2 / float4 / float8:
+//
+//   barrier(CLK_LOCAL_MEM_FENCE), as here         1.46  2.12  2.32  2.37
+//   barrier(CLK_LOCAL_MEM_FENCE |
+//           CLK_GLOBAL_MEM_FENCE)                 1.47
+//   barrier(CLK_GLOBAL_MEM_FENCE)                 2.82  2.71  2.67  2.56
+//   mem_fence(CLK_LOCAL_MEM_FENCE); barrier(0)    2.83  2.72  2.67  2.56
+//   Metal's own test                              2.93  2.77  2.70  2.58
+//
+// The two faster spellings leave local memory unordered by the OpenCL
+// specification, which the ping-pong needs ordered, and the second costs
+// elsewhere: on an RTX 5060 it reads 1.74 / 3.16 / 4.75 / 6.25 against these
+// kernels' 4.41 / 8.00 / 9.19 / 9.75.  So the kernels keep the barrier the
+// specification asks for.  A static __local array,
+// reqd_work_group_size(256, 1, 1), and Metal's 32M work-items instead of 8M
+// each move the float reading by under 3%.
+
 int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, bps;
@@ -15,11 +43,15 @@ int clPeak::runLocalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
 
   uint64_t globalWIs = (uint64_t)devInfo.numCUs * cfg.computeWgsPerCU * devInfo.maxWGSize;
 
-  auto test = currentDeviceScope->beginTest(
-    {"local_memory_bandwidth", "Local memory bandwidth", "bps",
-     Category::Unknown,
-     "Bandwidth of local memory, the scratchpad a work-group shares.",
-     TestShape::Homogeneous, "vector width"});
+  logger::TestSpec spec = {"local_memory_bandwidth", "Local memory bandwidth", "bps",
+                           Category::Unknown,
+                           "Bandwidth of local memory, the scratchpad a work-group shares.",
+                           TestShape::Homogeneous, "vector width"};
+  // Revision 2: since it first shipped, a device with no local memory of its
+  // own has skipped it (2.1.4), and the float8 row has moved its value as two
+  // float4 planes, where one float8 per slot timed bank conflicts (4.0.0).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   const int widths[] = {1, 2, 4, 8};
   const char *labels[] = {"float", "float2", "float4", "float8"};
