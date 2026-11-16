@@ -419,11 +419,16 @@ struct vk_compute_desc_t
   bool *refused;
 
   // Single-variant path only.  When set, the reading is stored here instead of
-  // emitted, and a dispatch that fails leaves 0 instead of the row's error:
-  // the caller races several builds of one reading and emits the fastest
-  // itself -- runCoopMatrix timing a tile at each subgroup width it could run
-  // at.  A refusal to build still goes to `refused`.
+  // emitted, and a build that could not run -- its buffer or its dispatch
+  // failed -- leaves 0 instead of the row's error: the caller races several
+  // builds of one reading and emits the fastest itself -- runCoopMatrix timing
+  // a tile at each subgroup width it could run at.  A refusal to build still
+  // goes to `refused`.
   float *reading;
+
+  // With `reading` only.  When the reading is left at 0, the error its row
+  // would have carried, for the caller to report if none of its builds ran.
+  const char **failure;
 
   // Never retry a refused pinned build unpinned.  Set for a width raced beside
   // the one the stage would otherwise run at: unpinned, the driver would

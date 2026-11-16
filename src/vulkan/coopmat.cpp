@@ -269,7 +269,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   // A tile whose width the driver did not name is timed at every width
   // coopmatSubgroupWidths() lists and reported at the fastest.  The first is
   // the width it runs at when nothing is raced, so only its refusal moves on
-  // to the next tile; a narrower width the driver refuses just drops out.
+  // to the next tile; a narrower width the driver refuses just drops out.  A
+  // width that could not run -- its buffer or its dispatch failed -- drops out
+  // too, and if none ran, the row's error is the first width's.
   auto runTiles = [&](const vk_compute_desc_t &base, const coopmat_tiles_t &tiles,
                       const CoopPush &fill)
   {
@@ -287,6 +289,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       // Sized once: each run's spec info points into itself.
       std::vector<CoopTileRun> runs(widths.size());
       std::vector<float> readings(widths.size(), 0.0f);
+      std::vector<const char *> failures(widths.size(), nullptr);
       bool refused = false;
       for (size_t i = 0; i < widths.size() && !refused; i++)
       {
@@ -299,7 +302,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         bool widthRefused = false;
         d.refused = &widthRefused;
         if (race)
+        {
           d.reading = &readings[i];
+          d.failure = &failures[i];
+        }
         runComputeKernel(dev, cfg, d);
         if (widthRefused && i == 0)
           refused = true;
@@ -307,6 +313,10 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
           XPUPEAK_VLOG("%s %s: the driver refused %s pinned to subgroup %u\n",
                        base.resultTag, base.metricLabel, coopmatTileName(t).c_str(),
                        widths[i]);
+        else if (failures[i])
+          XPUPEAK_VLOG("%s %s: %s at subgroup %u: %s\n", base.resultTag,
+                       base.metricLabel, coopmatTileName(t).c_str(), widths[i],
+                       failures[i]);
       }
       if (refused)
       {
@@ -353,7 +363,8 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
         o.dims.set({Dim::Form, "subgroup_" + std::to_string(widths[best])});
       if (ran.empty())
       {
-        test.skip(base.metricLabel, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed", o);
+        test.skip(base.metricLabel, ResultStatus::Error,
+                  failures[0] ? failures[0] : "vkQueueSubmit/WaitIdle failed", o);
         return;
       }
       XPUPEAK_VLOG("%s %s: %s %s\n", base.resultTag, base.metricLabel, timed.c_str(),

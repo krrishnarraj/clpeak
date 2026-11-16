@@ -98,6 +98,21 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     return o;
   };
 
+  // A reading this run could not take: its row's error, or, for a caller
+  // racing builds of one reading, a 0 and the reason, which it reports if
+  // none of them ran.
+  auto failReading = [&](const Variant &v, const char *reason)
+  {
+    if (d.reading)
+    {
+      *d.reading = 0.0f;
+      if (d.failure)
+        *d.failure = reason;
+    }
+    else
+      test.skip(v.label, ResultStatus::Error, reason, emitOpts(v));
+  };
+
   if (d.skip)
   {
     const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
@@ -143,19 +158,8 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
                         outputBuf, outputMem))
   {
-    // Every reading still gets its row.  A caller racing builds of one
-    // reading takes a 0 instead, as for a failed dispatch, and reports the
-    // race itself; this note is then all that says why.
     for (const auto &v : variants)
-    {
-      if (d.reading)
-      {
-        *d.reading = 0.0f;
-        log->note(note(v.label) + ": failed to allocate buffer\n");
-      }
-      else
-        test.skip(v.label, ResultStatus::Error, "Failed to allocate buffer", emitOpts(v));
-    }
+      failReading(v, "Failed to allocate buffer");
     return -1;
   }
 
@@ -336,11 +340,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     }
     if (timed <= 0.0f)
     {
-      if (d.reading)
-        *d.reading = 0.0f;
-      else
-        test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                  emitOpts(v));
+      failReading(v, "vkQueueSubmit/WaitIdle failed");
       continue;
     }
     float value = toValue(timed);

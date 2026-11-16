@@ -83,7 +83,8 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   width the device can pin (`coopmatSubgroupWidths()` in `vk_peak.h`): the
   runner hands each reading back through `vk_compute_desc_t::reading` instead
   of emitting it, and `runCoopMatrix` emits the fastest, naming the width in
-  the note.  The prose
+  the note.  A width that could not run comes back as 0 with its error in
+  `::failure`; a race in which none ran carries the first width's.  The prose
   goes on `metricDescription` — the test's own description covers the family.
   int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
