@@ -84,11 +84,18 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
             {{Dim::Direction, direction},
              {Dim::Memory, pinned ? dim::Memory::Pinned : dim::Memory::Pageable}}};
   };
-  auto skipBoth = [&](const std::string &reason)
+  // Each direction gets exactly one reading.  They are recorded in order, so
+  // `d` is also the first direction with no reading yet: a failure outside the
+  // copies (the device buffer, the host memory) skips only the directions from
+  // there on, never one already measured, whose id would then hold two
+  // readings.
+  const dim::Direction directions[] = {dim::Direction::H2d, dim::Direction::D2h};
+  int d = 0;
+  auto skipRest = [&](const std::string &reason)
   {
-    for (dim::Direction direction : {dim::Direction::H2d, dim::Direction::D2h})
+    for (; d < 2; d++)
     {
-      const Row r = rows(direction);
+      const Row r = rows(directions[d]);
       test.skip(r.id, ResultStatus::Error, reason, r.note, r.dims);
     }
   };
@@ -128,7 +135,7 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     {
       // Neither kind of host memory: the pinned rows, which are what the
       // test is for, are the ones missing.
-      skipBoth("Out of memory");
+      skipRest("Out of memory");
       return -1;
     }
     pinned = pageable == nullptr;
@@ -172,25 +179,30 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
       return (float)bytes / timed * 1e6f;
     };
 
-    float bw;
-
-    const Row h2d = rows(dim::Direction::H2d);
-    bw = runTransfer(
-      [&]() { queue.enqueueWriteBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); });
-    if (bw > 0.0f) test.emit(h2d.id, bw, h2d.note, h2d.dims);
-    else           test.skip(h2d.id, ResultStatus::Error, "timer returned zero", h2d.note, h2d.dims);
-
-    const Row d2h = rows(dim::Direction::D2h);
-    bw = runTransfer(
-      [&]() { queue.enqueueReadBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); });
-    if (bw > 0.0f) test.emit(d2h.id, bw, d2h.note, d2h.dims);
-    else           test.skip(d2h.id, ResultStatus::Error, "timer returned zero", d2h.note, d2h.dims);
+    // A direction that fails records its own error, and the next one still runs.
+    for (; d < 2; d++)
+    {
+      const Row r = rows(directions[d]);
+      try
+      {
+        const float bw = directions[d] == dim::Direction::H2d
+          ? runTransfer([&]() { queue.enqueueWriteBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); })
+          : runTransfer([&]() { queue.enqueueReadBuffer(devBuf, CL_FALSE, 0, bytes, hostPtr); });
+        if (bw > 0.0f) test.emit(r.id, bw, r.note, r.dims);
+        else           test.skip(r.id, ResultStatus::Error, "timer returned zero", r.note, r.dims);
+      }
+      catch (cl::Error &error)
+      {
+        std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+        test.skip(r.id, ResultStatus::Error, reason, r.note, r.dims);
+      }
+    }
 
     releaseHost();
   }
   catch (cl::Error &error)
   {
-    skipBoth(std::string(error.what()) + " (" + std::to_string(error.err()) + ")");
+    skipRest(std::string(error.what()) + " (" + std::to_string(error.err()) + ")");
 
     releaseHost();
     return -1;
