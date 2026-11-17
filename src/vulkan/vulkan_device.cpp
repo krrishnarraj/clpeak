@@ -213,6 +213,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.float16Supported = false;
   self->info.float64Supported = false;
   self->info.bfloat16Supported = false;
+  self->info.bfloat16CoopmatSupported = false;
   self->info.cooperativeMatrixSupported = false;
   self->info.fp8Supported = false;
   self->info.coopmatFP32 = {};
@@ -366,14 +367,18 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     // is the classic LocalSize execution mode plus a gl_WorkGroupSize
     // spec-constant composite and no feature is involved.  Detect maintenance4
     // anyway and request it where present -- it costs nothing and keeps the
-    // modules loadable either way -- but do not gate coopmat on it.
+    // modules loadable either way -- but do not gate coopmat on it.  It is
+    // core only from Vulkan 1.3, above the 1.2 the instance asks for
+    // (initInstance), so it goes through VK_KHR_maintenance4: asked of a
+    // device that lists the extension, and enabled with it below.
     {
       VkPhysicalDeviceMaintenance4Features m4 = {};
       m4.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES;
       VkPhysicalDeviceFeatures2 m4f2 = {};
       m4f2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
       m4f2.pNext = &m4;
-      if (pfnGetFeat2) pfnGetFeat2(physDev, &m4f2);
+      if (pfnGetFeat2 && hasExt(VK_KHR_MAINTENANCE_4_EXTENSION_NAME))
+        pfnGetFeat2(physDev, &m4f2);
       self->info.maintenance4Supported = m4.maintenance4 != VK_FALSE;
     }
 
@@ -417,6 +422,16 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
     {
       enabledExts.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
       self->info.cooperativeMatrixSupported = true;
+      // createLogicalDevice chains the maintenance4 feature with coopmat.
+      if (self->info.maintenance4Supported)
+        enabledExts.push_back(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+#ifdef VK_HAS_COOPMAT_BF16
+      // The bf16 module declares BFloat16CooperativeMatrixKHR, which takes
+      // shaderBFloat16CooperativeMatrix on top of the bf16 type.
+      self->info.bfloat16CoopmatSupported =
+          self->info.bfloat16Supported &&
+          bf16Features.shaderBFloat16CooperativeMatrix != VK_FALSE;
+#endif
       self->info.vulkanMemoryModelDeviceScopeSupported =
           vmmFeatures.vulkanMemoryModelDeviceScope != VK_FALSE;
 #ifdef VK_HAS_COOPMAT_FP16
@@ -465,6 +480,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
   self->info.maxSubgroupSize = 0;
   self->info.maxComputeWorkgroupSubgroups = 0;
   self->info.subgroupSizeControl = false;
+  self->info.computeFullSubgroups = false;
   {
     const bool hasSizeCtl = hasExt(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
 
@@ -498,6 +514,7 @@ static void queryOptionalFeatures(VulkanDevice *self, VkPhysicalDevice physDev,
       {
         enabledExts.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
         self->info.subgroupSizeControl = true;
+        self->info.computeFullSubgroups = sgCtlFeatures.computeFullSubgroups != VK_FALSE;
         self->info.minSubgroupSize = sgCtlProps.minSubgroupSize;
         self->info.maxSubgroupSize = sgCtlProps.maxSubgroupSize;
         self->info.maxComputeWorkgroupSubgroups = sgCtlProps.maxComputeWorkgroupSubgroups;
@@ -547,6 +564,7 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   if (self->info.subgroupSizeControl)
   {
     sizeCtlFeatures.subgroupSizeControl = VK_TRUE;
+    sizeCtlFeatures.computeFullSubgroups = self->info.computeFullSubgroups ? VK_TRUE : VK_FALSE;
     enabledChain = chainPNext(enabledChain, &sizeCtlFeatures);
   }
 
@@ -595,6 +613,8 @@ static bool createLogicalDevice(VulkanDevice *self, VkPhysicalDevice physDev,
   if (self->info.bfloat16Supported)
   {
     bf16Features.shaderBFloat16Type = VK_TRUE;
+    bf16Features.shaderBFloat16CooperativeMatrix =
+        self->info.bfloat16CoopmatSupported ? VK_TRUE : VK_FALSE;
     bf16Features.pNext = nullptr;
     enabledChain = chainPNext(enabledChain, &bf16Features);
   }
@@ -749,7 +769,8 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
                                          VkPipelineLayout pipeLayout,
                                          VkPipeline &pipeline,
                                          const VkSpecializationInfo *specInfo,
-                                         uint32_t requiredSubgroupSize)
+                                         uint32_t requiredSubgroupSize,
+                                         uint32_t fullSubgroupsWgSize)
 {
   VkShaderModuleCreateInfo smCI = {};
   smCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -773,11 +794,24 @@ bool VulkanDevice::createComputePipeline(const uint32_t *spirv, size_t spirvSize
   // subgroup" silently runs several subgroups per group instead.
   VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT sgSizeCI = {};
   sgSizeCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT;
-  if (canPinSubgroupSize(requiredSubgroupSize))
+  const bool pinned = canPinSubgroupSize(requiredSubgroupSize);
+  if (pinned)
   {
     sgSizeCI.requiredSubgroupSize = requiredSubgroupSize;
     stageCI.pNext = &sgSizeCI;
   }
+
+  // A module below SPIR-V 1.6 that uses cooperative-matrix instructions
+  // (ours are 1.5, see CompileShaders.cmake) needs its stage built with full
+  // subgroups (VUID-RuntimeSpirv-OpTypeCooperativeMatrixKHR-10770).  Legal
+  // only with computeFullSubgroups, and with a local_size_x that is a whole
+  // number of subgroups: of the pinned width, or of the widest the device can
+  // choose when the stage is not pinned.  Where it is not, the stage is built
+  // without, as the driver always took it.
+  const uint32_t fullUnit = pinned ? requiredSubgroupSize : info.maxSubgroupSize;
+  if (fullSubgroupsWgSize && info.computeFullSubgroups && fullUnit &&
+      fullSubgroupsWgSize % fullUnit == 0)
+    stageCI.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT;
 
   VkComputePipelineCreateInfo pipelineCI = {};
   pipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;

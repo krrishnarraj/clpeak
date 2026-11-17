@@ -172,6 +172,7 @@ namespace
     d.metricDescription = r.note.c_str();
     d.metricDims.set({Dim::Tile, r.tile});
     d.wgSize = wgSize;
+    d.requireFullSubgroups = true;  // SPIR-V 1.5 with coopmat instructions
     d.globalDivisor = kCoopGroupScale;
     d.outElemsPerWG = t.M * t.N * (d.altSpirv ? 4 : 1);
     d.pushData = &r.push;
@@ -477,7 +478,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.metricDims = {{Dim::Dtype, DType::Bf16}};
 
       d.elemSize = sizeof(float);
-      if (dev.info.bfloat16Supported && !dev.info.coopmatBF16.empty())
+      if (dev.info.bfloat16CoopmatSupported && !dev.info.coopmatBF16.empty())
       {
         d.spirv = vk_shaders::coopmat_bf16;
         d.spirvSize = vk_shaders::coopmat_bf16_size;
@@ -486,7 +487,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       else
       {
         d.skip = true;
-        d.skipMsg = "No bf16xbf16+fp32 coopmat support (shaderBFloat16Type or property)! Skipped";
+        d.skipMsg = dev.info.bfloat16Supported && !dev.info.coopmatBF16.empty()
+            ? "No bf16 cooperative-matrix feature (shaderBFloat16CooperativeMatrix)! Skipped"
+            : "No bf16xbf16+fp32 coopmat support (shaderBFloat16Type or property)! Skipped";
       }
       runTiles(d, dev.info.coopmatBF16, fill);
     }

@@ -243,8 +243,9 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
                        size_t spirvSize, uint32_t width, bool *built) -> float
   {
     VkPipeline pipeline;
+    const uint32_t fullWg = d.requireFullSubgroups ? wgSize : 0;
     *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                       pipeline, d.specInfo, width);
+                                       pipeline, d.specInfo, width, fullWg);
     // A pinned subgroup width is a preference, not a requirement: if the
     // driver won't build the stage pinned, build it unpinned and let it
     // choose rather than drop the row.  Worth knowing about, though -- a
@@ -265,7 +266,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
         dev.info.minSubgroupSize < dev.info.maxSubgroupSize)
     {
       *built = dev.createComputePipeline(spirv, spirvSize, dsLayout, pipeLayout,
-                                         pipeline, d.specInfo, 0);
+                                         pipeline, d.specInfo, 0, fullWg);
       XPUPEAK_VLOG("%s %s: the driver refused the pipeline pinned to subgroup "
                    "%u and %s\n",
                    d.resultTag, label, width,
