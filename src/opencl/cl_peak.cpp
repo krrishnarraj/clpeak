@@ -313,14 +313,14 @@ int clPeak::runAll()
              (devInfo.int8DotProductSupported || devInfo.int8DotProductPackedSupported) &&
                  isAllowed(Benchmark::ComputeInt8DP),
              int8Options, true);
-        // The latency test borrows a global-bandwidth kernel.
         want(Benchmark::GlobalBW, "Global memory bandwidth",
-             isAllowed(Benchmark::GlobalBW) || isAllowed(Benchmark::KernelLatency),
-             BUILD_OPTIONS);
+             isAllowed(Benchmark::GlobalBW), BUILD_OPTIONS);
         want(Benchmark::LocalBW, "Local memory bandwidth",
              isAllowed(Benchmark::LocalBW), BUILD_OPTIONS, true);
         want(Benchmark::ImageBW, "Image memory bandwidth",
              devInfo.imageSupported && isAllowed(Benchmark::ImageBW), BUILD_OPTIONS, true);
+        want(Benchmark::KernelLatency, "Kernel launch latency",
+             isAllowed(Benchmark::KernelLatency), BUILD_OPTIONS);
 
         {
           std::atomic<size_t> next(0);
@@ -503,13 +503,14 @@ int clPeak::runAll()
 
         // ---- Phase 4: latency ------------------------------------------
         if (supportsProfilingQueue)
-          runKernelLatency(queue, prog(Benchmark::GlobalBW), devInfo, cfg);
+          runKernelLatency(queue, prog(Benchmark::KernelLatency), devInfo, cfg);
         else if (auto run = admit(Benchmark::KernelLatency))
         {
-          auto test = deviceScope.beginTest(
-            {"kernel_launch_latency", "Kernel launch latency", "s",
-             Category::Unknown,
-             "Time to launch a small kernel, the fixed cost every dispatch pays."});
+          logger::TestSpec spec = {
+            "kernel_launch_latency", "Kernel launch latency", "s", Category::Unknown,
+            "Time to launch an empty kernel, the fixed cost every dispatch pays."};
+          spec.revision = 2; // runKernelLatency's (kernel_latency.cpp says why)
+          auto test = deviceScope.beginTest(spec);
           // One skip each, not skipAll: `op` is what tells the two apart,
           // and a skipped reading still says which measurement is missing.
           test.skip("dispatch", ResultStatus::Unsupported, "No profiling queue support",
