@@ -100,12 +100,20 @@ int clPeak::runTransferBandwidthTest(cl::CommandQueue &queue, cl::Program &prog,
     }
   };
 
+  // The copies are enqueued non-blocking, so a batch that failed part-way can
+  // leave earlier copies still queued, reading or writing through hostPtr --
+  // PoCL and Intel's CPU runtime go on running them after the enqueue that
+  // threw.  So the queue is drained before the host memory goes, on the
+  // pageable path too, where nothing else stops the allocation being freed
+  // under them.
   auto releaseHost = [&]() {
     if (hostPtr && pageable == nullptr)
     {
-      try { queue.enqueueUnmapMemObject(pinnedBuf, hostPtr); queue.finish(); }
+      try { queue.enqueueUnmapMemObject(pinnedBuf, hostPtr); }
       catch (cl::Error &) {}
     }
+    try { queue.finish(); }
+    catch (cl::Error &) {}
     freeAligned(pageable);
   };
 
