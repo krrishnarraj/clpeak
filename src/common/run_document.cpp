@@ -627,13 +627,76 @@ void writeDimsKey(JsonWriter &w, const Dims &dims)
     w.endObject();
 }
 
-void writeMetric(JsonWriter &w, const MetricResult &m)
+// ── Dims as a result holds them ──────────────────────────────────────────────
+//
+// A reading's coordinates are its effective dims: its test's, then its own.
+// A result writes them in one form, so that a reader builds a measure key
+// from the file alone (docs/format-v4.md, `dims`): no dim at its default, and
+// a test holds the dims every one of its readings has, each reading the
+// rest.  A checkpoint keeps them as the backend authored them, which is what
+// a resumed test's held readings are merged against.
+struct CanonicalDims {
+    Dims              test;
+    std::vector<Dims> readings;   // one per metric, in order
+};
+
+// `dims` without the entries at their default, for a reading of `family`.
+Dims withoutDefaults(const Dims &dims, const std::string &family)
+{
+    const DimValue *dtype = dims.find("dtype");
+    const std::string type = dtype ? dtype->str() : "";
+    Dims out;
+    for (const DimEntry &e : dims)
+        if (e.value.str() != xpupeak::dimDefaultFor(e.key, family, type))
+            out.entries.push_back(e);
+    return out;
+}
+
+CanonicalDims canonicalDims(const TestResult &t)
+{
+    CanonicalDims c;
+    std::vector<Dims> all;
+    for (const MetricResult &m : t.metrics)
+        all.push_back(withoutDefaults(effectiveDims(t.dims, m.dims),
+                                      m.benchmark.empty() ? t.benchmark : m.benchmark));
+    if (all.empty())
+    {
+        c.test = withoutDefaults(t.dims, t.benchmark);
+        return c;
+    }
+    // The test's: what every reading has, in the first one's order.
+    for (const DimEntry &e : all.front())
+    {
+        bool everyOne = true;
+        for (const Dims &d : all)
+        {
+            const DimValue *v = d.find(e.key);
+            if (!v || *v != e.value)
+            {
+                everyOne = false;
+                break;
+            }
+        }
+        if (everyOne) c.test.entries.push_back(e);
+    }
+    for (const Dims &d : all)
+    {
+        Dims own;
+        for (const DimEntry &e : d)
+            if (!c.test.find(e.key)) own.entries.push_back(e);
+        c.readings.push_back(std::move(own));
+    }
+    return c;
+}
+
+// `dims`: the reading's own, or in a result the canonical ones.
+void writeMetric(JsonWriter &w, const MetricResult &m, const Dims &dims)
 {
     w.beginObject();
     w.str("id", m.id);
     w.strIf("label", m.label);
     w.strIf("benchmark", m.benchmark);
-    writeDimsKey(w, m.dims);
+    writeDimsKey(w, dims);
     if (m.status == ResultStatus::Ok)
     {
         // An omitted "status" means ok.  Every reading in a healthy file is
@@ -657,8 +720,10 @@ void writeMetric(JsonWriter &w, const MetricResult &m)
     w.endObject();
 }
 
-void writeTest(JsonWriter &w, const TestResult &t)
+// `shared`: a result, whose dims are written canonical (canonicalDims).
+void writeTest(JsonWriter &w, const TestResult &t, bool shared)
 {
+    const CanonicalDims canonical = shared ? canonicalDims(t) : CanonicalDims{};
     w.beginObject();
     w.str("id", t.id);
     w.str("title", t.title);
@@ -666,7 +731,7 @@ void writeTest(JsonWriter &w, const TestResult &t)
     w.strIf("benchmark", t.benchmark);
     // Absent means 1, the first.
     if (t.revision > 1) w.integer("revision", t.revision);
-    writeDimsKey(w, t.dims);
+    writeDimsKey(w, shared ? canonical.test : t.dims);
     w.str("category", categoryString(t.category));
     w.str("shape", shapeString(t.shape));
     w.strIf("axis", t.axis);
@@ -677,7 +742,8 @@ void writeTest(JsonWriter &w, const TestResult &t)
     if (t.durationS > 0.0) w.num("duration_s", t.durationS);
     writeExt(w, t.ext);
     w.beginArray("metrics");
-    for (const MetricResult &m : t.metrics) writeMetric(w, m);
+    for (size_t i = 0; i < t.metrics.size(); i++)
+        writeMetric(w, t.metrics[i], shared ? canonical.readings[i] : t.metrics[i].dims);
     w.endArray();
     w.endObject();
 }
@@ -828,7 +894,7 @@ void writeProcessors(JsonWriter &w, const std::vector<ProcessorInfo> &processors
     w.endArray();
 }
 
-void writeDevice(JsonWriter &w, const DeviceResult &d)
+void writeDevice(JsonWriter &w, const DeviceResult &d, bool shared)
 {
     w.beginObject();
     w.str("backend", d.backend);
@@ -862,8 +928,41 @@ void writeDevice(JsonWriter &w, const DeviceResult &d)
         w.endArray();
     }
     w.beginArray("tests");
-    for (const TestResult &t : d.tests) writeTest(w, t);
+    for (const TestResult &t : d.tests) writeTest(w, t, shared);
     w.endArray();
+    w.endObject();
+}
+
+// Every dim key the devices' tests and readings use, with its class: what
+// a reader takes for a key its own vocabulary does not have.  A key this
+// build does not know keeps the class its file declared, else identity.
+void writeDimKeyClasses(JsonWriter &w, const RunDocument &doc)
+{
+    std::map<std::string, std::string> classes;
+    auto note = [&](const Dims &dims) {
+        for (const DimEntry &e : dims)
+        {
+            if (classes.count(e.key)) continue;
+            xpupeak::Dim d;
+            std::string cls = "identity";
+            if (xpupeak::fromString(e.key, d))
+                cls = xpupeak::dimInfo(d).cls == xpupeak::DimClass::Variant ? "variant"
+                                                                            : "identity";
+            else if (auto it = doc.meta.dimKeyClasses.find(e.key);
+                     it != doc.meta.dimKeyClasses.end())
+                cls = it->second;
+            classes[e.key] = cls;
+        }
+    };
+    for (const DeviceResult &d : doc.devices)
+        for (const TestResult &t : d.tests)
+        {
+            note(t.dims);
+            for (const MetricResult &m : t.metrics) note(m.dims);
+        }
+    if (classes.empty()) return;
+    w.beginObjectInline("dim_keys");
+    for (const auto &[key, cls] : classes) w.str(key.c_str(), cls);
     w.endObject();
 }
 
@@ -979,9 +1078,10 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
 
     writePackages(w, doc.packages);
     writeProcessors(w, doc.processors);
+    writeDimKeyClasses(w, doc);
 
     w.beginArray("devices");
-    for (const DeviceResult &d : doc.devices) writeDevice(w, d);
+    for (const DeviceResult &d : doc.devices) writeDevice(w, d, /*shared=*/progress == nullptr);
     w.endArray();
 
     // Results first; the two blocks a reader consults when they look wrong
@@ -1432,6 +1532,10 @@ void readDocument(const JsonValue &root, RunDocument &out)
         for (const auto &kv : a->obj)
             if (kv.second.type() == JsonValue::Type::String)
                 out.meta.annotations[kv.first] = kv.second.asString();
+    if (const JsonValue *k = root.find("dim_keys"); k && k->isObject())
+        for (const auto &kv : k->obj)
+            if (kv.second.type() == JsonValue::Type::String)
+                out.meta.dimKeyClasses[kv.first] = kv.second.asString();
     out.meta.ext = readExt(root);
     if (const JsonValue *rs = root.find("resumed"))
         for (const JsonValue &r : rs->items())

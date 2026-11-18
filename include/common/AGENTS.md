@@ -74,6 +74,12 @@ Rules that span every backend:
 - **Variant dims are free.** `width`, `chains`, `isa`, `simd_bits`, `impl`,
   `form`, `tile`, `problem_size` say how a number was reached; the best is
   taken over them.
+- **Author freely; the result is written canonical.** A dim at its default
+  may be authored (`{Dim::Dtype, DType::Fp32}` on an fp32 test): a result
+  drops it, holds on the test what every reading shares, and declares each
+  key's class in `dim_keys`, so a reader builds the measure key from the file
+  alone (`canonicalDims()`, `src/common/run_document.cpp`).  A checkpoint
+  keeps the dims as authored.
 - **A missing word goes at the end of its list** in `vocabulary.h` and
   `src/common/vocabulary.cpp`, in a commit of its own, and in the spec's
   tables. A key's class and default never change: a correction is a new key.

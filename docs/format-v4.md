@@ -96,6 +96,7 @@ Abbreviated; the values are illustrative.
     { "id": "npu0", "kind": "npu", "package": "pkg0", "vendor": "apple",
       "name": "Apple Neural Engine", "compute_units": 16 }
   ],
+  "dim_keys": { "dtype": "identity", "isa": "variant", "scope": "identity", "simd_bits": "variant" },
 
   "devices": [
     {
@@ -128,7 +129,7 @@ Abbreviated; the values are illustrative.
         {
           "id": "single_precision_compute", "variant": "NEON",
           "benchmark": "single-precision-compute",
-          "dims": {"dtype": "fp32", "isa": "neon", "simd_bits": 128},
+          "dims": {"isa": "neon", "simd_bits": 128},
           "…": "…",
           "metrics": [
             { "id": "float ST", "dims": {"scope": "core"}, "value": 1.03e11 },
@@ -173,6 +174,7 @@ Abbreviated; the values are illustrative.
 | `annotations` | C | what only a person knows about the run (*Annotations*) |
 | `resumed` | C | present only for a run continued after its process ended part-way: one entry per part after the first (*Resumed runs*) |
 | `packages`, `processors` | C | the hardware (*Hardware*) |
+| `dim_keys` | C | every dim key the file's tests and readings use, with its class: `{"dtype": "identity", "width": "variant"}`. A reader takes the class of a key it does not know from here (*Measure keys*) |
 | `devices` | C | one entry per benchmarked device |
 | `ext` | — | experimental fields (*Compatibility*) |
 | `inventory` | D | `--verbose` only: what `--list-devices` would have shown (*Inventory*) |
@@ -496,6 +498,13 @@ A reading's coordinates, from a fixed vocabulary (*Vocabulary*):
 test's `dims` hold what all its readings share — a vector test's data type, a
 CPU test's ISA — and a reading's own add to them and win over them. A value
 is a string or a whole number, and stays so.
+
+A result writes them in one form, so that a measure key can be read off the
+file alone: **no dim is written at its default** (an absent key means its
+default, and a present one never is), and a test holds the dims every one of
+its readings has, each reading the rest. With the classes `dim_keys`
+declares, that is all a reader needs (*Measure keys*). A checkpoint keeps
+the dims as the backend authored them (*The checkpoint*).
 
 Every key has one fixed class:
 
@@ -1027,11 +1036,12 @@ shares. For each reading that has a `value`:
    takes the reading's value. These are its **effective dims**.
 4. **Data type**: the effective `dtype`, else the family's (*Families*), else
    none.
-5. **Identity dims**: each effective dim whose key is identity (*Dim keys*),
-   and each whose key the reader does not know, except where the value is
-   the key's default for this family and data type. Variant dims (`width`,
-   `chains`, `isa`, `simd_bits`, `impl`, `form`, `tile`, `problem_size`)
-   never count: the best is taken over them.
+5. **Identity dims**: each effective dim whose key is identity — by *Dim
+   keys*, or for a key the reader does not know by the file's `dim_keys`,
+   and identity where that is silent — except where the value is the key's
+   default for this family and data type. Variant dims (`width`, `chains`,
+   `isa`, `simd_bits`, `impl`, `form`, `tile`, `problem_size`) never count:
+   the best is taken over them.
 6. **Text**: a string as written, a whole number in decimal (`2048`, also
    where the file says `2048.0`).
 7. **Key**: the family, the quantity, then `key=value` for each identity dim
@@ -1047,6 +1057,12 @@ data type the reader does not know gives what it can: no `dtype` default; for
 `acc`, the usual accumulator of a known data type, and no default for an
 unknown one.
 
+A result never writes a dim at its default (*`dims`*), so steps 4 and 5's
+defaults change nothing in one: a reader with no tables — or one older than
+the file, meeting a family or a key added since — reaches the same key from
+the family, the quantity and every effective dim that `dim_keys` calls
+identity. The defaults matter only for a file edited by hand.
+
 - Metal's `simdgroup_matrix` → `fp16` `{dtype: fp16}`:
   `matrix-compute|flops|dtype=fp16`.
 - `fp16 f16acc` `{dtype: fp16, acc: fp16}`:
@@ -1054,8 +1070,8 @@ unknown one.
   accumulator, the same reading is `matrix-compute|flops|dtype=fp16`.
 - `fp8_e4m3 2:4` `{dtype: fp8_e4m3, sparsity: "2:4"}`:
   `matrix-compute|flops|dtype=fp8_e4m3|sparsity=2:4`.
-- The CPU's `single_precision_compute@NEON`, whose test has `{dtype: fp32,
-  isa: neon, simd_bits: 128}`: `float ST` `{scope: core}` is
+- The CPU's `single_precision_compute@NEON`, whose test has `{isa: neon,
+  simd_bits: 128}` (fp32 is its family's): `float ST` `{scope: core}` is
   `single-precision-compute|flops|scope=core`, and `float MT` is
   `single-precision-compute|flops`. The ISA is variant, so a CPU's NEON and
   SVE variants reach the same keys, and the better is the CPU's.
@@ -1227,8 +1243,9 @@ files written by development builds are not migrated.
 - **Readers** accept any minor of their major, and say when a file comes from
   a newer one ("written by a newer XpuPeak; some details aren't shown"). They
   treat what they don't know as opaque and never fail on it: an unknown key
-  is ignored; an unknown enum value is shown as written; an unknown dim key is
-  treated as identity, so it never merges what it doesn't understand.
+  is ignored; an unknown enum value is shown as written; an unknown dim key
+  takes the class the file's `dim_keys` gives it, and is identity where that
+  is silent, so it never merges what it doesn't understand.
 - **A major bump (5)** would get a new schema string and a converter, never a
   silent change. The rules here exist so that it never has to happen.
 

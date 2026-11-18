@@ -184,9 +184,13 @@ const dimKeys = <String, DimKeyInfo>{
 };
 
 /// Whether two readings must agree on [key] to be comparable.  A key this
-/// build does not know is identity.
-bool isIdentityDim(String key) =>
-    (dimKeys[key]?.cls ?? DimClass.identity) == DimClass.identity;
+/// build does not know takes the class its file declares in `dim_keys`
+/// ([declared]), and is identity where that says nothing.
+bool isIdentityDim(String key, [Map<String, String> declared = const {}]) {
+  final known = dimKeys[key];
+  if (known != null) return known.cls == DimClass.identity;
+  return declared[key] != 'variant';
+}
 
 // ── Families ───────────────────────────────────────────────────────────────
 
