@@ -175,7 +175,7 @@
         "dotprod",
         "fhm",
         "aes",
-        "sha2",
+        "sha256",
         "sha512",
         "crc32"
       ]

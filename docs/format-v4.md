@@ -90,7 +90,7 @@ Abbreviated; the values are illustrative.
       "clusters": [ { "kind": "performance", "cores": 8, "max_mhz": 3228 },
                     { "kind": "efficiency", "cores": 2, "max_mhz": 2064 } ],
       "engines": [ {"kind": "matrix", "name": "AMX", "scope": "cluster", "reached_by": "library"} ],
-      "features": [ "neon", "fp16", "dotprod", "fhm", "aes", "sha2", "sha512", "crc32" ] },
+      "features": [ "neon", "fp16", "dotprod", "fhm", "aes", "sha256", "sha512", "crc32" ] },
     { "id": "gpu0", "kind": "gpu", "package": "pkg0", "vendor": "apple", "name": "Apple M1 Pro",
       "arch": "Apple7", "integrated": true, "compute_units": 16, "compute_unit": "core" },
     { "id": "npu0", "kind": "npu", "package": "pkg0", "vendor": "apple",
@@ -272,7 +272,7 @@ is the last part's.
 Facts only a person knows, as a flat map of strings (C). The tool never fills
 it, and it never overwrites a measured fact: a display may prefer an
 annotation, a reader keeps both. Its writers are `--annotate key=value`
-*(V10)*, the app's Details editor *(V8)*, and a site that collects results,
+*(V10)*, the app's Details editor, and a site that collects results,
 at upload. Recommended keys:
 
 | key | for |
