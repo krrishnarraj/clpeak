@@ -6,6 +6,7 @@
 #include <common/thermal.h>
 #include <common/screen_hold.h>
 #include <cassert>
+#include <cmath>
 #include <exception>
 #include <iomanip>
 #include <sstream>
@@ -639,6 +640,17 @@ void logger::TestScope::emit(std::string metric, float value, EmitOptions opts)
         // the test's: a `s` reading inside a throughput test is still
         // lower-is-better.
         if (m.direction == Direction::FromUnit) m.direction = u.direction;
+    }
+    // A measurement that came out NaN or infinite (a zero elapsed time, an
+    // overflowed count) is an error, never a value: JSON has no such number,
+    // and a reader ranking the best of a key would take an infinity as the
+    // peak.  The dims and unit stay, so the file still says what failed.
+    if (!std::isfinite(value))
+    {
+        m.status = ResultStatus::Error;
+        m.reason = std::isnan(value) ? "the measurement came out as NaN"
+                                     : "the measurement came out infinite";
+        m.value  = 0.0f;
     }
 
     LogEvent e = log->makeEvent(LogEvent::Kind::Metric);

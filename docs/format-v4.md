@@ -578,7 +578,7 @@ invented word for that pair would read worse than none.
 | `label` | I | display form; **omitted when it equals `id`**, which is the usual case |
 | `benchmark` | C | the reading's family, present only when it is not its test's |
 | `dims` | C | the reading's coordinates, over its test's |
-| `value` | C | the reading, in the test's `unit`. Present exactly when the reading succeeded |
+| `value` | C | the reading, in the test's `unit`: always a finite number. Present exactly when the reading succeeded; a measurement that came out NaN or infinite is an `error` reading instead |
 | `status` | C | `unsupported` \| `skipped` \| `error`. **Omitted for a successful reading** — every row of a healthy file is `ok`, so spelling it out on each would be noise |
 | `reason` | I | why, for a non-`ok` reading |
 | `description` | I | what this one reading means |
