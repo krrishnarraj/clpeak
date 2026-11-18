@@ -207,17 +207,24 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"onnx_gemm", "ONNX MatMul peak",
-       "flops",
-       Category::Unknown,
-       "Matrix-multiply rate on this provider, one data type per row: sixteen "
-       "chained matmuls in one dispatch, swept over layer width -- and, where "
-       "wider square layers fell off, over taller activations against "
-       "narrower layers -- and reported at its best.  int8 runs a second time "
-       "as 1x1 convolutions, and a model the provider cannot run entirely on "
-       "its device reports unsupported.",
-       TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{
+      "onnx_gemm", "ONNX MatMul peak",
+      "flops",
+      Category::Unknown,
+      "Matrix-multiply rate on this provider, one data type per row: sixteen "
+      "chained matmuls in one dispatch, swept over layer width -- and, where "
+      "wider square layers fell off, over taller activations against "
+      "narrower layers -- and reported at its best.  int8 runs a second time "
+      "as 1x1 convolutions, and a model the provider cannot run entirely on "
+      "its device reports unsupported.",
+      TestShape::Heterogeneous, "data type"};
+  // Revision 2 (4.0.0): on a CPU provider the thread that calls the runtime
+  // takes the core its pool leaves it (onnx_threads.h).  Left to the
+  // scheduler on a Threadripper PRO 3955WX it shared a core with a pool
+  // thread in most runs, and fp32 read 0.69-1.65 TFLOPS from run to run,
+  // where it now reads 1.64-1.66.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // runAll also clears per EP before dispatching; this entry clear keeps
   // direct runGemm callers (tests, future entry points) from inheriting a

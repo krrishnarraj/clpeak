@@ -273,13 +273,19 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
-       "2-D convolution rate on this provider at 256 channels -- a stride-2 "
-       "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size "
-       "and reported at its best.  Set against the matmul rows, it shows how "
-       "well this provider handles convolution.",
-       TestShape::Heterogeneous, "convolution shape and data type"});
+  logger::TestSpec spec{
+      "onnx_conv", "ONNX convolution peak", "flops", Category::Compute,
+      "2-D convolution rate on this provider at 256 channels -- a stride-2 "
+      "3x3, a 1x1 and a depthwise 3x3 -- each swept over feature-map size "
+      "and reported at its best.  Set against the matmul rows, it shows how "
+      "well this provider handles convolution.",
+      TestShape::Heterogeneous, "convolution shape and data type"};
+  // Revision 2 (4.0.0): on a CPU provider the thread that calls the runtime
+  // takes the core its pool leaves it (onnx_threads.h).  On a Threadripper
+  // PRO 3955WX the dense 3x3 and 1x1 rows read 1.2-1.4x what they did with
+  // that thread sharing a core with a pool thread.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   for (const DType &dt : kDTypes)
   {

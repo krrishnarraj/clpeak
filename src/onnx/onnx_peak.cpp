@@ -5,6 +5,7 @@
 #include "onnx_plugin.h"
 #include "onnx_probe.h"
 #include "onnx_session.h"
+#include "onnx_threads.h"
 #include "onnx_winml.h"
 
 #include <common/coreml_cache.h>
@@ -577,6 +578,13 @@ int OnnxPeak::runAll()
 
     // A device lost under a previous provider is not this one's problem.
     onnxClearDeviceLost();
+
+    // On a CPU provider, the thread that runs every test below takes the
+    // core ONNX Runtime's pool leaves for it, until the provider is done
+    // (onnx_threads.h).  Left to the scheduler it shared a core with a
+    // pinned pool thread in most runs on a 16-core Threadripper, which cost
+    // a matmul row up to half its rate.
+    const OnnxCallerPin callerPin(*rt, ep);
 
     // Global tiny probe once per EP: learn which dtypes this EP can
     // actually run at 64^3 before paying 1024^3 (QNN HTP: 0.5s vs 33s).

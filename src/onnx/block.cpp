@@ -1067,15 +1067,23 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "Prompt processing through one 2048-wide, 16-head decoder block "
       "(SwiGLU feed-forward, 50.6M parameters) at each precision a model "
       "ships in -- what sets time to the first token.";
-  const logger::TestSpec prefillFlopsSpec = {
+  // Revision 2 (4.0.0) for all three tests: on a CPU provider the thread
+  // that calls the runtime takes the core its pool leaves it
+  // (onnx_threads.h).  On a Threadripper PRO 3955WX, against that thread
+  // left to the scheduler, the fp32 512-token prompt went from 0.67-0.69 to
+  // 1.22 TFLOPS (its pass from 78-81 to 44 ms) and the int8 decode from 34
+  // to 38 GB/s.
+  logger::TestSpec prefillFlopsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "flops",
       Category::Ai, prefillDescription,
       TestShape::Heterogeneous, "data type and prompt length"};
-  const logger::TestSpec prefillOpsSpec = {
+  prefillFlopsSpec.revision = 2;
+  logger::TestSpec prefillOpsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "ops",
       Category::Ai, prefillDescription,
       TestShape::Heterogeneous, "data type and prompt length"};
-  const logger::TestSpec decodeSpec = {
+  prefillOpsSpec.revision = 2;
+  logger::TestSpec decodeSpec = {
       "onnx_block_decode", "Transformer block, decode", "bps",
       Category::Ai,
       "Weight-streaming rate of the same block generating one token at 2048 "
@@ -1083,13 +1091,15 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "narrow-weight row far below fp16 means this provider unpacks the "
       "weights to full width first.",
       TestShape::Heterogeneous, "data type"};
-  const logger::TestSpec latencySpec = {
+  decodeSpec.revision = 2;
+  logger::TestSpec latencySpec = {
       "onnx_block_latency", "Transformer block latency", "s",
       Category::Ai,
       "Time for one pass of the block at each precision; multiply by a "
       "model's layer count for a floor on time to first token and per-token "
       "time.  What the decode rows add as the context grows is attention.",
       TestShape::Heterogeneous, "data type, phase and context length"};
+  latencySpec.revision = 2;
 
   // ---- Prefill: flops vs ops split, single header per unit, per-variant ----
   // Measures only the prompt ladder; decode/latency are measured in their
