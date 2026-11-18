@@ -1,6 +1,8 @@
 #include <opencl/cl_peak.h>
 #include <algorithm>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, device_info_t &devInfo, benchmark_config_t &cfg)
 {
   float timed, bps;
@@ -10,20 +12,26 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
   if (!run)
     return 0;
 
-  auto test = currentDeviceScope->beginTest(
-    {"image_memory_bandwidth", "Image memory bandwidth", "bps",
-     Category::Unknown,
-     "Image read bandwidth, reading each pixel once.",
-     TestShape::Homogeneous});
+  logger::TestSpec spec = {"image_memory_bandwidth", "Image memory bandwidth", "bps",
+                           Category::Unknown,
+                           "Image read bandwidth, reading each pixel once.",
+                           TestShape::Homogeneous};
+  // Revision 2: since it first shipped, the dispatch has been sized from the
+  // image so each pixel is read once (2.0.9), and the row has been the
+  // fastest of several walk orders (2.1.4, with the Vulkan backend's blocked
+  // walks from 3.0.2).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // The image is RGBA float, so one fetch returns a whole pixel: four 32-bit
-  // values, hence the metric name.
+  // values, hence the metric name -- a pixel format, not a vector width.
   const char *fetchNote = "One RGBA fp32 pixel (16 bytes) per fetch.";
+  const Dims fetchDims = {{Dim::PixelFormat, dim::PixelFormat::Rgba32f}};
 
   if (!devInfo.imageSupported)
   {
     test.skip("float4", ResultStatus::Unsupported,
-               "Device has no image support", fetchNote);
+               "Device has no image support", fetchNote, fetchDims);
     return 0;
   }
 
@@ -122,14 +130,14 @@ int clPeak::runImageBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, de
         bps = std::max(bps, shapeBps);
       }
 
-      test.emit("float4", bps, fetchNote);
+      test.emit("float4", bps, fetchNote, fetchDims);
     }
     ///////////////////////////////////////////////////////////////////////////
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("float4", ResultStatus::Error, reason, fetchNote);
+    test.skip("float4", ResultStatus::Error, reason, fetchNote, fetchDims);
     return -1;
   }
 

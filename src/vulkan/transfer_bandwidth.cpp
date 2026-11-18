@@ -6,6 +6,8 @@
 #include <chrono>
 #include <vector>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Host<->device transfer bandwidth (Vulkan)
 // ---------------------------------------------------------------------------
@@ -184,21 +186,26 @@ int vkPeak::runTransferBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     return totalUs / static_cast<float>(iters);
   };
 
-  auto reportCopy = [&](const char *metric, const char *note, float us)
+  // The host side is a HOST_VISIBLE allocation: memory the driver mapped for
+  // the device to reach directly, which is what the other backends' pinned
+  // buffers are, so the readings say `memory: pinned` as theirs do.
+  auto reportCopy = [&](const char *metric, const char *note, dim::Direction direction,
+                        float us)
   {
+    const Dims dims = {{Dim::Direction, direction}, {Dim::Memory, dim::Memory::Pinned}};
     if (us <= 0.0f)
     {
       test.skip(metric, ResultStatus::Error,
-                 "vkQueueSubmit/WaitIdle failed or timer returned zero", note);
+                 "vkQueueSubmit/WaitIdle failed or timer returned zero", note, dims);
       return;
     }
     float bps = (float)bytes / us * 1e6f;
-    test.emit(metric, bps, note);
+    test.emit(metric, bps, note, dims);
   };
 
-  reportCopy("h2d", "Host to device.",
+  reportCopy("h2d", "Host to device.", dim::Direction::H2d,
              runCopy(hostBuf, devBuf));
-  reportCopy("d2h", "Device to host.",
+  reportCopy("d2h", "Device to host.", dim::Direction::D2h,
              runCopy(devBuf, hostBuf));
 
   if (queryPool != VK_NULL_HANDLE)

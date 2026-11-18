@@ -300,6 +300,11 @@ struct vk_compute_variant_t
   size_t spirvSize;
   const char *description;   // what this one reading means (nullptr = undocumented)
 
+  // This reading's coordinates, beside the note that says the same in words:
+  // `{{Dim::Width, 4}}` for a vector width, `{{Dim::Chains, 4}}` for int8_dp's
+  // independent chains.  The test's own (its data type) are the desc's `dims`.
+  Dims dims;
+
   // Second build of the same shader with the affine chain shape
   // (mad_chain.glsl).  When set, runComputeKernel times both and reports the
   // faster: no single chain shape reaches peak on every vendor, and picking
@@ -330,12 +335,23 @@ struct vk_compute_desc_t
   // What varies across the readings: "vector width", "data type".  Optional.
   const char *axis;
 
+  // The coordinates every reading shares (logger::TestSpec::dims): a vector
+  // family's data type, and its accumulator where that is not the family's
+  // own (include/common/vocabulary.h).  Read only by a desc that opens its
+  // own test.
+  Dims dims;
+
   // Single-variant path only: what this one reading means, and the unit it is
   // measured in when that differs from the test's.  The unit override is what
   // lets the integer members of a data-type family share the test with the
   // floating-point ones instead of living in a `-int` twin.
   const char *metricDescription;
   const char *metricUnit;
+
+  // Single-variant path only: this reading's coordinates -- a coopmat row's
+  // data type and accumulator, and the tile it ran at -- on its row and on
+  // every skip that stands in for it.
+  Dims metricDims;
 
   // Single-variant shader (used when variants == nullptr), and the second
   // build raced against it the way a variant's alt is -- coopmat's four-

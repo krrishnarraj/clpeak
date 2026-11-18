@@ -39,6 +39,14 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     testSpec.shape = d.shape;
     if (d.axis)
       testSpec.axis = d.axis;
+    testSpec.dims = d.dims;
+    // Revision 2: every family this runner opens has moved since it first
+    // shipped, for reasons that were not the hardware -- its chains went from
+    // ping-pong to one accumulator and then raced in two shapes (2.1.0,
+    // 2.1.3), its pipelines were pinned to the device's subgroup width
+    // (3.0.1) and the affine chain raced at half of it (3.0.2), and
+    // int8_dp's chain stopped issuing an op its budget did not count (2.1.4).
+    testSpec.revision = 2;
     ownTest.reset(new logger::TestScope(currentDeviceScope->beginTest(testSpec)));
   }
   logger::TestScope &test = d.scope ? *d.scope : *ownTest;
@@ -52,6 +60,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     const uint32_t *spirv;
     size_t spirvSize;
     const char *description;
+    Dims dims;
     const uint32_t *altSpirv;
     size_t altSpirvSize;
   };
@@ -61,6 +70,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     for (uint32_t i = 0; i < d.numVariants; i++)
       variants.push_back({d.variants[i].label, d.variants[i].spirv,
                           d.variants[i].spirvSize, d.variants[i].description,
+                          d.variants[i].dims,
                           d.variants[i].altSpirv, d.variants[i].altSpirvSize});
   }
   else
@@ -68,18 +78,21 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     // Single-variant tests: one reading, documented by d.metricDescription.
     // Coopmat uses this path once per data type, all into the same test.
     variants.push_back({d.metricLabel, d.spirv, d.spirvSize,
-                        d.metricDescription, d.altSpirv, d.altSpirvSize});
+                        d.metricDescription, d.metricDims,
+                        d.altSpirv, d.altSpirvSize});
   }
 
   auto note = [](const char *text)
   { return text ? std::string(text) : std::string(); };
 
-  // Unit override for the single-variant path: an integer member of an
+  // A reading's note and dims, on its row and on any skip standing in for
+  // it, and the single-variant path's unit override: an integer member of an
   // otherwise floating-point family carries its own.
-  auto emitOpts = [&](const char *description)
+  auto emitOpts = [&](const Variant &v)
   {
     logger::EmitOptions o;
-    o.description = note(description);
+    o.description = note(v.description);
+    o.dims = v.dims;
     if (d.metricUnit)
       o.unit = d.metricUnit;
     return o;
@@ -89,7 +102,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
   {
     const char *msg = d.skipMsg ? d.skipMsg : "Skipped";
     for (const auto &v : variants)
-      test.skip(v.label, ResultStatus::Unsupported, msg, emitOpts(v.description));
+      test.skip(v.label, ResultStatus::Unsupported, msg, emitOpts(v));
     return 0;
   }
 
@@ -306,8 +319,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
       if (d.refused)
         *d.refused = true;
       else
-        test.skip(v.label, ResultStatus::Error, "Pipeline creation failed",
-                  emitOpts(v.description));
+        test.skip(v.label, ResultStatus::Error, "Pipeline creation failed", emitOpts(v));
       continue;
     }
     if (timed <= 0.0f)
@@ -316,7 +328,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
         *d.reading = 0.0f;
       else
         test.skip(v.label, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                  emitOpts(v.description));
+                  emitOpts(v));
       continue;
     }
     float value = toValue(timed);
@@ -388,7 +400,7 @@ int vkPeak::runComputeKernel(VulkanDevice &dev, benchmark_config_t &cfg,
     if (d.reading)
       *d.reading = value;
     else
-      test.emit(v.label, value, emitOpts(v.description));
+      test.emit(v.label, value, emitOpts(v));
   }
 
   vkDestroyDescriptorPool(dev.device, descPool, nullptr);

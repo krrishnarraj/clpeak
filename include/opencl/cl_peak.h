@@ -94,8 +94,10 @@ public:
 
     // Unified compute benchmark helper — replaces 7 nearly-identical runCompute* methods.
     // `description` is the test's one- or two-sentence explanation
-    // (logger::TestSpec::description); the per-width readings are documented
-    // by clWidthNote() (clChainNote() for int8_dp) inside the helper.  A
+    // (logger::TestSpec::description), and `dims` what all its readings
+    // share (logger::TestSpec::dims: the family's data type); the per-width
+    // readings are documented by clWidthNote() (clChainNote() for int8_dp)
+    // inside the helper, which gives each its `width` (`chains`).  A
     // non-empty `buildError` says `prog` failed to build where it should
     // have, and every reading becomes that error.
     int runComputeTest(cl::CommandQueue &queue, cl::Program &prog,
@@ -105,7 +107,7 @@ public:
                        const std::string &resultTag,
                        const std::string &kernelPrefix,
                        const std::string &typeName, const std::string &unit,
-                       const std::string &description,
+                       const std::string &description, const Dims &dims,
                        unsigned int workPerWI, unsigned int wgsPerCU,
                        size_t elemSize);
 

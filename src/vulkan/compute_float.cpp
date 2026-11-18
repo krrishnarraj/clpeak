@@ -3,6 +3,8 @@
 #include <vulkan/vk_peak.h>
 #include <common/common.h>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 // ---------------------------------------------------------------------------
 // Floating-point compute benchmarks.
 // Each is a thin wrapper that fills a vk_compute_desc_t and delegates to
@@ -13,14 +15,14 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "float",  vk_shaders::compute_sp_v1, vk_shaders::compute_sp_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_sp_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_sp_v1) },
 #ifdef VK_HAS_COMPUTE_SP_V2
     { "float2", vk_shaders::compute_sp_v2, vk_shaders::compute_sp_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_sp_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_sp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_SP_V4
     { "float4", vk_shaders::compute_sp_v4, vk_shaders::compute_sp_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_sp_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_sp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -32,6 +34,7 @@ int vkPeak::runComputeSP(VulkanDevice &dev, benchmark_config_t &cfg)
                   "traffic.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  d.dims        = {{Dim::Dtype, DType::Fp32}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.raceHalfSubgroup = true;
@@ -47,14 +50,14 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "half",   vk_shaders::compute_hp_v1, vk_shaders::compute_hp_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_hp_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_hp_v1) },
 #ifdef VK_HAS_COMPUTE_HP_V2
     { "half2",  vk_shaders::compute_hp_v2, vk_shaders::compute_hp_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_hp_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_hp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_HP_V4
     { "half4",  vk_shaders::compute_hp_v4, vk_shaders::compute_hp_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_hp_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_hp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -65,6 +68,7 @@ int vkPeak::runComputeHP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak fp16 arithmetic rate, with fp16 inputs and accumulator.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  d.dims        = {{Dim::Dtype, DType::Fp16}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.raceHalfSubgroup = true;
@@ -83,14 +87,14 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
 {
   static const vk_compute_variant_t variants[] = {
     { "double",  vk_shaders::compute_dp_v1, vk_shaders::compute_dp_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_dp_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_dp_v1) },
 #ifdef VK_HAS_COMPUTE_DP_V2
     { "double2", vk_shaders::compute_dp_v2, vk_shaders::compute_dp_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_dp_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_dp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_DP_V4
     { "double4", vk_shaders::compute_dp_v4, vk_shaders::compute_dp_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_dp_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_dp_v4) },
 #endif
   };
   double A = 1.3;
@@ -101,6 +105,7 @@ int vkPeak::runComputeDP(VulkanDevice &dev, benchmark_config_t &cfg)
   d.description = "Peak fp64 arithmetic rate.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  d.dims        = {{Dim::Dtype, DType::Fp64}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.raceHalfSubgroup = true;
@@ -122,14 +127,14 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
   // all three are FFMA, bounded by the FP32 rate.
   static const vk_compute_variant_t variants[] = {
     { "mp",  vk_shaders::compute_mp_v1, vk_shaders::compute_mp_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_mp_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_mp_v1) },
 #ifdef VK_HAS_COMPUTE_MP_V2
     { "mp2", vk_shaders::compute_mp_v2, vk_shaders::compute_mp_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_mp_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_mp_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_MP_V4
     { "mp4", vk_shaders::compute_mp_v4, vk_shaders::compute_mp_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_mp_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_mp_v4) },
 #endif
   };
   float A = 1.3f;
@@ -141,6 +146,8 @@ int vkPeak::runComputeMP(VulkanDevice &dev, benchmark_config_t &cfg)
                   "without the matrix engine.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  // The fp32 accumulator is what the family means, so it is its default.
+  d.dims        = {{Dim::Dtype, DType::Fp16}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.raceHalfSubgroup = true;
@@ -161,14 +168,14 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
   // peaks at bf16vec2 via BMMA2-style packed multiply.
   static const vk_compute_variant_t variants[] = {
     { "bf16",  vk_shaders::compute_bf16_v1, vk_shaders::compute_bf16_v1_size, vkWidthNote(1),
-      VK_ALT_SHADER(compute_bf16_v1) },
+      {{Dim::Width, 1}}, VK_ALT_SHADER(compute_bf16_v1) },
 #ifdef VK_HAS_COMPUTE_BF16_V2
     { "bf16_2", vk_shaders::compute_bf16_v2, vk_shaders::compute_bf16_v2_size, vkWidthNote(2),
-      VK_ALT_SHADER(compute_bf16_v2) },
+      {{Dim::Width, 2}}, VK_ALT_SHADER(compute_bf16_v2) },
 #endif
 #ifdef VK_HAS_COMPUTE_BF16_V4
     { "bf16_4", vk_shaders::compute_bf16_v4, vk_shaders::compute_bf16_v4_size, vkWidthNote(4),
-      VK_ALT_SHADER(compute_bf16_v4) },
+      {{Dim::Width, 4}}, VK_ALT_SHADER(compute_bf16_v4) },
 #endif
   };
   float A = 1.3f;
@@ -180,6 +187,9 @@ int vkPeak::runComputeBF16(VulkanDevice &dev, benchmark_config_t &cfg)
                   "without the matrix engine.";
   d.shape       = TestShape::Homogeneous;
   d.axis        = "vector width";
+  // The family accumulates in bf16 unless a reading says otherwise, and these
+  // chains carry fp32 between bf16 roundings (compute_bf16_v*.comp).
+  d.dims        = {{Dim::Dtype, DType::Bf16}, {Dim::Acc, DType::Fp32}};
   d.variants    = variants;
   d.numVariants = sizeof(variants) / sizeof(variants[0]);
   d.raceHalfSubgroup = true;

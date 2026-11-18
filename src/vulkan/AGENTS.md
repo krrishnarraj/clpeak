@@ -88,6 +88,28 @@ See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:
   int8 carries `metricUnit = "ops"`, which is what
   lets it share the test instead of needing a `coopmat_int8` twin.
 
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  Vulkan specifics:
+
+- `vk_compute_desc_t::dims` (the test it opens), `::metricDims` (the
+  single-variant path's reading) and `vk_compute_variant_t::dims` (one
+  reading, beside its note); `runComputeKernel()` forwards them on every
+  path, skips included, and sets the compute families' `revision`.
+- Vector tests carry their data type on the test and `width` per reading;
+  `bfloat16_compute` is `{dtype: bf16, acc: fp32}` (fp32 chains between bf16
+  roundings), and the int8_dp rows are `chains`.
+- `coopmat`: each block's `metricDims` say `dtype`, and `acc: fp16` on the
+  f16acc row; `bindCoopTile` adds the `tile` that ran ("16x16x16"), and a row
+  that raced subgroup widths names the winner as `form` ("subgroup_16").
+- Bandwidth: global `{op: read}` and `width`, local `width`, image
+  `pixel_format: rgba32f`, transfer `direction` and `memory: pinned` (the
+  HOST_VISIBLE buffer is the driver's own mapped memory).  Latency: `op`.
+- `revision` is 2 where a test's method changed in a release after it first
+  shipped, in a way that moved its numbers (the compute families, coopmat,
+  global, local and image bandwidth); the reason is beside the line that sets
+  it.  1 otherwise.  The native GPU backends count the same way.
+
 ## When You Change This Directory
 
 - If you add a new benchmark → add it to the appropriate category file (or create a new one) + update `CMakeLists.txt` + this file.

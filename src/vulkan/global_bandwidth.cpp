@@ -5,6 +5,8 @@
 #include <cstring>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Global memory bandwidth benchmark (Vulkan)
 // ---------------------------------------------------------------------------
@@ -31,6 +33,13 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       "Read bandwidth from device memory, over a buffer too large to cache.";
   testSpec.shape = TestShape::Homogeneous;
   testSpec.axis  = "vector width";
+  // A read, said as the CPU backend's STREAM rows say theirs, so a CPU driver
+  // (llvmpipe) lines up with that backend's read row.
+  testSpec.dims  = {{Dim::Op, dim::Op::Read}};
+  // Revision 2: since it first shipped, a barrier keeps consecutive dispatches
+  // from overlapping two passes over the buffer, which NVIDIA ran at once
+  // (2.1.4).
+  testSpec.revision = 2;
   auto test = currentDeviceScope->beginTest(testSpec);
 
   // The one number that decides whether this test measured memory or cache:
@@ -201,7 +210,7 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
       std::string key(v.label);
       while (!key.empty() && key.back() == ' ') key.pop_back();
       test.skip(key, ResultStatus::Error, "Pipeline creation failed",
-                vkWidthNote(v.width));
+                vkWidthNote(v.width), {{Dim::Width, v.width}});
       continue;
     }
     // Match OpenCL: reduce work-group count by vector width so total bytes
@@ -215,12 +224,12 @@ int vkPeak::runGlobalBandwidth(VulkanDevice &dev, benchmark_config_t &cfg)
     if (timed <= 0.0f)
     {
       test.skip(key, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed",
-                vkWidthNote(v.width));
+                vkWidthNote(v.width), {{Dim::Width, v.width}});
       vkDestroyPipeline(dev.device, pipe, nullptr);
       continue;
     }
     float bps = ((float)numItems * sizeof(float)) / timed * 1e6f;
-    test.emit(key, bps, vkWidthNote(v.width));
+    test.emit(key, bps, vkWidthNote(v.width), {{Dim::Width, v.width}});
     vkDestroyPipeline(dev.device, pipe, nullptr);
   }
 

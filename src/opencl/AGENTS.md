@@ -50,14 +50,34 @@ See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:
 
 - `runComputeTest()` takes the test-level text as a `description` parameter
   (after `unit`); the per-width readings are documented inside the helper,
-  which also classifies every test it drives as a homogeneous "vector width"
-  sweep — that is all it ever runs.
+  which also classifies every test it drives as homogeneous — a "vector
+  width" sweep, or int8_dp's "chains in flight" — that is all it ever runs.
 - `clWidthNote()` (`cl_peak.h`) is the shared wording for the
   `float`/`float2`/…/`float16` readings, used by the compute helper and the
   global/local bandwidth tests.
 - `transfer_bandwidth` reports the same two readings as the CUDA/ROCm/oneAPI
   backends -- `h2d_pinned` / `d2h_pinned` -- so the four are directly
   comparable on one machine.
+
+## Reading dims
+
+See `include/common/AGENTS.md` § `dims`.  OpenCL specifics:
+
+- `runComputeTest()` takes the test's `dims` -- its family's data type -- at
+  each call in `runAll()`, and gives each reading its `width`, or int8_dp's
+  `chains`: its v2..v16 are independent chains (`clChainNote()`), as
+  Vulkan's are.  The integer families are int32, int24 (mad24), int8 and
+  int16; integer_compute's `int8` is an 8-wide int32 vector.
+- Bandwidth: global `{op: read}` and `width`, local `width`, image
+  `pixel_format: rgba32f`, transfer `direction` and `memory`.  A driver that
+  will not map the pinned buffer gets `h2d_pageable` / `d2h_pageable` rows,
+  `memory: pageable`.  Latency: `op`, on the skips of a device with no
+  profiling queue too.
+- `skipAll()` records no dims, so it stays only where the readings differ in
+  `width` alone.
+- `revision` is 2 where a test's method changed in a release after it first
+  shipped, in a way that moved its numbers (the compute families, global and
+  image bandwidth); the reason is beside the line that sets it.  1 otherwise.
 
 ## Chain shapes
 

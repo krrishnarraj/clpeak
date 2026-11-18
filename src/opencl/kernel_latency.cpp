@@ -1,6 +1,8 @@
 #include <opencl/cl_peak.h>
 #include <chrono>
 
+using xpupeak::Dim; namespace dim = xpupeak::dim;
+
 // ---------------------------------------------------------------------------
 // Kernel launch latency (OpenCL) -- two distinct metrics:
 //
@@ -33,6 +35,8 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
 
   const char *dispatchNote = "Host submit to kernel start, one way.";
   const char *roundtripNote = "Host submit to completion seen by the host.";
+  const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
+  const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
 
   try
   {
@@ -75,14 +79,14 @@ int clPeak::runKernelLatency(cl::CommandQueue &queue, cl::Program &prog, device_
     float dispatchUs  = (float)(totalDispatchUs  / iters);
     float roundtripUs = (float)(totalRoundtripUs / iters);
 
-    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote);
-    test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote);
+    test.emit("dispatch", (float)(dispatchUs * 1e-6), dispatchNote, dispatchDims);
+    test.emit("roundtrip", (float)(roundtripUs * 1e-6), roundtripNote, roundtripDims);
   }
   catch (cl::Error &error)
   {
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    test.skip("dispatch", ResultStatus::Error, reason, dispatchNote);
-    test.skip("roundtrip", ResultStatus::Error, reason, roundtripNote);
+    test.skip("dispatch", ResultStatus::Error, reason, dispatchNote, dispatchDims);
+    test.skip("roundtrip", ResultStatus::Error, reason, roundtripNote, roundtripDims);
     return -1;
   }
 

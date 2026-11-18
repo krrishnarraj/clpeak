@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+using xpupeak::Dim; using xpupeak::DType;
+
 // ---------------------------------------------------------------------------
 // Cooperative matrix (tensor-core) umbrella.
 //
@@ -95,6 +97,7 @@ namespace
     VkSpecializationMapEntry entries[4];
     VkSpecializationInfo specInfo;
     CoopPush push;
+    std::string tile; // "16x16x16": the reading's `tile`
     std::string how;  // what goes in the note's parentheses: tile, fallback
     std::string note;
   };
@@ -121,9 +124,11 @@ namespace
   // under two ids.  The name stays the data type, which is what identifies it.
   //
   // The caller has already set r.push.A to the fill this dtype wants, and
-  // d.metricLabel / d.metricDescription to what this reading is.  `refused`
-  // counts the tiles the driver refused to build before this one, so a
-  // reading taken at a fallback says so; --verbose names them.
+  // d.metricLabel / d.metricDescription / d.metricDims to what this reading
+  // is; the tile joins its dims as `tile`, which is variant, so a reading
+  // taken at another device's tile still compares.  `refused` counts the
+  // tiles the driver refused to build before this one, so a reading taken at
+  // a fallback says so; --verbose names them.
   //
   // d.altSpirv, the four-accumulator build (shaders/coopmat_chain.glsl), is
   // kept for this tile only where four accumulators fit the lane budget
@@ -157,14 +162,15 @@ namespace
     r.specInfo.dataSize = sizeof(r.data);
     r.specInfo.pData = &r.data;
     r.push.trips = (int32_t)trips;
-    r.how = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" +
-            std::to_string(t.K) + " tile" +
+    r.tile = std::to_string(t.M) + "x" + std::to_string(t.N) + "x" + std::to_string(t.K);
+    r.how = r.tile + " tile" +
             (refused ? ", fallback after " + std::to_string(refused) + " refused"
                      : std::string());
     r.note = coopNote(d.metricDescription, r.how);
 
     d.specInfo = &r.specInfo;
     d.metricDescription = r.note.c_str();
+    d.metricDims.set({Dim::Tile, r.tile});
     d.wgSize = wgSize;
     d.globalDivisor = kCoopGroupScale;
     d.outElemsPerWG = t.M * t.N * (d.altSpirv ? 4 : 1);
@@ -238,12 +244,19 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
   };
 
   // One scope for the whole family -- all data types in one test.
-  // The int8 row carries its own unit (ops) so it shares the test.
-  auto test = currentDeviceScope->beginTest(
-      {"coopmat", "Cooperative matrix", "flops", Category::Unknown,
-       "Peak cooperative-matrix multiply-add rate, on the device's matrix "
-       "engine where it has one.",
-       TestShape::Heterogeneous, "data type"});
+  // The int8 row carries its own unit (ops) so it shares the test.  Each row
+  // carries its data type (and fp16 f16acc its accumulator) on metricDims.
+  logger::TestSpec spec = {"coopmat", "Cooperative matrix", "flops", Category::Unknown,
+                           "Peak cooperative-matrix multiply-add rate, on the device's "
+                           "matrix engine where it has one.",
+                           TestShape::Heterogeneous, "data type"};
+  // Revision 2: since this test first shipped (3.0.0, when the per-type tests
+  // became its rows), llvmpipe stopped folding tiles built from one scalar --
+  // it had read above its CPU's peak -- and each row came to race a
+  // four-accumulator run and, where the driver named no width, narrower
+  // subgroups (3.0.2).
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // Measure one data type at the first of its advertised tiles the driver will
   // build.  They come best first (rankTiles in vk_peak.cpp), and a refusal to
@@ -331,6 +344,13 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
                                      runs[best].how + ", fastest at subgroup " +
                                          std::to_string(widths[best]))
                           : runs[best].note;
+      // The race's winner is a spelling of the same work, so `form`, which is
+      // variant: a device reaching its peak at subgroup 8 still compares
+      // with one reaching it at 32.
+      o.dims = base.metricDims;
+      o.dims.set({Dim::Tile, runs[best].tile});
+      if (ran.size() > 1)
+        o.dims.set({Dim::Form, "subgroup_" + std::to_string(widths[best])});
       if (ran.empty())
       {
         test.skip(base.metricLabel, ResultStatus::Error, "vkQueueSubmit/WaitIdle failed", o);
@@ -344,6 +364,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     // Refused at every tile: the row's error, naming what was asked.
     logger::EmitOptions o;
     o.description = base.metricDescription ? base.metricDescription : "";
+    o.dims = base.metricDims;
     if (base.metricUnit)
       o.unit = base.metricUnit;
     test.skip(base.metricLabel, ResultStatus::Error,
@@ -365,6 +386,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.metricLabel = "fp32";
       d.unit = "flops";
       d.metricDescription = "fp32 inputs and accumulator.";
+      d.metricDims = {{Dim::Dtype, DType::Fp32}};
 
       d.elemSize = sizeof(float);
       if (!dev.info.coopmatFP32.empty())
@@ -391,6 +413,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.metricLabel = "fp16";
       d.unit = "flops";
       d.metricDescription = "fp16 inputs, fp32 accumulator.";
+      d.metricDims = {{Dim::Dtype, DType::Fp16}};
 
       d.elemSize = sizeof(float);
       if (dev.info.float16Supported && !dev.info.coopmatFP16.empty())
@@ -417,6 +440,9 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.metricLabel = "fp16 f16acc";
       d.unit = "flops";
       d.metricDescription = "fp16 inputs and accumulator.";
+      // Not the usual fp32, so said: without `acc` this row would merge into
+      // the fp16 one above.
+      d.metricDims = {{Dim::Dtype, DType::Fp16}, {Dim::Acc, DType::Fp16}};
 
       d.elemSize = sizeof(float);
       if (!dev.info.float16Supported || dev.info.coopmatFP16F16.empty())
@@ -448,6 +474,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.metricLabel = "bf16";
       d.unit = "flops";
       d.metricDescription = "bf16 inputs, fp32 accumulator.";
+      d.metricDims = {{Dim::Dtype, DType::Bf16}};
 
       d.elemSize = sizeof(float);
       if (dev.info.bfloat16Supported && !dev.info.coopmatBF16.empty())
@@ -475,6 +502,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.unit = "flops";
       d.metricDescription = "fp8 E4M3 inputs (more precision, less range), fp32 "
                             "accumulator.";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E4m3}};
 
       d.elemSize = sizeof(float);
       // Two gates: the float8 feature must be enabled at device creation
@@ -504,6 +532,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
       d.unit = "flops";
       d.metricDescription = "fp8 E5M2 inputs (more range, less precision), fp32 "
                             "accumulator.";
+      d.metricDims = {{Dim::Dtype, DType::Fp8E5m2}};
 
       d.elemSize = sizeof(float);
       if (dev.info.fp8Supported && !dev.info.coopmatFP8E5M2.empty())
@@ -537,6 +566,7 @@ int vkPeak::runCoopMatrix(VulkanDevice &dev, benchmark_config_t &cfg)
     d.unit = "ops";
     d.metricUnit = "ops";
     d.metricDescription = "int8 inputs, int32 accumulator.";
+    d.metricDims = {{Dim::Dtype, DType::Int8}};
 
     d.elemSize = sizeof(int32_t);
     // Two gates, like fp8: the shader's Int8 capability needs shaderInt8
