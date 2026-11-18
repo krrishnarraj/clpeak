@@ -631,10 +631,10 @@ void writeDimsKey(JsonWriter &w, const Dims &dims)
 //
 // A reading's coordinates are its effective dims: its test's, then its own.
 // A result writes them in one form, so that a reader builds a measure key
-// from the file alone (docs/format-v4.md, `dims`): no dim at its default, and
-// a test holds the dims every one of its readings has, each reading the
-// rest.  A checkpoint keeps them as the backend authored them, which is what
-// a resumed test's held readings are merged against.
+// from the file alone (docs/format-v4.md, `dims`): no dim at its default,
+// keys in order, and a test holding the dims every one of its readings has,
+// each reading the rest.  A checkpoint keeps them as the backend authored
+// them, which is what a resumed test's held readings are merged against.
 struct CanonicalDims {
     Dims              test;
     std::vector<Dims> readings;   // one per metric, in order
@@ -652,16 +652,28 @@ Dims withoutDefaults(const Dims &dims, const std::string &family)
     return out;
 }
 
+// Keys in code-unit order, as a measure key lists them: the form a re-save
+// writes byte for byte again, whatever order the dims were authored in.
+void sortByKey(Dims &dims)
+{
+    std::stable_sort(dims.entries.begin(), dims.entries.end(),
+                     [](const DimEntry &a, const DimEntry &b) { return a.key < b.key; });
+}
+
 CanonicalDims canonicalDims(const TestResult &t)
 {
     CanonicalDims c;
     std::vector<Dims> all;
     for (const MetricResult &m : t.metrics)
+    {
         all.push_back(withoutDefaults(effectiveDims(t.dims, m.dims),
                                       m.benchmark.empty() ? t.benchmark : m.benchmark));
+        sortByKey(all.back());
+    }
     if (all.empty())
     {
         c.test = withoutDefaults(t.dims, t.benchmark);
+        sortByKey(c.test);
         return c;
     }
     // The test's: what every reading has, in the first one's order.

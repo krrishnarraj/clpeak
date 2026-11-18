@@ -501,8 +501,8 @@ is a string or a whole number, and stays so.
 
 A result writes them in one form, so that a measure key can be read off the
 file alone: **no dim is written at its default** (an absent key means its
-default, and a present one never is), and a test holds the dims every one of
-its readings has, each reading the rest. With the classes `dim_keys`
+default, and a present one never is), keys are in order, and a test holds
+the dims every one of its readings has, each reading the rest. With the classes `dim_keys`
 declares, that is all a reader needs (*Measure keys*). A checkpoint keeps
 the dims as the backend authored them (*The checkpoint*).
 
