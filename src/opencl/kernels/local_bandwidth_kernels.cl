@@ -66,7 +66,15 @@ __kernel void local_bandwidth_v4(__global float* output, __local float4* scratch
 }
 
 
-__kernel void local_bandwidth_v8(__global float* output, __local float8* scratch)
+// The float8 travels as two float4 planes, lo at [lid] and hi at
+// [lsize + lid] (the host sizes scratch at 8 floats per work-item), as Metal's
+// kernel holds its value in two float4 arrays (Metal has no float8).  One
+// float8 per slot puts
+// neighbouring work-items 32 B apart, so each 16-byte half of the access
+// touches every other bank: two passes where banks are 4 B wide, as NVIDIA's
+// are.  That timed the conflict, not the memory: 1.66 against 2.37 TB/s on
+// an M1 Pro, and 5.05 against 9.75 on an RTX 5060, whose float4 reads 9.19.
+__kernel void local_bandwidth_v8(__global float* output, __local float4* scratch)
 {
     uint lid   = get_local_id(0);
     uint lsize = get_local_size(0);
@@ -79,9 +87,11 @@ __kernel void local_bandwidth_v8(__global float* output, __local float8* scratch
                           (float)(gid + 6), (float)(gid + 7));
 
     for (int i = 0; i < 64; i++) {
-        scratch[lid] = sum;
+        scratch[lid]         = sum.lo;
+        scratch[lsize + lid] = sum.hi;
         barrier(CLK_LOCAL_MEM_FENCE);
-        sum = scratch[next];
+        sum.lo = scratch[next];
+        sum.hi = scratch[lsize + next];
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 

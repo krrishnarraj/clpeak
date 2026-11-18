@@ -76,9 +76,9 @@ See `include/common/AGENTS.md` § `dims`.  OpenCL specifics:
 - `skipAll()` records no dims, so it stays only where the readings differ in
   `width` alone.
 - `revision` is 2 where a test's method changed in a release after it first
-  shipped, in a way that moved its numbers (the compute families, global and
-  image bandwidth, kernel launch latency); the reason is beside the line that
-  sets it.  1 otherwise.
+  shipped, in a way that moved its numbers (the compute families, global,
+  local and image bandwidth, kernel launch latency); the reason is beside the
+  line that sets it.  1 otherwise.
 
 ## Chain shapes
 
