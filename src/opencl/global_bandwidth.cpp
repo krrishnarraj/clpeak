@@ -43,6 +43,15 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
                (unsigned long long)(numItems * sizeof(float) >> 20),
                (unsigned long long)(devInfo.globalMemCacheSize >> 20));
 
+  const int widths[] = {1, 2, 4, 8, 16};
+  const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
+  // Each width gets exactly one reading.  The sweep records them in order, so
+  // `w` is also the first width with no reading yet: a failure outside the
+  // sweep (the staging copy, the buffers, the kernels) skips only the widths
+  // from there on, never one already measured, whose id would then hold two
+  // readings.
+  int w = 0;
+
   try
   {
     // A program that failed to build is a null handle, and an older ICD
@@ -99,44 +108,50 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
 
     cl::Kernel *lo_kernels[] = {&kernel_v1_lo, &kernel_v2_lo, &kernel_v4_lo, &kernel_v8_lo, &kernel_v16_lo};
     cl::Kernel *go_kernels[] = {&kernel_v1_go, &kernel_v2_go, &kernel_v4_go, &kernel_v8_go, &kernel_v16_go};
-    const int widths[] = {1, 2, 4, 8, 16};
-    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
 
-    for (int w = 0; w < 5; w++)
+    // A width that fails records its own error, and the next one still runs.
+    for (; w < 5; w++)
     {
-      // Reset each iteration: run_kernel may clamp global/local for a kernel
-      // whose work-group limit is below the device max.
-      globalSize = numItems / widths[w] / FETCH_PER_WI;
-      localSize = devInfo.maxWGSize;
+      try
+      {
+        // Reset each iteration: run_kernel may clamp global/local for a kernel
+        // whose work-group limit is below the device max.
+        globalSize = numItems / widths[w] / FETCH_PER_WI;
+        localSize = devInfo.maxWGSize;
 
-      timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
-      timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
-      timed = (timed_lo < timed_go) ? timed_lo : timed_go;
+        timed_lo = run_kernel(queue, *lo_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
+        timed_go = run_kernel(queue, *go_kernels[w], globalSize, localSize, cfg.targetTimeUs, forced);
+        timed = (timed_lo < timed_go) ? timed_lo : timed_go;
 
-      // Bytes actually moved = effective work-items * per-WI fetch.
-      uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
-      bps = ((float)movedFloats * sizeof(float)) / timed * 1e6f;
+        // Bytes actually moved = effective work-items * per-WI fetch.
+        uint64_t movedFloats = ndRangeTotal(globalSize) * widths[w] * FETCH_PER_WI;
+        bps = ((float)movedFloats * sizeof(float)) / timed * 1e6f;
 
-      // OpenCL is the only backend carrying both offset shapes -- the other
-      // five implement the local-offset one alone -- so this race is the only
-      // evidence anywhere of whether the grid-stride shape ever wins.  Print
-      // both: if it never does by more than noise, the second family can go and
-      // every backend measures the same thing; if it does, the shape has to be
-      // ported to the other five instead.
-      XPUPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f B/s\n",
-                   labels[w],
-                   ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
-                   ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
+        // OpenCL is the only backend carrying both offset shapes -- the other
+        // five implement the local-offset one alone -- so this race is the only
+        // evidence anywhere of whether the grid-stride shape ever wins.  Print
+        // both: if it never does by more than noise, the second family can go and
+        // every backend measures the same thing; if it does, the shape has to be
+        // ported to the other five instead.
+        XPUPEAK_VLOG("global_memory_bandwidth %s: local-offset %.1f, global-offset %.1f B/s\n",
+                     labels[w],
+                     ((float)movedFloats * sizeof(float)) / timed_lo * 1e6f,
+                     ((float)movedFloats * sizeof(float)) / timed_go * 1e6f);
 
-      test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
-     }
+        test.emit(labels[w], bps, clWidthNote(widths[w]), {{Dim::Width, widths[w]}});
+      }
+      catch (cl::Error &error)
+      {
+        std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+        test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
+                  {{Dim::Width, widths[w]}});
+      }
+    }
   }
   catch (cl::Error &error)
   {
-    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
-    const int widths[] = {1, 2, 4, 8, 16};
     std::string reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
-    for (int w = 0; w < 5; w++)
+    for (; w < 5; w++)
       test.skip(labels[w], ResultStatus::Error, reason, clWidthNote(widths[w]),
                 {{Dim::Width, widths[w]}});
 
@@ -145,9 +160,7 @@ int clPeak::runGlobalBandwidthTest(cl::CommandQueue &queue, cl::Program &prog, d
   }
   catch (std::bad_alloc &)
   {
-    const char *labels[] = {"float", "float2", "float4", "float8", "float16"};
-    const int widths[] = {1, 2, 4, 8, 16};
-    for (int w = 0; w < 5; w++)
+    for (; w < 5; w++)
       test.skip(labels[w], ResultStatus::Error, "Out of memory", clWidthNote(widths[w]),
                 {{Dim::Width, widths[w]}});
     delete[] arr;
