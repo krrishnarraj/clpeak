@@ -92,7 +92,8 @@ function(compile_shaders)
       # At 1.5 the same GLSL compiles to the classic OpExecutionMode LocalSize
       # plus a gl_WorkGroupSize spec-constant composite, which every driver has
       # handled since Vulkan 1.0.  Nothing here needs 1.6, and 1.5 modules load
-      # on Vulkan 1.2 devices that 1.6 modules cannot.
+      # on Vulkan 1.2 devices that 1.6 modules cannot.  initInstance
+      # (vk_peak.cpp) asks for Vulkan 1.2 to match; raise both together.
       COMMAND "${GLSLC}" --target-env=vulkan1.2 -O -I "${_CS_DIR}"
               ${EXTRA_ARG} "${SHADER}" -o "${_CS_SPV}"
       RESULT_VARIABLE _CS_RESULT

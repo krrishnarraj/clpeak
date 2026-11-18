@@ -126,7 +126,12 @@ See `include/common/AGENTS.md` § `dims`.  Vulkan specifics:
   a specialized work-group size becomes `OpExecutionModeId LocalSizeId`, gated on
   maintenance4; at 1.5 the same GLSL becomes the classic `LocalSize` mode plus a
   `gl_WorkGroupSize` spec constant, which every driver has handled since Vulkan
-  1.0.  Nothing here needs 1.6.
+  1.0.  Nothing here needs 1.6.  `initInstance` asks for Vulkan 1.2 to match:
+  a SPIR-V 1.5 module is valid only on a device used at 1.2 or later, and a
+  device is used at the lower of that and its own version.  Raise both together.
+  Below 1.6, a stage with cooperative-matrix instructions must be built with
+  full subgroups: coopmat's descs set `requireFullSubgroups`, and
+  `createComputePipeline` applies it where it is legal.
 - Coopmat shaders take **M/N/K and the work-group width as specialization
   constants (ids 0–3) and the trip count as a push constant**.  The trip count
   is pushed on purpose: a compile-time bound lets the driver unroll the whole

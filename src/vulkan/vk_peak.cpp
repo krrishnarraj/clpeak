@@ -233,18 +233,24 @@ bool vkPeak::initInstance()
   appInfo.pApplicationName = "xpupeak-vulkan";
   appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
   appInfo.pEngineName = "xpupeak";
-  // Only request 1.1 when we compiled in code that actually needs 1.1-core
-  // symbols (e.g. vkGetPhysicalDeviceFeatures2 for INT8 DP feature query).
-  // Otherwise request 1.0 so we work on older drivers / Android API levels
-  // where libvulkan only exposes 1.0.
-  // 1.1 gets us vkGetPhysicalDeviceFeatures2; cooperative matrix brings its
-  // own extension + VK_KHR_vulkan_memory_model, so 1.1 is sufficient as the
-  // instance version (MoltenVK 1.2 headers reject some older loaders).
-#if defined(VK_HAS_COMPUTE_INT8_DP_V1) || defined(VK_HAS_COMPUTE_MP_V1) || defined(VK_HAS_COMPUTE_BF16_V1) || defined(VK_HAS_ANY_COOPMAT)
-  appInfo.apiVersion = VK_API_VERSION_1_1;
-#else
-  appInfo.apiVersion = VK_API_VERSION_1_0;
-#endif
+  // Vulkan 1.2, the version the shaders are built for: CompileShaders.cmake
+  // targets vulkan1.2, and a SPIR-V 1.5 module is valid only on a device used
+  // at 1.2 or later.  A device is used at the lower of this and its own
+  // version, so a 1.0 or 1.1 driver still runs, at its own: the Khronos and
+  // the Android loader both hand a 1.0 driver 1.0, and one of 1.1 or later
+  // must accept any version.  1.2 also makes valid the 1.2 structs the
+  // device setup uses without their extension -- the memory-model features
+  // coopmat enables, and the driver properties of a 1.2 driver that does not
+  // list VK_KHR_driver_properties -- while a later version's still takes its
+  // extension, as maintenance4 takes VK_KHR_maintenance4.  A device-version
+  // check above 1.2 would have to take the lower of the two; vulkanIdentify's
+  // and queryDriverInfo's stop at 1.2.
+  //
+  // No vkEnumerateInstanceVersion first: it only tells a 1.0 loader apart,
+  // which must refuse anything above 1.0, and the 1.0 instance it would
+  // grant instead is one this backend cannot use -- it calls 1.1 entry
+  // points directly.
+  appInfo.apiVersion = VK_API_VERSION_1_2;
 
   VkInstanceCreateInfo instCI = {};
   instCI.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

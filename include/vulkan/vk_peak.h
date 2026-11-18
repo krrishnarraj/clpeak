@@ -89,6 +89,8 @@ struct vk_device_info_t {
   bool float16Supported;          // VK_KHR_shader_float16_int8::shaderFloat16
   bool float64Supported;          // VkPhysicalDeviceFeatures::shaderFloat64
   bool bfloat16Supported;         // VK_KHR_shader_bfloat16::shaderBFloat16Type
+  bool bfloat16CoopmatSupported;  // ...::shaderBFloat16CooperativeMatrix, which
+                                  // the bf16 coopmat module's capability takes
   bool cooperativeMatrixSupported;// VK_KHR_cooperative_matrix + cooperativeMatrix
   bool vulkanMemoryModelDeviceScopeSupported; // vulkanMemoryModel itself is
                                   // implied by cooperativeMatrixSupported
@@ -99,7 +101,8 @@ struct vk_device_info_t {
                                   // takes a subgroup size and answers for that
                                   // width specifically, where the KHR one
                                   // reports the union over all widths.
-  bool maintenance4Supported;     // requested where present, not required.
+  bool maintenance4Supported;     // VK_KHR_maintenance4 + maintenance4;
+                                  // requested where present, not required.
                                   // It is the precondition for OpExecutionModeId
                                   // LocalSizeId (VUID-RuntimeSpirv-LocalSizeId-
                                   // 06434), which is how a specialized workgroup
@@ -115,6 +118,8 @@ struct vk_device_info_t {
   uint32_t maxSubgroupSize;
   uint32_t maxComputeWorkgroupSubgroups; // 0 = no subgroup-size control
   bool     subgroupSizeControl;   // requiredSubgroupSize usable on compute
+  bool     computeFullSubgroups;  // VK_EXT_subgroup_size_control's feature:
+                                  // REQUIRE_FULL_SUBGROUPS usable on compute
 
   // The cooperative-matrix tiles advertised per dtype by
   // vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, best first.  We don't
@@ -273,12 +278,16 @@ public:
   // selected M/N/K tile + loop count at pipeline-creation time.
   // requiredSubgroupSize (0 = leave it to the driver) pins the subgroup width
   // the stage is compiled for; only legal when info.subgroupSizeControl.
+  // fullSubgroupsWgSize, when not 0, is the stage's local_size_x and asks for
+  // VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT, set where it
+  // is legal (see the definition).
   bool createComputePipeline(const uint32_t *spirv, size_t spirvSize,
                              VkDescriptorSetLayout dsLayout,
                              VkPipelineLayout pipeLayout,
                              VkPipeline &pipeline,
                              const VkSpecializationInfo *specInfo = nullptr,
-                             uint32_t requiredSubgroupSize = 0);
+                             uint32_t requiredSubgroupSize = 0,
+                             uint32_t fullSubgroupsWgSize = 0);
 
   // Whether createComputePipeline will pin a stage to this subgroup width
   // rather than drop the request: size control on compute, and the width
@@ -393,6 +402,10 @@ struct vk_compute_desc_t
                              // subgroup -- see coopmatRequiredSubgroupSize).
   uint32_t requiredSubgroupSize; // the stage's subgroup width; 0 = the width the
                                  // device reports (see runComputeKernel).
+  bool requireFullSubgroups;     // build with REQUIRE_FULL_SUBGROUPS where legal:
+                                 // a SPIR-V 1.5 module using cooperative-matrix
+                                 // instructions needs it (VUID-RuntimeSpirv-
+                                 // OpTypeCooperativeMatrixKHR-10770).  coopmat.
   uint32_t outElemsPerWG;    // number of output buffer elements the shader
                              // writes per work-group.  0 => defaults to wgSize
                              // (one element per WI).  Coopmat shaders write an
