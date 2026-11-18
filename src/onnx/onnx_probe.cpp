@@ -1104,9 +1104,9 @@ bool onnxEpViable(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     return ok;
   };
 
-  static const Variant kFp32{ONNX_DT_FLOAT, false, "", "", 0, false};
-  static const Variant kFp16{ONNX_DT_FLOAT16, false, "", "", 0, false};
-  static const Variant kInt8{ONNX_DT_INT8, true, "", "", 0, false};
+  static const Variant kFp32{ONNX_DT_FLOAT, false, "", {}, "", 0, false};
+  static const Variant kFp16{ONNX_DT_FLOAT16, false, "", {}, "", 0, false};
+  static const Variant kInt8{ONNX_DT_INT8, true, "", {}, "", 0, false};
   const bool ok = tryBuild(kFp32, 0, 0) || tryBuild(kFp16, 0, 0) ||
                   tryBuild(kInt8, ONNX_DT_INT8, ONNX_DT_INT8) ||
                   tryBuild(kInt8, ONNX_DT_UINT8, ONNX_DT_INT8);

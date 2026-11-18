@@ -97,6 +97,12 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
        "chip rated at tens of TOPS can still lose to the host on small work.",
        TestShape::Heterogeneous, "what is submitted"});
 
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+  const Dims trivialDims{{Dim::Workload, dim::Workload::TrivialOp}};
+  const Dims mmDims{{Dim::Workload, dim::Workload::SmallMatmul}};
+  const Dims createDims{{Dim::Workload, dim::Workload::SessionCreate}};
+
   std::string trivialIn;
   for (int64_t i = 0; i < kTrivialWidth; i++)
     trivialIn += litertScalarBytes(plan.act, 0.5f);
@@ -107,9 +113,9 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
       "One elementwise multiply over 64 values, the smallest graph there is: its "
       "whole time is per-inference overhead.";
   if (trivial.perRunUs > 0.0)
-    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote.c_str());
+    test.emit("trivial_op", (float)(trivial.perRunUs * 1e-6), trivialNote.c_str(), trivialDims);
   else
-    test.skip("trivial_op", trivial.status, trivial.error, trivialNote);
+    test.skip("trivial_op", trivial.status, trivial.error, trivialNote, trivialDims);
 
   const std::string scalar = litertScalarBytes(plan.act, 1.0009765625f);
   Run matmul = measure(rt, dev, plan, litertMatMulModel(plan, kSmallMatMul, kSmallMatMul, kSmallMatMul),
@@ -118,17 +124,17 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
       "A 256-cubed matmul with resident operands, 34 MFLOP: the time above the "
       "trivial row is a real kernel's setup, not arithmetic.";
   if (matmul.perRunUs > 0.0)
-    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str());
+    test.emit("matmul_256", (float)(matmul.perRunUs * 1e-6), mmNote.c_str(), mmDims);
   else
-    test.skip("matmul_256", matmul.status, matmul.error, mmNote);
+    test.skip("matmul_256", matmul.status, matmul.error, mmNote, mmDims);
 
   const std::string createNote =
       "Compiling the one-operator graph, what an application pays before its "
       "first inference; on an NPU this is the vendor compiler.";
   if (trivial.createUs > 0.0)
-    test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote.c_str());
+    test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote.c_str(), createDims);
   else
-    test.skip("session_create", trivial.status, trivial.error, createNote);
+    test.skip("session_create", trivial.status, trivial.error, createNote, createDims);
 
   test.end();
   return 0;

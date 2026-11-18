@@ -12,20 +12,28 @@
 namespace onnxgemm
 {
 
+using xpupeak::Dim;
+using xpupeak::DType;
+namespace dim = xpupeak::dim;
+
 const Variant kFpVariants[] = {
-    {ONNX_DT_FLOAT, false, "fp32",
+    {ONNX_DT_FLOAT, false, "fp32", {{Dim::Dtype, DType::Fp32}},
      "Full 32-bit precision, unless the numeric-error row says otherwise.",
      0, false},
-    {ONNX_DT_FLOAT16, false, "fp16", "16-bit weights and arithmetic.", 0, false},
-    {ONNX_DT_BFLOAT16, false, "bf16", "bfloat16 weights and arithmetic.",
-     0, false},
+    {ONNX_DT_FLOAT16, false, "fp16", {{Dim::Dtype, DType::Fp16}},
+     "16-bit weights and arithmetic.", 0, false},
+    {ONNX_DT_BFLOAT16, false, "bf16", {{Dim::Dtype, DType::Bf16}},
+     "bfloat16 weights and arithmetic.", 0, false},
     {ONNX_DT_FLOAT8E4M3FN, true, "fp8_e4m3",
+     {{Dim::Dtype, DType::Fp8E4m3}, {Dim::Quant, dim::Quant::Qdq}},
      "fp8 e4m3 activations and weights, quantized in and out.",
      0, false},
     {ONNX_DT_FLOAT8E5M2, true, "fp8_e5m2",
+     {{Dim::Dtype, DType::Fp8E5m2}, {Dim::Quant, dim::Quant::Qdq}},
      "fp8 e5m2 activations and weights, quantized in and out.",
      0, false},
     {ONNX_DT_FLOAT4E2M1, true, "fp4_e2m1",
+     {{Dim::Dtype, DType::Fp4E2m1}, {Dim::Quant, dim::Quant::Qdq}},
      "fp4 e2m1 activations and weights, one scale per tensor, quantized in "
      "and out.",
      0, false},
@@ -33,21 +41,24 @@ const Variant kFpVariants[] = {
     // the tensor; the one row whose arithmetic is genuinely four-bit rather
     // than four bits unpacked into something wider.  gemm.cpp says why it is
     // not chained.
-    {ONNX_DT_FLOAT4E2M1, false, "nvfp4",
+    {ONNX_DT_FLOAT4E2M1, false, "nvfp4", {{Dim::Dtype, DType::Nvfp4}},
      "NVFP4 on both operands, 4-bit values with an fp8 scale per 16; one "
      "multiply per dispatch, not a chain.",
      /*blockSize=*/16, /*nvfp4=*/true},
     {ONNX_DT_FLOAT4E2M1, false, "fp4_weight",
+     {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Fp4E2m1}, {Dim::Quant, dim::Quant::Block}},
      "4-bit float weights in blocks of 32 against 16-bit "
      "activations.",
      /*blockSize=*/32, false},
     {ONNX_DT_INT4, false, "int4_weight",
+     {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int4}, {Dim::Quant, dim::Quant::Block}},
      "4-bit integer weights in blocks of 32 against 16-bit "
      "activations.",
      /*blockSize=*/32, false},
     // Narrows only the weights where int8_qdq narrows the arithmetic too, so
     // the gap between the two is what the integer units are worth.
     {ONNX_DT_INT8, false, "int8_weight",
+     {{Dim::Dtype, DType::Fp16}, {Dim::Weights, DType::Int8}, {Dim::Quant, dim::Quant::Block}},
      "8-bit integer weights in blocks of 32 against 16-bit "
      "activations.",
      /*blockSize=*/32, false},
@@ -71,9 +82,11 @@ const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 // kTallCliffShare) -- which is where they paid, 27% on an Arc A380's fp16.
 const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
+     {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}, {Dim::Form, "matmul"}},
      "Full-integer int8: 8-bit activations and weights.",
      0, false},
     {ONNX_DT_INT8, true, "int8_qdq_conv1x1",
+     {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}, {Dim::Form, "conv1x1"}},
      "Full-integer int8 again, every layer spelled as a 1x1 convolution.",
      0, false, /*conv1x1=*/true},
 };

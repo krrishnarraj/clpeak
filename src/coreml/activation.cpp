@@ -67,13 +67,15 @@ struct Variant
 {
   CoremlActivation act;
   const char *label;
+  xpupeak::dim::Op op;   // the reading's `op`; its `working_set` is the size's
   const char *note;
 };
 
 const Variant kVariants[] = {
-    {CoremlActivation::Silu, "silu", "SiLU, x times sigmoid(x)"},
-    {CoremlActivation::Softmax, "softmax", "Softmax across each row"},
-    {CoremlActivation::LayerNorm, "layernorm", "Layer norm (each row's mean and variance, then a rescale)"},
+    {CoremlActivation::Silu, "silu", xpupeak::dim::Op::Silu, "SiLU, x times sigmoid(x)"},
+    {CoremlActivation::Softmax, "softmax", xpupeak::dim::Op::Softmax, "Softmax across each row"},
+    {CoremlActivation::LayerNorm, "layernorm", xpupeak::dim::Op::Layernorm,
+     "Layer norm (each row's mean and variance, then a rescale)"},
 };
 
 struct Run
@@ -167,11 +169,12 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       const std::string metric = std::string(v.label) + "_" + sz.label;
       const std::string note =
           std::string(v.note) + ", over " + std::to_string(sz.bytes >> 20) + " MB of activations.";
+      const Dims dims{{xpupeak::Dim::Op, v.op}, {xpupeak::Dim::WorkingSet, sz.bytes}};
       const int64_t rows = (int64_t)(sz.bytes / (2ull * (uint64_t)kCols));
 
       if (sz.bytes * kCopiesAtPeak > maxTensorBytes())
       {
-        test.skip(metric, ResultStatus::Unsupported, "not enough memory for this working set", note);
+        test.skip(metric, ResultStatus::Unsupported, "not enough memory for this working set", note, dims);
         continue;
       }
 
@@ -187,14 +190,14 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       {
         test.skip(metric, ref.run.status,
                   "reference graph failed: " + (ref.run.error.empty() ? std::string("run failed") : ref.run.error),
-                  note);
+                  note, dims);
         continue;
       }
 
       Run full = measure(dev, spec, rows, v.act, warmupCount, forceIters, specifiedIters);
       if (full.us <= 0.0)
       {
-        test.skip(metric, full.status, full.error.empty() ? "run failed" : full.error, note);
+        test.skip(metric, full.status, full.error.empty() ? "run failed" : full.error, note, dims);
         continue;
       }
       const double opUs = full.us - ref.run.us;
@@ -213,7 +216,7 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
                             std::to_string((long long)noiseUs) +
                             " us), so it cannot be resolved -- on a unit that fuses it into "
                             "the passes around it, it costs nothing",
-                  note);
+                  note, dims);
         continue;
       }
       // Read once, written once.
@@ -234,7 +237,7 @@ int CoreMLPeak::runActivation(const coreml_device_info_t &dev, benchmark_config_
       if (bps > 2.0 * refStreamBps)
         row += "  Faster than this unit streamed the reference graph, so the operation was fused "
                "or cached: an arithmetic rate, not memory's.";
-      test.emit(metric, (float)bps, row.c_str());
+      test.emit(metric, (float)bps, row.c_str(), dims);
     }
   }
 

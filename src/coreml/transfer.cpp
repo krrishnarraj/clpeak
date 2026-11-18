@@ -144,6 +144,11 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   auto mb = [](int64_t rows, int64_t width) {
     return std::to_string(((uint64_t)rows * (uint64_t)width * 2) >> 20) + " MB";
   };
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+  const Dims h2dDims{{Dim::Direction, dim::Direction::H2d}};
+  const Dims rtDims{{Dim::Direction, dim::Direction::Roundtrip}};
+  const Dims d2hDims{{Dim::Direction, dim::Direction::D2h}};
   std::string h2dNote = "Host to device: the input-fed matmul less the resident one, at the largest size";
   std::string d2hNote =
       "Device to host: returning the whole result less returning one row of it, at the largest size";
@@ -217,14 +222,14 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
   d2hNote += ".";
 
   if (lastH2dBps > 0.0)
-    test.emit("h2d", (float)lastH2dBps, h2dNote.c_str());
+    test.emit("h2d", (float)lastH2dBps, h2dNote.c_str(), h2dDims);
   else if (firstRows > 0)
     test.skip("h2d", ResultStatus::Error,
               "handing the input over cost no more than holding it resident, so no copy "
               "could be measured",
-              h2dNote);
+              h2dNote, h2dDims);
   else
-    test.skip("h2d", errStatus, firstErr.empty() ? "unsupported" : firstErr, h2dNote);
+    test.skip("h2d", errStatus, firstErr.empty() ? "unsupported" : firstErr, h2dNote, h2dDims);
 
   if (firstRows > 0 && !xpupeak::cancelRequested())
   {
@@ -235,16 +240,16 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
                  dev.displayName.c_str(), rt.us, firstToDeviceUs, firstResidentUs);
     if (rt.us <= 0.0)
     {
-      test.skip("roundtrip", rt.status, rt.error.empty() ? "run failed" : rt.error, rtNote);
-      test.skip("d2h", ResultStatus::Error, "the round trip it is derived from could not be measured", d2hNote);
+      test.skip("roundtrip", rt.status, rt.error.empty() ? "run failed" : rt.error, rtNote, rtDims);
+      test.skip("d2h", ResultStatus::Error, "the round trip it is derived from could not be measured", d2hNote, d2hDims);
     }
     else
     {
       if (rt.us > firstResidentUs)
-        test.emit("roundtrip", (float)((double)(inBytes + outBytes) / ((rt.us - firstResidentUs) * 1.0e-6)), rtNote.c_str());
+        test.emit("roundtrip", (float)((double)(inBytes + outBytes) / ((rt.us - firstResidentUs) * 1.0e-6)), rtNote.c_str(), rtDims);
       else
         test.skip("roundtrip", ResultStatus::Error,
-                  "moving the tensors cost no more than keeping them resident", rtNote);
+                  "moving the tensors cost no more than keeping them resident", rtNote, rtDims);
 
       // Does returning the result copy anything?  Core ML can hand an
       // output back in the buffer the unit wrote -- the Neural Engine's
@@ -276,20 +281,20 @@ int CoreMLPeak::runTransferBandwidth(const coreml_device_info_t &dev, benchmark_
           d2hBps = (double)((uint64_t)lastRows * kN * 2) / (d2hLast * 1.0e-6);
       }
       if (copies && d2hBps > 0.0)
-        test.emit("d2h", (float)d2hBps, d2hNote.c_str());
+        test.emit("d2h", (float)d2hBps, d2hNote.c_str(), d2hDims);
       else if (!copies)
         test.skip("d2h", ResultStatus::Unsupported,
                   "the result is handed back without a copy -- the time did not grow with its size",
-                  d2hNote);
+                  d2hNote, d2hDims);
       else
         test.skip("d2h", ResultStatus::Error,
-                  "returning the result cost no more than keeping it on device", d2hNote);
+                  "returning the result cost no more than keeping it on device", d2hNote, d2hDims);
     }
   }
   else
   {
-    test.skip("roundtrip", errStatus, firstErr.empty() ? "no usable size" : firstErr, rtNote);
-    test.skip("d2h", errStatus, firstErr.empty() ? "no usable size" : firstErr, d2hNote);
+    test.skip("roundtrip", errStatus, firstErr.empty() ? "no usable size" : firstErr, rtNote, rtDims);
+    test.skip("d2h", errStatus, firstErr.empty() ? "no usable size" : firstErr, d2hNote, d2hDims);
   }
 
   test.end();

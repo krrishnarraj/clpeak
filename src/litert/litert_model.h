@@ -104,6 +104,17 @@ struct LitertPlan
 };
 LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel);
 
+// The same format in the vocabulary's words, for a reading's dims
+// (docs/format-v4.md), as `p` -- the format's plan on one accelerator --
+// expresses it: the type the graph computes in, the stored weights' where
+// they are narrower, how those are scaled (one scale per output column, per
+// block of 32, or a full-integer graph's quantized activations), and the
+// accumulator where the GPU's precision policy names one -- its fp16 policy
+// computes in fp16 throughout, its third policy accumulates in fp32.
+// Every test that walks formats takes its readings' dims from here, so a
+// gemm row and its numeric-error row carry the same coordinates.
+Dims litertFormatDims(LitertFormat f, const LitertPlan &p);
+
 // The type a plan's activation-shaped constants are stored in: fp16 under
 // `halfConstants`, otherwise the activation type.  What a resident tensor
 // costs in host memory and, on the GPU, the bytes it streams.

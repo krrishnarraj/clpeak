@@ -498,6 +498,8 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
       break;
     const char *label = litertFormatLabel(v.f);
     const LitertPlan plan = litertPlanFor(v.f, dev.accel);
+    // The gemm row's coordinates: the format this accuracy is the price of.
+    const Dims dims = litertFormatDims(v.f, plan);
     // The row reads FULLY_CONNECTED with the GPU's 8-bit kernels disallowed,
     // in the inputs and outputs the format answers right with (resolveIo).
     const LitertForm form = resolveIo(rt, dev, v.f, LitertForm());
@@ -505,7 +507,7 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     std::string note = v.note;
     if (c.ppm < 0.0 && !c.wrong())
     {
-      test.skip(label, c.status, c.error, note);
+      test.skip(label, c.status, c.error, note, dims);
       continue;
     }
     // One sentence after the format's: an integer format the accelerator
@@ -547,10 +549,10 @@ int LitertPeak::runNumericError(const LitertRuntime &rt, const litert_device_inf
     // it, beside the rate rows it withheld.
     if (c.wrong())
     {
-      test.skip(label, ResultStatus::Error, wrongRowReason(c), note);
+      test.skip(label, ResultStatus::Error, wrongRowReason(c), note, dims);
       continue;
     }
-    test.emit(label, (float)c.ppm, note.c_str());
+    test.emit(label, (float)c.ppm, note.c_str(), dims);
   }
 
   test.end();

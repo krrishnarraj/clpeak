@@ -159,6 +159,20 @@ int64_t gemmBlockSize(const char *label)
   return 0;
 }
 
+// The gemm row's dims (gemm_setup.cpp): an accuracy row measures the format
+// its rate row does, so the two carry the same coordinates and a reader
+// pairs them on those, not on the label.
+Dims gemmDims(const char *label)
+{
+  for (size_t i = 0; i < onnxgemm::kFpVariantCount; i++)
+    if (std::strcmp(onnxgemm::kFpVariants[i].label, label) == 0)
+      return onnxgemm::kFpVariants[i].dims;
+  for (size_t i = 0; i < onnxgemm::kIntVariantCount; i++)
+    if (std::strcmp(onnxgemm::kIntVariants[i].label, label) == 0)
+      return onnxgemm::kIntVariants[i].dims;
+  return Dims();
+}
+
 // Only ever asked about the types that cross the graph boundary, which are
 // fp32 and the plain float widths -- the quantized ones are handed over as
 // fp32 and quantized on device.  Sub-byte types need onnxElemBytes(), which
@@ -750,6 +764,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     logger::EmitOptions o;
     o.description = v.note;
+    o.dims = gemmDims(v.label);
 
     // Paired suppression: gemm's ladder proved this provider folded the
     // resident operands for this label, so its rate was refused as
@@ -766,7 +781,7 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       test.skip(v.label, ResultStatus::Unsupported,
                 "suppressed: onnx-gemm folded the operands for this datatype, "
                 "so no rate was published for the pair",
-                o.description);
+                o);
       continue;
     }
 
@@ -777,12 +792,12 @@ int OnnxPeak::runNumericError(const OrtRuntime &rt, const onnx_ep_info_t &ep,
     if (c.wrong())
     {
       test.skip(v.label, ResultStatus::Error,
-                xpupeak::wrongAnswerRowReason(c, kWords, kRowConsequence), o.description);
+                xpupeak::wrongAnswerRowReason(c, kWords, kRowConsequence), o);
       continue;
     }
     if (c.ppm < 0.0)
     {
-      test.skip(v.label, c.status, c.error, o.description);
+      test.skip(v.label, c.status, c.error, o);
       continue;
     }
     test.emit(v.label, (float)c.ppm, o);

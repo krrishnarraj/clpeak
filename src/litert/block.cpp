@@ -616,6 +616,21 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     return "," + litertGpuFormWords(plans[vi], vr.forms[pt.form]);
   };
 
+  // One reading's dims: its format's on this accelerator (litertFormatDims),
+  // its cache's type where that is narrower, its phase and context -- the
+  // prompt's tokens, or the cache's -- and how attention is spelled: matmul,
+  // softmax and matmul, or the odml.scaled_dot_product_attention composite.
+  auto pointDims = [&](size_t vi, xpupeak::dim::Phase phase, int64_t context) {
+    const Variant &v = kVariants[vi];
+    Dims d = litertFormatDims(v.f, plans[vi]);
+    if (v.int8Kv)
+      d.set({xpupeak::Dim::Kv, xpupeak::DType::Int8});
+    d.set({xpupeak::Dim::Phase, phase});
+    d.set({xpupeak::Dim::Context, context});
+    d.set({xpupeak::Dim::Form, v.composite ? "sdpa" : "explicit"});
+    return d;
+  };
+
   auto emitPrefillTo = [&](logger::TestScope &test, size_t vi)
   {
     const Variant &v = kVariants[vi];
@@ -637,6 +652,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       logger::EmitOptions o;
       o.description = std::string(v.note) + "  A " + std::to_string(seq) + "-token prompt" + form +
                       kernel + ".";
+      o.dims = pointDims(vi, xpupeak::dim::Phase::Prefill, seq);
       if (v.unit || std::strcmp(unit, "flops") != 0)
         o.unit = unit;
       if (!vr.usable)
@@ -653,16 +669,22 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
     }
   };
 
-  const logger::TestSpec prefillSpec = {
+  // Revision 2 (3.0.1) for both prompt tests and the latency one, whose
+  // prompt rows they are: a prompt longer than the seed enters through a
+  // 64-wide seed widened by one uncounted multiply, where 3.0.0 scaled the
+  // whole input.  Decode's one row never had a seed.
+  logger::TestSpec prefillSpec = {
       "litert_block_prefill", "Transformer block, prefill", "flops", Category::Ai,
       "Prompt processing through one 2048-wide, 16-head decoder block (SwiGLU "
       "feed-forward, 50.6M parameters) at each precision a model ships in -- what "
       "sets time to the first token.  LiteRT confirms every operation ran on this "
       "accelerator.",
       TestShape::Heterogeneous, "format and prompt length"};
-  const logger::TestSpec prefillOpsSpec = {
+  prefillSpec.revision = 2;
+  logger::TestSpec prefillOpsSpec = {
       "litert_block_prefill", "Transformer block, prefill", "ops", Category::Ai,
       prefillSpec.description, TestShape::Heterogeneous, "format and prompt length"};
+  prefillOpsSpec.revision = 2;
   const logger::TestSpec decodeSpec = {
       "litert_block_decode", "Transformer block, decode", "bps", Category::Ai,
       "Weight-streaming rate of the same block generating one token at 2048 "
@@ -670,12 +692,13 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       "row far below fp16 means this accelerator unpacks the weights to full "
       "width first.",
       TestShape::Heterogeneous, "format"};
-  const logger::TestSpec latencySpec = {
+  logger::TestSpec latencySpec = {
       "litert_block_latency", "Transformer block latency", "s", Category::Ai,
       "Time for one pass of the block at each precision; multiply by a model's "
       "layer count for a floor on time to first token and per-token time.  What "
       "the decode rows add as the context grows is attention.",
       TestShape::Heterogeneous, "format, phase and context length"};
+  latencySpec.revision = 2;
 
   // ---- Prefill, flops ------------------------------------------------------
   {
@@ -752,6 +775,7 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
                                " MB of weights, " + std::to_string((unsigned long long)(kvB >> 20)) +
                                " MB of cache";
       o.description = head + ".";
+      o.dims = pointDims(vi, xpupeak::dim::Phase::Decode, kDecodeKv);
       if (!validateVariant(vi))
       {
         test.skip(metric, vr.skipStatus, vr.skipReason, o);
@@ -780,9 +804,11 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
       if (!v.decodeOnly)
       {
         const std::string metric = std::string(v.label) + "_prefill_s" + std::to_string(kPrefillSeq);
+        const Dims dims = pointDims(vi, xpupeak::dim::Phase::Prefill, kPrefillSeq);
         if (!vr.usable)
           test.skip(metric, vr.skipStatus, vr.skipReason,
-                    std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) + "-token prompt.");
+                    std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) + "-token prompt.",
+                    dims);
         else
         {
           measurePrefill(vi, kPrefillSeq);
@@ -790,9 +816,9 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
           const std::string note = std::string(v.note) + "  One pass over a " + std::to_string(kPrefillSeq) +
                                    "-token prompt" + formClause(vi, pt) + ".";
           if (pt.us > 0.0)
-            test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
+            test.emit(metric, (float)(pt.us * 1e-6), note.c_str(), dims);
           else
-            test.skip(metric, pt.status, pt.error, note);
+            test.skip(metric, pt.status, pt.error, note, dims);
         }
       }
       for (int64_t kv : contextsFor(v))
@@ -800,10 +826,12 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         if (xpupeak::cancelRequested())
           break;
         const std::string metric = std::string(v.label) + "_decode_kv" + std::to_string(kv);
+        const Dims dims = pointDims(vi, xpupeak::dim::Phase::Decode, kv);
         if (!vr.usable)
         {
           test.skip(metric, vr.skipStatus, vr.skipReason,
-                    std::string(v.note) + "  One token with " + std::to_string(kv) + " tokens of context.");
+                    std::string(v.note) + "  One token with " + std::to_string(kv) + " tokens of context.",
+                    dims);
           continue;
         }
         measureDecode(vi, kv);
@@ -811,9 +839,9 @@ int LitertPeak::runBlock(const LitertRuntime &rt, const litert_device_info_t &de
         const std::string note = std::string(v.note) + "  One token with " + std::to_string(kv) +
                                  " tokens of context" + formClause(vi, pt) + ".";
         if (pt.us > 0.0)
-          test.emit(metric, (float)(pt.us * 1e-6), note.c_str());
+          test.emit(metric, (float)(pt.us * 1e-6), note.c_str(), dims);
         else
-          test.skip(metric, pt.status, pt.error, note);
+          test.skip(metric, pt.status, pt.error, note, dims);
       }
     }
     test.end();

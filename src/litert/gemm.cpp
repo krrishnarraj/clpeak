@@ -229,13 +229,17 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(dev.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"litert_gemm", "LiteRT matmul peak", "flops", Category::Unknown,
-       "Matrix-multiply rate on this accelerator, one model format per row: "
-       "sixteen chained square matmuls in one dispatch, swept over layer width "
-       "and reported at its best.  Each row names the kernel that ran, and a "
-       "format LiteRT hands back to the CPU reports unsupported.",
-       TestShape::Heterogeneous, "model format"});
+  logger::TestSpec testSpec{
+      "litert_gemm", "LiteRT matmul peak", "flops", Category::Unknown,
+      "Matrix-multiply rate on this accelerator, one model format per row: "
+      "sixteen chained square matmuls in one dispatch, swept over layer width "
+      "and reported at its best.  Each row names the kernel that ran, and a "
+      "format LiteRT hands back to the CPU reports unsupported.",
+      TestShape::Heterogeneous, "model format"};
+  // Revision 2 (3.0.1): the sixteen-layer chain from a live seed, where
+  // 3.0.0 timed one multiply per dispatch (the header says what moved).
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   // The cost of asking, measured once: a 64^3 multiply whose arithmetic is
   // nothing, so its time is submission and the reduction.
@@ -263,6 +267,7 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
 
     logger::EmitOptions o;
     o.description = v.note;
+    o.dims = litertFormatDims(v.f, plan);
     if (plan.integerOps)
       o.unit = "ops";
 
@@ -644,6 +649,11 @@ int LitertPeak::runGemm(const LitertRuntime &rt, const litert_device_info_t &dev
       if (forms[w].floatIo)
         o.description += ", with float inputs and outputs";
       o.description += ".";
+      o.dims.set({xpupeak::Dim::ProblemSize, win.bestDim});
+      // Where the layers' spelling was raced, the one that won: the ONNX
+      // backend's words for its two int8 rows.
+      if (forms.front().conv1x1 != forms.back().conv1x1)
+        o.dims.set({xpupeak::Dim::Form, forms[w].conv1x1 ? "conv1x1" : "matmul"});
       test.emit(label, (float)win.best, o);
     }
     else

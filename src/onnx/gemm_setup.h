@@ -39,6 +39,11 @@ struct Variant
   int dtype;         // element type of the graph's input/output
   bool qdq;          // build the quantized (DequantizeLinear/MatMul/Q) form
   const char *label;
+  // What the row measures, in the vocabulary's words (docs/format-v4.md):
+  // the activations' type, the stored weights' where narrower, how they are
+  // scaled, and the spelling where a format has two rows.  The numeric-error
+  // row of the same label carries the same dims (numeric_error.cpp).
+  Dims dims;
   const char *note;  // the row's description; gemm.cpp appends what the run found
   int64_t blockSize; // >0: blocked, one scale per this many elements
   bool nvfp4;        // blocked on *both* operands, with a second scale

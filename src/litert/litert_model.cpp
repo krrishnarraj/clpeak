@@ -45,6 +45,47 @@ const char *litertFormatLabel(LitertFormat f)
   return "?";
 }
 
+Dims litertFormatDims(LitertFormat f, const LitertPlan &p)
+{
+  using xpupeak::Dim;
+  using xpupeak::DType;
+  namespace dim = xpupeak::dim;
+  Dims d;
+  switch (f)
+  {
+  case LitertFormat::Fp32: d = {{Dim::Dtype, DType::Fp32}}; break;
+  // On the GPU an fp32 graph whose constants are half, under the fp16
+  // policy: fp16 storage and arithmetic as surely as a half-typed graph.
+  case LitertFormat::Fp16: d = {{Dim::Dtype, DType::Fp16}}; break;
+  case LitertFormat::Fp16Acc32: d = {{Dim::Dtype, DType::Fp16}}; break;
+  case LitertFormat::Bf16: d = {{Dim::Dtype, DType::Bf16}}; break;
+  case LitertFormat::Int8Qdq: d = {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}}; break;
+  case LitertFormat::Int16x8:
+    d = {{Dim::Dtype, DType::Int16}, {Dim::Weights, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}};
+    break;
+  // Dynamic-range quantization: the graph's activations are fp32, which a
+  // kernel may quantize as it goes (XNNPACK's QD8) -- the rate's unit and
+  // the kernel's name say when it did.
+  case LitertFormat::Int8Weight:
+    d = {{Dim::Dtype, DType::Fp32}, {Dim::Weights, DType::Int8}, {Dim::Quant, dim::Quant::Channel}};
+    break;
+  case LitertFormat::Int4Weight:
+    d = {{Dim::Dtype, DType::Fp32}, {Dim::Weights, DType::Int4}, {Dim::Quant, dim::Quant::Block}};
+    break;
+  case LitertFormat::Fp8Weight:
+    d = {{Dim::Dtype, DType::Fp32}, {Dim::Weights, DType::Fp8E4m3}, {Dim::Quant, dim::Quant::Channel}};
+    break;
+  }
+  // The GPU's fp16 policy keeps the running sums in fp16 too: on an M1 Pro
+  // and a Pixel 7a its fp16 row reads 4690 ppm where fp16_acc32's reads 388
+  // (src/litert/AGENTS.md).
+  if (p.gpuPrecision == kLiteRtDelegatePrecisionFp16)
+    d.set({Dim::Acc, DType::Fp16});
+  else if (p.gpuPrecision == kLiteRtDelegatePrecisionFp16WithFp32Accum)
+    d.set({Dim::Acc, DType::Fp32});
+  return d;
+}
+
 LitertPlan litertPlanFor(LitertFormat f, LitertAccel accel)
 {
   LitertPlan p;

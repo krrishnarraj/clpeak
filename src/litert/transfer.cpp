@@ -128,6 +128,11 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
        "round trip at the smallest, and the trip back is their difference.",
        TestShape::Heterogeneous, "direction"});
 
+  using xpupeak::Dim;
+  namespace dim = xpupeak::dim;
+  const Dims h2dDims{{Dim::Direction, dim::Direction::H2d}};
+  const Dims rtDims{{Dim::Direction, dim::Direction::Roundtrip}};
+  const Dims d2hDims{{Dim::Direction, dim::Direction::D2h}};
   const char *h2dNote = "Host to accelerator: a tensor handed to LiteRT and one element read back.";
   const char *rtNote = "Round trip: the tensor in, squared, and the whole result back.";
   const char *d2hNote = "Accelerator to host: the round trip less the trip in at the same size.";
@@ -167,9 +172,9 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
       break;   // the link saturated
   }
   if (h2dBest > 0.0)
-    test.emit("h2d", (float)h2dBest, h2dNote);
+    test.emit("h2d", (float)h2dBest, h2dNote, h2dDims);
   else
-    test.skip("h2d", h2dStatus, h2dErr.empty() ? "no size could be measured" : h2dErr, h2dNote);
+    test.skip("h2d", h2dStatus, h2dErr.empty() ? "no size could be measured" : h2dErr, h2dNote, h2dDims);
 
   if (smallElems > 0)
   {
@@ -180,27 +185,27 @@ int LitertPeak::runTransferBandwidth(const LitertRuntime &rt, const litert_devic
       const double bps = 2.0 * (double)bytes / (r.us * 1.0e-6);
       XPUPEAK_VLOG("litert-transfer[%s]: roundtrip %llu MB -> %.2f GB/s (%.1f us)\n", dev.displayName.c_str(),
                    (unsigned long long)(bytes >> 20), bps / 1.0e9, r.us);
-      test.emit("roundtrip", (float)bps, rtNote);
+      test.emit("roundtrip", (float)bps, rtNote, rtDims);
       const double backUs = r.us - h2dSmallUs;
       if (backUs > 0.05 * r.us)
-        test.emit("d2h", (float)((double)bytes / (backUs * 1.0e-6)), d2hNote);
+        test.emit("d2h", (float)((double)bytes / (backUs * 1.0e-6)), d2hNote, d2hDims);
       else
         test.skip("d2h", ResultStatus::Error,
                   "the round trip took no longer than the trip out, so the return copy cannot "
                   "be separated from it -- on a unified-memory device the result is read in "
                   "place",
-                  d2hNote);
+                  d2hNote, d2hDims);
     }
     else
     {
-      test.skip("roundtrip", r.status, r.error.empty() ? "run failed" : r.error, rtNote);
-      test.skip("d2h", r.status, "the round trip could not be measured", d2hNote);
+      test.skip("roundtrip", r.status, r.error.empty() ? "run failed" : r.error, rtNote, rtDims);
+      test.skip("d2h", r.status, "the round trip could not be measured", d2hNote, d2hDims);
     }
   }
   else
   {
-    test.skip("roundtrip", h2dStatus, "no size could be measured", rtNote);
-    test.skip("d2h", h2dStatus, "no size could be measured", d2hNote);
+    test.skip("roundtrip", h2dStatus, "no size could be measured", rtNote, rtDims);
+    test.skip("d2h", h2dStatus, "no size could be measured", d2hNote, d2hDims);
   }
 
   test.end();

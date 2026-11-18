@@ -369,23 +369,31 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
 {
   (void)cfg;
 
-  auto test = currentDeviceScope->beginTest(
-      {"coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
-       "How far each weight format's answer on a 1024-cubed matmul drifts from a "
-       "double-precision reference, in parts per million.  The reference "
-       "multiplies the exact values this compute unit was given, so only the "
-       "arithmetic and the width the answer was kept in remain.",
-       TestShape::Heterogeneous, "weight format"});
+  logger::TestSpec testSpec{
+      "coreml_numeric_error", "Core ML matmul numeric error", "ppm", Category::Compute,
+      "How far each weight format's answer on a 1024-cubed matmul drifts from a "
+      "double-precision reference, in parts per million.  The reference "
+      "multiplies the exact values this compute unit was given, so only the "
+      "arithmetic and the width the answer was kept in remain.",
+      TestShape::Heterogeneous, "weight format"};
+  // Revision 2 (3.0.1): the answer read is the faster weight layout's
+  // (CoremlLayoutRace), where 3.0.0 read one layout per unit -- the M1 Pro
+  // CPU's int4_weight went from 272 ppm to 3218, its fast kernel
+  // accumulating in fp16.
+  testSpec.revision = 2;
+  auto test = currentDeviceScope->beginTest(testSpec);
 
   for (const Variant &v : kVariants)
   {
     if (xpupeak::cancelRequested())
       break;
     const char *label = coremlWeightLabel(v.w);
+    // The gemm row's coordinates: the format this accuracy is the price of.
+    const Dims dims = coremlWeightDims(v.w);
     const AnswerCheck &c = answerCheck(dev, v.w);
     if (c.read < 0)
     {
-      test.skip(label, c.layout[0].status, c.layout[0].error, v.note);
+      test.skip(label, c.layout[0].status, c.layout[0].error, v.note, dims);
       continue;
     }
     const std::string note = std::string(v.note) + c.note;
@@ -402,15 +410,15 @@ int CoreMLPeak::runNumericError(const coreml_device_info_t &dev, benchmark_confi
                     otherWrong ? std::string("and stored ") + coremlLayoutName(1 - c.read) +
                                      " it is wrong too, so its rate rows are withheld"
                                : std::string("so its rate rows are withheld")),
-                note);
+                note, dims);
       continue;
     }
     if (r.ppm < 0.0)
     {
-      test.skip(label, r.status, r.error, note);
+      test.skip(label, r.status, r.error, note, dims);
       continue;
     }
-    test.emit(label, (float)r.ppm, note.c_str());
+    test.emit(label, (float)r.ppm, note.c_str(), dims);
   }
 
   test.end();

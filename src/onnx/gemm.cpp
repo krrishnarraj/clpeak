@@ -54,6 +54,7 @@
 #include <vector>
 
 using namespace onnxgemm;
+using xpupeak::Dim;
 
 namespace
 {
@@ -207,17 +208,22 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // (gpuRunCapUs); elsewhere 0, unbounded.
   const double runCapUs = gpuRunCapUs(ep.deviceType, cfg);
 
-  auto test = currentDeviceScope->beginTest(
-      {"onnx_gemm", "ONNX MatMul peak",
-       "flops",
-       Category::Unknown,
-       "Matrix-multiply rate on this provider, one data type per row: sixteen "
-       "chained matmuls in one dispatch, swept over layer width -- and, where "
-       "wider square layers fell off, over taller activations against "
-       "narrower layers -- and reported at its best.  int8 runs a second time "
-       "as 1x1 convolutions, and a model the provider cannot run entirely on "
-       "its device reports unsupported.",
-       TestShape::Heterogeneous, "data type"});
+  logger::TestSpec spec{
+      "onnx_gemm", "ONNX MatMul peak",
+      "flops",
+      Category::Unknown,
+      "Matrix-multiply rate on this provider, one data type per row: sixteen "
+      "chained matmuls in one dispatch, swept over layer width -- and, where "
+      "wider square layers fell off, over taller activations against "
+      "narrower layers -- and reported at its best.  int8 runs a second time "
+      "as 1x1 convolutions, and a model the provider cannot run entirely on "
+      "its device reports unsupported.",
+      TestShape::Heterogeneous, "data type"};
+  // Revision 2 (3.0.1): sixteen chained multiplies from a live seed, where
+  // 3.0.0 timed one multiply per dispatch -- QNN's HTP read a single int8
+  // 8192-cube at 13 TOPS and the chain at 35.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   // runAll also clears per EP before dispatching; this entry clear keeps
   // direct runGemm callers (tests, future entry points) from inheriting a
@@ -1044,6 +1050,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
 
     logger::EmitOptions o;
     o.description = v.note;
+    o.dims = v.dims;
     if (isInt)
       o.unit = "ops";
 
@@ -1176,6 +1183,7 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       o.description += "; from " + std::to_string(L.offDeviceAbove) +
                        " it ran on another unit";
     o.description += ".";
+    o.dims.set({Dim::ProblemSize, L.bestDim});
     test.emit(v.label, (float)L.best, o);
   };
 

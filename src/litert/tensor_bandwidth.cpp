@@ -141,27 +141,29 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
     // every accelerator (the GPU's stores them as half under its fp16
     // policy, and the model now carries them as half too).
     const uint64_t bytes = (uint64_t)s.dim * (uint64_t)s.dim * 2;
+    // The rung's working set, as its label names it.
+    const Dims dims{{xpupeak::Dim::WorkingSet, bytes}};
     // The weights are held as any constant is (litertHeldBytes); the
     // vector they multiply is nothing beside them.
     const uint64_t peak = litertHeldBytes(litertWeightBytes(plan, s.dim, s.dim), 0);
     if (peak > xpupeak::memoryBudget(3ull << 30))
     {
       if (rung < kAlwaysMeasured)
-        test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note);
+        test.skip(s.label, ResultStatus::Unsupported, "not enough memory for this working set", s.note, dims);
       break;
     }
     Result r = measure(rt, dev, plan, s.dim, warmupCount, forceIters, specifiedIters, kSizeBudgetUs,
                        kLitertMaxIters, true);
     if (r.us <= 0.0)
     {
-      test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error, s.note);
+      test.skip(s.label, r.status, r.error.empty() ? "run failed" : r.error, s.note, dims);
       break;
     }
     const double netUs = r.us - floorUs;
     if (netUs <= 0.0)
     {
       test.skip(s.label, ResultStatus::Error,
-                "took no longer than the per-dispatch floor, so nothing measurable was streamed", s.note);
+                "took no longer than the per-dispatch floor, so nothing measurable was streamed", s.note, dims);
       break;
     }
     const double bps = (double)bytes / (netUs * 1.0e-6);
@@ -169,7 +171,7 @@ int LitertPeak::runTensorBandwidth(const LitertRuntime &rt, const litert_device_
                  s.label, bps / 1.0e9, netUs, floorUs);
     stillFalling = (prevBps <= 0.0) || (bps < prevBps * kFallingRatio);
     prevBps = bps;
-    test.emit(s.label, (float)bps, s.note);
+    test.emit(s.label, (float)bps, s.note, dims);
   }
 
   test.end();
