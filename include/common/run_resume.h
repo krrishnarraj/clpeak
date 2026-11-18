@@ -28,9 +28,11 @@ class RunCheckpoint;
 // log: the sidecar is continued, and the document's log starts with the part
 // before's.
 //
-// Only the build that started a run continues it, on the OS release it
-// started on: another build can run other tests in another order, and the
-// parts would not be one run.  Both hosts (src/cli/main.cpp,
+// Only the build that started a run continues it, on the OS it started on
+// (the same release, build, kernel and distribution, all of `system.os`):
+// another build can run other tests in another order, and the parts would
+// not be one run; another OS build can bring other drivers, and the file
+// names one.  Both hosts (src/cli/main.cpp,
 // src/ffi/xpupeak_ffi.cpp) go through these three calls in this order, and
 // take this part's `resumed` record from the checkpoint once it is over
 // (RunCheckpoint::partRecord).

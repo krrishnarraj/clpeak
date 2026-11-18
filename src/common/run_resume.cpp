@@ -158,6 +158,22 @@ double priorRunning(const ResumePlan &plan)
     return total + (last - start);
 }
 
+// "macOS 27.2.1 (build 26B131, kernel 27.2.0)",
+// "Linux 26.04 (Ubuntu 26.04.1 LTS, kernel 7.0.0-43-generic)": what the
+// resume check compares, so a refusal shows what changed.
+std::string osDescription(const OsInfo &os)
+{
+    std::string s = os.name + " " + os.version, more;
+    auto add = [&more](const std::string &what) {
+        if (what.empty()) return;
+        more += (more.empty() ? "" : ", ") + what;
+    };
+    add(os.distribution);
+    if (!os.build.empty()) add("build " + os.build);
+    if (!os.kernel.empty()) add("kernel " + os.kernel);
+    return more.empty() ? s : s + " (" + more + ")";
+}
+
 } // namespace
 
 bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &error)
@@ -194,13 +210,20 @@ bool loadResumePlan(const std::string &path, ResumePlan &plan, std::string &erro
                 "started it; this is " + XPUPEAK_VERSION_STR;
         return false;
     }
+    // The file has one `system.os`, so every part runs on the OS it names:
+    // the same release, build and kernel.  The build catches a phone's
+    // monthly update, which can bring its GPU and NPU drivers with it; the
+    // kernel catches a Linux update, which `version` (the distribution's
+    // release) no longer shows.
     const SystemInfo here = probeSystem();
-    if (meta.system.os.name != here.os.name || meta.system.os.version != here.os.version)
+    const OsInfo &startedOn = meta.system.os, &thisOs = here.os;
+    if (startedOn.name != thisOs.name || startedOn.version != thisOs.version ||
+        startedOn.build != thisOs.build || startedOn.kernel != thisOs.kernel ||
+        startedOn.distribution != thisOs.distribution)
     {
         error = std::string(programName()) + ": " + outputFile + " was started on " +
-                meta.system.os.name + " " + meta.system.os.version +
-                ", and a run is continued only on the release it started on; this is " +
-                here.os.name + " " + here.os.version;
+                osDescription(startedOn) + ", and a run is continued only on the OS it "
+                "started on; this is " + osDescription(thisOs);
         return false;
     }
     if (meta.invocation.argv.empty())

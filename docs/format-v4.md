@@ -896,7 +896,9 @@ from its start, or with `--skip-crashed`, for a crash that would repeat, is
 recorded in its place as an `error` reading `crashed` instead. Where the run
 stopped while held, the readings its `held_tests` had are kept, and the
 Benchmark run again adds only the ones they lack. Only the build
-that started a run continues it, on the OS release it started on.
+that started a run continues it, on the OS it started on: every field of
+`system.os` the same, so a kernel or OS build update between parts refuses
+the resume.
 
 The parts end in one document under the same name and the same `run_id`.
 `generated_at` is the first part's start, `log[].elapsed_s` goes on counting
