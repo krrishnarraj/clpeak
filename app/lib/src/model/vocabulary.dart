@@ -181,6 +181,9 @@ const dimKeys = <String, DimKeyInfo>{
   // Appended after the seed list
   'kv': DimKeyInfo(
       'kv', DimClass.identity, DimKind.dataType, DimDefault.sameAsDtype),
+  'bound': DimKeyInfo('bound', DimClass.identity, DimKind.word,
+      DimDefault.value,
+      defaultValue: 'throughput', words: ['throughput', 'latency']),
 };
 
 /// Whether two readings must agree on [key] to be comparable.  A key this
