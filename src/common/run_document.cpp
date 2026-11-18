@@ -3,6 +3,7 @@
 #include <common/json.h>
 #include <common/json_writer.h>
 #include <common/options.h>
+#include <common/path_scrub.h>
 #include <version.h>
 
 #include <algorithm>
@@ -530,13 +531,17 @@ void writeAnnotations(JsonWriter &w, const std::map<std::string, std::string> &a
     w.endObject();
 }
 
-void writeInvocation(JsonWriter &w, const Invocation &inv)
+// `shared` for what may leave the machine, a result and its sidecar: argv
+// without the paths that name the user (xpupeak::scrubArgv).  A checkpoint
+// keeps argv as given, for --resume to parse again.
+void writeInvocation(JsonWriter &w, const Invocation &inv, bool shared)
 {
     w.beginObject("invocation");
     if (!inv.argv.empty())
     {
         w.beginArray("argv");
-        for (const std::string &a : inv.argv) w.rawString(a);
+        for (const std::string &a : shared ? xpupeak::scrubArgv(inv.argv) : inv.argv)
+            w.rawString(a);
         w.endArray();
     }
     if (inv.targetTimeUs)      w.uint("target_time_us",        inv.targetTimeUs);
@@ -958,7 +963,7 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
     if (meta.cancelled)       w.boolean("cancelled", true);
 
     writeBuild(w, meta.build);
-    writeInvocation(w, meta.invocation);
+    writeInvocation(w, meta.invocation, /*shared=*/progress == nullptr);
     writeSystem(w, meta.system);
     writeConditions(w, meta.conditions);
     writeAnnotations(w, meta.annotations);
@@ -1030,7 +1035,7 @@ std::string runLogHeaderJson(const RunMeta &meta)
     writeGenerator(w, meta.generator);
     w.strIf("generated_at", meta.generatedAt);
     writeBuild(w, meta.build);
-    writeInvocation(w, meta.invocation);
+    writeInvocation(w, meta.invocation, /*shared=*/true);
     writeSystem(w, meta.system);
     w.endObject();
     return ss.str();

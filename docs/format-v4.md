@@ -187,7 +187,8 @@ the CMake configuration it was built in (`Release`, `Debug`, …) when the
 build stamped it: a debug build's host-side work runs unoptimised, and a slow
 run from one is not the device's fault.
 
-**`invocation`**: `argv` (I) is the command line. `target_time_us`,
+**`invocation`**: `argv` (I) is the command line, the program by its file name
+and every path as *Never recorded* writes it. `target_time_us`,
 `target_time_us_ml_gpu` and `target_time_us_cpu` are the `--max-time-gpu`,
 `--max-time-ml-gpu` and `--max-time-cpu` budgets in microseconds, and
 `warmup` the warm-up count. `categories` lists the categories enabled;
@@ -791,7 +792,7 @@ reproduces what the CLI printed.
 | `level` | `error` \| `warning` \| `info` \| `debug` |
 | `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
-| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found |
+| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found. Every message, XpuPeak's own included, has its paths written as *Never recorded* says |
 
 What each level means, and when it is in the file:
 
@@ -1145,12 +1146,11 @@ text someone typed: a site escapes them, bounds their length, and shows them
 as that person's words. Its upload form may write the recommended keys and
 keys of its own; a reader shows a key it does not know as written.
 
-**Privacy.** What a file never holds is the *Never recorded* list. A path is
-where a person's name can still reach a file: a home directory is named after
-its user, and some paths are written whole — the program's own in
-`invocation.argv`, an output or library path given on the command line, a
-cache or temporary folder in a log line. So a site publishes less than it
-keeps:
+**Privacy.** What a file never holds is the *Never recorded* list: its paths
+come without the home directory's name, the user's temporary folder or an
+app's install id. A path can still hold a name a person chose, a folder's or
+a volume's, in `invocation.argv` (an output or library path given on the
+command line) and in a log line. So a site publishes less than it keeps:
 
 - `log` and `inventory` are for maintainers (D): a site drops them, or keeps
   them for the uploader alone.
@@ -1309,7 +1309,15 @@ it ran on or the person who ran it, and no minor may add:
   `UIDevice.name`) — a name the user chooses to give goes in `annotations`;
 - a GPU's UUID or LUID, a PCI bus address, a Metal registry ID — only their
   per-run tokens (*Linking*);
-- the key those tokens are made under, which only the checkpoint holds.
+- the key those tokens are made under, which only the checkpoint holds;
+- the parts of a path that name the user or the install. A path is written
+  with the home directory as `~` and the user's own temporary directory as
+  `$TMPDIR`; any other home's name as `<user>` (`/Users/<user>`,
+  `/home/<user>`, `C:\Users\<user>`) and macOS's per-user folder as
+  `/var/folders/<user>`; an app install's random directory as `<install>`
+  (Android's `/data/app/<install>`, iOS's `Application/<install>`).
+  `invocation.argv[0]` is the program's file name alone. A checkpoint keeps
+  argv as given, since `--resume` parses it again;
 - a power plan's GUID, which is unique to the install, and who and where an
   OS build was made (Android's `ro.build.user` and `ro.build.host`, a local
   build's `eng.<user>` id).
