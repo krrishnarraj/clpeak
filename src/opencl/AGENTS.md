@@ -44,6 +44,11 @@ unified memory as integrated, NVIDIA's `sm_` arch, compute units named for
 the vendor (`computeUnitName()`), clock, and a discrete part's memory.  A CPU
 device (PoCL, Intel's CPU runtime) is the host CPU.
 
+The helper is called from `enumerate()` too, with what it already holds, so
+a listing's device has the type, facts and evidence a run's has
+(`InventoryDevice`, `include/common/inventory.h`) and `--list-devices`
+links it as a run would.
+
 ## Test documentation
 
 See `include/common/AGENTS.md` § Test documentation.  OpenCL specifics:

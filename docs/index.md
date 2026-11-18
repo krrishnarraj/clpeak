@@ -254,9 +254,10 @@ away.
 
 ```console
 xpupeak                            # every test on every device
-xpupeak --list-devices             # every device, named as --devices takes it
+xpupeak --list-devices             # the hardware and every device, named as --devices takes them
 xpupeak --devices cuda:0,vulkan:1  # only these devices
 xpupeak --devices coreml:0         # Core ML on the Neural Engine
+xpupeak --devices gpu0             # every backend's device on one processor
 xpupeak --metal --cpu              # only these backends
 xpupeak --no-opencl                # everything except OpenCL
 xpupeak --compute                  # one category: --compute, --bandwidth, --latency, --ai, …
@@ -265,6 +266,8 @@ xpupeak --gemm                     # the vendor's tuned matmul, everywhere
 xpupeak --onnx --transformer-block # the decoder block on every ONNX provider
 xpupeak --describe                 # what each test and each reading measures
 xpupeak -o run.xpupeak.json        # save the run as JSON
+xpupeak --summary                  # each processor's peaks, once the run is done
+xpupeak --annotate cooling=stock   # a fact only you know, saved with the run
 xpupeak --compare run.xpupeak.json # run again and compare with a saved run
 xpupeak --max-time-gpu 250         # keep a GPU busy at most 250 ms at a time
 xpupeak --max-time-ml-gpu 500      # the same for one ONNX / LiteRT / Core ML run

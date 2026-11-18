@@ -67,6 +67,10 @@ vendor, and from its metadata the CUDA plugin's `pci_bus_id`, DXGI's `LUID`
 and OpenVINO's `DEVICE_PCI_INFO`, `DEVICE_UUID` and `DEVICE_LUID`.
 `runtime` is the provider and the runtime's version.
 
+The helper is called from `enumerate()` too, so a listing's device has the
+type, facts and evidence a run's has (`InventoryDevice`,
+`include/common/inventory.h`) and `--list-devices` links it as a run would.
+
 ## The runtime is dlopen'd, never linked (except on iOS)
 
 Only `OrtGetApiBase` is resolved by name; everything else comes through the

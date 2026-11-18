@@ -88,13 +88,15 @@ option; Android and iOS builds are in [`app/AGENTS.md`](app/AGENTS.md).
 
 ```sh
 xpupeak                             # every test on every device
-xpupeak --list-devices              # what XpuPeak can see, named as --devices takes them
+xpupeak --list-devices              # the hardware and its devices, named as --devices takes them
 xpupeak --devices cuda:0,vulkan:1   # only these devices
+xpupeak --devices gpu0              # every backend's device on one processor
 xpupeak --vulkan --opencl           # only these backends
 xpupeak --bandwidth                 # one category: --compute, --bandwidth, --latency, --ai, …
 xpupeak --gemm                      # one test, on every backend that has it
 xpupeak --describe                  # what each test and each reading measures
 xpupeak -o run.xpupeak.json         # save the run as JSON
+xpupeak --summary                   # each processor's peaks, once the run is done
 xpupeak --compare run.xpupeak.json  # run again and compare with a saved run
 ```
 

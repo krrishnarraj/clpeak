@@ -71,6 +71,10 @@ GPU, which joins the run's one GPU and never one of several.  The CPU is the
 host.  `runtime.accelerator` is `npu`, `gpu` or `cpu`; LiteRT reports no
 version of its own.
 
+The helper is called from `enumerate()` too, so a listing's device has the
+type, facts and evidence a run's has (`InventoryDevice`,
+`include/common/inventory.h`) and `--list-devices` links it as a run would.
+
 ## The runtime is dlopen'd, never linked
 
 Only the platform's conventional names are searched (`libLiteRt.so` on

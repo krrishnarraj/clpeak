@@ -65,6 +65,10 @@ registry ID (`coreml_device_info_t::gpuRegistryId`), which links it to the
 Metal backend's view, and the CPU the host.  `runtime.accelerator` is
 `neural_engine`, `gpu` or `cpu`.
 
+The helper is called from `enumerate()` too, so a listing's device has the
+type, facts and evidence a run's has (`InventoryDevice`,
+`include/common/inventory.h`) and `--list-devices` links it as a run would.
+
 ## Models are emitted as protobuf bytes, not built with coremltools
 
 `coreml_model.cpp` writes the ML Program wire format by hand, exactly as

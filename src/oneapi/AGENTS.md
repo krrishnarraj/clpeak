@@ -49,8 +49,12 @@ Each device reports who it is with its `beginDevice()` (`oneapiIdentify()` in
 and UUID through Intel's SYCL extensions (`ext_intel_pci_address`,
 `ext_intel_device_info_uuid`) where the device has the aspect, and as facts
 its PCI vendor and device ids, the vendor's string, its compute units (EUs
-on an Intel GPU) and clock.  A CPU device is the host CPU.  `enumerate()`
-can call it with the same `sycl::device`.
+on an Intel GPU) and clock.  A CPU device is the host CPU.
+
+The helper is called from `enumerate()` too, with what it already holds, so
+a listing's device has the type, facts and evidence a run's has
+(`InventoryDevice`, `include/common/inventory.h`) and `--list-devices`
+links it as a run would.
 
 ## Build
 

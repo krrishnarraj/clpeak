@@ -8,13 +8,15 @@ runs benchmarks, and handles centralized file output.
 - CLI argument parsing? → `../common/options.cpp` + `include/common/options.h`
 - How backends are wired? → `main.cpp` iterates `backendRegistry()` (`../registry/backend_registry.cpp`, shared with the GUI bridge) — creates each enabled backend, runs it, merges its results
 - Logger implementation? → shared `LoggerText` in `../common/logger_text.cpp` + `include/common/logger_text.h` (CLI constructs it over `std::cout`)
-- Device listing? → `main.cpp` collects each enabled backend's `enumerate()`; `printInventory()` in `../common/inventory.cpp` prints them all in one format, each device line starting with the `backend:index` token `--devices` takes
+- Device listing? → `main.cpp` collects each enabled backend's `enumerate()`, links them (`linkInventory()`) and `printInventory()` in `../common/inventory.cpp` prints the hardware view, then every device in one format, each line starting with the `backend:index` token `--devices` takes
+- `--devices gpu0`? → `main.cpp` enumerates the backends the flags leave on, links them and resolves the processor ids into `backend:index` items (`resolveProcessorSelectors()`) before anything runs
+- `--compare`, `--summary`? → the baseline is loaded once up front (`loadCompareBaseline()`, which every backend's logger shares for its per-row note); after the save, `asSaved()` gives the run as its file holds it and `printRunSummary()` / `printRunCompare()` (`../common/logger_text.cpp`) print the reports
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `main.cpp` | `main()` — `setProgramName(argv[0])` first, then backend dispatch, `--list-devices`, `--resume` (`include/common/run_resume.h`), centralized file output; constructs `LoggerText(std::cout, …)` |
+| `main.cpp` | `main()` — `setProgramName(argv[0])` first, then backend dispatch, `--list-devices` (the hardware view), `--devices` processor ids, `--resume` (`include/common/run_resume.h`), `--annotate` into the run's `annotations`, centralized file output, then `--summary` and `--compare`'s report; constructs `LoggerText(std::cout, …)` |
 | `CMakeLists.txt` | the `xpupeak` target at the build root, and `clpeak` beside it (a link; a copy of the exe on Windows); the root `CMakeLists.txt` installs and tests both |
 
 ## Two names, one program

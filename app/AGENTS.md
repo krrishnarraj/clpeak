@@ -128,6 +128,15 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   without the host: in-process (`InProcessEngine`).  `BenchmarkService`
   takes one; tests pass none and get the in-process engine over their stub
   bindings
+- The device catalog, and the processors its devices are views of? →
+  `BackendCatalog` (`lib/src/model/catalog.dart`): `backends` as each
+  enumerated, and beside them `packages` and `processors` (the result
+  document's `PackageInfo` / `ProcessorInfo`, `hardware.dart`), linked by the
+  native side as a run links its devices; each `CatalogDevice.processor`
+  names its processor and `devicesOf(id)` lists a processor's devices with
+  their `--devices` tokens.  `--devices` takes the processor id too (`gpu0`:
+  every device on it), which `ResumeOffer.plannedDevices` counts as those
+  devices.  A catalog from an older native library has none of it
 - Argv construction (device/category/time flags)? → `lib/src/model/run_config.dart`
   (never emits per-test flags — the UI is data-driven so test churn in the
   core needs no app changes). `--verbose` is not run configuration: it is the

@@ -54,6 +54,11 @@ memory.  NVIDIA's Vulkan and OpenCL drivers report the same UUID, which is
 what links the three; ONNX Runtime's CUDA plugin links by the PCI address.
 The helper needs only `cuInit`, so `enumerate()` can call it too.
 
+The helper is called from `enumerate()` too, with what it already holds, so
+a listing's device has the type, facts and evidence a run's has
+(`InventoryDevice`, `include/common/inventory.h`) and `--list-devices`
+links it as a run would.
+
 ## Test documentation
 
 See `include/common/AGENTS.md` § Test documentation.  CUDA specifics:

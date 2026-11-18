@@ -52,6 +52,11 @@ matches nothing, so on Apple silicon the device joins Metal's GPU by the
 sole rule.  The helper takes only the `VkPhysicalDevice`, so `enumerate()`
 can call it too.
 
+The helper is called from `enumerate()` too, with what it already holds, so
+a listing's device has the type, facts and evidence a run's has
+(`InventoryDevice`, `include/common/inventory.h`) and `--list-devices`
+links it as a run would.
+
 ## Test documentation
 
 See `include/common/AGENTS.md` § Test documentation.  Vulkan specifics:

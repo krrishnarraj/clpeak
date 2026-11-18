@@ -71,7 +71,7 @@ shared library / Apple framework.
 | File | Purpose |
 |------|---------|
 | `xpupeak_ffi.h` | `extern "C"` surface + event schema + `XPUPEAK_RUN_*` codes |
-| `xpupeak_ffi.cpp` | launch loop, catalog, cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory |
+| `xpupeak_ffi.cpp` | launch loop, catalog (linked, with its hardware), cancel, run-document assembly + save, the run's `RunLog` + sidecar, the `--verbose` inventory; a launch resolves `--devices` processor ids and writes `--annotate`'s annotations as the CLI does |
 | `launch.h` | `xpuPeakLaunch()`: `xpupeak_launch()` with a choice of whether to clear a pending cancel and pause (the engine does not) |
 | `engine.cpp` | `xpupeak_engine_main`: the desktop engine process's catalog / launch modes, events one JSON line per stdout line, cancel, pause and resume on stdin |
 | `engine_host.cpp` | `xpupeak-engine` executable: dlopens the library path the app passes and calls `xpupeak_engine_main`; beside the runner in every desktop bundle |
@@ -107,7 +107,11 @@ shared library / Apple framework.
   consumer's drain barrier.
 - The catalog JSON keys are snake_case (`compute_units`, `global_mem_bytes`)
   — the same serializer writes the run document's `inventory`, so the two
-  cannot drift.
+  cannot drift.  Beside `backends` the catalog holds the listing's hardware,
+  `packages` and `processors` in the result document's shapes, and each
+  device its `processor` (`linkInventory()`, `include/common/inventory.h`):
+  never the evidence, whose tokens are made under a key of the process's
+  own.  Decoded by `app/lib/src/model/catalog.dart`.
 - argv follows the CLI grammar; parsing uses `parseCliOptionsNoExit` so a bad
   flag can never kill the host process.
 - The engine process takes the runtime setup as `--set-*` options applied

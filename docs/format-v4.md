@@ -274,8 +274,9 @@ is the last part's.
 Facts only a person knows, as a flat map of strings (C). The tool never fills
 it, and it never overwrites a measured fact: a display may prefer an
 annotation, a reader keeps both. Its writers are `--annotate key=value`
-*(V10)*, the app's Details editor, and a site that collects results,
-at upload. Recommended keys:
+(repeatable; a key's later value replaces an earlier one, and a blank key or
+value is refused), the app's Details editor, and a site that collects
+results, at upload. Recommended keys:
 
 | key | for |
 |---|---|
@@ -588,7 +589,7 @@ invented word for that pair would read worse than none.
 | `label` | I | display form; **omitted when it equals `id`**, which is the usual case |
 | `benchmark` | C | the reading's family, present only when it is not its test's |
 | `dims` | C | the reading's coordinates, over its test's |
-| `value` | C | the reading, in the test's `unit`: always a finite number. Present exactly when the reading succeeded; a measurement that came out NaN or infinite is an `error` reading instead |
+| `value` | C | the reading, in the test's `unit`: always a finite number. Present exactly when the reading succeeded; a measurement that came out NaN or infinite is an `error` reading instead. A reader takes a reading without one as not measured, whatever its `status` says: one it does not know, or none, reads as `error` |
 | `status` | C | `unsupported` \| `skipped` \| `error`. **Omitted for a successful reading** — every row of a healthy file is `ok`, so spelling it out on each would be noise |
 | `reason` | I | why, for a non-`ok` reading |
 | `description` | I | what this one reading means |
@@ -954,6 +955,22 @@ Per device: `index`, `name`, `type`, and whichever of `arch`, `driver`,
 `fp16`, `fp64` the backend could answer. The keys are those of
 `include/common/inventory.h`, which is the one serializer for both uses.
 
+**The listing's hardware.** `--list-devices` and the GUI's catalog link the
+devices they list as a run links its own (*Linking*): each backend's
+enumeration reports, for every device, the type, facts and identity its run
+gives that device's `beginDevice()`, so a listing names the processors and
+packages a run of the same backends, seeing the same devices, writes —
+`gpu0` in the listing is the GPU `--devices gpu0` runs. `--list-devices`
+prints the system, each package and processor (a CPU's clusters, a GPU's
+compute units) and under each processor the `backend:index` tokens of the
+devices that reach it. The catalog holds the same hardware beside `backends`,
+as `packages` and `processors` in the shapes of *Hardware*, and each of its
+devices names its `processor`. A listing's identity tokens are made under a
+key of the listing process's own and are never written; the catalog holds
+the linker's answer only. A run's `inventory` is the `backends` array as
+enumerated, so its devices name no `processor`: the run's own devices name
+theirs.
+
 ## Reading a run as hardware
 
 The document keeps the order the run produced it in: backend by backend,
@@ -1233,8 +1250,9 @@ Headlines are the measures worth a summary row or a leaderboard: a
 processor's peak floating-point and integer compute, its memory bandwidth.
 They are not in the run document. They are data of their own,
 `app/assets/measures.json` (`"schema": "xpupeak/measures"`), with a
-`catalog_version` of its own, read by the app and embedded in the CLI
-*(V10 embeds it)*. Each headline has an `id`, a `title` and the `quantity`
+`catalog_version` of its own, read by the app and embedded in the CLI when
+it is built, where `--summary` and `--compare` read it. Each headline has an
+`id`, a `title` and the `quantity`
 it selects, and may narrow that by the processor kinds it applies to
 (`processors`), the `families` it selects from, and `dims`: a list of
 identity-dim objects, defaults filled in, of which a selected key must equal

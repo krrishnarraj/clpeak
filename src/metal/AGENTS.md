@@ -48,6 +48,11 @@ family as its arch, its core count and unified memory as integrated.
 Apple's OpenCL answers registry ID 0 on Apple silicon and MoltenVK's UUID
 matches nothing, so those two join this GPU by the sole rule.
 
+The helper is called from `enumerate()` too, with what it already holds, so
+a listing's device has the type, facts and evidence a run's has
+(`InventoryDevice`, `include/common/inventory.h`) and `--list-devices`
+links it as a run would.
+
 ## Test documentation
 
 See `include/common/AGENTS.md` § Test documentation.  Metal specifics:

@@ -191,6 +191,8 @@ spec. All of it is authored where it is measured:
 **The facts** (`cpu_device_info_t::facts`, the device's `facts.cpu`, with
 `identity.host`): the OS's and CPUID's word only, built in `detectCpuInfo()`
 before `probeCacheSizes()` runs, so a measured size never reaches them.
+`enumerate()` gives its listed device the same (type cpu, `evidence.host`,
+`facts.cpu`), so `--list-devices` prints the clusters a run records.
 
 - A cluster is one kind of core. Linux and Windows draw them from every online
   CPU (`buildClusters()`): on Arm a kind is a MIDR plus the OS's capacity and

@@ -1,6 +1,7 @@
-# src/common/cmake — Version Handling
+# src/common/cmake — Version Handling and Embedded Data
 
-Git-describe version derivation and the generated `version.h.in` template.
+Git-describe version derivation and the generated `version.h.in` template;
+the headline catalog embedded in the build.
 
 ## Quick Lookups
 
@@ -14,6 +15,7 @@ Git-describe version derivation and the generated `version.h.in` template.
 |------|---------|
 | `version.cmake` | git-describe → `XPUPEAK_VERSION_STR` (`"unknown"` when git-describe cannot run) → `generated/version.h`; `xpupeak_setup_version(<target>)` puts that header on the target's include path |
 | `version.h.in` | Template for `generated/version.h` |
+| `embed_catalog.cmake` | `cmake -P` script: `app/assets/measures.json` → `measures_catalog.cpp` (a byte array, `HeadlineCatalog::bundled()`'s, `include/common/measures.h`).  Run by `src/common/CMakeLists.txt` as a build step that depends on the file, so a catalog edit rebuilds without a reconfigure -- unlike the version, the catalog is data the build should follow |
 
 ## Rules
 
