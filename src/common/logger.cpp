@@ -2,6 +2,7 @@
 #include <common/hardware_link.h>   // evidenceFrom
 #include <common/options.h>   // benchmarkFlag
 #include <common/run_checkpoint.h>
+#include <common/run_compare.h>  // the --compare baseline
 #include <common/run_log.h>
 #include <common/thermal.h>
 #include <common/screen_hold.h>
@@ -77,9 +78,32 @@ logger::logger(std::string compareFileName, bool mirrorToRunLog)
     // process is stamped with, and the channel that shows it.
     if (RunLog *run = RunLog::current()) run->attach(this);
     if (!compareEnabled) return;
-    RunDocument base;
-    if (loadRunJson(compareFileName, base))
-        baseline = buildBaselineMap(base);
+    baseline = xpupeak::loadCompareBaseline(compareFileName);
+}
+
+int logger::openDeviceOccurrence() const
+{
+    if (curDeviceIdx == kNoIndex || curDeviceIdx >= doc.devices.size()) return 0;
+    const DeviceResult &me = doc.devices[curDeviceIdx];
+    int n = 0;
+    for (std::size_t i = 0; i < curDeviceIdx; i++)
+        if (doc.devices[i].backend == me.backend && doc.devices[i].name == me.name) n++;
+    return n;
+}
+
+std::string logger::baselineNote(const LogEvent &e) const
+{
+    if (!baseline || !baseline->readings || e.kind != LogEvent::Kind::Metric ||
+        e.metric.status != ResultStatus::Ok)
+        return "";
+    UnitInfo unit;
+    unit.symbol   = e.metric.hasUnit ? e.metric.unit : e.unit;
+    unit.quantity = e.metric.hasUnit ? e.metric.quantity : e.quantity;
+    const Direction direction =
+        e.metric.direction == Direction::FromUnit ? e.direction : e.metric.direction;
+    return baseline->readings->note(e.backend, e.device, openDeviceOccurrence(), e.deviceIndex,
+                                    e.testKey(), e.testRevision, e.metric.id, e.metric.value,
+                                    direction, unit);
 }
 
 logger::~logger()
@@ -307,10 +331,6 @@ void logger::mirrorEvent(const LogEvent &e)
             unit.symbol   = e.unit;
             unit.quantity = e.quantity;
         }
-        Direction direction = (e.metric.direction == Direction::FromUnit)
-                                  ? e.direction
-                                  : e.metric.direction;
-
         std::ostringstream line;
         line << kReadingIndent << e.metric.displayLabel() << " : ";
         if (e.metric.status == ResultStatus::Ok)
@@ -321,34 +341,7 @@ void logger::mirrorEvent(const LogEvent &e)
                 line << " " << sv.unit;
 
             // Optional baseline delta, using the same scaling as the row.
-            if (compareEnabled)
-            {
-                const std::string key = baselineKey(e.backend, e.platform,
-                                                    e.deviceKey(), e.testKey(),
-                                                    e.metric.id);
-                auto it = baseline.find(key);
-                if (it != baseline.end())
-                {
-                    const double base  = it->second;
-                    const double delta = (base != 0.0)
-                                             ? 100.0 * (e.metric.value - base) / base
-                                             : 0.0;
-                    const char   sign     = (delta >= 0.0) ? '+' : '-';
-                    const double absDelta = (delta < 0.0) ? -delta : delta;
-                    const bool   improved = (direction == Direction::LowerIsBetter)
-                                                ? (delta < 0.0)
-                                                : (delta > 0.0);
-                    const ScaledValue svb = formatScaledValue(base, unit);
-                    line << "  (was " << svb.text;
-                    if (!svb.unit.empty())
-                        line << " " << svb.unit;
-                    line << ", " << sign << std::fixed
-                         << std::setprecision(1) << absDelta << "%";
-                    if (absDelta >= 0.05)
-                        line << (improved ? " better" : " worse");
-                    line << ")";
-                }
-            }
+            line << baselineNote(e);
         }
         else
         {

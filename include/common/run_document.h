@@ -10,6 +10,7 @@
 
 #include <common/benchmark_enums.h>
 #include <common/common.h>     // xpupeak::LogLevel
+#include <common/hardware_facts.h>  // HardwareFacts, DeviceEvidence, PackageInfo, ProcessorInfo
 #include <common/host_info.h>  // SystemInfo, RunConditions
 #include <common/inventory.h>
 #include <common/units.h>
@@ -195,6 +196,10 @@ struct MetricResult {
     bool        hasUnit  = false;
     std::string unit;                             // resolved display symbol
     Quantity    quantity = Quantity::Unknown;
+    // The quantity as a read file spells it, where this build does not know
+    // the word (`quantity` Unknown): a newer build's, kept so a measure key
+    // and a rewrite carry it as written.  Empty otherwise.
+    std::string quantityWord;
 
     // Direction override.  FromUnit means "inherit the test's".
     Direction   direction = Direction::FromUnit;
@@ -244,6 +249,7 @@ struct TestResult {
     // Resolved from the authored unit token exactly once, at beginTest().
     std::string unit;                             // display symbol: "FLOPS"
     Quantity    quantity = Quantity::Unknown;
+    std::string quantityWord;                     // as MetricResult::quantityWord
 
     // The family -- a Benchmark's flag name, "matrix-compute" -- that the
     // test measures: the one admit() had open when the test was opened.
@@ -291,9 +297,10 @@ struct TestResult {
 
 // ---- Device ---------------------------------------------------------------
 
-// One device's identity within a backend+platform: its name, plus the
-// enumeration index when the backend reports one.  Shared by the document's
-// own key and by the --compare baseline so the two never disagree.
+// One device's identity within a backend+platform, within one run: its
+// name, plus the enumeration index when the backend reports one.  Across two
+// runs a device is named by its name's occurrence instead, which a second
+// card does not shift (include/common/run_compare.h).
 std::string deviceKey(const std::string &name, int deviceIndex);
 
 
@@ -306,88 +313,8 @@ struct DeviceProp {
     std::string value;
 };
 
-// ---- Hardware facts ---------------------------------------------------------
-//
-// What an API -- or for a CPU, the OS and CPUID -- says about the hardware,
-// typed.  A device keeps its own API's (`facts`), and a processor the facts
-// merged from the most native backend that ran, written on the processor
-// itself; so a consumer with other rules can merge them again.  Vocabulary
-// fields hold their strings.  None identifies a unit: a PCI device id is a
-// model's, not a card's.
-
-struct CacheInfo {
-    std::string   level;           // CacheLevel: "l1d", "l2", "slc"
-    std::uint64_t sizeBytes = 0;   // one instance
-    unsigned      instances = 0;   // how many the processor, or the cluster, has
-    unsigned      lineBytes = 0;
-};
-
-struct CpuCluster {
-    std::string kind;              // ClusterKind; "" for a CPU of one kind of core
-    unsigned    cores = 0;
-    unsigned    threadsPerCore = 0;
-    unsigned    maxMhz = 0;
-    std::string microarch;         // as MIDR or CPUID decode it: "Firestorm", "Zen 2"
-    std::string midr;              // ARM: MIDR_EL1 of its cores, hex
-    std::vector<CacheInfo> caches; // the cluster's own
-};
-
-struct CpuEngine {
-    std::string kind;              // EngineKind: "matrix"
-    std::string name;              // "AMX", "SME"
-    std::string scope;             // EngineScope: one per "core" | per "cluster"
-    std::string reachedBy;         // EngineReach: "instructions" | "library"
-};
-
-struct CpuFacts {
-    std::string isa;               // "arm64", "x86_64"
-    unsigned    cores   = 0;
-    unsigned    threads = 0;
-    unsigned    sockets = 0;
-    std::vector<CpuCluster> clusters;
-    std::vector<CacheInfo>  caches;    // the ones the whole processor shares
-    // x86: CPUID's vendor string and family / model / stepping; -1 unknown.
-    std::string cpuidVendor;
-    int         cpuidFamily   = -1;
-    int         cpuidModel    = -1;
-    int         cpuidStepping = -1;
-    std::vector<CpuEngine>   engines;
-    std::vector<std::string> features; // normalised: "neon", "dotprod", "avx512_vnni"
-
-    bool empty() const;
-};
-
-struct HardwareFacts {
-    std::string   vendorId;        // the API's vendor id, lower-case hex: "10de", "10005"
-    std::string   deviceId;        // the PCI device id, lower-case hex: a model id
-    // The vendor's own string, as the API gives it: "NVIDIA Corporation".  A
-    // device's; a processor keeps its own in ProcessorInfo::vendorName.
-    std::string   vendorName;
-    std::string   arch;            // "sm_120", "gfx1201", "Apple7"
-    unsigned      computeUnits = 0;
-    std::string   computeUnit;     // what one is called: "SM", "CU", "Xe-core", "core"
-    unsigned      clockMhz = 0;
-    std::uint64_t memoryBytes = 0;
-    int           integrated = -1; // -1 unknown, 0 discrete, 1 integrated
-    CpuFacts      cpu;             // a CPU's
-
-    bool empty() const;
-};
-
-// What links a device to its processor, as the document keeps it: tokens for
-// the strong identifiers its API gave -- HMACs under a key made per run and
-// never written to the result, so two devices in one file can be seen to
-// share an identifier while nothing correlates across files -- and the
-// weaker evidence, which identifies nothing.  The raw identifiers never
-// leave the process (logger::DeviceSpec::Identity).
-struct DeviceEvidence {
-    std::map<std::string, std::string> tokens;   // "uuid" | "luid" | "pci_bus" | "registry"
-    bool        host = false;      // executes on the host CPU
-    std::string soc;               // ProcessorKind: the SoC's "npu" or "gpu"
-    bool        defaultGpu = false;// the platform's default GPU
-
-    bool empty() const { return tokens.empty() && !host && soc.empty() && !defaultGpu; }
-};
+// The facts and evidence a device keeps (`facts`, `evidence`) are
+// include/common/hardware_facts.h.
 
 // An ML runtime's view of where it ran.
 struct RuntimeInfo {
@@ -599,28 +526,8 @@ struct RunMeta {
 
 // ---- Hardware ---------------------------------------------------------------
 //
-// The run's hardware, which the devices are views of: packages (an SoC, a CPU
-// package, a discrete card) and the processors in them, with run-local ids
-// that are deterministic for one machine -- `cpu0`, `gpu0`, `npu0`.
-
-struct PackageInfo {
-    std::string id;               // "pkg0"
-    std::string kind;             // PackageKind: "soc" | "cpu" | "discrete"
-    std::string vendor;           // Vendor, when known
-    std::string name;             // "Apple M1 Pro", "NVIDIA GeForce RTX 5060"
-    std::string ext;
-};
-
-struct ProcessorInfo {
-    std::string   id;             // "cpu0", "gpu0", "npu0"
-    std::string   kind;           // ProcessorKind
-    std::string   package;        // PackageInfo::id
-    std::string   vendor;         // Vendor, when known
-    std::string   vendorName;     // the vendor's own string: "NVIDIA Corporation"
-    std::string   name;
-    HardwareFacts facts;          // merged; written on the processor itself
-    std::string   ext;
-};
+// The run's packages and processors (PackageInfo, ProcessorInfo) are
+// include/common/hardware_facts.h.
 
 struct RunDocument {
     RunMeta                    meta;
@@ -651,21 +558,6 @@ struct RunDocument {
     void append(const RunDocument &other);
 };
 
-// ---- Baselines ------------------------------------------------------------
-
-// `--compare` lookup.  Keyed on
-//   backend/platform/device/test.key()/metric.id
-// -- driver and category are deliberately absent, so a baseline survives a
-// driver update and a test being re-filed under another category.
-typedef std::map<std::string, double> BaselineMap;
-
-std::string baselineKey(const std::string &backend, const std::string &platform,
-                        const std::string &device, const std::string &testKey,
-                        const std::string &metricId);
-
-// Only Ok readings participate; there is nothing to compare a skip against.
-BaselineMap buildBaselineMap(const RunDocument &doc);
-
 // ---- Helpers --------------------------------------------------------------
 
 // Current UTC time as ISO-8601 ("2026-08-29T14:03:11Z").  Both hosts (CLI and
@@ -691,6 +583,14 @@ std::string extFromJson(const std::string &json);
 // Dims as the compact JSON object the document writes ("{}" for none): what
 // the GUI event stream carries (src/ffi/logger_ffi.cpp).
 std::string dimsToJson(const Dims &dims);
+
+// The `packages` and `processors` arrays as a result writes them, as keys of
+// the object open in `w`, each left out when empty: the device catalog
+// (inventory.cpp) holds its listing's hardware in the same shape, so one
+// reader parses both.
+class JsonWriter;
+void writeHardwareJson(JsonWriter &w, const std::vector<PackageInfo> &packages,
+                       const std::vector<ProcessorInfo> &processors);
 
 // One log entry as a single-line JSON object -- the form the document's
 // `log` array holds one per line, the run-log sidecar holds one per line, and

@@ -138,6 +138,20 @@ std::string numberText(double n)
     return ss.str();
 }
 
+// A quantity as a file spells it: the word this build knows, else the one
+// a read file had (TestResult::quantityWord), else "unknown".
+std::string quantityText(Quantity q, const std::string &word)
+{
+    return q == Quantity::Unknown && !word.empty() ? word : std::string(quantityString(q));
+}
+
+// What a reader keeps of a quantity word it did not resolve: the word, when
+// it is one this build does not know.
+std::string unknownQuantityWord(Quantity q, const std::string &word)
+{
+    return q == Quantity::Unknown && word != quantityString(Quantity::Unknown) ? word : "";
+}
+
 // A producer's value of the wrong kind for its key: a data type for
 // `level`, a word of another key's list.  Debug builds stop there, since
 // every such pairing is a slip at a call site that no reader could repair.
@@ -357,27 +371,6 @@ std::string deviceKey(const std::string &name, int deviceIndex)
 {
     if (deviceIndex < 0) return name;
     return name + "#" + std::to_string(deviceIndex);
-}
-
-std::string baselineKey(const std::string &backend, const std::string &platform,
-                        const std::string &device, const std::string &testKey,
-                        const std::string &metricId)
-{
-    return backend + "/" + platform + "/" + device + "/" + testKey + "/" +
-           metricId;
-}
-
-BaselineMap buildBaselineMap(const RunDocument &doc)
-{
-    BaselineMap m;
-    for (const DeviceResult &d : doc.devices)
-        for (const TestResult &t : d.tests)
-            for (const MetricResult &r : t.metrics)
-                if (r.status == ResultStatus::Ok)
-                    m[baselineKey(d.backend, d.platform,
-                                  deviceKey(d.name, d.deviceIndex),
-                                  t.key(), r.id)] = r.value;
-    return m;
 }
 
 // ── Time ───────────────────────────────────────────────────────────────────
@@ -723,7 +716,7 @@ void writeMetric(JsonWriter &w, const MetricResult &m, const Dims &dims)
     if (m.hasUnit)
     {
         w.str("unit", m.unit);
-        w.str("quantity", quantityString(m.quantity));
+        w.str("quantity", quantityText(m.quantity, m.quantityWord));
     }
     if (m.direction != Direction::FromUnit)
         w.str("direction", directionString(m.direction));
@@ -748,7 +741,7 @@ void writeTest(JsonWriter &w, const TestResult &t, bool shared)
     w.str("shape", shapeString(t.shape));
     w.strIf("axis", t.axis);
     w.str("direction", directionString(t.direction));
-    w.str("quantity", quantityString(t.quantity));
+    w.str("quantity", quantityText(t.quantity, t.quantityWord));
     w.str("unit", t.unit);
     w.strIf("description", t.description);
     if (t.durationS > 0.0) w.num("duration_s", t.durationS);
@@ -1117,6 +1110,13 @@ void writeDocument(const RunDocument &doc, std::ostream &out,
 
 } // namespace
 
+void writeHardwareJson(JsonWriter &w, const std::vector<PackageInfo> &packages,
+                       const std::vector<ProcessorInfo> &processors)
+{
+    writePackages(w, packages);
+    writeProcessors(w, processors);
+}
+
 std::string dimsToJson(const Dims &dims)
 {
     std::ostringstream ss;
@@ -1428,13 +1428,20 @@ MetricResult readMetric(const JsonValue &v)
     }
     else
     {
-        m.status = statusFromString(v.str("status", "ok"));
+        // No value is no measurement, whatever the status says: a status
+        // this build does not know -- a newer one's -- or none at all is an
+        // error here, as every reader takes it (docs/format-v4.md, Metric),
+        // never an ok reading of 0.
+        const std::string status = v.str("status");
+        m.status = status == "ok" ? ResultStatus::Ok : statusFromString(status);
+        if (m.status == ResultStatus::Ok && status != "ok") m.status = ResultStatus::Error;
     }
     if (v.has("unit"))
     {
-        m.hasUnit  = true;
-        m.unit     = v.str("unit");
-        m.quantity = quantityFromString(v.str("quantity"));
+        m.hasUnit      = true;
+        m.unit         = v.str("unit");
+        m.quantity     = quantityFromString(v.str("quantity"));
+        m.quantityWord = unknownQuantityWord(m.quantity, v.str("quantity"));
     }
     if (v.has("direction"))
         m.direction = directionFromString(v.str("direction"));
@@ -1456,6 +1463,7 @@ TestResult readTest(const JsonValue &v)
     t.shape       = shapeFromString(v.str("shape"));
     t.direction   = directionFromString(v.str("direction"));
     t.quantity    = quantityFromString(v.str("quantity"));
+    t.quantityWord = unknownQuantityWord(t.quantity, v.str("quantity"));
     t.unit        = v.str("unit");
     t.durationS   = v.num("duration_s");
     t.benchmark   = v.str("benchmark");

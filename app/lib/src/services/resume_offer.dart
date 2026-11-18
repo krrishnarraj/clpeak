@@ -222,12 +222,22 @@ class ResumeOffer {
           ].join('|'),
       ].join('\n');
 
-  /// How many devices a run's command line selects: its `--devices` list,
-  /// or every device of the catalog when it names none.
+  /// How many devices a run's command line selects: its `--devices` list --
+  /// a processor id (`gpu0`) standing for every device the catalog lists on
+  /// it -- or every device of the catalog when it names none.
   static int plannedDevices(List<String> argv, BackendCatalog catalog) {
     final at = argv.indexOf('--devices');
     if (at >= 0 && at + 1 < argv.length) {
-      return argv[at + 1].split(',').where((s) => s.isNotEmpty).length;
+      final tokens = <String>{};
+      for (final item in argv[at + 1].split(',')) {
+        if (item.isEmpty) continue;
+        if (item.contains(':')) {
+          tokens.add(item);
+        } else {
+          tokens.addAll([for (final e in catalog.devicesOf(item)) e.token]);
+        }
+      }
+      return tokens.length;
     }
     return catalog.usable.fold(0, (n, b) => n + b.deviceCount);
   }

@@ -1,5 +1,7 @@
 #include <common/options.h>
 #include <common/benchmark_enums.h>
+#include <common/hardware_link.h>  // parseProcessorId
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -329,7 +331,9 @@ static std::string helpText()
                            "with -o, record them in the file's log, with the device\n"
                            "inventory, so the file alone can be debugged");
   helpLine(s, "--describe", "explain what each test and each reading measures");
-  helpLine(s, "--list-devices", "list available devices for every backend and exit");
+  helpLine(s, "--list-devices", "list the hardware -- the system, its packages and\n"
+                                "processors, and the devices that reach each -- and\n"
+                                "every backend's devices, then exit");
   helpLine(s, "-o, --output file", "save results to a JSON file");
   helpLine(s, "--resume file", "continue a run that was saved to this file and ended\n"
                                "part-way or was cancelled: only what it had not\n"
@@ -338,7 +342,20 @@ static std::string helpText()
                                ".partial.json for .json, names the run too");
   helpLine(s, "--skip-crashed", "with --resume, for a run that crashed: record the test\n"
                                 "it died in instead of running it again");
-  helpLine(s, "--compare file", "compare results against a saved run");
+  helpLine(s, "--compare file", "compare this run with a saved one: beside each row, its\n"
+                                "reading there on the same device (backend, name, and\n"
+                                "which of that name); then the processors paired by kind\n"
+                                "and model, their headlines and, for two different parts,\n"
+                                "every measure both have.  Two revisions of one test say\n"
+                                "\"method changed\"");
+  helpLine(s, "--summary", "after the run, each processor's headlines: its peak\n"
+                           "floating-point and integer compute and memory bandwidth,\n"
+                           "the best reading over every backend, as the app's\n"
+                           "Summary shows them");
+  helpLine(s, "--annotate key=value", "a fact only you know, saved in the file's annotations\n"
+                                      "(repeatable): system.name, cooling, power_limit,\n"
+                                      "overclock, memory, gpu_board, notes, or a key of\n"
+                                      "your own");
   helpLine(s, "--onnx-lib path", "the ONNX Runtime library to load; decides which\n"
                                  "providers exist before anything below adds more\n"
                                  "(default: the platform's conventional names)");
@@ -371,8 +388,9 @@ static std::string helpText()
   s += "\n";
   s += " DEVICES (default: every device of every backend that runs):\n";
   helpLine(s, "--devices list", "run only these devices: comma-separated backend:index\n"
-                                "items, exactly as --list-devices prints them\n"
-                                "(e.g. --devices cuda:0,vulkan:1)");
+                                "items, or processor ids for every device on that\n"
+                                "processor, exactly as --list-devices prints them\n"
+                                "(e.g. --devices cuda:0,vulkan:1 or --devices gpu0)");
   s += "\n";
   s += " CATEGORIES (--<category> / --no-<category>; default: all):\n";
   for (int i = 0; i < numCategoryFlags; i++)
@@ -430,6 +448,18 @@ static bool parseIntArg(const char *arg, int &value)
   return true;
 }
 
+static void trimInPlace(std::string &s)
+{
+  const char *ws = " \t\r\n";
+  const size_t b = s.find_first_not_of(ws);
+  if (b == std::string::npos)
+  {
+    s.clear();
+    return;
+  }
+  s = s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
+
 static const BackendRow *findBackendFlag(const std::string &flag)
 {
   for (int i = 0; i < numBackends; i++)
@@ -438,14 +468,19 @@ static const BackendRow *findBackendFlag(const std::string &flag)
   return nullptr;
 }
 
-// Parse the --devices list: comma-separated `backend:index` items, the
-// tokens --list-devices prints.  Empty items ("cuda:0,,cuda:2"), unknown
-// backends and negative indices fail; `why` names the offending item.
+// Parse the --devices list: comma-separated `backend:index` items and
+// processor ids, the tokens --list-devices prints.  Empty items
+// ("cuda:0,,cuda:2"), unknown backends, negative indices and words that are
+// neither fail; `why` names the offending item.  A processor id is kept as
+// written, for the host to resolve against a listing (CliOptions::
+// deviceProcessors).
 static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
+                            std::vector<std::string> &processors,
                             std::bitset<static_cast<size_t>(Backend::COUNT)> &requested,
                             std::string &why)
 {
   std::vector<DeviceSelector> parsed;
+  std::vector<std::string> parsedProcessors;
   std::stringstream ss(arg);
   std::string tok;
   while (std::getline(ss, tok, ','))
@@ -454,7 +489,15 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
     const size_t colon = tok.find(':');
     if (colon == std::string::npos)
     {
-      why = "'" + tok + "': expected backend:index, as --list-devices prints it";
+      xpupeak::ProcessorKind kind;
+      unsigned ordinal = 0;
+      if (xpupeak::parseProcessorId(tok, kind, ordinal))
+      {
+        parsedProcessors.push_back(tok);
+        continue;
+      }
+      why = "'" + tok + "': expected backend:index or a processor id (cpu0, gpu0, npu0), "
+            "as --list-devices prints them";
       return false;
     }
     const std::string backendPart = tok.substr(0, colon);
@@ -474,12 +517,15 @@ static bool parseDeviceList(const char *arg, std::vector<DeviceSelector> &out,
     }
     parsed.push_back(sel);
   }
-  if (parsed.empty()) // arg was empty string
+  if (parsed.empty() && parsedProcessors.empty()) // arg was empty string
   {
     why = "empty list";
     return false;
   }
   out.insert(out.end(), parsed.begin(), parsed.end());
+  for (const std::string &p : parsedProcessors)
+    if (std::find(processors.begin(), processors.end(), p) == processors.end())
+      processors.push_back(p);
   return true;
 }
 
@@ -658,7 +704,7 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       // lacks gets reported (CliOptions::requestedButNotBuilt) rather than
       // silently running nothing.
       std::string why;
-      if (!parseDeviceList(v, out.devices, out.requestedBackends, why))
+      if (!parseDeviceList(v, out.devices, out.deviceProcessors, out.requestedBackends, why))
       {
         err = std::string(programName()) + ": invalid --devices " + why + "\n";
         return ParseResult::Error;
@@ -682,6 +728,32 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!v)
         return missingArg(err, a);
       out.compareFile = v;
+      continue;
+    }
+    if (!strcmp(a, "--summary"))
+    {
+      out.summary = true;
+      continue;
+    }
+    if (!strcmp(a, "--annotate"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      // key=value; the key ends at the first '=', so a value may hold more.
+      const char *eq = strchr(v, '=');
+      std::string key = eq ? std::string(v, eq - v) : std::string();
+      std::string value = eq ? std::string(eq + 1) : std::string();
+      trimInPlace(key);
+      trimInPlace(value);
+      if (key.empty() || value.empty())
+      {
+        err = std::string(programName()) +
+              ": --annotate expects key=value, a key and what to say under it "
+              "(system.name=..., cooling=..., notes=...); got '" + v + "'\n";
+        return ParseResult::Error;
+      }
+      out.annotations[key] = value;
       continue;
     }
     if (!strcmp(a, "--onnx-lib"))
@@ -798,8 +870,10 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
   }
 
   // `--devices cuda:0 --vulkan` selects nothing: every device named is on a
-  // backend the backend flags switched off.  Contradictory, so say so.
-  if (!out.devices.empty())
+  // backend the backend flags switched off.  Contradictory, so say so.  A
+  // processor's devices are not known until it is resolved, which says the
+  // same of one that has none on a backend that runs.
+  if (!out.devices.empty() && out.deviceProcessors.empty())
   {
     bool any = false;
     for (const DeviceSelector &sel : out.devices)

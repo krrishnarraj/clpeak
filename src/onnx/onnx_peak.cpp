@@ -775,6 +775,15 @@ BackendInventory OnnxPeak::enumerate()
       const std::string origin = onnxPluginOrigin(eps[i]);
       dev.origin = origin.empty() ? "EP plugin" : "EP plugin (" + origin + ")";
     }
+    // Who it is, as a run's beginDevice() says it (onnxIdentify), so a
+    // listing links like a run.
+    dev.type = eps[i].deviceType;
+    {
+      logger::Identity identity;
+      RuntimeInfo runtime;
+      onnxIdentify(*rt, eps[i], identity, dev.facts, runtime);
+      dev.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(dev));
   }
 

@@ -1,5 +1,9 @@
 #include <common/logger_text.h>
+#include <common/measures.h>
+#include <common/run_compare.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <iomanip>
 #include <sstream>
 
@@ -201,8 +205,9 @@ void LoggerText::renderMetric(const LogEvent &e)
     ml.status      = e.metric.status;
     ml.reason      = e.metric.reason;
     ml.description = e.metric.description;
-    ml.baselineKey = baselineKey(e.backend, e.platform, e.deviceKey(),
-                                 e.testKey(), e.metric.id);
+    // Taken now, while the reading's device is the open one.
+    if (compareEnabled)
+        ml.baselineNote = baselineNote(e);
     // The unit context this row prints in: the reading's own when it
     // overrides its test's (an int8 row in ops inside a GEMM test in flops),
     // else the test's.  Resolved here so the print path does no unit-table
@@ -373,9 +378,7 @@ void LoggerText::flushMetrics()
                 out << " " << sv.unit;
 
             // Baseline delta on the same line (if enabled)
-            if (compareEnabled)
-                printBaselineDelta(ml.baselineKey, ml.value, ml.direction,
-                                   ml.unit);
+            out << ml.baselineNote;
 
             out << "\n";
         }
@@ -446,36 +449,457 @@ void LoggerText::writeWrapped(int column, const std::string &text)
         out << pad << line << "\n";
 }
 
-void LoggerText::printBaselineDelta(const std::string &key, double value,
-                                    Direction direction, const UnitInfo &unit)
+
+// ── Text reports of a whole run ─────────────────────────────────────────────
+//
+// The app's Summary and compare, as text: the numbers, sides and words are
+// the measure engine's and the compare model's (include/common/measures.h,
+// run_compare.h), and what is laid around them here is the CLI's own.
+
+namespace {
+
+std::string trimmedText(const std::string &s)
 {
-    auto it = baseline.find(key);
-    if (it == baseline.end())
-        return;
+    const char *ws = " \t\r\n";
+    const size_t b = s.find_first_not_of(ws);
+    if (b == std::string::npos) return "";
+    return s.substr(b, s.find_last_not_of(ws) - b + 1);
+}
 
-    const double base  = it->second;
-    const double delta = (base != 0.0) ? 100.0 * (value - base) / base : 0.0;
+std::string joinedWith(const std::vector<std::string> &parts, const char *sep)
+{
+    std::string out;
+    for (size_t i = 0; i < parts.size(); i++)
+    {
+        if (i) out += sep;
+        out += parts[i];
+    }
+    return out;
+}
 
-    const char   sign     = (delta >= 0.0) ? '+' : '-';
-    const double absDelta = (delta < 0.0)  ? -delta : delta;
+std::string padTo(const std::string &s, size_t width)
+{
+    return s.size() >= width ? s : s + std::string(width - s.size(), ' ');
+}
 
-    // Which way a reading moved is not which way is better: on a latency or
-    // numeric-error row, +3% is a regression.  A bare signed percentage has
-    // always read as good news, so say which it is.
-    const bool improved = (direction == Direction::LowerIsBetter) ? (delta < 0.0)
-                                                                  : (delta > 0.0);
+std::string scaled(double value, const UnitInfo &unit)
+{
+    const ScaledValue sv = formatScaledValue(value, unit);
+    return sv.unit.empty() ? sv.text : sv.text + " " + sv.unit;
+}
 
-    // The baseline prints through the row's own scaling: "was 4476" beside a
-    // row that says 4.48 TFLOPS reads as a collapse that did not happen.
-    const ScaledValue sv = formatScaledValue(base, unit);
-    out << "  (was " << sv.text;
-    if (!sv.unit.empty())
-        out << " " << sv.unit;
-    out << ", " << sign << std::fixed
-        << std::setprecision(1) << absDelta << "%";
-    // Below this the figure prints as 0.0%, and calling run-to-run noise
-    // "better" or "worse" would be inventing a result.
-    if (absDelta >= 0.05)
-        out << (improved ? " better" : " worse");
-    out << ")";
+// The system as a person would name it, as the app's RunMeta.systemName: the
+// `system.name` annotation, else the OS's marketing name, else the model id,
+// the board or the SoC.
+std::string systemName(const RunMeta &m)
+{
+    const auto it = m.annotations.find("system.name");
+    if (it != m.annotations.end() && !trimmedText(it->second).empty())
+        return trimmedText(it->second);
+    for (const std::string *s : {&m.system.name, &m.system.model, &m.system.board, &m.system.soc})
+        if (!trimmedText(*s).empty()) return trimmedText(*s);
+    return "";
+}
+
+const PackageInfo *packageNamed(const RunDocument &run, const std::string &id)
+{
+    for (const PackageInfo &p : run.packages)
+        if (trimmedText(p.id) == trimmedText(id)) return &p;
+    return nullptr;
+}
+
+std::string gigahertz(unsigned mhz)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.1f GHz", mhz / 1000.0);
+    return buf;
+}
+
+std::string memoryText(std::uint64_t bytes)
+{
+    char buf[32];
+    const double gb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+    if (gb >= 1.0)
+        std::snprintf(buf, sizeof(buf), "%.1f GB", gb);
+    else
+        std::snprintf(buf, sizeof(buf), "%.0f MB", gb * 1024.0);
+    return buf;
+}
+
+// One processor's facts in a line, as the app's processorFacts() lists them.
+std::string processorFacts(const xpupeak::ProcessorMeasures &g, const RunDocument &run)
+{
+    const ProcessorInfo *p = g.processor;
+    const DeviceResult *dev = g.devices.empty() ? nullptr : g.devices.front();
+    const HardwareFacts none;
+    const HardwareFacts &f = p ? p->facts : (dev ? dev->facts : none);
+    std::vector<std::string> parts;
+    if (g.kind() == "cpu")
+    {
+        const CpuFacts &c = f.cpu;
+        if (c.cores) parts.push_back(std::to_string(c.cores) + " cores");
+        if (c.threads && c.threads != c.cores) parts.push_back(std::to_string(c.threads) + " threads");
+        std::vector<std::string> kinds;
+        unsigned maxMhz = 0;
+        for (const CpuCluster &k : c.clusters)
+        {
+            maxMhz = std::max(maxMhz, k.maxMhz);
+            if (!k.cores || k.kind.empty()) continue;
+            const std::string tag = k.kind == "prime" ? "X" : k.kind == "performance" ? "P"
+                                  : k.kind == "efficiency" ? "E" : k.kind == "low_power" ? "LP"
+                                                                                    : " " + k.kind;
+            kinds.push_back(std::to_string(k.cores) + tag);
+        }
+        if (kinds.size() > 1) parts.push_back(joinedWith(kinds, " + "));
+        if (maxMhz) parts.push_back(gigahertz(maxMhz));
+        if (c.sockets > 1) parts.push_back(std::to_string(c.sockets) + " sockets");
+        if (!c.isa.empty()) parts.push_back(c.isa);
+        for (const CpuEngine &e : c.engines)
+            if (!e.name.empty()) parts.push_back(e.name);
+    }
+    else
+    {
+        if (f.computeUnits)
+        {
+            const std::string unit = f.computeUnit.empty() ? "unit" : f.computeUnit;
+            parts.push_back(std::to_string(f.computeUnits) + " " + unit + (f.computeUnits == 1 ? "" : "s"));
+        }
+        if (!f.arch.empty()) parts.push_back(f.arch);
+        if (f.clockMhz) parts.push_back(gigahertz(f.clockMhz));
+        if (f.integrated == 1)
+            parts.push_back("integrated");
+        else if (f.memoryBytes)
+            parts.push_back(memoryText(f.memoryBytes));
+    }
+    if (!p && parts.empty() && dev)
+    {
+        if (!dev->platform.empty() && dev->platform != dev->backend) parts.push_back(dev->platform);
+        if (!dev->driver.empty()) parts.push_back(dev->driver);
+    }
+    if (p)
+        if (const PackageInfo *pkg = packageNamed(run, p->package))
+            if (!trimmedText(pkg->name).empty() && trimmedText(pkg->name) != trimmedText(p->name))
+                parts.push_back("in " + trimmedText(pkg->name));
+    return joinedWith(parts, ", ");
+}
+
+// A device by its backend, and by its backend's name for it where that
+// backend reached the processor more than once, as the app labels it.
+std::string deviceLabel(const DeviceResult &d, const std::vector<const DeviceResult *> &all)
+{
+    const auto same = std::count_if(all.begin(), all.end(), [&](const DeviceResult *r) {
+        return r->backend == d.backend;
+    });
+    return same > 1 ? d.backend + " " + d.name + " #" + std::to_string(d.deviceIndex) : d.backend;
+}
+
+// A headline's reading in a person's words: its data type and qualifiers,
+// or its test's title where it names neither (the app's _words()).
+std::string readingWords(const xpupeak::MeasuredReading &r)
+{
+    const std::vector<std::string> words = xpupeak::describeReading(r);
+    return words.empty() ? r.test->title : joinedWith(words, ", ");
+}
+
+std::string factorText(double factor)
+{
+    char buf[32];
+    // Near 1, a third digit: 1.002x is not 1.00x.
+    if (factor < 1.1)
+        std::snprintf(buf, sizeof(buf), "%.3fx", factor);
+    else if (factor < 10.0)
+        std::snprintf(buf, sizeof(buf), "%.2fx", factor);
+    else if (factor < 100.0)
+        std::snprintf(buf, sizeof(buf), "%.1fx", factor);
+    else
+        std::snprintf(buf, sizeof(buf), "%.0fx", factor);
+    return buf;
+}
+
+// A verdict from this run's side: "1.19x better", "2.14x worse", "the same",
+// "method changed"; "better" alone where a value is not above zero.
+std::string verdictText(const xpupeak::Verdict &v)
+{
+    if (v.methodChanged) return "method changed";
+    if (v.isTie()) return "the same";
+    const std::string word = v.winner == xpupeak::CompareSide::A ? "better" : "worse";
+    return v.hasFactor ? factorText(v.factor) + " " + word : word;
+}
+
+std::string valueWithBackend(const xpupeak::CompareValue &v)
+{
+    return scaled(v.value(), v.units()) + " " + v.backend();
+}
+
+std::string groupTitle(const xpupeak::ProcessorMeasures &g)
+{
+    const std::string id = g.linked() ? g.id : (g.devices.empty() ? g.id : g.devices.front()->backend);
+    const std::string name = g.name().empty() ? "(unnamed)" : g.name();
+    return id + "  " + name;
+}
+
+std::string categoryWord(Category c)
+{
+    return c == Category::Unknown ? "other" : categoryString(c);
+}
+
+// One measure row: the family, then what its reading measured.
+std::string keyLabel(const xpupeak::MeasureKey &key, const std::vector<std::string> &words)
+{
+    return words.empty() ? key.family : key.family + "  " + joinedWith(words, ", ");
+}
+
+void printKeyRows(const std::vector<xpupeak::KeyCompare> &rows, std::ostream &out)
+{
+    size_t labelWidth = 0, aWidth = 0, bWidth = 0;
+    std::vector<std::string> labels, as, bs;
+    for (const xpupeak::KeyCompare &k : rows)
+    {
+        labels.push_back(keyLabel(k.key, k.label()));
+        as.push_back(valueWithBackend(k.a.best));
+        bs.push_back(valueWithBackend(k.b.best));
+        labelWidth = std::max(labelWidth, labels.back().size());
+        aWidth     = std::max(aWidth, as.back().size());
+        bWidth     = std::max(bWidth, bs.back().size());
+    }
+    labelWidth = std::min<size_t>(labelWidth, 56);
+    Category last = Category::Unknown;
+    for (size_t i = 0; i < rows.size(); i++)
+    {
+        if (i == 0 || rows[i].category != last)
+            out << "    " << categoryWord(rows[i].category) << "\n";
+        last = rows[i].category;
+        out << "      " << padTo(labels[i], labelWidth) << "  " << padTo(as[i], aWidth) << "  vs  "
+            << padTo(bs[i], bWidth) << "  " << verdictText(rows[i].verdict) << "\n";
+    }
+}
+
+void printOneSided(const char *heading, const std::vector<xpupeak::MeasureRow> &rows,
+                   std::ostream &out)
+{
+    out << "   " << heading << ":\n";
+    Category last = Category::Unknown;
+    for (size_t i = 0; i < rows.size(); i++)
+    {
+        if (i == 0 || rows[i].category != last)
+            out << "    " << categoryWord(rows[i].category) << "\n";
+        last = rows[i].category;
+        out << "      " << keyLabel(rows[i].key, rows[i].label()) << "  "
+            << valueWithBackend(rows[i].best) << "\n";
+    }
+}
+
+} // namespace
+
+void printRunSummary(const RunDocument &run, const xpupeak::HeadlineCatalog &catalog,
+                     std::ostream &out)
+{
+    const xpupeak::RunMeasures measures = xpupeak::RunMeasures::of(run);
+    out << "\nSummary: each processor's headlines, the best reading of each over every\n"
+           "backend that reached it\n";
+    if (run.processors.empty())
+        out << "This file does not link its devices to processors, so each backend's view of\n"
+               "one is listed on its own.\n";
+
+    // Columns as wide as their widest entry over the whole summary, so every
+    // processor's numbers line up.
+    size_t titleWidth = 0, valueWidth = 1, wordsWidth = 0;
+    for (const xpupeak::Headline &h : catalog.headlines)
+        titleWidth = std::max(titleWidth, h.title.size());
+    for (const xpupeak::ProcessorMeasures &g : measures.groups)
+        for (const xpupeak::Headline &h : catalog.headlines)
+        {
+            xpupeak::HeadlineValue v;
+            if (!g.headline(h, v)) continue;
+            valueWidth = std::max(valueWidth, scaled(v.best.value(), v.best.units()).size());
+            wordsWidth = std::max(wordsWidth, readingWords(v.best).size());
+        }
+    wordsWidth = std::min<size_t>(wordsWidth, 48);
+
+    for (const xpupeak::ProcessorMeasures &g : measures.groups)
+    {
+        out << "\n  " << groupTitle(g);
+        const std::string kind = g.kind();
+        out << "  [" << (kind.empty() ? "device" : kind) << "]";
+        const std::string facts = processorFacts(g, run);
+        if (!facts.empty()) out << "  " << facts;
+        out << "\n";
+
+        bool any = false;
+        for (const xpupeak::Headline &h : catalog.headlines)
+        {
+            if (!h.appliesTo(kind)) continue;
+            any = true;
+            out << "    " << padTo(h.title, titleWidth) << "  ";
+            xpupeak::HeadlineValue v;
+            if (!g.headline(h, v))
+            {
+                out << padTo("-", valueWidth) << "  not measured on this device\n";
+                continue;
+            }
+            out << padTo(scaled(v.best.value(), v.best.units()), valueWidth) << "  "
+                << padTo(readingWords(v.best), wordsWidth) << "  " << v.best.backend();
+            if (v.byBackend.size() > 1)
+                out << ", best of " << v.byBackend.size() << " backends";
+            out << "\n";
+        }
+        if (!any)
+            out << "    No headline applies to this kind of device.\n";
+        if (!g.devices.empty())
+        {
+            std::vector<std::string> through;
+            for (const DeviceResult *d : g.devices) through.push_back(deviceLabel(*d, g.devices));
+            out << "    measured through " << joinedWith(through, ", ") << "\n";
+        }
+    }
+    out << "\n";
+}
+
+void printRunCompare(const RunDocument &run, const xpupeak::CompareBaseline &baseline,
+                     const xpupeak::HeadlineCatalog &catalog, bool verbose, std::ostream &out)
+{
+    const xpupeak::CompareRun a(run);
+    const xpupeak::CompareRun b(baseline.document);
+    const xpupeak::RunCompare c = xpupeak::RunCompare::of(a, b, catalog);
+
+    const RunMeta &bm = baseline.document.meta;
+    out << "\nCompared with " << baseline.file << "\n";
+    out << "  this run: " << (systemName(run.meta).empty() ? "(unnamed system)" : systemName(run.meta))
+        << "\n";
+    out << "  baseline: " << (systemName(bm).empty() ? "(unnamed system)" : systemName(bm));
+    std::vector<std::string> when;
+    if (bm.generatedAt.size() >= 10) when.push_back(bm.generatedAt.substr(0, 10));
+    if (!bm.generator.version.empty()) when.push_back(bm.generator.name + " " + bm.generator.version);
+    if (!when.empty()) out << " (" << joinedWith(when, ", ") << ")";
+    out << "\n";
+
+    // Which processors it paired, and how: the first thing a compare of two
+    // machines has to say.
+    out << "\n Processors, paired by kind, then by model:\n";
+    size_t width = 0;
+    for (const xpupeak::PairCompare &p : c.pairs) width = std::max(width, groupTitle(*p.a).size());
+    for (const xpupeak::ProcessorMeasures *g : c.unpairedA) width = std::max(width, groupTitle(*g).size());
+    for (const xpupeak::PairCompare &p : c.pairs)
+        out << "  " << padTo(groupTitle(*p.a), width) << "  with  " << groupTitle(*p.b) << "  ("
+            << (p.pairedBy == xpupeak::PairedBy::Model ? "one model"
+                                                       : "two models, paired by kind")
+            << ")\n";
+    for (const xpupeak::ProcessorMeasures *g : c.unpairedA)
+        out << "  " << padTo(groupTitle(*g), width) << "  unpaired: the baseline has no other "
+            << (g->kind().empty() ? "device" : g->kind()) << "\n";
+    for (const xpupeak::ProcessorMeasures *g : c.unpairedB)
+        out << "  " << padTo("", width) << "  unpaired in the baseline: " << groupTitle(*g) << "\n";
+
+    for (const xpupeak::PairCompare &p : c.pairs)
+    {
+        out << "\n " << groupTitle(*p.a) << "  against the baseline's  " << groupTitle(*p.b) << "\n";
+        // A processor one side measured nothing on -- the host CPU of a run
+        // that did not reach it -- has nothing to set beside the other's.
+        if (p.a->byKey.empty() || p.b->byKey.empty())
+        {
+            out << "   Nothing measured on it " << (p.a->byKey.empty() ? "in this run" : "in the baseline")
+                << (p.a->byKey.empty() && p.b->byKey.empty() ? " or the baseline" : "") << ".\n";
+            continue;
+        }
+
+        // Headlines: each side's value, which may be readings of two keys.
+        size_t titleWidth = 0, aWidth = 0;
+        std::vector<std::string> as;
+        for (const xpupeak::HeadlineCompare &h : p.headlines)
+        {
+            titleWidth = std::max(titleWidth, h.headline->title.size());
+            as.push_back(h.hasA ? valueWithBackend(h.a) + " (" + joinedWith(h.a.label(), ", ") + ")"
+                                : "-");
+            aWidth = std::max(aWidth, as.back().size());
+        }
+        for (size_t i = 0; i < p.headlines.size(); i++)
+        {
+            const xpupeak::HeadlineCompare &h = p.headlines[i];
+            out << "   " << padTo(h.headline->title, titleWidth) << "  " << padTo(as[i], aWidth) << "  vs  "
+                << (h.hasB ? valueWithBackend(h.b) + " (" + joinedWith(h.b.label(), ", ") + ")" : "-");
+            if (h.hasVerdict) out << "  " << verdictText(h.verdict);
+            out << "\n";
+        }
+
+        if (p.byReadings())
+        {
+            // One model: the devices both runs saw on it compared reading by
+            // reading, beside the rows above.
+            size_t n = 0, better = 0, worse = 0, same = 0, changed = 0, onlyA = 0, onlyB = 0;
+            for (const xpupeak::DeviceCompare &d : p.devices)
+            {
+                for (const xpupeak::ReadingCompare &r : d.readings)
+                {
+                    n++;
+                    const double base = r.b.value();
+                    if (r.verdict.methodChanged)
+                        changed++;
+                    else if (r.verdict.isTie() ||
+                             (r.verdict.hasRatio && base != 0.0 &&
+                              std::fabs(r.a.value() - base) / std::fabs(base) < 0.0005))
+                        same++;
+                    else if (r.verdict.winner == xpupeak::CompareSide::A)
+                        better++;
+                    else
+                        worse++;
+                }
+                onlyA += d.onlyA.size();
+                onlyB += d.onlyB.size();
+            }
+            out << "   One model: " << n << " readings on " << p.devices.size()
+                << (p.devices.size() == 1 ? " device" : " devices")
+                << " compared reading by reading, beside the rows above:\n   " << better
+                << " better, " << worse << " worse, " << same << " within 0.05%";
+            if (changed) out << ", " << changed << " method changed";
+            out << ".\n";
+            if (onlyA || onlyB)
+                out << "   Readings only in this run: " << onlyA << "; only in the baseline: " << onlyB
+                    << ".\n";
+            for (const DeviceResult *d : p.devicesOnlyA)
+                out << "   Only this run saw " << d->backend << " " << d->name << ".\n";
+            for (const DeviceResult *d : p.devicesOnlyB)
+                out << "   Only the baseline saw " << d->backend << " " << d->name << ".\n";
+            if (verbose && !p.both.empty())
+            {
+                out << "   Measured on both, by measure (" << p.both.size() << "):\n";
+                printKeyRows(p.both, out);
+            }
+        }
+        else
+        {
+            // Two models, or no device both saw: by measure key, the best of
+            // each side's backends.
+            if (p.sameModel())
+                out << "   One model, but no device both runs saw on it: by measure.\n";
+            else
+            {
+                // Rows above that met a baseline device of the same name
+                // compared two parts that share it (an M1 Pro of 8+2 cores
+                // and one of 6+2): these are the comparable figures.
+                bool named = false;
+                for (const DeviceResult *d : p.a->devices)
+                    for (const DeviceResult *e : p.b->devices)
+                        if (d->backend == e->backend && d->name == e->name &&
+                            a.occurrenceOf(*d) == b.occurrenceOf(*e))
+                            named = true;
+                if (named)
+                    out << "   Two models of one name: the notes beside the rows above set two parts\n"
+                           "   side by side; by measure:\n";
+            }
+            out << "   Measured on both (" << p.both.size() << (p.both.size() == 1 ? " measure" : " measures")
+                << "):\n";
+            if (!p.both.empty()) printKeyRows(p.both, out);
+        }
+        if (verbose)
+        {
+            if (!p.onlyA.empty()) printOneSided("Only in this run", p.onlyA, out);
+            if (!p.onlyB.empty()) printOneSided("Only in the baseline", p.onlyB, out);
+        }
+        else if (!p.onlyA.empty() || !p.onlyB.empty())
+        {
+            out << "   Measures only in this run: " << p.onlyA.size() << "; only in the baseline: "
+                << p.onlyB.size() << " (--verbose lists them).\n";
+        }
+    }
+    out << "\n";
 }

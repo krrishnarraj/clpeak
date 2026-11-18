@@ -158,6 +158,18 @@ BackendInventory MetalPeak::enumerate()
         dev.index   = static_cast<int>(i);
         dev.name    = [devs[i].name UTF8String];
         dev.typeStr = "GPU";
+        // Who it is, as a run's beginDevice() says it (metalIdentify), so a
+        // listing links like a run.  The family and core count come from
+        // the device's init, as runAll() reads them.
+        MetalDevice probe;
+        if (probe.init(static_cast<int>(i)))
+        {
+            logger::Identity identity;
+            metalIdentify(devs[i], probe.info, identity, dev.facts);
+            dev.type     = probe.info.deviceType;
+            dev.evidence = xpupeak::listingEvidence(identity);
+            dev.arch     = dev.facts.arch;
+        }
         plat.devices.push_back(std::move(dev));
     }
 

@@ -78,7 +78,7 @@ private:
         double       value;        // valid when status == Ok
         ResultStatus status;
         std::string  reason;       // valid when status != Ok
-        std::string  baselineKey;  // --compare lookup
+        std::string  baselineNote; // --compare: "  (was …, +3.1% better)", or 
         std::string  description;  // --describe: what this reading measures
 
         // The unit context this row prints in: its own when the reading
@@ -131,13 +131,35 @@ private:
     std::string indentStr(int level) const;
     void writeLine(int level, const std::string &text);
     void writeLine(const std::string &text);  // uses current indentLevel
-    void printBaselineDelta(const std::string &key, double value,
-                            Direction direction, const UnitInfo &unit);
 
     /// Write `text` as prose, word-wrapped to the output width and left-aligned
     /// at `column` spaces (a raw column, not an indent level, so a reading's
     /// note can line up under its value).
     void writeWrapped(int column, const std::string &text);
 };
+
+// ── Text reports of a whole run ─────────────────────────────────────────────
+//
+// What the CLI prints once a run is linked and saved, from the run as its
+// file holds it (xpupeak::asSaved, include/common/measures.h), so the words
+// are the app's on the same file.
+
+namespace xpupeak {
+struct HeadlineCatalog;
+struct CompareBaseline;
+}
+
+// --summary: per processor, the catalog's headlines -- the best reading over
+// every backend, with the data type it was reached at and the backend that
+// reached it -- as the app's Summary tab shows them.
+void printRunSummary(const RunDocument &run, const xpupeak::HeadlineCatalog &catalog,
+                     std::ostream &out);
+
+// --compare's report, after the per-row notes: which processors it paired
+// and how, each pair's headlines, and for two different models every measure
+// both have (include/common/run_compare.h).  With `verbose`, also the
+// measures of one side alone, and the by-measure rows of a pair of one model.
+void printRunCompare(const RunDocument &run, const xpupeak::CompareBaseline &baseline,
+                     const xpupeak::HeadlineCatalog &catalog, bool verbose, std::ostream &out);
 
 #endif  // LOGGER_TEXT_HPP

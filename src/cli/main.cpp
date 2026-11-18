@@ -14,6 +14,8 @@
 #include <common/thermal.h>
 #include <common/console_mute.h>
 #include <common/hardware_link.h>
+#include <common/measures.h>
+#include <common/run_compare.h>
 #include <version.h>
 #include <iostream>
 #include <vector>
@@ -82,25 +84,62 @@ int main(int argc, char **argv)
 
     const auto &backends = backendRegistry();
 
-    // --list-devices: every enabled backend's inventory, in one format and
-    // in the order a run would visit them.
-    if (opts.listDevices)
-    {
-        for (Backend b : opts.requestedButNotBuilt())
-            std::cout << programName() << ": the " << backendInfo(b).name
-                      << " backend is not in this build\n";
+    // Every backend `on` says, enumerated in run order, vendor stderr muted:
+    // the table goes to stdout.
+    auto enumerate = [&](auto on) {
         std::vector<BackendInventory> invs;
         for (const auto &be : backends)
-            if (opts.backendEnabled(be.id))
+            if (on(be.id))
             {
-                // Mute vendor stderr during enumeration; the table is on stdout.
                 xpupeak::ScopedConsoleMute mute(
                     xpupeak::ScopedConsoleMute::Capture::Verbose, {},
                     /*stderrOnly=*/true);
                 invs.push_back(be.enumerate());
             }
-        printInventory(invs, std::cout);
+        return invs;
+    };
+
+    // --list-devices: the hardware -- the system, its packages, its
+    // processors and the devices that reach each, linked as a run links
+    // them -- then every enabled backend's inventory, in one format and in
+    // the order a run would visit them.
+    if (opts.listDevices)
+    {
+        for (Backend b : opts.requestedButNotBuilt())
+            std::cout << programName() << ": the " << backendInfo(b).name
+                      << " backend is not in this build\n";
+        std::vector<BackendInventory> invs =
+            enumerate([&](Backend b) { return opts.backendEnabled(b); });
+        const InventoryHardware hw = linkInventory(invs);
+        printInventory(invs, std::cout, &hw);
         return 0;
+    }
+
+    // --devices gpu0: every device on that processor, as --list-devices with
+    // these backend flags links them -- a listing of the backends the flags
+    // leave on, whatever --devices also names.
+    if (!opts.deviceProcessors.empty())
+    {
+        std::vector<BackendInventory> invs = enumerate(
+            [&](Backend b) { return opts.enabledBackends.test(static_cast<size_t>(b)); });
+        const InventoryHardware hw = linkInventory(invs);
+        std::string error;
+        if (!resolveProcessorSelectors(invs, hw, opts, error))
+        {
+            std::cerr << programName() << ": " << error << "\n";
+            return 1;
+        }
+    }
+
+    // --compare: the baseline, read once and before anything runs, so a file
+    // that cannot be compared with -- a clpeak 3.x one among them -- says so
+    // now rather than after the run.  Every backend's logger shares the load.
+    std::shared_ptr<const xpupeak::CompareBaseline> baseline;
+    if (!opts.compareFile.empty())
+    {
+        baseline = xpupeak::loadCompareBaseline(opts.compareFile);
+        if (!baseline)
+            return 1;   // the loader has said why
     }
 
     RunDocument combined;
@@ -118,6 +157,10 @@ int main(int argc, char **argv)
         combined.meta.system        = probeSystem();
         combined.meta.conditions    = probeConditions();
         combined.meta.invocation    = invocationFrom(opts, argc, argv);
+        // --annotate: what only the person running it knows.  A resumed run
+        // keeps its checkpoint's, which the app's Details editor may have
+        // added to since.
+        combined.meta.annotations   = opts.annotations;
     }
 
     // The run's diagnostic stream: every note, XPUPEAK_LOG line and relayed
@@ -227,6 +270,28 @@ int main(int argc, char **argv)
         checkpoint.close(/*remove=*/saved);
         if (!saved)
             lastError |= 1;
+    }
+
+    // --summary and --compare's report: from the run as its file holds it --
+    // canonical dims, values as written -- so they say what the app says of
+    // the same file (include/common/measures.h).
+    if (opts.summary || baseline)
+    {
+        RunDocument asFile;
+        std::string error;
+        if (!xpupeak::asSaved(combined, asFile, error))
+        {
+            std::cerr << programName() << ": " << error << "\n";
+            lastError |= 1;
+        }
+        else
+        {
+            const xpupeak::HeadlineCatalog &catalog = xpupeak::HeadlineCatalog::bundled();
+            if (opts.summary)
+                printRunSummary(asFile, catalog, std::cout);
+            if (baseline)
+                printRunCompare(asFile, *baseline, catalog, opts.verbose, std::cout);
+        }
     }
 
     return lastError;

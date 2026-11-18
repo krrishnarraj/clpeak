@@ -361,6 +361,11 @@ DeviceEvidence evidenceFrom(const logger::Identity &id, const std::string &keyHe
     return e;
 }
 
+DeviceEvidence listingEvidence(const logger::Identity &id)
+{
+    return evidenceFrom(id, processEvidenceKey());
+}
+
 std::string currentEvidenceKey()
 {
     const RunCheckpoint *run = RunCheckpoint::current();

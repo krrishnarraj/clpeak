@@ -667,6 +667,14 @@ BackendInventory clPeak::enumerate()
           dev.maxAllocBytes   = info.maxAllocSize;
           dev.hasFp16         = info.halfSupported;
           dev.hasFp64         = info.doubleSupported;
+          // Who it is and its type, as a run's beginDevice() says them
+          // (openclIdentify), so a listing links like a run.
+          dev.type = info.deviceType;
+          {
+            logger::Identity identity;
+            openclIdentify(devices[d], info, identity, dev.facts);
+            dev.evidence = xpupeak::listingEvidence(identity);
+          }
           plat.devices.push_back(std::move(dev));
         }
       }

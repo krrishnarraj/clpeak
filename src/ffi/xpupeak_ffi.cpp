@@ -82,17 +82,34 @@ const char *xpupeak_version(void)
     return XPUPEAK_VERSION_STR;
 }
 
-char *xpupeak_copy_backend_catalog_json(void)
+namespace
+{
+
+// Every backend `on` says, in registry order, vendor stderr muted.
+template <class On>
+std::vector<BackendInventory> enumerateBackends(On on)
 {
     std::vector<BackendInventory> inv;
     for (const auto &be : backendRegistry())
-    {
-        xpupeak::ScopedConsoleMute mute(
-            xpupeak::ScopedConsoleMute::Capture::Verbose, {},
-            /*stderrOnly=*/true);
-        inv.push_back(be.enumerate());
-    }
-    return copyString(inventoryToJson(inv));
+        if (on(be.id))
+        {
+            xpupeak::ScopedConsoleMute mute(
+                xpupeak::ScopedConsoleMute::Capture::Verbose, {},
+                /*stderrOnly=*/true);
+            inv.push_back(be.enumerate());
+        }
+    return inv;
+}
+
+} // namespace
+
+char *xpupeak_copy_backend_catalog_json(void)
+{
+    std::vector<BackendInventory> inv = enumerateBackends([](Backend) { return true; });
+    // The hardware the devices are views of, linked as a run links them:
+    // the processors a run screen can group its devices by.
+    const InventoryHardware hw = linkInventory(inv);
+    return copyString(inventoryToJson(inv, &hw));
 }
 
 void xpupeak_free_string(char *s)
@@ -359,6 +376,23 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         litertSetNpuDirOverride(opts.litertNpuDir);
 #endif
 
+    // --devices gpu0: every device on that processor, as the CLI resolves it
+    // -- from a listing of the backends the flags leave on.
+    if (!opts.deviceProcessors.empty())
+    {
+        std::vector<BackendInventory> inv = enumerateBackends(
+            [&](Backend b) { return opts.enabledBackends.test(static_cast<size_t>(b)); });
+        const InventoryHardware hw = linkInventory(inv);
+        std::string error;
+        if (!resolveProcessorSelectors(inv, hw, opts, error))
+        {
+            xpupeak::logMessage(xpupeak::LogLevel::Error, "", "xpupeak: " + error);
+            emitDone(on_event, user_data, XPUPEAK_RUN_BAD_ARGS, false);
+            g_running.store(false);
+            return XPUPEAK_RUN_BAD_ARGS;
+        }
+    }
+
     if (resuming)
     {
         // The parts before: their meta, devices, log and progress.
@@ -378,6 +412,7 @@ int xpuPeakLaunch(int argc, const char **argv, XpuPeakEventCallback on_event,
         combined.meta.system        = probeSystem();
         combined.meta.conditions    = probeConditions();
         combined.meta.invocation    = invocationFrom(opts, argc, mutableArgv.data());
+        combined.meta.annotations   = opts.annotations;   // --annotate, as in the CLI
     }
     // The sidecar: every entry on disk as it happens, for the native crash
     // the document never gets written after.  The app adopts one left behind

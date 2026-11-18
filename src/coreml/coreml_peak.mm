@@ -278,6 +278,15 @@ BackendInventory CoreMLPeak::enumerate()
     d.name = devs[i].displayName;
     d.typeStr = devs[i].typeStr;
     d.numComputeUnits = devs[i].coreCount > 0 ? (unsigned)devs[i].coreCount : 0;
+    // Who it is, as a run's beginDevice() says it (coremlIdentify), so a
+    // listing links like a run.
+    d.type = devs[i].deviceType;
+    {
+      logger::Identity identity;
+      RuntimeInfo runtime;
+      coremlIdentify(devs[i], identity, d.facts, runtime);
+      d.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(d));
   }
   inv.platforms.push_back(std::move(plat));

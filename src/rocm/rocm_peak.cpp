@@ -298,6 +298,14 @@ BackendInventory RocmPeak::enumerate()
     dev.name = props.name;
     dev.typeStr = "GPU";
     dev.arch = props.gcnArchName;
+    // Who it is, as a run's beginDevice() says it (rocmIdentify), so a
+    // listing links like a run.
+    dev.type = DeviceType::Gpu;
+    {
+      logger::Identity identity;
+      rocmIdentify(i, props, identity, dev.facts);
+      dev.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(dev));
   }
 

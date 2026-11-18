@@ -330,6 +330,18 @@ BackendInventory OneapiPeak::enumerate()
     try { d.name = devs[i].get_info<sycl::info::device::name>(); }
     catch (...) { d.name = "<unknown>"; }
     d.typeStr = deviceTypeStr(devs[i]);
+    // Who it is and its type, as a run's beginDevice() says them
+    // (oneapiIdentify; the type as oneapi_device.cpp reads it), so a listing
+    // links like a run.
+    d.type = devs[i].is_gpu()           ? DeviceType::Gpu
+           : devs[i].is_cpu()           ? DeviceType::Cpu
+           : devs[i].is_accelerator()   ? DeviceType::Accelerator
+                                        : DeviceType::Unknown;
+    {
+      logger::Identity identity;
+      oneapiIdentify(devs[i], identity, d.facts);
+      d.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(d));
   }
 

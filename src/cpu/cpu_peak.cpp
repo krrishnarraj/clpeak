@@ -489,6 +489,14 @@ BackendInventory CpuPeak::enumerate()
   d.numComputeUnits = (unsigned)info.logicalCores;
   d.maxClockMHz     = (unsigned)info.clockMHz;
   d.globalMemBytes  = info.totalMemBytes;
+  // The host CPU and its facts, as runAll()'s DeviceSpec gives them: the
+  // listing's cpu0 takes its clusters from here, as a run's does.  The OS's
+  // word only -- the cache probe that measures an unsized level runs with
+  // the tests, not here.
+  d.type             = DeviceType::Cpu;
+  d.evidence.host    = true;
+  d.facts.cpu        = info.facts;
+  d.facts.vendorName = info.vendor;
   plat.devices.push_back(std::move(d));
 
   inv.platforms.push_back(std::move(plat));

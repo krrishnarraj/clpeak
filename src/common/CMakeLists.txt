@@ -8,11 +8,13 @@ add_library(peak_common STATIC
     inventory.cpp
     logger.cpp
     logger_text.cpp
+    measures.cpp
     options.cpp
     host_info.cpp
     json.cpp
     keep_awake.cpp
     run_checkpoint.cpp
+    run_compare.cpp
     run_document.cpp
     run_log.cpp
     run_resume.cpp
@@ -21,6 +23,20 @@ add_library(peak_common STATIC
     units.cpp
     vocabulary.cpp
 )
+# The headline catalog the measure engine reads (include/common/measures.h):
+# the app's own app/assets/measures.json, embedded as bytes by a build step
+# that depends on it, so editing the catalog rebuilds the binaries with no
+# reconfigure, and --summary and the app's Summary show the same headlines.
+set(XPUPEAK_MEASURES_JSON ${CMAKE_CURRENT_LIST_DIR}/../../app/assets/measures.json)
+set(XPUPEAK_MEASURES_CPP ${CMAKE_CURRENT_BINARY_DIR}/measures_catalog.cpp)
+add_custom_command(
+    OUTPUT ${XPUPEAK_MEASURES_CPP}
+    COMMAND ${CMAKE_COMMAND} -DIN=${XPUPEAK_MEASURES_JSON} -DOUT=${XPUPEAK_MEASURES_CPP}
+            -P ${CMAKE_CURRENT_LIST_DIR}/cmake/embed_catalog.cmake
+    DEPENDS ${XPUPEAK_MEASURES_JSON} ${CMAKE_CURRENT_LIST_DIR}/cmake/embed_catalog.cmake
+    COMMENT "Embedding the headline catalog (app/assets/measures.json)"
+    VERBATIM)
+target_sources(peak_common PRIVATE ${XPUPEAK_MEASURES_CPP})
 # dlopen lives in libdl on older glibc; ${CMAKE_DL_LIBS} is empty where it's in libc.
 target_link_libraries(peak_common PUBLIC ${CMAKE_DL_LIBS})
 # Core ML's compile cache has to be cleared by whichever backend fills it

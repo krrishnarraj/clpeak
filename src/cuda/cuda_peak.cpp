@@ -293,6 +293,14 @@ BackendInventory CudaPeak::enumerate()
     dev.name = name;
     dev.typeStr = "GPU";
     dev.arch = "sm_" + std::to_string(maj) + std::to_string(min);
+    // Who it is, as a run's beginDevice() says it (cudaIdentify), so a
+    // listing links like a run.
+    dev.type = DeviceType::Gpu;
+    {
+      logger::Identity identity;
+      cudaIdentify(d, identity, dev.facts);
+      dev.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(dev));
   }
 

@@ -2,6 +2,7 @@
 #define XPUPEAK_OPTIONS_H
 
 #include <bitset>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,6 +27,8 @@ const BackendInfo &backendInfo(Backend b);
 // One item of --devices, `backend:index`, exactly as --list-devices prints
 // it.  The list is an allow-list: when it is given, only the devices on it
 // run, and a backend with none of its devices listed does not run at all.
+// An item may also name a processor (`gpu0`), which stands for every device
+// on it: CliOptions::deviceProcessors, resolved into these before a run.
 struct DeviceSelector {
   Backend backend = Backend::COUNT;
   int     index   = 0;
@@ -67,6 +70,13 @@ struct CliOptions {
   // --devices: the devices that run.  Empty = every device of every enabled
   // backend.
   std::vector<DeviceSelector> devices;
+  // --devices items that name a processor ("gpu0", "cpu0", "npu0",
+  // "accelerator0": any id xpupeak::parseProcessorId() reads), meaning every
+  // device on it, as --list-devices with the same backend flags links them.
+  // A host resolves them into `devices` before the run
+  // (resolveProcessorSelectors, include/common/inventory.h), from a listing
+  // of the backends the flags leave on.
+  std::vector<std::string> deviceProcessors;
 
   // --onnx-lib: absolute path to the onnxruntime shared library to load,
   // overriding the platform's conventional names.  Empty = search the
@@ -123,6 +133,16 @@ struct CliOptions {
   bool        enableOutput = false;
   std::string outputFile;
   std::string compareFile;
+
+  // --summary: after the run, each processor's headlines -- the catalog's
+  // measures, app/assets/measures.json -- as the app's Summary shows them
+  // (include/common/measures.h).
+  bool summary = false;
+
+  // --annotate key=value (repeatable): the run's `annotations`, facts only a
+  // person knows (docs/format-v4.md, Annotations).  A later value for a key
+  // replaces an earlier one.
+  std::map<std::string, std::string> annotations;
 
   // Listing mode (no benchmarks run; just print devices).
   bool listDevices = false;

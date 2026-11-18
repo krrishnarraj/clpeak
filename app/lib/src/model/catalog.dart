@@ -1,7 +1,13 @@
 /// Parsed device catalog — the inventoryToJson() document from
 /// xpupeak_copy_backend_catalog_json (src/common/inventory.cpp).  The same
-/// `backends` array a verbose run document embeds as its `inventory`.
+/// `backends` array a verbose run document embeds as its `inventory`, and
+/// beside it the hardware the devices are views of: `packages` and
+/// `processors`, linked from the listing as a run links its devices, in the
+/// result document's own shape (docs/format-v4.md, Hardware) -- so a run
+/// screen can group the devices by processor before anything has run.
 library;
+
+import 'hardware.dart';
 
 class CatalogDevice {
   const CatalogDevice({
@@ -16,6 +22,7 @@ class CatalogDevice {
     required this.globalMemBytes,
     required this.fp16,
     required this.fp64,
+    this.processor = '',
   });
 
   final int index;
@@ -30,6 +37,12 @@ class CatalogDevice {
   final bool fp16;
   final bool fp64;
 
+  /// The id of the processor it is a view of (`gpu0`), as
+  /// [BackendCatalog.processors] lists it; empty from a native library
+  /// older than the catalog's hardware.  `--devices` takes the id too, for
+  /// every device on that processor.
+  final String processor;
+
   factory CatalogDevice.fromJson(Map<String, dynamic> m) => CatalogDevice(
         index: (m['index'] as num?)?.toInt() ?? -1,
         name: m['name'] as String? ?? '',
@@ -42,6 +55,7 @@ class CatalogDevice {
         globalMemBytes: (m['global_mem_bytes'] as num?)?.toInt() ?? 0,
         fp16: m['fp16'] as bool? ?? false,
         fp64: m['fp64'] as bool? ?? false,
+        processor: m['processor'] is String ? m['processor'] as String : '',
       );
 }
 
@@ -109,17 +123,74 @@ class CatalogBackend {
       );
 }
 
+/// One device of the catalog with its backend: what `--devices` names as
+/// `<backend.flag>:<device.index>`.
+class CatalogEntry {
+  const CatalogEntry(this.backend, this.device);
+
+  final CatalogBackend backend;
+  final CatalogDevice device;
+
+  /// The token `--devices` takes for it: `metal:0`.
+  String get token => '${backend.flag}:${device.index}';
+}
+
 class BackendCatalog {
-  const BackendCatalog(this.backends);
+  const BackendCatalog(this.backends,
+      {this.packages = const [], this.processors = const []});
 
   final List<CatalogBackend> backends;
+
+  /// The chips and cards the listed devices sit in, the host's first
+  /// (`pkg0`); empty from a native library older than the catalog's
+  /// hardware.
+  final List<PackageInfo> packages;
+
+  /// The processors the listed devices are views of, in the order a run
+  /// numbers them: `cpu0`, `gpu0`, `npu0`.  A processor no listed device
+  /// reaches is here too (the host CPU, when no CPU backend is built in).
+  final List<ProcessorInfo> processors;
 
   /// Backends that actually enumerated at least one device.
   List<CatalogBackend> get usable =>
       backends.where((b) => b.available && b.hasDevices).toList();
 
-  factory BackendCatalog.fromJson(Map<String, dynamic> m) => BackendCatalog([
-        for (final b in (m['backends'] as List? ?? const []))
-          CatalogBackend.fromJson(b as Map<String, dynamic>)
-      ]);
+  ProcessorInfo? processorById(String id) {
+    for (final p in processors) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  PackageInfo? packageById(String id) {
+    for (final p in packages) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// Every listed device on processor [id], in run order (by backend, then
+  /// index): what `--devices <id>` runs.
+  List<CatalogEntry> devicesOf(String id) => [
+        for (final b in backends)
+          for (final p in b.platforms)
+            for (final d in p.devices)
+              if (d.processor == id) CatalogEntry(b, d),
+      ];
+
+  factory BackendCatalog.fromJson(Map<String, dynamic> m) => BackendCatalog(
+        [
+          for (final b in (m['backends'] as List? ?? const []))
+            CatalogBackend.fromJson(b as Map<String, dynamic>)
+        ],
+        packages: [
+          for (final p in (m['packages'] is List ? m['packages'] as List : const []))
+            PackageInfo.fromJson(p),
+        ],
+        processors: [
+          for (final p
+              in (m['processors'] is List ? m['processors'] as List : const []))
+            ProcessorInfo.fromJson(p),
+        ],
+      );
 }

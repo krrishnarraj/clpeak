@@ -98,6 +98,12 @@ const std::string &processEvidenceKey();
 // opens, with the run's key, so a checkpoint already holds tokens.
 DeviceEvidence evidenceFrom(const logger::Identity &id, const std::string &keyHex);
 
+// A listed device's evidence (InventoryDevice::evidence, inventory.h): as
+// evidenceFrom(), under this process's key, since a listing's tokens are
+// only ever compared with each other.  Each backend's enumerate() calls it
+// with the Identity its *Identify() helper fills for a run.
+DeviceEvidence listingEvidence(const logger::Identity &id);
+
 // The key a run's tokens are made under: the running run's
 // (RunCheckpoint::evidenceKey()), else this process's.
 std::string currentEvidenceKey();

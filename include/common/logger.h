@@ -4,10 +4,13 @@
 #include <chrono>
 #include <cstddef>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <vector>
 #include <common/run_document.h>
 #include "common.h"
+
+namespace xpupeak { struct CompareBaseline; }   // run_compare.h
 
 // ── Structured log-event stream ────────────────────────────────────────────
 //
@@ -318,9 +321,24 @@ public:
   static bool isReadingLine(const LogEntry &e);
 
   // ── Baseline compare ────────────────────────────────────────────────────
+  //
+  // --compare's baseline, reading by reading: a reading of this run meets
+  // the saved run's of the same device -- its backend, its name and which of
+  // that name it is, never its index -- the same test key and the same id
+  // (docs/format-v4.md, Two runs side by side).  One load per process,
+  // shared by every backend's logger (xpupeak::loadCompareBaseline).
 
-  bool        compareEnabled;
-  BaselineMap baseline;
+  bool compareEnabled;
+  std::shared_ptr<const xpupeak::CompareBaseline> baseline;
+
+  /// The --compare note for one reading being rendered: "  (was 4.48
+  /// TFLOPS, +3.1% better)", "  (was 4.48 TFLOPS, method changed)", or ""
+  /// where the baseline has no such reading.
+  std::string baselineNote(const LogEvent &e) const;
+
+  /// The open device's place among this logger's devices of its backend and
+  /// name, from 0: what names it in a baseline beside its name.
+  int openDeviceOccurrence() const;
 
   // ── Accumulated results ─────────────────────────────────────────────────
   //

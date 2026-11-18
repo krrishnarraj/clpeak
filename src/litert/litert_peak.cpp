@@ -771,6 +771,15 @@ BackendInventory LitertPeak::enumerate()
     d.index = i;
     d.name = devs[i].displayName;
     d.typeStr = devs[i].typeStr;
+    // Who it is, as a run's beginDevice() says it (litertIdentify), so a
+    // listing links like a run.
+    d.type = devs[i].deviceType;
+    {
+      logger::Identity identity;
+      RuntimeInfo runtime;
+      litertIdentify(devs[i], identity, d.facts, runtime);
+      d.evidence = xpupeak::listingEvidence(identity);
+    }
     plat.devices.push_back(std::move(d));
   }
   inv.platforms.push_back(std::move(plat));

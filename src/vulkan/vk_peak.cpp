@@ -751,6 +751,19 @@ BackendInventory vkPeak::enumerate()
                 : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) ? "Integrated GPU"
                 : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)            ? "CPU"
                                                                                : "Other";
+    // Who it is and its type, as a run's beginDevice() says them
+    // (vulkanIdentify; the type as vulkan_device.cpp reads it), so a
+    // listing links like a run.
+    dev.type = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) ? DeviceType::Cpu
+             : (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ||
+                props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
+                props.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU) ? DeviceType::Gpu
+                                                                          : DeviceType::Unknown;
+    {
+      logger::Identity identity;
+      vulkanIdentify(vk.physicalDevices[i], identity, dev.facts);
+      dev.evidence = xpupeak::listingEvidence(identity);
+    }
     {
       std::ostringstream api;
       api << VK_VERSION_MAJOR(props.apiVersion) << "."
