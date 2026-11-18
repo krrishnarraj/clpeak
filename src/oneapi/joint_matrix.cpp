@@ -283,17 +283,32 @@ static bool jmDType(syclex::matrix_type t, DType &out)
 }
 
 // A row's coordinates, from the combination it ran: A's type as the row's
-// data type, B's as its weights where the two differ (a mixed-sign 8-bit
-// pair), the accumulator where it is not the usual one, and the tile.
+// data type, B's as its weights where the two differ, the accumulator where
+// it is not the usual one, and the tile.  8-bit integer inputs are int8
+// whatever their signs, and so is their 32-bit accumulator
+// (docs/format-v4.md, Data types): an s8 x u8 tile and an s8 x s8 one are
+// the device's int8 path, as x86's VPDPBUSD and Arm's SDOT are each CPU's,
+// so they share a key and the faster is the peak.  The row name still says
+// which operand is the unsigned one.
+static bool jmByte(syclex::matrix_type t)
+{
+  return t == syclex::matrix_type::sint8 || t == syclex::matrix_type::uint8;
+}
+
 static Dims jmDims(const JmTile &t)
 {
+  using mt = syclex::matrix_type;
   Dims d;
   DType a, b, c;
   if (jmDType(t.at, a))
   {
+    const bool bytes = jmByte(t.at) && jmByte(t.bt);
+    if (bytes) a = DType::Int8;
     d.set({Dim::Dtype, a});
-    if (jmDType(t.bt, b) && b != a) d.set({Dim::Weights, b});
-    if (jmDType(t.ct, c) && c != xpupeak::usualAccumulator(a)) d.set({Dim::Acc, c});
+    if (!bytes && jmDType(t.bt, b) && b != a) d.set({Dim::Weights, b});
+    const bool int32Acc = bytes && (t.ct == mt::sint32 || t.ct == mt::uint32);
+    if (!int32Acc && jmDType(t.ct, c) && c != xpupeak::usualAccumulator(a))
+      d.set({Dim::Acc, c});
   }
   if (!t.shape.empty()) d.set({Dim::Tile, t.shape});
   return d;

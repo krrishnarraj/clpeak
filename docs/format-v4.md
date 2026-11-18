@@ -615,6 +615,14 @@ of its own. The **usual accumulator** of a type is `fp64` for fp64, `fp32`
 for every other float, `int64` for the 64-bit integers and `int32` for the
 rest.
 
+A dot product's or a matrix multiply's 8-bit integer inputs are `int8`
+whatever their signs, and so is their 32-bit accumulator: x86's VPDPBUSD
+(unsigned × signed), Arm's SDOT (signed × signed), a GPU's DP4a and a matrix
+engine's s8 × u8 tile are each processor's int8 path, so their rows share a
+key and the faster is the peak; the reading's id says which signs ran. The
+`uint` types are for an operation whose speed depends on the sign, such as
+a 64-bit integer divide.
+
 ### Dim keys
 
 | key | class | value | default | meaning |

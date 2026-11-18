@@ -154,9 +154,11 @@ See `include/common/AGENTS.md` § `dims`.  oneAPI specifics:
   beside the note.  `integer_compute`'s `int8` and `int16` are widths of
   int32; `bfloat16_compute` is `{dtype: bf16, acc: fp32}`.
 - `joint_matrix`: `jmDims()` reads a row's dims off the combination it ran:
-  A's type as `dtype`, B's as `weights` where the two differ (`s8u8`,
-  `u8s8`), the accumulator as `acc` where it is not the usual one, and the
-  shape as `tile`.  The race's winner is its `form` (`chain_filled`,
+  A's type as `dtype`, B's as `weights` where the two differ, the
+  accumulator as `acc` where it is not the usual one, and the shape as
+  `tile`.  An 8-bit integer pair is `int8` whatever its signs (`s8u8`,
+  `u8s8` and `u8u8` rows included, and their s32 or u32 accumulator), as
+  oneMKL's s8 x u8 form and every CPU's VPDPBUSD are.  The race's winner is its `form` (`chain_filled`,
   `chain_spread`, `blocks_1acc`, `blocks_4acc`).
 - `onemkl_gemm` is `impl` onemkl.  Where a dtype races forms, the winner is
   its `form`, `GemmForm::form`, made beside the name in `layouts()`
