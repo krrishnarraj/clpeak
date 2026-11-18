@@ -1108,26 +1108,56 @@ headline catalog (below) selects among these bests.
 
 ### Two runs side by side
 
-A compare pairs two runs' processors by kind, then by model (*Models*), and a
-person may re-pair them. For each pair it sets the keys both sides have side
-by side: each side's best, with the backend that reached it, and their ratio,
-turned by the key's direction so that above 1 is better. The keys of one side
-alone follow. Where both bests are readings of one backend's test at two
-revisions, it says "method changed" instead of a ratio. One device in two
-runs of one machine, before and after a driver update, compares reading by
-reading instead: by backend, device name and the occurrence of that name,
-test key and reading id.
+A compare sets two runs' processors side by side in pairs, and in each pair
+the measure keys both have.
+
+- **Pairing.** Processors pair by kind, then by model (*Models*). Each of the
+  first run's processors, in its order, takes the first of the second run's
+  of its kind and model still free; then the rest of each kind pair in
+  order, first with first. What is left is unpaired, and listed. A processor
+  nothing measured takes part, and so does a device that is a processor of
+  its own (*By processor*): by its `type`, its model being its API's
+  `vendor_id` and `device_id`, else its `name`. A CPU's model holds CPUID's
+  `family` and `model`, or its clusters' `midr`, wherever the file has them:
+  they tell apart parts that share a generic name, and agree where the name
+  is specific. A person may re-pair them, whatever their kinds.
+- **The keys both have.** For each, each side's best (*The best of a key*),
+  with the backend that reached it, and their ratio, turned by the key's
+  direction so that above 1 means the first run is better: the first's value
+  over the second's where higher is better, the second's over the first's
+  where lower is. Equal values are exactly 1. Where a value is not above
+  zero there is no ratio, only the better side. Where the two disagree on
+  direction — only a file that contradicts itself has them — the first of
+  them in the order that breaks ties says. The keys of one side alone
+  follow.
+- **Headlines** compare the same way, each side's value being the best of
+  the keys the headline selects there (*The headline catalog*): the two may
+  be readings of different keys.
+- **Method changed.** Where the two values set side by side are readings of
+  one backend's test at two revisions, a compare says "method changed"
+  instead of a ratio (*Revisions*).
+- **Reading by reading.** Where a pair's processors are one model, the
+  devices both runs saw on them compare reading by reading as well: one
+  machine before and after a driver update, say. A device is named by its
+  backend, its `name` and the occurrence of that name — its place among its
+  run's devices of that backend and name, from 0 in file order — and never
+  by its index, which a second card shifts; a reading by its test key
+  (`id@variant`) and its id. Nothing in a file says two runs are of one
+  machine (*One run, one record*), so one model is what a reader goes by.
 
 ### Revisions
 
 A test's `revision` (absent, `1`) is its method's version. Readings of one
 backend's test — the same `backend` and test `id`, whatever the `variant` —
 at two revisions are not compared: a compare says "method changed" instead of
-a ratio. A ranking keeps, for each backend's test, the newest revision it has
-seen, and ranks the readings at it alone: the others were measured another
-way, before a kernel fix or under another counting rule, and may be off by a
-factor (the Metal simdgroup fold read 4× high). The best of a key on one
-processor can still draw on several tests, each at its own revision.
+a ratio. It takes each side's best as it would for that run alone, and looks
+only at the two values it sets side by side: readings of two backends' tests,
+or of two tests of one backend, compare whatever their revisions. A ranking
+keeps, for each backend's test, the newest revision it has seen, and ranks
+the readings at it alone: the others were measured another way, before a
+kernel fix or under another counting rule, and may be off by a factor (the
+Metal simdgroup fold read 4× high). The best of a key on one processor can
+still draw on several tests, each at its own revision.
 
 ### Which runs rank
 
