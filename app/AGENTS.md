@@ -219,6 +219,26 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   memory bandwidth -- raw readings, never a derived score.  The engine's
   answers are checked against hand-worked ones on the fixtures in
   `test/fixtures/` (`test/measures_test.dart`)
+- Comparing two runs? → `lib/src/model/compare.dart`, pure Dart over the
+  measure engine, by the rules of `docs/format-v4.md` § Two runs side by
+  side, which a compare in the CLI must answer alike.  Each side is a
+  `CompareRun` (a document, its `RunMeasures`, its History row);
+  `RunCompare.of(a, b, catalog:)` pairs the processors (`pairProcessors`:
+  by kind, then `processorModel`) and compares each pair (`PairCompare`):
+  `headlines`, then `both` / `onlyA` / `onlyB` by category
+  (`bothByCategory` …), each value a `CompareValue` naming its run,
+  backend, device, test, reading and revision, each pair of values a
+  `Verdict` (ratio above 1 when A is better, winner, factor, or
+  `methodChanged`); where the pair is one model, `devices` compares
+  reading by reading.  `swapped()`, `withPair()` and `withoutPair()` are
+  the screen's swap and re-pair.  One processor's backends against each
+  other: `BackendCompare`.  Runs come in through History only --
+  `RunHistoryStore.loadForCompare` / `compareRuns`
+  (`lib/src/services/compare_loading.dart`); a file from another machine
+  is imported first, as History imports it.  A screen that shows a
+  compare reads this API and adds only its own words: no pairing, ratio
+  or revision rule lives in a widget.  `test/compare_test.dart` checks it
+  on the fixtures
 - What the results screen shows? → `ResultsBody` is tabs: for a finished
   run (one read from a file: `document.meta` set) **Summary** first --
   `SystemPanel` and a `FlagshipCard` per processor

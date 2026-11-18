@@ -305,6 +305,56 @@ const families = <String, FamilyInfo>{
   'transformer-block': FamilyInfo('transformer-block', FamilyMethod.graph),
 };
 
+/// The category a family's flag is listed under in `xpupeak --help`:
+/// `compute`, `crypto`, `string`, `bandwidth`, `latency` or `ai`, as
+/// `categoryOf()` in include/common/benchmark_enums.h has it -- a family's
+/// own, whichever backend's test measured it.  Empty for a family this
+/// build does not know, whose readings' tests say instead.
+String familyCategory(String family) => _familyCategories[family] ?? '';
+
+const _familyCategories = <String, String>{
+  'single-precision-compute': 'compute',
+  'half-precision-compute': 'compute',
+  'double-precision-compute': 'compute',
+  'mixed-precision-compute': 'compute',
+  'bfloat16-compute': 'compute',
+  'integer-compute': 'compute',
+  'integer-compute-fast': 'compute',
+  'integer-compute-char': 'compute',
+  'integer-compute-short': 'compute',
+  'int8-dot-product-compute': 'compute',
+  'int16-dot-product-compute': 'compute',
+  'fp8-dot-product-compute': 'compute',
+  'divide-sqrt-compute': 'compute',
+  'integer-divide-compute': 'compute',
+  'matrix-compute': 'compute',
+  'gemm': 'compute',
+  'attention': 'compute',
+  'convolution': 'compute',
+  'numeric-error': 'compute',
+  'smt-scaling': 'compute',
+  'aes': 'crypto',
+  'sha256': 'crypto',
+  'sha512': 'crypto',
+  'crc32c': 'crypto',
+  'string-scan': 'string',
+  'utf8-validate': 'string',
+  'global-memory-bandwidth': 'bandwidth',
+  'local-memory-bandwidth': 'bandwidth',
+  'image-memory-bandwidth': 'bandwidth',
+  'transfer-bandwidth': 'bandwidth',
+  'tensor-bandwidth': 'bandwidth',
+  'activation': 'bandwidth',
+  'cache-bandwidth': 'bandwidth',
+  'texture-sample': 'bandwidth',
+  'kernel-launch-latency': 'latency',
+  'memory-latency': 'latency',
+  'atomics': 'latency',
+  'branch-penalty': 'latency',
+  'store-forward': 'latency',
+  'transformer-block': 'ai',
+};
+
 /// The default of dim [key] for a reading of [family] (a Benchmark's flag
 /// name) whose data type is [dtype] -- its dims', or else its family's: the
 /// value an absent key means, or null for a key with none.  Null too for a
