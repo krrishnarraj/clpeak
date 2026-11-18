@@ -63,7 +63,7 @@ const char *const kLayer[]       = {"conv3x3s2", "conv1x1", "depthwise3x3"};
 const char *const kPixelFormat[] = {"rgba32f", "rgba16f", "rgba8", "r32f"};
 const char *const kPhase[]       = {"prefill", "decode"};
 const char *const kContention[]  = {"none", "all"};
-const char *const kWorkload[]    = {"trivial_op", "small_matmul", "session_create", "model_create"};
+const char *const kWorkload[]    = {"trivial_op", "small_matmul", "model_create"};
 const char *const kIsa[]         = {"scalar", "sse2", "ssse3", "sse4_2", "avx", "avx2", "avx512",
                                     "avx10", "amx", "neon", "sve", "sve2", "sme", "sme2"};
 const char *const kImpl[]        = {"cublaslt", "hipblaslt", "rocblas", "rocwmma", "onemkl", "mps",

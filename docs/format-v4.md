@@ -655,7 +655,7 @@ a 64-bit integer divide.
 | `phase` | identity | `prefill`, `decode` | — | a transformer block's phase |
 | `context` | identity | tokens | — | a prefill's sequence length, a decode's KV-cache length |
 | `contention` | identity | `none`, `all` | `none` | whether every other thread competed for the same data |
-| `workload` | identity | `trivial_op`, `small_matmul`, `session_create`, `model_create` | — | what a dispatch-latency reading submits |
+| `workload` | identity | `trivial_op`, `small_matmul`, `model_create` | — | what a dispatch-latency reading submits; `model_create` is making a trivial model runnable from its bytes, its compile included, whatever the runtime calls the result (Core ML's model, ONNX Runtime's session, LiteRT's compiled model) |
 | `kv` | identity | a data type | the reading's `dtype` | a transformer block's KV-cache type |
 | `bound` | identity | `throughput`, `latency` | `throughput` | what limits a compute kernel: enough independent chains to fill every pipe, as in every compute peak, or one chain whose every operation waits on the one before |
 | `width` | variant | a number | — | vector width, in elements |

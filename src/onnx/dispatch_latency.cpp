@@ -217,7 +217,10 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   const char *createNote =
       "Creating a session for the trivial graph; on providers that compile "
       "ahead of time, this runs a compiler.";
-  const Dims createDims{{Dim::Workload, dim::Workload::SessionCreate}};
+  // The same work as Core ML's model_create, whatever the API calls it:
+  // the dims say what was measured, the reading's id what this backend
+  // calls it.
+  const Dims createDims{{Dim::Workload, dim::Workload::ModelCreate}};
   if (trivial.createUs > 0.0)
     test.emit("session_create", (float)(trivial.createUs * 1e-6), createNote, createDims);
   else

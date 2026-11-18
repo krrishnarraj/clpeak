@@ -157,7 +157,7 @@ const dimKeys = <String, DimKeyInfo>{
       defaultValue: 'none', words: ['none', 'all']),
   'workload': DimKeyInfo(
       'workload', DimClass.identity, DimKind.word, DimDefault.none,
-      words: ['trivial_op', 'small_matmul', 'session_create', 'model_create']),
+      words: ['trivial_op', 'small_matmul', 'model_create']),
   'width': DimKeyInfo(
       'width', DimClass.variant, DimKind.integer, DimDefault.none),
   'chains': DimKeyInfo(

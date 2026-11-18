@@ -156,7 +156,7 @@ enum class Layer : unsigned char { Conv3x3s2, Conv1x1, Depthwise3x3, COUNT };
 enum class PixelFormat : unsigned char { Rgba32f, Rgba16f, Rgba8, R32f, COUNT };
 enum class Phase : unsigned char { Prefill, Decode, COUNT };
 enum class Contention : unsigned char { None, All, COUNT };
-enum class Workload : unsigned char { TrivialOp, SmallMatmul, SessionCreate, ModelCreate, COUNT };
+enum class Workload : unsigned char { TrivialOp, SmallMatmul, ModelCreate, COUNT };
 enum class Isa : unsigned char {
     Scalar, Sse2, Ssse3, Sse4_2, Avx, Avx2, Avx512, Avx10, Amx,
     Neon, Sve, Sve2, Sme, Sme2, COUNT

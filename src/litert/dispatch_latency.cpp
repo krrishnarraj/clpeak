@@ -101,7 +101,10 @@ int LitertPeak::runDispatchLatency(const LitertRuntime &rt, const litert_device_
   namespace dim = xpupeak::dim;
   const Dims trivialDims{{Dim::Workload, dim::Workload::TrivialOp}};
   const Dims mmDims{{Dim::Workload, dim::Workload::SmallMatmul}};
-  const Dims createDims{{Dim::Workload, dim::Workload::SessionCreate}};
+  // The same work as Core ML's model_create, whatever the API calls it:
+  // the dims say what was measured, the reading's id what this backend
+  // calls it.
+  const Dims createDims{{Dim::Workload, dim::Workload::ModelCreate}};
 
   std::string trivialIn;
   for (int64_t i = 0; i < kTrivialWidth; i++)

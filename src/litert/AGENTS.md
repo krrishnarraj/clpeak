@@ -784,7 +784,8 @@ See `include/common/AGENTS.md` § `dims`.  LiteRT specifics:
   `explicit`, or `sdpa` for `fp16_composite` (`pointDims`).
 - **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`,
   transfer `direction`, dispatch `workload` (`matmul_256` is
-  `small_matmul`).
+  `small_matmul`, and `session_create` is `model_create`, as Core ML's
+  creation row is).
 - **`revision` is 2** for `litert_gemm` (the sixteen-layer chain),
   `litert_conv` (the 3x3 at stride 2), and `litert_block_prefill` and
   `litert_block_latency` (the prompt through a seed), all since 3.0.1; 1
