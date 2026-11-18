@@ -18,6 +18,7 @@ backend.
 - Looking for plugin providers (`--onnx-ep`), their registration on the environment and the OrtEpDevice enumeration? → `onnx_plugin.cpp` + `onnx_plugin.h`
 - Looking for the Windows ML catalog (`--onnx-winml`), which installs vendor providers from the Store? → `onnx_winml.cpp` + `onnx_winml.h`
 - Looking for session creation / per-EP options / the CPU-fallback guard / the crash fence? → `onnx_session.cpp`
+- Looking for where the thread that runs a CPU provider's graphs is placed? → `onnx_threads.cpp`
 - Looking for how models are built without protobuf? → `onnx_model.cpp` + `onnx_model.h`
 - Looking for the MatMul benchmark? → `gemm.cpp`
 - Looking for the convolution benchmark? → `conv.cpp`
@@ -35,6 +36,7 @@ backend.
 | `onnx_peak.cpp` | `OnnxPeak` class: `applyOptions()` (takes `--max-time-ml-gpu`), `runAll()`, `enumerate()`, plus `kEpTable` — the EP → display-name/type map and `onnxAvailableEps()`; `onnxIdentify()`, who each device is (*Identity*) |
 | `onnx_runtime.cpp` | `ortRuntime()` — dlopens the runtime and resolves the `OrtApi` table; the runtime setup, fixed for the process by the first runtime that loads: `onnxSetLibraryOverride()` (`--onnx-lib` / the FFI setter), `onnxSetWinml()` and its accessors, `onnxPendingSetup()` (a choice waiting for the next start); `onnxLoadDiagnostic()`; `XPUPEAK_ONNX_STATIC` swaps the dlopen for a direct `OrtGetApiBase()` call on iOS |
 | `onnx_session.cpp` | `onnxEnv()`, `onnxCreateSession()`, `onnxStatusText()` — per-EP registration options, the CPU-fallback guard and the placement guard; `onnxDeviceLost()` / `onnxFailureStatus()` — the device-loss latch and the one place that decides whether a refusal is a capability fact (`Unsupported`) or a dead device (`Error`); `onnxProviderFenceReason()` — the graphs a provider crashes on rather than declines, never built; `onnxNonFiniteReason()` — the read-back every ladder makes of the row its timed runs returned; `onnxHeldBytes()` — what a session holds, every memory gate's count |
+| `onnx_threads.{h,cpp}` | `OnnxCallerPin` -- on a CPU provider, the thread that calls `Run()` pinned to the CPUs ONNX Runtime's intra-op pool leaves free, read from one trivial session, for that provider's tests (see "On a CPU provider, the calling thread takes the core the pool leaves it") |
 | `onnx_coreml_plan.{h,cpp}` | The CoreML provider's compute plan, parsed from the lines it logs under `ProfileComputePlan=1`, and the 5%-of-cost judgement that refuses a session Core ML ran on the CPU under the Neural Engine's name; pure string handling, no Apple headers |
 | `onnx_plugin.{h,cpp}` | Plugin execution providers (ORT 1.22+): the configured library set (`onnxSetEpLibraries`), `onnxSyncEpLibraries()` (called by `onnxEnv()`: brings the environment's registrations in line with the set, the Windows ML providers included), `onnxPluginDevices()` (one device per `OrtEpDevice` a plugin serves) and `onnxAppendPluginDevice()` (the `_V2` append) |
 | `onnx_winml.{h,cpp}` | Windows ML's execution-provider catalog through the flat C API of `Microsoft.Windows.AI.MachineLearning.dll`, dlopen'd: enumerate, install from the Store, read each provider's library path — which then registers like any `--onnx-ep` library |
@@ -2239,6 +2241,31 @@ table through the OrtEpDevice append, `onnxAppendPluginDevice()`; there
 the one exception to "no defaults" applies, since a person named that
 library (see "Plugin providers").
 
+## On a CPU provider, the calling thread takes the core the pool leaves it
+
+A CPU provider's kernels split their work between the session's intra-op
+pool and the thread that called `Run()`.  On Linux the runtime pins each
+pool thread to one core and leaves the first core for the caller, but
+never pins the caller.  Left to the scheduler, the caller usually shared a
+core with a pinned pool thread, and every split kernel waited for those two.
+On a Threadripper PRO 3955WX that halved most matmul rows from run to run,
+and changed which rung won.  `onnx_threads.h` has the numbers.
+
+So `runAll()` pins its own thread for each CPU provider's tests, to the CPUs
+the pool's threads left free (`OnnxCallerPin`), and restores it afterwards.
+Those CPUs are found from one trivial session, not assumed.  It moved the
+CPU rows of `onnx_gemm`, `onnx_conv`, the block's three tests and
+`onnx_dispatch_latency`, so those tests are at revision 2 (4.0.0).
+Activation, resident-tensor bandwidth, transfer and numeric error moved
+less than their own noise.  Two rules follow from it:
+
+- **Every `Run()` on a CPU provider comes from that thread.**  A test that
+  ran graphs from a thread of its own would bring the shared core back.
+- **No session sets its own thread options.**  The pin is computed from the
+  pool the defaults build (no `intra_op_num_threads`, no
+  `session.intra_op_thread_affinities`).  A session built another way would
+  need its own.
+
 ## A datatype needs a runtime, not just an opset
 
 `onnxDtypeUnsupportedReason()` gates both `onnx-gemm` and `onnx-numeric-error`,
@@ -2400,8 +2427,10 @@ See `include/common/AGENTS.md` § `dims`.  ONNX specifics:
   `direction`, dispatch `workload` (`matmul_256` is `small_matmul`).
 - **`revision` is 2** for `onnx_gemm` (the sixteen-layer chain),
   `onnx_conv` (the 3x3 at stride 2), and `onnx_block_prefill` and
-  `onnx_block_latency` (the prompt through a seed), all since 3.0.1; 1
-  elsewhere.  The rule is the GPU backends': 2 where a release after the
+  `onnx_block_latency` (the prompt through a seed), all since 3.0.1, and for
+  `onnx_block_decode` and `onnx_dispatch_latency` since 4.0.0 (the CPU
+  provider's caller on a core of its own, which moved the 3.0.1 ones too);
+  1 elsewhere.  The rule is the GPU backends': 2 where a release after the
   test first shipped changed its method in a way that moved its numbers.
   The reason sits beside each line that sets it.
 

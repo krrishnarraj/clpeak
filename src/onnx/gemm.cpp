@@ -222,6 +222,11 @@ int OnnxPeak::runGemm(const OrtRuntime &rt, const onnx_ep_info_t &ep,
   // Revision 2 (3.0.1): sixteen chained multiplies from a live seed, where
   // 3.0.0 timed one multiply per dispatch -- QNN's HTP read a single int8
   // 8192-cube at 13 TOPS and the chain at 35.
+  // Revision 2 (4.0.0): on a CPU provider the thread that calls the runtime
+  // takes the core its pool leaves it (onnx_threads.h).  Left to the
+  // scheduler on a Threadripper PRO 3955WX it shared a core with a pool
+  // thread in most runs, and fp32 read 0.69-1.65 TFLOPS from run to run,
+  // where it now reads 1.64-1.66.
   spec.revision = 2;
   auto test = currentDeviceScope->beginTest(spec);
 

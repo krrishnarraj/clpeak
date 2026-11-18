@@ -71,15 +71,18 @@ const size_t kFpVariantCount = sizeof(kFpVariants) / sizeof(kFpVariants[0]);
 // 35 for the MatMul spelling, and through ONNX Runtime 1.24.4's built-in QNN
 // at 36 against 5 -- its FullyConnected int8 path is the slow one.
 // TensorRT on an RTX 5060 read 142 against 135, and ONNX Runtime's CPU
-// provider 4-6% more on an M1 Pro and 60-75% more on a Zen 2 Threadripper,
-// where QLinearConv is its faster int8 kernel.  The fp16 chain was measured
-// the same way and lost or tied on every provider tried (QNN's HTP and
-// Adreno, the Neural Engine, the CPU), so it has no row.  Neither do
-// activations four times taller than the layers: on those providers they
-// gained fp16 nothing and cost the HTP's int8 seven eighths of its rate.
-// Every chain's ladder tries taller activations against narrower layers
-// instead, and only where its wider square layers fell off (gemm.cpp,
-// kTallCliffShare) -- which is where they paid, 27% on an Arc A380's fp16.
+// provider 4-6% more on an M1 Pro.  On a Zen 2 Threadripper the two read
+// the same, 1.84 and 1.85 TOPS, with the calling thread on a core of its
+// own (onnx_threads.h).  Sharing a core with a pool thread costs the MatMul
+// spelling half its rate there (0.95) and the convolution a seventh (1.59).
+// The fp16 chain was measured the same way and lost or tied on every
+// provider tried (QNN's HTP and Adreno, the Neural Engine, the CPU), so it
+// has no row.  Neither do activations four times taller than the layers: on
+// those providers they gained fp16 nothing and cost the HTP's int8 seven
+// eighths of its rate.  Every chain's ladder tries taller activations
+// against narrower layers instead, and only where its wider square layers
+// fell off (gemm.cpp, kTallCliffShare) -- which is where they paid, 27% on
+// an Arc A380's fp16.
 const Variant kIntVariants[] = {
     {ONNX_DT_INT8, true, "int8_qdq",
      {{Dim::Dtype, DType::Int8}, {Dim::Quant, dim::Quant::Qdq}, {Dim::Form, "matmul"}},

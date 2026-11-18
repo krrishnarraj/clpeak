@@ -288,6 +288,10 @@ int OnnxPeak::runConv(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       TestShape::Heterogeneous, "convolution shape and data type"};
   // Revision 2 (3.0.1): the dense 3x3 runs at stride 2 (kShapes says why),
   // where 3.0.0 ran it at stride 1 and counted multiplies Winograd skips.
+  // Revision 2 (4.0.0): on a CPU provider the thread that calls the runtime
+  // takes the core its pool leaves it (onnx_threads.h).  On a Threadripper
+  // PRO 3955WX the dense 3x3 and 1x1 rows read 1.2-1.4x what they did with
+  // that thread sharing a core with a pool thread.
   spec.revision = 2;
   auto test = currentDeviceScope->beginTest(spec);
 

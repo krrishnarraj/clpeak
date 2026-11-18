@@ -1102,7 +1102,13 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "ships in -- what sets time to the first token.";
   // Revision 2 (3.0.1) for both prompt tests: a prompt longer than the seed
   // enters through a 64-wide seed widened by one uncounted multiply, where
-  // 3.0.0 scaled the whole input.  Decode's one row never had a seed.
+  // 3.0.0 scaled the whole input.
+  // Revision 2 (4.0.0) for all three tests: on a CPU provider the thread
+  // that calls the runtime takes the core its pool leaves it
+  // (onnx_threads.h).  On a Threadripper PRO 3955WX, against that thread
+  // left to the scheduler, the fp32 512-token prompt went from 0.67-0.69 to
+  // 1.22 TFLOPS (its pass from 78-81 to 44 ms) and the int8 decode from 34
+  // to 38 GB/s.
   logger::TestSpec prefillFlopsSpec = {
       "onnx_block_prefill", "Transformer block, prefill", "flops",
       Category::Ai, prefillDescription,
@@ -1113,7 +1119,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       Category::Ai, prefillDescription,
       TestShape::Heterogeneous, "data type and prompt length"};
   prefillOpsSpec.revision = 2;
-  const logger::TestSpec decodeSpec = {
+  logger::TestSpec decodeSpec = {
       "onnx_block_decode", "Transformer block, decode", "bps",
       Category::Ai,
       "Weight-streaming rate of the same block generating one token at 2048 "
@@ -1121,6 +1127,7 @@ int OnnxPeak::runBlock(const OrtRuntime &rt, const onnx_ep_info_t &ep,
       "narrow-weight row far below fp16 means this provider unpacks the "
       "weights to full width first.",
       TestShape::Heterogeneous, "data type"};
+  decodeSpec.revision = 2;
   // Revision 2 (3.0.1): its prompt rows time the seeded prompt above.
   logger::TestSpec latencySpec = {
       "onnx_block_latency", "Transformer block latency", "s",

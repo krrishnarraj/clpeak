@@ -178,14 +178,19 @@ int OnnxPeak::runDispatchLatency(const OrtRuntime &rt, const onnx_ep_info_t &ep,
                        kSmallMatMul, kSmallMatMul, mmDtype, warmupCount,
                        forceIters, specifiedIters);
 
-  auto test = currentDeviceScope->beginTest(
-      {"onnx_dispatch_latency", "ONNX dispatch latency", "s",
-       Category::Latency,
-       "The fixed cost of handing this provider one piece of work whose "
-       "arithmetic is negligible, and of creating a session for it.  It is why "
-       "a chip rated at tens of TOPS can still lose to the host on small "
-       "work.",
-       TestShape::Heterogeneous, "what is submitted"});
+  logger::TestSpec spec{
+      "onnx_dispatch_latency", "ONNX dispatch latency", "s",
+      Category::Latency,
+      "The fixed cost of handing this provider one piece of work whose "
+      "arithmetic is negligible, and of creating a session for it.  It is why "
+      "a chip rated at tens of TOPS can still lose to the host on small "
+      "work.",
+      TestShape::Heterogeneous, "what is submitted"};
+  // Revision 2 (4.0.0): on a CPU provider the thread that calls the runtime
+  // takes the core its pool leaves it (onnx_threads.h).  On a Threadripper
+  // PRO 3955WX that took matmul_256 from 41-43 to 35-36 us.
+  spec.revision = 2;
+  auto test = currentDeviceScope->beginTest(spec);
 
   using xpupeak::Dim;
   namespace dim = xpupeak::dim;
