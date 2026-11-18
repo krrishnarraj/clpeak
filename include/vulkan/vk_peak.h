@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <utility>
 #include <bitset>
 #include <common/common.h>
 #include <common/logger.h>
@@ -227,6 +228,24 @@ static inline const char *vkWidthNote(uint32_t width)
   }
 }
 
+// Runs `fn` as the scope it is declared in exits.  A test's setup declares
+// one right after each object it makes, holding the call that frees it, so a
+// setup failure returns having freed exactly what was made, newest first, as
+// the test's own return does.  A handle whose create failed -- which that
+// call leaves undefined -- is never read.
+template <typename F>
+class ScopeExit
+{
+public:
+  explicit ScopeExit(F f) : fn(std::move(f)) {}
+  ~ScopeExit() { fn(); }
+  ScopeExit(const ScopeExit &) = delete;
+  ScopeExit &operator=(const ScopeExit &) = delete;
+
+private:
+  F fn;
+};
+
 // Manages a single Vulkan device for benchmarking
 class VulkanDevice
 {
@@ -243,7 +262,8 @@ public:
   bool init(VkInstance inst, VkPhysicalDevice physDev);
   void cleanup();
 
-  // Allocate a device-local buffer
+  // A buffer with memory of `memProps` bound to it.  On any failure both
+  // handles come back VK_NULL_HANDLE, with nothing of it left allocated.
   bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                     VkMemoryPropertyFlags memProps,
                     VkBuffer &buffer, VkDeviceMemory &memory);
@@ -419,11 +439,16 @@ struct vk_compute_desc_t
   bool *refused;
 
   // Single-variant path only.  When set, the reading is stored here instead of
-  // emitted, and a dispatch that fails leaves 0 instead of the row's error:
-  // the caller races several builds of one reading and emits the fastest
-  // itself -- runCoopMatrix timing a tile at each subgroup width it could run
-  // at.  A refusal to build still goes to `refused`.
+  // emitted, and a build that could not run -- its buffer or its dispatch
+  // failed -- leaves 0 instead of the row's error: the caller races several
+  // builds of one reading and emits the fastest itself -- runCoopMatrix timing
+  // a tile at each subgroup width it could run at.  A refusal to build still
+  // goes to `refused`.
   float *reading;
+
+  // With `reading` only.  When the reading is left at 0, the error its row
+  // would have carried, for the caller to report if none of its builds ran.
+  const char **failure;
 
   // Never retry a refused pinned build unpinned.  Set for a width raced beside
   // the one the stage would otherwise run at: unpinned, the driver would

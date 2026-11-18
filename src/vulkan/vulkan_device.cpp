@@ -711,36 +711,47 @@ bool VulkanDevice::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                 VkMemoryPropertyFlags memProps,
                                 VkBuffer &buffer, VkDeviceMemory &memory)
 {
+  // The caller's handles change only once the buffer is whole: a step that
+  // fails frees what the earlier ones made and leaves both VK_NULL_HANDLE.
+  // A failed create leaves its own output undefined, hence the locals.
+  buffer = VK_NULL_HANDLE;
+  memory = VK_NULL_HANDLE;
+
   VkBufferCreateInfo bufCI = {};
   bufCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufCI.size = size;
   bufCI.usage = usage;
   bufCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-  if (vkCreateBuffer(device, &bufCI, nullptr, &buffer) != VK_SUCCESS)
+  VkBuffer buf;
+  if (vkCreateBuffer(device, &bufCI, nullptr, &buf) != VK_SUCCESS)
     return false;
 
   VkMemoryRequirements memReqs;
-  vkGetBufferMemoryRequirements(device, buffer, &memReqs);
+  vkGetBufferMemoryRequirements(device, buf, &memReqs);
 
   VkMemoryAllocateInfo allocInfo = {};
   allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
   allocInfo.allocationSize = memReqs.size;
   allocInfo.memoryTypeIndex = findMemoryType(memReqs.memoryTypeBits, memProps);
 
-  if (allocInfo.memoryTypeIndex == UINT32_MAX)
+  VkDeviceMemory mem;
+  if (allocInfo.memoryTypeIndex == UINT32_MAX ||
+      vkAllocateMemory(device, &allocInfo, nullptr, &mem) != VK_SUCCESS)
   {
-    vkDestroyBuffer(device, buffer, nullptr);
+    vkDestroyBuffer(device, buf, nullptr);
     return false;
   }
 
-  if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS)
+  if (vkBindBufferMemory(device, buf, mem, 0) != VK_SUCCESS)
   {
-    vkDestroyBuffer(device, buffer, nullptr);
+    vkDestroyBuffer(device, buf, nullptr);
+    vkFreeMemory(device, mem, nullptr);
     return false;
   }
 
-  vkBindBufferMemory(device, buffer, memory, 0);
+  buffer = buf;
+  memory = mem;
   return true;
 }
 

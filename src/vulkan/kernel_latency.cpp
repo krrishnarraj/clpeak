@@ -44,16 +44,29 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   const char *roundtripNote = "Host submit to completion seen by the host.";
   const Dims dispatchDims  = {{Dim::Op, dim::Op::Dispatch}};
   const Dims roundtripDims = {{Dim::Op, dim::Op::Roundtrip}};
+  // A setup failure measures neither, and each still gets its row.
+  auto skipBoth = [&](const char *reason)
+  {
+    test.skip("dispatch", ResultStatus::Error, reason, dispatchNote, dispatchDims);
+    test.skip("roundtrip", ResultStatus::Error, reason, roundtripNote, roundtripDims);
+  };
+  // What setup made until then is freed on the way out, by the ScopeExit
+  // beside each object.
+  auto fail = [&](const char *reason)
+  {
+    skipBoth(reason);
+    return -1;
+  };
 
   // Pipeline layout with no descriptor sets and no push constants.
   VkPipelineLayoutCreateInfo plCI = {};
   plCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
   VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
   if (vkCreatePipelineLayout(dev.device, &plCI, nullptr, &pipeLayout) != VK_SUCCESS)
-  {
-    XPUPEAK_VLOG("pipeline layout creation failed\n");
-    return -1;
-  }
+    return fail("Pipeline layout creation failed");
+  ScopeExit freePipeLayout([&] {
+    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
+  });
 
   // Shader module from the embedded no-op SPIR-V.
   VkShaderModuleCreateInfo smCI = {};
@@ -62,11 +75,10 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   smCI.pCode    = vk_shaders::kernel_latency;
   VkShaderModule shaderModule = VK_NULL_HANDLE;
   if (vkCreateShaderModule(dev.device, &smCI, nullptr, &shaderModule) != VK_SUCCESS)
-  {
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("shader module creation failed\n");
-    return -1;
-  }
+    return fail("Shader module creation failed");
+  ScopeExit freeShaderModule([&] {
+    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
+  });
 
   VkComputePipelineCreateInfo pCI = {};
   pCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -77,12 +89,8 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   pCI.stage.pName  = "main";
   VkPipeline pipeline = VK_NULL_HANDLE;
   if (vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &pCI, nullptr, &pipeline) != VK_SUCCESS)
-  {
-    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("compute pipeline creation failed\n");
-    return -1;
-  }
+    return fail("Pipeline creation failed");
+  ScopeExit freePipeline([&] { vkDestroyPipeline(dev.device, pipeline, nullptr); });
 
   // GPU timestamp query pool used by the dispatch-latency path: a single
   // TOP_OF_PIPE timestamp tells us when the GPU started executing.
@@ -137,8 +145,15 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     qpCI.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qpCI.queryCount = 1;
     if (vkCreateQueryPool(dev.device, &qpCI, nullptr, &queryPool) != VK_SUCCESS)
+    {
+      queryPool = VK_NULL_HANDLE;   // a failed create leaves it undefined
       haveTimestamps = false;
+    }
   }
+  ScopeExit freeQueryPool([&] {
+    if (queryPool != VK_NULL_HANDLE)
+      vkDestroyQueryPool(dev.device, queryPool, nullptr);
+  });
 
   // Pre-record a 1x1x1 dispatch.  Reusing one command buffer across iters
   // keeps record overhead out of the timing loop.
@@ -149,20 +164,16 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   allocInfo.commandBufferCount = 1;
   VkCommandBuffer cmdBuf = VK_NULL_HANDLE;
   if (vkAllocateCommandBuffers(dev.device, &allocInfo, &cmdBuf) != VK_SUCCESS)
-  {
-    if (queryPool != VK_NULL_HANDLE)
-      vkDestroyQueryPool(dev.device, queryPool, nullptr);
-    vkDestroyPipeline(dev.device, pipeline, nullptr);
-    vkDestroyShaderModule(dev.device, shaderModule, nullptr);
-    vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
-    XPUPEAK_VLOG("command buffer allocation failed\n");
-    return -1;
-  }
+    return fail("Command buffer allocation failed");
+  ScopeExit freeCmdBuf([&] {
+    vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
+  });
 
   VkCommandBufferBeginInfo beginInfo = {};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
-  vkBeginCommandBuffer(cmdBuf, &beginInfo);
+  if (vkBeginCommandBuffer(cmdBuf, &beginInfo) != VK_SUCCESS)
+    return fail("Command buffer recording failed");
   if (haveTimestamps)
   {
     vkCmdResetQueryPool(cmdBuf, queryPool, 0, 1);
@@ -170,7 +181,8 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
   }
   vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   vkCmdDispatch(cmdBuf, 1, 1, 1);
-  vkEndCommandBuffer(cmdBuf);
+  if (vkEndCommandBuffer(cmdBuf) != VK_SUCCESS)
+    return fail("Command buffer recording failed");
 
   // Get a calibrated (host, gpu) pair.  Stored in driver-domain units:
   //   ns since CLOCK_MONOTONIC epoch (POSIX) or QPC ticks (Windows).
@@ -300,13 +312,6 @@ int vkPeak::runKernelLatency(VulkanDevice &dev, benchmark_config_t &cfg)
     double avgRoundtripUs = totalRoundtripUs / static_cast<double>(iters);
     test.emit("roundtrip", (float)(avgRoundtripUs * 1e-6), roundtripNote, roundtripDims);
   }
-
-  vkFreeCommandBuffers(dev.device, dev.commandPool, 1, &cmdBuf);
-  if (queryPool != VK_NULL_HANDLE)
-    vkDestroyQueryPool(dev.device, queryPool, nullptr);
-  vkDestroyPipeline(dev.device, pipeline, nullptr);
-  vkDestroyShaderModule(dev.device, shaderModule, nullptr);
-  vkDestroyPipelineLayout(dev.device, pipeLayout, nullptr);
 
   return 0;
 }
