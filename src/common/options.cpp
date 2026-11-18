@@ -152,6 +152,11 @@ struct TestFlag
 
 // --help groups these by categoryOf(test), in table order within a group,
 // so a test can never be listed under the wrong heading.
+//
+// A flag's name is also its family's in every result file (`benchmark`,
+// docs/format-v4.md § Families), and a family never changes its name once
+// 4.0.0 ships: a reader groups and compares by it.  A new spelling for the
+// command line is an alias beside the old one, never a rename.
 static const TestFlag testFlags[] = {
     {"single-precision-compute", Benchmark::ComputeSP, "fp32"},
     {"half-precision-compute", Benchmark::ComputeHP, "fp16"},

@@ -74,6 +74,12 @@ Rules that span every backend:
 - **Variant dims are free.** `width`, `chains`, `isa`, `simd_bits`, `impl`,
   `form`, `tile`, `problem_size` say how a number was reached; the best is
   taken over them.
+- **Author freely; the result is written canonical.** A dim at its default
+  may be authored (`{Dim::Dtype, DType::Fp32}` on an fp32 test): a result
+  drops it, holds on the test what every reading shares, and declares each
+  key's class in `dim_keys`, so a reader builds the measure key from the file
+  alone (`canonicalDims()`, `src/common/run_document.cpp`).  A checkpoint
+  keeps the dims as authored.
 - **A missing word goes at the end of its list** in `vocabulary.h` and
   `src/common/vocabulary.cpp`, in a commit of its own, and in the spec's
   tables. A key's class and default never change: a correction is a new key.
@@ -235,6 +241,7 @@ See also: `app/AGENTS.md` (the GUI affordance), `src/ffi/AGENTS.md` (the
 | `vocabulary.h` | The format's words, each list append-only: `DType`, `Dim` with each key's class, kind and default (`dimInfo()`, `dimDefaultFor()`) and the `dim::` value enums, the family table (`familyInfo()`: method, data type, accumulator rule), processor / package / cluster / cache / engine kinds, `LinkEvidence`, `Vendor` with the PCI, CPUID and MIDR tables, form factors, `BackendKind` and `backendPortable()`. In `namespace xpupeak` |
 | `units.h` | `Quantity`, `Direction`, `UnitInfo` — resolves a unit token into symbol, quantity, and which way is better; `formatScaledValue()` picks the display SI prefix, `formatReading()` the same as one string for a reading quoted in a description |
 | `json.h` | Minimal JSON DOM parser (the writers stream text), and `jsonSerialize()`, which writes a parsed value back: what keeps an `ext` whole |
+| `path_scrub.h` | `scrubPaths()` / `scrubArgv()`: a path without the user's or the install's name in it, for every log entry and a shared file's argv (docs/format-v4.md § Never recorded) |
 | `host_info.h` | `probeHost()` — the machine a run happened on, never its owner — and the document's `SystemInfo` (`probeSystem()`) and `RunConditions` (`probeConditions()` as a run starts, `finishConditions()` as it ends, `setHostFacts()` for what only the app reads) |
 | `logger.h` | `LogEvent` + `logger` abstract base — result-scope API, `log()`/`note()` diagnostics, single `onEvent()` hook, accumulated `doc` |
 | `run_log.h` | `RunLog` — one run's diagnostic stream: the process's `LogSink`, the document's `log`, the `<output>.log` sidecar, the size cap |

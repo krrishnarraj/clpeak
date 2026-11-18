@@ -466,7 +466,7 @@ See `include/common/AGENTS.md` § `dims`.  Core ML specifics:
   `explicit` otherwise (`pointDims`).
 - **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`,
   transfer `direction`, dispatch `workload` -- `model_create` for this
-  backend's creation row, and `small_matmul` with the `problem_size` the
+  backend's creation row (ONNX's and LiteRT's `session_create` rows too), and `small_matmul` with the `problem_size` the
   planner first sent the unit.
 - **`revision` is 2** for `coreml_gemm` (the sixteen-layer chain),
   `coreml_conv` (the 3x3 at stride 2), `coreml_block_prefill` and

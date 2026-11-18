@@ -203,6 +203,30 @@ void main() {
           id: 'fp16', value: 1, dims: {'dtype': 'fp16', 'lanes': 32});
       expect(measureReading(run, test, m)!.key.id,
           'matrix-compute|flops|dtype=fp16|lanes=32');
+      // Unless its file's `dim_keys` says it is variant: a key added after
+      // this build still merges as the file that has it says.
+      expect(
+          measureReading(run, test, m, declared: const {'lanes': 'variant'})!
+              .key
+              .id,
+          'matrix-compute|flops|dtype=fp16');
+      // A key this build knows keeps its own class, whatever a file says.
+      const w = MetricResult(id: 'fp16', value: 1, dims: {'dtype': 'fp16', 'width': 4});
+      expect(
+          measureReading(run, test, w, declared: const {'width': 'identity'})!
+              .key
+              .id,
+          'matrix-compute|flops|dtype=fp16');
+    });
+
+    test('a file\'s dim_keys reach the engine', () {
+      final doc = RunDocument.fromJson({
+        'schema': 'xpupeak/run',
+        'format_version': 4,
+        'dim_keys': {'dtype': 'identity', 'lanes': 'variant'},
+        'devices': [],
+      });
+      expect(doc.meta!.dimKeys, {'dtype': 'identity', 'lanes': 'variant'});
     });
 
     test('a reading without a family or a value has no key', () {

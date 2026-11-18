@@ -90,12 +90,13 @@ Abbreviated; the values are illustrative.
       "clusters": [ { "kind": "performance", "cores": 8, "max_mhz": 3228 },
                     { "kind": "efficiency", "cores": 2, "max_mhz": 2064 } ],
       "engines": [ {"kind": "matrix", "name": "AMX", "scope": "cluster", "reached_by": "library"} ],
-      "features": [ "neon", "fp16", "dotprod", "fhm", "aes", "sha2", "sha512", "crc32" ] },
+      "features": [ "neon", "fp16", "dotprod", "fhm", "aes", "sha256", "sha512", "crc32" ] },
     { "id": "gpu0", "kind": "gpu", "package": "pkg0", "vendor": "apple", "name": "Apple M1 Pro",
       "arch": "Apple7", "integrated": true, "compute_units": 16, "compute_unit": "core" },
     { "id": "npu0", "kind": "npu", "package": "pkg0", "vendor": "apple",
       "name": "Apple Neural Engine", "compute_units": 16 }
   ],
+  "dim_keys": { "dtype": "identity", "isa": "variant", "scope": "identity", "simd_bits": "variant" },
 
   "devices": [
     {
@@ -128,7 +129,7 @@ Abbreviated; the values are illustrative.
         {
           "id": "single_precision_compute", "variant": "NEON",
           "benchmark": "single-precision-compute",
-          "dims": {"dtype": "fp32", "isa": "neon", "simd_bits": 128},
+          "dims": {"isa": "neon", "simd_bits": 128},
           "…": "…",
           "metrics": [
             { "id": "float ST", "dims": {"scope": "core"}, "value": 1.03e11 },
@@ -173,6 +174,7 @@ Abbreviated; the values are illustrative.
 | `annotations` | C | what only a person knows about the run (*Annotations*) |
 | `resumed` | C | present only for a run continued after its process ended part-way: one entry per part after the first (*Resumed runs*) |
 | `packages`, `processors` | C | the hardware (*Hardware*) |
+| `dim_keys` | C | every dim key the file's tests and readings use, with its class: `{"dtype": "identity", "width": "variant"}`. A reader takes the class of a key it does not know from here (*Measure keys*) |
 | `devices` | C | one entry per benchmarked device |
 | `ext` | — | experimental fields (*Compatibility*) |
 | `inventory` | D | `--verbose` only: what `--list-devices` would have shown (*Inventory*) |
@@ -187,7 +189,8 @@ the CMake configuration it was built in (`Release`, `Debug`, …) when the
 build stamped it: a debug build's host-side work runs unoptimised, and a slow
 run from one is not the device's fault.
 
-**`invocation`**: `argv` (I) is the command line. `target_time_us`,
+**`invocation`**: `argv` (I) is the command line, the program by its file name
+and every path as *Never recorded* writes it. `target_time_us`,
 `target_time_us_ml_gpu` and `target_time_us_cpu` are the `--max-time-gpu`,
 `--max-time-ml-gpu` and `--max-time-cpu` budgets in microseconds, and
 `warmup` the warm-up count. `categories` lists the categories enabled;
@@ -271,7 +274,7 @@ is the last part's.
 Facts only a person knows, as a flat map of strings (C). The tool never fills
 it, and it never overwrites a measured fact: a display may prefer an
 annotation, a reader keeps both. Its writers are `--annotate key=value`
-*(V10)*, the app's Details editor *(V8)*, and a site that collects results,
+*(V10)*, the app's Details editor, and a site that collects results,
 at upload. Recommended keys:
 
 | key | for |
@@ -496,6 +499,13 @@ test's `dims` hold what all its readings share — a vector test's data type, a
 CPU test's ISA — and a reading's own add to them and win over them. A value
 is a string or a whole number, and stays so.
 
+A result writes them in one form, so that a measure key can be read off the
+file alone: **no dim is written at its default** (an absent key means its
+default, and a present one never is), keys are in order, and a test holds
+the dims every one of its readings has, each reading the rest. With the classes `dim_keys`
+declares, that is all a reader needs (*Measure keys*). A checkpoint keeps
+the dims as the backend authored them (*The checkpoint*).
+
 Every key has one fixed class:
 
 - **Identity** keys must match for two readings to be comparable: the data
@@ -578,7 +588,7 @@ invented word for that pair would read worse than none.
 | `label` | I | display form; **omitted when it equals `id`**, which is the usual case |
 | `benchmark` | C | the reading's family, present only when it is not its test's |
 | `dims` | C | the reading's coordinates, over its test's |
-| `value` | C | the reading, in the test's `unit`. Present exactly when the reading succeeded |
+| `value` | C | the reading, in the test's `unit`: always a finite number. Present exactly when the reading succeeded; a measurement that came out NaN or infinite is an `error` reading instead |
 | `status` | C | `unsupported` \| `skipped` \| `error`. **Omitted for a successful reading** — every row of a healthy file is `ok`, so spelling it out on each would be noise |
 | `reason` | I | why, for a non-`ok` reading |
 | `description` | I | what this one reading means |
@@ -614,6 +624,14 @@ of its own. The **usual accumulator** of a type is `fp64` for fp64, `fp32`
 for every other float, `int64` for the 64-bit integers and `int32` for the
 rest.
 
+A dot product's or a matrix multiply's 8-bit integer inputs are `int8`
+whatever their signs, and so is their 32-bit accumulator: x86's VPDPBUSD
+(unsigned × signed), Arm's SDOT (signed × signed), a GPU's DP4a and a matrix
+engine's s8 × u8 tile are each processor's int8 path, so their rows share a
+key and the faster is the peak; the reading's id says which signs ran. The
+`uint` types are for an operation whose speed depends on the sign, such as
+a 64-bit integer divide.
+
 ### Dim keys
 
 | key | class | value | default | meaning |
@@ -637,7 +655,7 @@ rest.
 | `phase` | identity | `prefill`, `decode` | — | a transformer block's phase |
 | `context` | identity | tokens | — | a prefill's sequence length, a decode's KV-cache length |
 | `contention` | identity | `none`, `all` | `none` | whether every other thread competed for the same data |
-| `workload` | identity | `trivial_op`, `small_matmul`, `session_create`, `model_create` | — | what a dispatch-latency reading submits |
+| `workload` | identity | `trivial_op`, `small_matmul`, `model_create` | — | what a dispatch-latency reading submits; `model_create` is making a trivial model runnable from its bytes, its compile included, whatever the runtime calls the result (Core ML's model, ONNX Runtime's session, LiteRT's compiled model) |
 | `kv` | identity | a data type | the reading's `dtype` | a transformer block's KV-cache type |
 | `bound` | identity | `throughput`, `latency` | `throughput` | what limits a compute kernel: enough independent chains to fill every pipe, as in every compute peak, or one chain whose every operation waits on the one before |
 | `width` | variant | a number | — | vector width, in elements |
@@ -791,7 +809,7 @@ reproduces what the CLI printed.
 | `level` | `error` \| `warning` \| `info` \| `debug` |
 | `source` | the library a message was relayed from: `onnxruntime` (its logger), `vulkan` (a `VK_EXT_debug_utils` messenger), `opencl` (the context's error callback), `console` (output captured off stdout/stderr around a call that prints), `app` (what the app running it says: that it left the screen or came back, that the run was paused or resumed -- a run holds at its next reading meanwhile), `android` (how the OS says the process ended; sidecar only, see below). **Absent for XpuPeak's own messages** |
 | `backend`, `device`, `device_index`, `test` | the scope the line fired in — `test` is the test's key (`id@variant`), joinable to `tests[]`. Each is absent when no such scope was open: a message between two backends carries none |
-| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found |
+| `message` | the text. Embedded newlines are kept — a compiler's build log is its line structure. A relayed message (one with a `source`) has every identifier in it — a PCI bus address, a UUID, a LUID or registry ID after its name — replaced by its token, `<pci_bus 7e05b9d1c2a84f36>`, the one the device's `evidence` holds (*Linking*): a runtime's own log names the devices it found. Every message, XpuPeak's own included, has its paths written as *Never recorded* says |
 
 What each level means, and when it is in the file:
 
@@ -896,7 +914,9 @@ from its start, or with `--skip-crashed`, for a crash that would repeat, is
 recorded in its place as an `error` reading `crashed` instead. Where the run
 stopped while held, the readings its `held_tests` had are kept, and the
 Benchmark run again adds only the ones they lack. Only the build
-that started a run continues it, on the OS release it started on.
+that started a run continues it, on the OS it started on: every field of
+`system.os` the same, so a kernel or OS build update between parts refuses
+the resume.
 
 The parts end in one document under the same name and the same `run_id`.
 `generated_at` is the first part's start, `log[].elapsed_s` goes on counting
@@ -1016,11 +1036,12 @@ shares. For each reading that has a `value`:
    takes the reading's value. These are its **effective dims**.
 4. **Data type**: the effective `dtype`, else the family's (*Families*), else
    none.
-5. **Identity dims**: each effective dim whose key is identity (*Dim keys*),
-   and each whose key the reader does not know, except where the value is
-   the key's default for this family and data type. Variant dims (`width`,
-   `chains`, `isa`, `simd_bits`, `impl`, `form`, `tile`, `problem_size`)
-   never count: the best is taken over them.
+5. **Identity dims**: each effective dim whose key is identity — by *Dim
+   keys*, or for a key the reader does not know by the file's `dim_keys`,
+   and identity where that is silent — except where the value is the key's
+   default for this family and data type. Variant dims (`width`, `chains`,
+   `isa`, `simd_bits`, `impl`, `form`, `tile`, `problem_size`) never count:
+   the best is taken over them.
 6. **Text**: a string as written, a whole number in decimal (`2048`, also
    where the file says `2048.0`).
 7. **Key**: the family, the quantity, then `key=value` for each identity dim
@@ -1036,6 +1057,12 @@ data type the reader does not know gives what it can: no `dtype` default; for
 `acc`, the usual accumulator of a known data type, and no default for an
 unknown one.
 
+A result never writes a dim at its default (*`dims`*), so steps 4 and 5's
+defaults change nothing in one: a reader with no tables — or one older than
+the file, meeting a family or a key added since — reaches the same key from
+the family, the quantity and every effective dim that `dim_keys` calls
+identity. The defaults matter only for a file edited by hand.
+
 - Metal's `simdgroup_matrix` → `fp16` `{dtype: fp16}`:
   `matrix-compute|flops|dtype=fp16`.
 - `fp16 f16acc` `{dtype: fp16, acc: fp16}`:
@@ -1043,8 +1070,8 @@ unknown one.
   accumulator, the same reading is `matrix-compute|flops|dtype=fp16`.
 - `fp8_e4m3 2:4` `{dtype: fp8_e4m3, sparsity: "2:4"}`:
   `matrix-compute|flops|dtype=fp8_e4m3|sparsity=2:4`.
-- The CPU's `single_precision_compute@NEON`, whose test has `{dtype: fp32,
-  isa: neon, simd_bits: 128}`: `float ST` `{scope: core}` is
+- The CPU's `single_precision_compute@NEON`, whose test has `{isa: neon,
+  simd_bits: 128}` (fp32 is its family's): `float ST` `{scope: core}` is
   `single-precision-compute|flops|scope=core`, and `float MT` is
   `single-precision-compute|flops`. The ISA is variant, so a CPU's NEON and
   SVE variants reach the same keys, and the better is the CPU's.
@@ -1143,12 +1170,11 @@ text someone typed: a site escapes them, bounds their length, and shows them
 as that person's words. Its upload form may write the recommended keys and
 keys of its own; a reader shows a key it does not know as written.
 
-**Privacy.** What a file never holds is the *Never recorded* list. A path is
-where a person's name can still reach a file: a home directory is named after
-its user, and some paths are written whole — the program's own in
-`invocation.argv`, an output or library path given on the command line, a
-cache or temporary folder in a log line. So a site publishes less than it
-keeps:
+**Privacy.** What a file never holds is the *Never recorded* list: its paths
+come without the home directory's name, the user's temporary folder or an
+app's install id. A path can still hold a name a person chose, a folder's or
+a volume's, in `invocation.argv` (an output or library path given on the
+command line) and in a log line. So a site publishes less than it keeps:
 
 - `log` and `inventory` are for maintainers (D): a site drops them, or keeps
   them for the uploader alone.
@@ -1217,8 +1243,9 @@ files written by development builds are not migrated.
 - **Readers** accept any minor of their major, and say when a file comes from
   a newer one ("written by a newer XpuPeak; some details aren't shown"). They
   treat what they don't know as opaque and never fail on it: an unknown key
-  is ignored; an unknown enum value is shown as written; an unknown dim key is
-  treated as identity, so it never merges what it doesn't understand.
+  is ignored; an unknown enum value is shown as written; an unknown dim key
+  takes the class the file's `dim_keys` gives it, and is identity where that
+  is silent, so it never merges what it doesn't understand.
 - **A major bump (5)** would get a new schema string and a converter, never a
   silent change. The rules here exist so that it never has to happen.
 
@@ -1307,7 +1334,15 @@ it ran on or the person who ran it, and no minor may add:
   `UIDevice.name`) — a name the user chooses to give goes in `annotations`;
 - a GPU's UUID or LUID, a PCI bus address, a Metal registry ID — only their
   per-run tokens (*Linking*);
-- the key those tokens are made under, which only the checkpoint holds.
+- the key those tokens are made under, which only the checkpoint holds;
+- the parts of a path that name the user or the install. A path is written
+  with the home directory as `~` and the user's own temporary directory as
+  `$TMPDIR`; any other home's name as `<user>` (`/Users/<user>`,
+  `/home/<user>`, `C:\Users\<user>`) and macOS's per-user folder as
+  `/var/folders/<user>`; an app install's random directory as `<install>`
+  (Android's `/data/app/<install>`, iOS's `Application/<install>`).
+  `invocation.argv[0]` is the program's file name alone. A checkpoint keeps
+  argv as given, since `--resume` parses it again;
 - a power plan's GUID, which is unique to the install, and who and where an
   OS build was made (Android's `ro.build.user` and `ro.build.host`, a local
   build's `eng.<user>` id).

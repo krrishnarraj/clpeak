@@ -4,6 +4,7 @@ add_library(peak_common STATIC
     console_mute.cpp
     dynlib.cpp
     hardware_link.cpp
+    path_scrub.cpp
     inventory.cpp
     logger.cpp
     logger_text.cpp

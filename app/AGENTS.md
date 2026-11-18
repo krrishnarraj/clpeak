@@ -209,7 +209,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `lib/src/model/measures.dart` (`RunMeasures.of(doc)`: per processor, the
   best reading of every measure key overall and per backend, with the
   reading it came from), pure Dart, by the algorithm `docs/format-v4.md`
-  fixes -- a C++ engine in the CLI must give the same answers.  What the
+  fixes -- a C++ engine in the CLI must give the same answers.  A dim key
+  this build does not know takes its class from the file's `dim_keys`
+  (`RunMeta.dimKeys`), so a newer file's variant keys still merge.  What the
   results summary shows is the headline catalog, `assets/measures.json`
   (`HeadlineCatalog`, `lib/src/model/headlines.dart`; format in
   `docs/format-v4.md` § The headline catalog): peak floating-point and

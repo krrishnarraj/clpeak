@@ -2424,7 +2424,8 @@ See `include/common/AGENTS.md` § `dims`.  ONNX specifics:
   `{dtype: fp16, kv: int8}`.
 - **The rest**: activation `{op, working_set}`, tensor_bw `{working_set}`
   (the rung's weight bytes, whichever width streams them), transfer
-  `direction`, dispatch `workload` (`matmul_256` is `small_matmul`).
+  `direction`, dispatch `workload` (`matmul_256` is `small_matmul`, and
+  `session_create` is `model_create`, as Core ML's creation row is).
 - **`revision` is 2** for `onnx_gemm` (the sixteen-layer chain),
   `onnx_conv` (the 3x3 at stride 2), and `onnx_block_prefill` and
   `onnx_block_latency` (the prompt through a seed), all since 3.0.1, and for

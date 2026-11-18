@@ -1,6 +1,7 @@
 #ifndef XPUPEAK_JSON_WRITER_H
 #define XPUPEAK_JSON_WRITER_H
 
+#include <cmath>
 #include <cstdint>
 #include <iomanip>
 #include <locale>
@@ -98,6 +99,10 @@ public:
     // per million and used to be written as 0.0000.
     static std::string fmtNum(double v)
     {
+        // JSON has no NaN or infinity, so a non-finite number is written as
+        // null and the file still parses.  emit() keeps measurements from
+        // getting here; this covers every other number in the file.
+        if (!std::isfinite(v)) return "null";
         std::ostringstream ss;
         ss.imbue(std::locale::classic());
         ss << std::setprecision(7) << v;

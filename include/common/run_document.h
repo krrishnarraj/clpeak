@@ -589,6 +589,11 @@ struct RunMeta {
     // Each part after the first, in order; empty for a run done in one go.
     std::vector<ResumeRecord> resumed;
 
+    // The classes a read file declared for its dim keys (`dim_keys`), kept
+    // for the ones this build does not know: a rewrite declares them as the
+    // file did, never as identity by default.
+    std::map<std::string, std::string> dimKeyClasses;
+
     std::string ext;              // the run's experimental fields, raw JSON
 };
 

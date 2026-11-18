@@ -1,6 +1,7 @@
 #include <common/run_log.h>
 #include <common/hardware_link.h>   // scrubIdentifiers
 #include <common/logger.h>
+#include <common/path_scrub.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -197,6 +198,11 @@ void RunLog::recordToSidecar(LogEntry &entry)
 
 void RunLog::appendLocked(LogEntry &entry, bool toDocument)
 {
+    // Every entry, the document's and the sidecar's, our own lines and a
+    // library's alike, without the parts of a path that name the user or the
+    // install (include/common/path_scrub.h).  It is the entry the logger then
+    // renders, so the console shows what the file holds.
+    entry.message = xpupeak::scrubPaths(entry.message);
     bool toSidecar = sidecar != nullptr;
     if (entry.level == xpupeak::LogLevel::Debug)
     {

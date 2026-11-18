@@ -37,14 +37,17 @@ String dimValueText(Object v) {
 /// The identity dims of [dims] that differ from their defaults, for a
 /// reading of [family], sorted by key: what a measure key carries.  Variant
 /// keys go, and so does every key at its default; a key this build does not
-/// know stays, since it is identity (docs/format-v4.md).
+/// know stays unless its file declares it variant ([declared], the file's
+/// `dim_keys`), since it is identity (docs/format-v4.md).
 ///
 /// [dims] are a reading's effective dims (its test's under its own), or a
 /// headline's dims object, which is normalised the same way to be compared.
-Map<String, String> identityDims(Map<String, Object> dims, String family) {
+Map<String, String> identityDims(Map<String, Object> dims, String family,
+    {Map<String, String> declared = const {}}) {
   final dtypeValue = dims['dtype'];
   final dtype = dtypeValue == null ? '' : dimValueText(dtypeValue);
-  final keys = dims.keys.where(isIdentityDim).toList()..sort();
+  final keys = dims.keys.where((k) => isIdentityDim(k, declared)).toList()
+    ..sort();
   final out = <String, String>{};
   for (final key in keys) {
     final text = dimValueText(dims[key]!);
@@ -150,9 +153,10 @@ bool isBetter(MeasuredReading a, MeasuredReading b) {
 
 /// The key, and the reading that measured it [ok] on a device, or null when
 /// it has none: a reading that did not succeed, has no family, or no finite
-/// value.
+/// value.  [declared] is the file's `dim_keys`.
 MeasuredReading? measureReading(
-    DeviceRun device, TestResult test, MetricResult m) {
+    DeviceRun device, TestResult test, MetricResult m,
+    {Map<String, String> declared = const {}}) {
   if (!m.isOk || !m.value.isFinite) return null;
   final family = m.benchmark.isNotEmpty ? m.benchmark : test.header.benchmark;
   if (family.isEmpty) return null;
@@ -166,7 +170,7 @@ MeasuredReading? measureReading(
     test: test,
     metric: m,
     key: MeasureKey(family, test.unitsOf(m).quantityTag,
-        identityDims(dims, family)),
+        identityDims(dims, family, declared: declared)),
     dims: dims,
     dtype: dtype,
     direction: m.direction ?? test.header.direction,
@@ -297,7 +301,8 @@ class RunMeasures {
       group.devices.add(run);
       for (final test in run.tests) {
         for (final m in test.metrics) {
-          final r = measureReading(run, test, m);
+          final r = measureReading(run, test, m,
+              declared: doc.meta?.dimKeys ?? const {});
           if (r != null) group._add(r);
         }
       }

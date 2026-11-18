@@ -69,6 +69,11 @@
       "type": "array",
       "items": {"$ref": "#/$defs/processor"}
     },
+    "dim_keys": {
+      "description": "C. Every dim key the file's tests and readings use, with its class: identity keys must match for two readings to compare, variant keys are what the best is taken over. A reader takes the class of a key it does not know from here, identity where this is silent.",
+      "type": "object",
+      "additionalProperties": {"enum": ["identity", "variant"]}
+    },
     "devices": {
       "description": "C. One entry per benchmarked device: one backend's view of a processor.",
       "type": "array",

@@ -449,7 +449,13 @@ class RunMeta {
     this.systemInfo = const SystemInfo(),
     this.conditions = const RunConditions(),
     this.annotations = const {},
+    this.dimKeys = const {},
   });
+
+  /// The class of each dim key the file uses, `identity` or `variant`
+  /// (`dim_keys`): what the measure engine takes for a key this build does
+  /// not know.
+  final Map<String, String> dimKeys;
 
   /// The additive revision of format 4 the file was written in.
   final int formatMinor;
@@ -556,6 +562,7 @@ class RunMeta {
           BuildBackend(name: b),
     ];
     final annotations = m['annotations'];
+    final dimKeys = m['dim_keys'];
     return RunMeta(
       generator: GeneratorInfo.fromJson(m['generator']),
       generatedAt: m['generated_at'] as String? ?? '',
@@ -591,6 +598,12 @@ class RunMeta {
               e.key as String: e.value is String
                   ? e.value as String
                   : e.value.toString(),
+      },
+      dimKeys: {
+        if (dimKeys is Map)
+          for (final e in dimKeys.entries)
+            if (e.key is String && e.value is String)
+              e.key as String: e.value as String,
       },
     );
   }
