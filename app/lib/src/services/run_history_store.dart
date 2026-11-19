@@ -521,12 +521,16 @@ class RunHistoryStore {
     required String fileName,
     bool overwrite = false,
   }) async {
-    late Map<String, dynamic> json;
+    final Object? decoded;
     try {
-      json = jsonDecode(raw) as Map<String, dynamic>;
+      decoded = jsonDecode(raw);
     } catch (e) {
       throw FormatException('Not valid JSON: $e');
     }
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Not a run document: it is not a JSON object');
+    }
+    final json = decoded;
     if (writtenBy3x(json)) throw const FormatException(refusal3x);
     if ((json['format_version'] as num?)?.toInt() != formatVersion) {
       throw FormatException(
@@ -536,7 +540,15 @@ class RunHistoryStore {
       throw const FormatException(
           'This is the checkpoint of a run that did not finish, not a result');
     }
-    final doc = RunDocument.fromJson(json);
+    // Valid JSON of the wrong shape (`devices` an object, a number where a
+    // name goes) fails as a cast deep in the reader: say what it means.
+    final RunDocument doc;
+    try {
+      doc = RunDocument.fromJson(json);
+    } on TypeError {
+      throw const FormatException(
+          'Not a run document: a field holds the wrong kind of value');
+    }
     final dir = await runsDirectory();
     var targetName = p.basename(fileName);
     if (!targetName.endsWith(fileSuffix)) {
