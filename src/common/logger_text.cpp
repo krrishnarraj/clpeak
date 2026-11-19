@@ -618,11 +618,14 @@ std::string factorText(double factor)
 }
 
 // A verdict from this run's side: "1.19x better", "2.14x worse", "the same",
-// "method changed"; "better" alone where a value is not above zero.
+// "method changed"; "better" alone where a value is not above zero.  A
+// factor that would print as 1.000x reads "within 0.05%", the band the
+// reading-by-reading count uses, rather than a winner its digits cannot show.
 std::string verdictText(const xpupeak::Verdict &v)
 {
     if (v.methodChanged) return "method changed";
     if (v.isTie()) return "the same";
+    if (v.hasFactor && v.factor < 1.0005) return "within 0.05%";
     const std::string word = v.winner == xpupeak::CompareSide::A ? "better" : "worse";
     return v.hasFactor ? factorText(v.factor) + " " + word : word;
 }
