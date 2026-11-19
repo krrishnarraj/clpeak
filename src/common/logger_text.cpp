@@ -1,5 +1,6 @@
 #include <common/logger_text.h>
 #include <common/measures.h>
+#include <common/path_scrub.h>
 #include <common/run_compare.h>
 #include <algorithm>
 #include <cmath>
@@ -763,7 +764,9 @@ void printRunCompare(const RunDocument &run, const xpupeak::CompareBaseline &bas
     const xpupeak::RunCompare c = xpupeak::RunCompare::of(a, b, catalog);
 
     const RunMeta &bm = baseline.document.meta;
-    out << "\nCompared with " << baseline.file << "\n";
+    // The path as a shared file would hold it: output gets pasted into
+    // issues, so no home directory's name (include/common/path_scrub.h).
+    out << "\nCompared with " << xpupeak::scrubPaths(baseline.file) << "\n";
     out << "  this run: " << (systemName(run.meta).empty() ? "(unnamed system)" : systemName(run.meta))
         << "\n";
     out << "  baseline: " << (systemName(bm).empty() ? "(unnamed system)" : systemName(bm));
