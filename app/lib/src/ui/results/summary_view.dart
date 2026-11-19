@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../model/headlines.dart';
 import '../../model/measures.dart';
-import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
@@ -84,13 +83,13 @@ class SystemPanel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             decoration: BoxDecoration(
-              color: t.isDark ? t.hover : t.hover.withValues(alpha: 0.7),
+              color: t.isDark ? t.surface2 : t.surface2.withValues(alpha: 0.7),
               border: Border(bottom: BorderSide(color: t.line)),
             ),
             child: Row(
               children: [
                 Icon(_formIcon(s.formFactor, s.formFactorDetail),
-                    size: 15, color: t.dim),
+                    size: 15, color: t.muted),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(title.isEmpty ? 'System' : title,
@@ -122,8 +121,8 @@ class SystemPanel extends StatelessWidget {
                 children: [
                   for (final (key, value) in [...entries, ...notes])
                     Text.rich(TextSpan(children: [
-                      TextSpan(text: '$key  ', style: t.micro),
-                      TextSpan(text: value, style: t.monoSmall),
+                      TextSpan(text: '$key  ', style: t.caps),
+                      TextSpan(text: value, style: t.small),
                     ])),
                 ],
               ),
@@ -199,14 +198,14 @@ class FlagshipCard extends StatelessWidget {
                           style: t.title),
                       if (facts.isNotEmpty) ...[
                         const SizedBox(height: 4),
-                        Text(facts, style: t.monoSmallDim),
+                        Text(facts, style: t.smallMuted),
                       ],
                     ],
                   ),
                 ),
                 const SizedBox(width: 10),
                 Text(group.linked ? group.id : group.devices.first.backend,
-                    style: t.micro),
+                    style: t.caps),
               ],
             ),
           ),
@@ -214,7 +213,7 @@ class FlagshipCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
               child: Text('No headline applies to this kind of device.',
-                  style: t.monoSmallDim),
+                  style: t.smallMuted),
             )
           else
             LayoutBuilder(builder: (context, c) {
@@ -260,7 +259,7 @@ class FlagshipCard extends StatelessWidget {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
-                    child: Text('MEASURED THROUGH', style: t.micro),
+                    child: Text('MEASURED THROUGH', style: t.caps),
                   ),
                   for (final run in group.devices)
                     _DeviceLink(
@@ -362,24 +361,20 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final v = value;
-    final tint = XpuPeakTheme.categoryColor(
-        headline.quantity == 'bytes_per_second'
-            ? BenchCategory.bandwidth
-            : BenchCategory.compute,
-        brightness: Theme.of(context).brightness);
-    final big = t.value.copyWith(fontSize: 30, letterSpacing: -0.9, height: 1.05);
+    final tint = t.ink;
+    final big = t.number.copyWith(fontSize: 30, letterSpacing: -0.9, height: 1.05);
 
     final body = Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 13),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(headline.title.toUpperCase(), style: t.micro),
+          Text(headline.title.toUpperCase(), style: t.caps),
           const SizedBox(height: 9),
           if (v == null) ...[
-            Text('—', style: big.copyWith(color: t.faint)),
+            Text('—', style: big.copyWith(color: t.muted)),
             const SizedBox(height: 6),
-            Text('not measured on this device', style: t.monoSmallDim),
+            Text('not measured on this device', style: t.smallMuted),
           ] else ...[
             Builder(builder: (context) {
               final f = formatValue(v.best.value, v.best.units);
@@ -388,12 +383,12 @@ class _Stat extends StatelessWidget {
                   TextSpan(text: f.value, style: big.copyWith(color: tint)),
                   TextSpan(
                       text: ' ${f.unit}',
-                      style: t.mono.copyWith(color: t.dim, fontSize: 14)),
+                      style: t.body.copyWith(color: t.muted, fontSize: 14)),
                 ]),
               );
             }),
             const SizedBox(height: 6),
-            Text(_words(v.best), style: t.monoSmall),
+            Text(_words(v.best), style: t.small),
             const SizedBox(height: 7),
             Wrap(
               spacing: 6,
@@ -403,7 +398,7 @@ class _Stat extends StatelessWidget {
                 CTag(text: v.best.backend, upper: false, color: tint),
                 if (v.byBackend.length > 1)
                   Text('best of ${v.byBackend.length} backends',
-                      style: t.micro.copyWith(fontSize: 9.5)),
+                      style: t.caps.copyWith(fontSize: 9.5)),
               ],
             ),
           ],
@@ -414,7 +409,7 @@ class _Stat extends StatelessWidget {
     return CTap(
       onTap: () => showHeadlineDialog(context, device: device, value: v),
       builder: (context, hovered, pressed) => Container(
-        color: hovered || pressed ? t.hover : Colors.transparent,
+        color: hovered || pressed ? t.surface2 : Colors.transparent,
         child: body,
       ),
     );
@@ -442,7 +437,7 @@ class _DeviceLink extends StatelessWidget {
       builder: (context, hovered, pressed) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(
-          color: hovered || pressed ? t.hover : Colors.transparent,
+          color: hovered || pressed ? t.surface2 : Colors.transparent,
           border: Border.all(color: t.line),
           borderRadius: BorderRadius.circular(CP.rControl),
         ),
@@ -451,11 +446,11 @@ class _DeviceLink extends StatelessWidget {
           children: [
             Flexible(
               child: Text(label,
-                  style: t.monoSmall.copyWith(color: hovered ? t.text : t.dim)),
+                  style: t.small.copyWith(color: hovered ? t.ink : t.muted)),
             ),
             if (onTap != null) ...[
               const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 12, color: t.faint),
+              Icon(Icons.chevron_right, size: 12, color: t.muted),
             ],
           ],
         ),
@@ -505,18 +500,18 @@ class _HeadlineDialog extends StatelessWidget {
             children: [
               CValue(value: f.value, unit: f.unit),
               const SizedBox(height: 6),
-              Text(_words(best), style: t.mono),
+              Text(_words(best), style: t.body),
               const SizedBox(height: 10),
               Text(
                 'Measured through ${best.backend} on ${best.device.device}: '
                 '${best.test.displayTitle}, reading '
                 '"${best.metric.displayLabel}"'
                 '${best.revision > 1 ? ' (method revision ${best.revision})' : ''}.',
-                style: t.body,
+                style: t.prose,
               ),
               if (ranked.length > 1) ...[
                 const SizedBox(height: 14),
-                Text("EACH BACKEND'S BEST", style: t.micro),
+                Text("EACH BACKEND'S BEST", style: t.caps),
                 const SizedBox(height: 6),
                 for (final r in ranked)
                   Padding(
@@ -527,13 +522,13 @@ class _HeadlineDialog extends StatelessWidget {
                         SizedBox(
                           width: 64,
                           child: Text(r.backend,
-                              style: t.monoSmall.copyWith(
+                              style: t.small.copyWith(
                                   fontWeight: identical(r, best)
                                       ? FontWeight.w700
                                       : FontWeight.w400)),
                         ),
                         Expanded(
-                            child: Text(_words(r), style: t.monoSmallDim)),
+                            child: Text(_words(r), style: t.smallMuted)),
                         const SizedBox(width: 10),
                         Builder(builder: (context) {
                           final g = formatValue(r.value, r.units);
@@ -547,7 +542,7 @@ class _HeadlineDialog extends StatelessWidget {
               Text(
                 'The best reading on this device over every backend that '
                 'reached it, as measured: nothing is scored or derived.',
-                style: t.monoSmallDim,
+                style: t.smallMuted,
               ),
             ],
           ),

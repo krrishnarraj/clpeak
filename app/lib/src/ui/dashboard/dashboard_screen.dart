@@ -96,7 +96,7 @@ class _Masthead extends StatelessWidget {
         const CAppMark(size: 30),
         const SizedBox(width: 12),
         Expanded(child: Text('XpuPeak', style: t.wordmark)),
-        Text('v$version', style: t.micro.copyWith(letterSpacing: 0.6)),
+        Text('v$version', style: t.caps.copyWith(letterSpacing: 0.6)),
       ],
     );
   }
@@ -126,7 +126,7 @@ class _RunLauncher extends StatelessWidget {
         children: [
           Text(
             'Measures compute, bandwidth and latency on $deviceLabel.',
-            style: t.body,
+            style: t.prose,
           ),
           const SizedBox(height: 16),
           Wrap(
@@ -185,16 +185,16 @@ class _ResumePanel extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
         decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: t.text, width: 2)),
+          border: Border(left: BorderSide(color: t.ink, width: 2)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('RUN DID NOT FINISH', style: t.micro),
+            Text('RUN DID NOT FINISH', style: t.caps),
             const SizedBox(height: 6),
-            Text(offer.headline, style: t.body),
+            Text(offer.headline, style: t.prose),
             const SizedBox(height: 6),
-            Text(detail, style: t.monoSmallDim),
+            Text(detail, style: t.smallMuted),
             const SizedBox(height: 14),
             Wrap(
               spacing: 10,
@@ -255,7 +255,7 @@ class _BackendPanel extends StatelessWidget {
               backend.deviceCount == 1
                   ? '1 DEVICE'
                   : '${backend.deviceCount} DEVICES',
-              style: t.micro,
+              style: t.caps,
             ),
           ),
           for (var i = 0; i < devices.length; i++)
@@ -302,7 +302,7 @@ class _DeviceLine extends StatelessWidget {
           children: [
             // Wraps rather than ellipsizes — driver-reported device names run
             // long, and the tail is what distinguishes two of them.
-            Expanded(child: Text(device.name, style: t.mono)),
+            Expanded(child: Text(device.name, style: t.body)),
             for (final cap in caps) ...[
               const SizedBox(width: 6),
               CTag(text: cap),
@@ -311,7 +311,7 @@ class _DeviceLine extends StatelessWidget {
         ),
         if (specs.isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text(specs.join('  ·  '), style: t.monoSmallDim),
+          Text(specs.join('  ·  '), style: t.smallMuted),
         ],
       ],
     );

@@ -43,7 +43,7 @@ class RunConfigScreen extends StatelessWidget {
                     CPanel(
                       child: Text(
                         'Detecting devices…',
-                        style: t.body,
+                        style: t.prose,
                       ),
                     ),
                   for (final backend in catalog.usable) ...[
@@ -64,7 +64,7 @@ class RunConfigScreen extends StatelessWidget {
                     'keeps the driver from resetting it. The ML budget is the '
                     'longest one ONNX Runtime, LiteRT or Core ML run may keep '
                     'a GPU busy; their size sweeps stop before that.',
-                    style: t.body,
+                    style: t.prose,
                   ),
                   const SizedBox(height: 14),
                   CPanel(
@@ -111,7 +111,7 @@ class RunConfigScreen extends StatelessWidget {
             // as chrome and gets skipped over.
             Container(
               decoration: BoxDecoration(
-                color: t.panel,
+                color: t.surface,
                 border: Border(top: BorderSide(color: t.line)),
               ),
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
@@ -127,7 +127,7 @@ class RunConfigScreen extends StatelessWidget {
                               ? 'Detecting devices…'
                               : 'Select at least one device and category',
                           textAlign: TextAlign.center,
-                          style: t.micro.copyWith(color: t.danger),
+                          style: t.caps.copyWith(color: t.danger),
                         ),
                         const SizedBox(height: 10),
                       ],
@@ -226,10 +226,10 @@ class _BackendSelector extends StatelessWidget {
                         children: [
                           // Wraps: you pick a device by its full name, so
                           // nothing here is allowed to hide the tail of one.
-                          Text(refs[i].$2.name, style: t.mono),
+                          Text(refs[i].$2.name, style: t.body),
                           if (subtitles[i].isNotEmpty) ...[
                             const SizedBox(height: 3),
-                            Text(subtitles[i], style: t.monoSmallDim),
+                            Text(subtitles[i], style: t.smallMuted),
                           ],
                         ],
                       ),
@@ -266,8 +266,7 @@ class _CategoryChips extends StatelessWidget {
               CChip(
                 label: category.label,
                 selected: config.categories.contains(category),
-                color: XpuPeakTheme.categoryColor(category,
-                    brightness: brightness),
+                color: CP.forBrightness(brightness).ink,
                 onTap: () => service.updateConfig((c) =>
                     c.categories.contains(category)
                         ? c.categories.remove(category)
@@ -282,8 +281,8 @@ class _CategoryChips extends StatelessWidget {
               : selectedCount == total
                   ? 'All $total categories selected'
                   : '$selectedCount of $total categories selected',
-          style: t.micro.copyWith(
-              color: selectedCount == 0 ? t.danger : t.dim),
+          style: t.caps.copyWith(
+              color: selectedCount == 0 ? t.danger : t.muted),
         ),
       ],
     );
@@ -316,7 +315,7 @@ class _BudgetSlider extends StatelessWidget {
         children: [
           SizedBox(
             width: 108,
-            child: Text(label.toUpperCase(), style: t.micro),
+            child: Text(label.toUpperCase(), style: t.caps),
           ),
           Expanded(
             // Material's Slider carries the drag logic; the theme strips it
@@ -324,9 +323,9 @@ class _BudgetSlider extends StatelessWidget {
             child: SliderTheme(
               data: SliderThemeData(
                 trackHeight: 3,
-                activeTrackColor: t.text,
-                inactiveTrackColor: t.isDark ? t.hover : t.line,
-                thumbColor: t.text,
+                activeTrackColor: t.ink,
+                inactiveTrackColor: t.isDark ? t.surface2 : t.line,
+                thumbColor: t.ink,
                 overlayColor: Colors.transparent,
                 trackShape: const RectangularSliderTrackShape(),
                 thumbShape: const _SquareThumb(),
@@ -348,7 +347,7 @@ class _BudgetSlider extends StatelessWidget {
             width: 72,
             child: Text(
               '$value ms${value == defaultValue ? '' : ' *'}',
-              style: t.monoSmall,
+              style: t.small,
               textAlign: TextAlign.right,
             ),
           ),

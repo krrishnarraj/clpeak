@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +20,12 @@ import 'src/ui/app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // The bundled typeface's licence travels with it: About's licences list it
+  // beside the packages'.
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(const ['Sora'],
+        await rootBundle.loadString('assets/fonts/sora/OFL.txt'));
+  });
   final bindings = XpuPeakBindings.open();
   // On desktop, enumeration and runs happen in an engine process of their
   // own (XpuPeakEngine explains why); on mobile, here.

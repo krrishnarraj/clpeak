@@ -34,3 +34,22 @@ flutter:
     # The headline catalog: the flagship numbers the results summary shows
     # (lib/src/model/headlines.dart; docs/format-v4.md, The headline catalog).
     - assets/measures.json
+    # Sora's licence, which ships with the font and is listed among the app's
+    # licences (main.dart).
+    - assets/fonts/sora/OFL.txt
+
+  # The app's one typeface (lib/src/theme/xpupeak_theme.dart): the static
+  # Google Fonts builds, SIL Open Font License 1.1.
+  fonts:
+    - family: Sora
+      fonts:
+        - asset: assets/fonts/sora/Sora-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/sora/Sora-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/sora/Sora-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/sora/Sora-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/sora/Sora-ExtraBold.ttf
+          weight: 800

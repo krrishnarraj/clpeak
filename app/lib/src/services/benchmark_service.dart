@@ -747,7 +747,7 @@ class BenchmarkService extends ChangeNotifier {
       final summary = summarize(_savedDocument ?? _document);
       // Index first: History re-reads the store as soon as the run is
       // over, so the row must already be on disk.
-      await _history.add(summary);
+      await _history.add(summary, origin: RunOrigin.measured);
       _lastSummary = summary;
     }
     // A cancelled run keeps its note with its checkpoint, to be continued.

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -26,6 +27,9 @@ import 'process_exit.dart';
 ///                       catalog it started on, and whether its Continue
 ///                       offer was dismissed ([RunResumeState])
 ///   index.json          {"runs":[RunSummary...]} for a fast history list
+///   origins.json        `{"<id>": "measured" | "imported"}`: where each
+///                       run came from ([RunOrigin]), which the index row
+///                       has no field for
 ///
 /// Orphan documents (present on disk but missing from the index, e.g. after
 /// an app kill mid-finalize) are re-adopted on load.
@@ -44,6 +48,24 @@ class RunHistoryStore {
   final Directory? _override;
   final Future<List<ProcessExitRecord>> Function() _processExits;
   Directory? _dir;
+
+  /// Bumped after every change to the saved runs -- one added, renamed,
+  /// deleted or imported, or the index repaired by [list] -- so a view of
+  /// them (the shell's History count and recent runs) reads them again.
+  final ValueNotifier<int> changes = ValueNotifier<int>(0);
+
+  void _changed() => changes.value++;
+
+  /// The index's read-modify-writes, one at a time: History and the shell
+  /// both read the runs as the app starts, and two writes of index.json at
+  /// once could interleave.
+  Future<void> _indexQueue = Future<void>.value();
+
+  Future<T> _serially<T>(Future<T> Function() body) {
+    final result = _indexQueue.then((_) => body());
+    _indexQueue = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
+  }
 
   /// Suffix rather than plain `.json`: it names the format at a glance in a
   /// directory a user is expected to browse, and keeps the index sidecar
@@ -129,7 +151,9 @@ class RunHistoryStore {
   /// Only documents in this build's format are listed: a row whose file
   /// went missing, or no longer parses as the current version, is hidden —
   /// and pruned from the index — rather than listed only to fail on tap.
-  Future<List<RunSummary>> list() async {
+  Future<List<RunSummary>> list() => _serially(_list);
+
+  Future<List<RunSummary>> _list() async {
     final dir = await runsDirectory();
     var runs = await _readIndex(dir);
 
@@ -150,6 +174,7 @@ class RunHistoryStore {
       }
       if (pruned) {
         await _writeIndex(dir, kept);
+        _changed();
       }
       runs = kept;
     }
@@ -183,30 +208,54 @@ class RunHistoryStore {
       adopted = true;
     }
     runs.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-    if (adopted) await _writeIndex(dir, runs);
+    if (adopted) {
+      await _writeIndex(dir, runs);
+      _changed();
+    }
     return runs;
   }
 
-  Future<void> add(RunSummary summary) async {
-    final dir = await runsDirectory();
-    final runs = await _readIndex(dir)
-      ..removeWhere((r) => r.id == summary.id)
-      ..add(summary);
-    runs.sort((a, b) => b.startedAt.compareTo(a.startedAt));
-    await _writeIndex(dir, runs);
-  }
+  /// The index's rows as they stand, newest first, without opening a
+  /// document: for a view that only names the runs (the shell's History
+  /// count and recent runs).  [list] is what checks each file, and repairs
+  /// the index, which [changes] then reports.
+  Future<List<RunSummary>> indexed() => _serially(() async {
+        final runs = [
+          for (final r in await _readIndex(await runsDirectory()))
+            if (r.fileName.endsWith(fileSuffix)) r,
+        ]..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+        return runs;
+      });
+
+  /// Index a run, or rebuild its row.  [origin] records where a new run
+  /// came from; a rebuilt row (new details) keeps the one it has.
+  Future<void> add(RunSummary summary, {RunOrigin? origin}) =>
+      _serially(() async {
+        final dir = await runsDirectory();
+        final runs = await _readIndex(dir)
+          ..removeWhere((r) => r.id == summary.id)
+          ..add(summary);
+        runs.sort((a, b) => b.startedAt.compareTo(a.startedAt));
+        await _writeIndex(dir, runs);
+        if (origin != null) await _writeOrigin(dir, summary.id, origin);
+        _changed();
+      });
 
   /// Set (or clear, with an empty string) a run's user-given name.
-  Future<void> rename(RunSummary summary, String name) async {
-    final dir = await runsDirectory();
-    final runs = await _readIndex(dir);
-    final i = runs.indexWhere((r) => r.id == summary.id);
-    if (i < 0) return;
-    runs[i] = runs[i].withName(name.trim());
-    await _writeIndex(dir, runs);
-  }
+  Future<void> rename(RunSummary summary, String name) =>
+      _serially(() async {
+        final dir = await runsDirectory();
+        final runs = await _readIndex(dir);
+        final i = runs.indexWhere((r) => r.id == summary.id);
+        if (i < 0) return;
+        runs[i] = runs[i].withName(name.trim());
+        await _writeIndex(dir, runs);
+        _changed();
+      });
 
-  Future<void> delete(RunSummary summary) async {
+  Future<void> delete(RunSummary summary) => _serially(() => _delete(summary));
+
+  Future<void> _delete(RunSummary summary) async {
     final dir = await runsDirectory();
     final file = File(p.join(dir.path, summary.fileName));
     if (await file.exists()) await file.delete();
@@ -218,6 +267,47 @@ class RunHistoryStore {
     final runs = await _readIndex(dir)
       ..removeWhere((r) => r.id == summary.id);
     await _writeIndex(dir, runs);
+    await _writeOrigin(dir, summary.id, null);
+    _changed();
+  }
+
+  // ── Where runs came from ─────────────────────────────────────────────────
+
+  static const _originsFileName = 'origins.json';
+
+  /// Each saved run's origin, by id.  Runs saved before origins were kept
+  /// have none, and are neither.
+  Future<Map<String, RunOrigin>> origins() =>
+      _serially(() async => _readOrigins(await runsDirectory()));
+
+  Future<Map<String, RunOrigin>> _readOrigins(Directory dir) async {
+    final f = File(p.join(dir.path, _originsFileName));
+    final out = <String, RunOrigin>{};
+    try {
+      if (!await f.exists()) return out;
+      final m = jsonDecode(await f.readAsString());
+      if (m is! Map) return out;
+      final byName = RunOrigin.values.asNameMap();
+      m.forEach((id, name) {
+        final origin = byName[name];
+        if (id is String && origin != null) out[id] = origin;
+      });
+    } catch (_) {
+      // An unreadable file is no origins, not a failure.
+    }
+    return out;
+  }
+
+  /// Record (or, null, forget) one run's origin.
+  Future<void> _writeOrigin(Directory dir, String id, RunOrigin? origin) async {
+    final origins = await _readOrigins(dir);
+    if (origin == null ? origins.remove(id) == null : origins[id] == origin) {
+      return;
+    }
+    if (origin != null) origins[id] = origin;
+    await File(p.join(dir.path, _originsFileName)).writeAsString(
+        const JsonEncoder.withIndent(' ')
+            .convert({for (final e in origins.entries) e.key: e.value.name}));
   }
 
   // ── Runs that never finished ─────────────────────────────────────────────
@@ -361,7 +451,10 @@ class RunHistoryStore {
 
   /// Everything of the run: a cancelled run continued that died in turn
   /// has its first part's result too.
-  Future<void> deleteCrashLog(CrashLog log) async {
+  Future<void> deleteCrashLog(CrashLog log) =>
+      _serially(() => _deleteCrashLog(log));
+
+  Future<void> _deleteCrashLog(CrashLog log) async {
     final dir = await runsDirectory();
     await _deleteQuietly([
       File(p.join(dir.path, log.fileName)),
@@ -372,6 +465,8 @@ class RunHistoryStore {
     final runs = await _readIndex(dir);
     if (runs.any((r) => r.id == log.id)) {
       await _writeIndex(dir, runs..removeWhere((r) => r.id == log.id));
+      await _writeOrigin(dir, log.id, null);
+      _changed();
     }
   }
 
@@ -579,9 +674,18 @@ class RunHistoryStore {
       durationMs: durationMs,
       cancelled: doc.meta?.cancelled ?? false,
     );
-    await add(summary);
+    await add(summary, origin: RunOrigin.imported);
     return summary;
   }
+}
+
+/// Where a saved run came from.
+enum RunOrigin {
+  /// Measured by this app, on this device.
+  measured,
+
+  /// Imported from a file.
+  imported,
 }
 
 /// A run the process died in.  Its document was never written; the run-log

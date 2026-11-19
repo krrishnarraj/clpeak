@@ -182,11 +182,11 @@ class _Notice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final accent = danger ? t.danger : t.dim;
+    final accent = danger ? t.danger : t.muted;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: t.panel,
+        color: t.surface,
         border: Border(
           left: BorderSide(color: accent, width: 2),
           bottom: BorderSide(color: t.line),
@@ -197,7 +197,7 @@ class _Notice extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: accent),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: t.monoSmall)),
+          Expanded(child: Text(text, style: t.small)),
         ],
       ),
     );

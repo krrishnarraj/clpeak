@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../ffi/xpupeak_bindings.dart';
-import '../../model/result_model.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/settings_service.dart';
 import '../../theme/xpupeak_theme.dart';
@@ -255,12 +254,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(path, style: t.monoSmallDim),
+            Text(path, style: t.smallMuted),
             const SizedBox(height: 10),
             TextField(
               controller: controller,
               autofocus: true,
-              style: t.mono,
+              style: t.body,
               cursorWidth: 1.5,
               cursorRadius: Radius.zero,
               decoration: InputDecoration(
@@ -277,7 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
-                  borderSide: BorderSide(color: t.text, width: 1.5),
+                  borderSide: BorderSide(color: t.ink, width: 1.5),
                 ),
               ),
               onSubmitted: (v) => Navigator.pop(context, v.trim()),
@@ -286,7 +285,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text(
                 'The name the provider expects to be registered under; '
                 'Qualcomm\'s QNN plugin requires QNNExecutionProvider.',
-                style: t.micro),
+                style: t.caps),
           ],
         ),
       ),
@@ -338,9 +337,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Row(
                         children: [
                           Icon(Icons.dark_mode_outlined,
-                              size: 15, color: t.dim),
+                              size: 15, color: t.muted),
                           const SizedBox(width: 10),
-                          Expanded(child: Text('Theme', style: t.mono)),
+                          Expanded(child: Text('Theme', style: t.body)),
                           _ThemeToggle(
                             value: settings.themeMode,
                             onChanged: settings.setThemeMode,
@@ -607,19 +606,19 @@ class _RuntimePanel extends StatelessWidget {
   static const _byName = 'Found by name on the system paths';
 
   Widget _line(CP t, _SetupLine line, {bool rule = true, bool inactive = false}) {
-    final color = line.danger ? t.danger : (inactive ? t.faint : null);
+    final color = line.danger ? t.danger : (inactive ? t.muted : null);
     return CRow(
       rule: rule,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(line.icon, size: 15, color: line.danger ? t.danger : t.dim),
+          Icon(line.icon, size: 15, color: line.danger ? t.danger : t.muted),
           const SizedBox(width: 10),
           Expanded(
             child: Text(line.text,
                 style: color == null
-                    ? t.monoSmallDim
-                    : t.monoSmallDim.copyWith(color: color)),
+                    ? t.smallMuted
+                    : t.smallMuted.copyWith(color: color)),
           ),
         ],
       ),
@@ -630,8 +629,7 @@ class _RuntimePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final s = view;
-    final tint = XpuPeakTheme.categoryColor(BenchCategory.ai,
-        brightness: Theme.of(context).brightness);
+    final tint = t.ink;
     final fixed = s.fixed;
     final next = s.next;
 
@@ -646,11 +644,11 @@ class _RuntimePanel extends StatelessWidget {
                 accent: s.available ? tint : null,
                 child: Row(
                   children: [
-                    Expanded(child: Text(s.title, style: t.mono)),
+                    Expanded(child: Text(s.title, style: t.body)),
                     if (s.known)
                       CTag(
                         text: s.available ? 'active' : 'absent',
-                        color: s.available ? tint : t.dim,
+                        color: s.available ? tint : t.muted,
                       ),
                   ],
                 ),
@@ -689,8 +687,8 @@ class _RuntimePanel extends StatelessWidget {
                     children: [
                       Expanded(
                           child: Text('Next launch',
-                              style: t.mono.copyWith(color: t.dim))),
-                      CTag(text: 'inactive', color: t.dim),
+                              style: t.body.copyWith(color: t.muted))),
+                      CTag(text: 'inactive', color: t.muted),
                     ],
                   ),
                 ),
@@ -706,12 +704,12 @@ class _RuntimePanel extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.schedule, size: 15, color: t.dim),
+                      Icon(Icons.schedule, size: 15, color: t.muted),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                             'Takes effect the next time XpuPeak starts.',
-                            style: t.monoSmallDim),
+                            style: t.smallMuted),
                       ),
                     ],
                   ),
@@ -723,7 +721,7 @@ class _RuntimePanel extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           fixed ? s.fixedHint : s.hint,
-          style: t.micro.copyWith(color: t.dim),
+          style: t.caps.copyWith(color: t.muted),
         ),
         if (!fixed) ...[
           const SizedBox(height: 12),
@@ -747,7 +745,7 @@ class _RuntimePanel extends StatelessWidget {
           if (locked) ...[
             const SizedBox(height: 8),
             Text('Not while a run is in flight.',
-                style: t.micro.copyWith(color: t.dim)),
+                style: t.caps.copyWith(color: t.muted)),
           ],
         ],
       ],
@@ -782,8 +780,7 @@ class _EpLibrariesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final tint = XpuPeakTheme.categoryColor(BenchCategory.ai,
-        brightness: Theme.of(context).brightness);
+    final tint = t.ink;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -794,7 +791,7 @@ class _EpLibrariesPanel extends StatelessWidget {
               if (libraries.isEmpty)
                 CRow(
                   rule: false,
-                  child: Text('None registered', style: t.monoSmallDim),
+                  child: Text('None registered', style: t.smallMuted),
                 ),
               for (var i = 0; i < libraries.length; i++)
                 Builder(builder: (context) {
@@ -808,24 +805,24 @@ class _EpLibrariesPanel extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.extension_outlined, size: 15, color: t.dim),
+                        Icon(Icons.extension_outlined, size: 15, color: t.muted),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(lib.name, style: t.mono),
+                              Text(lib.name, style: t.body),
                               const SizedBox(height: 3),
-                              Text(lib.path, style: t.monoSmallDim),
+                              Text(lib.path, style: t.smallMuted),
                               for (final r in replaces) ...[
                                 const SizedBox(height: 3),
                                 Text('In place of Windows ML\'s $r',
-                                    style: t.monoSmallDim),
+                                    style: t.smallMuted),
                               ],
                               if (st != null && !registered) ...[
                                 const SizedBox(height: 3),
                                 Text(st.error,
-                                    style: t.monoSmallDim
+                                    style: t.smallMuted
                                         .copyWith(color: t.danger)),
                               ],
                             ],
@@ -839,7 +836,7 @@ class _EpLibrariesPanel extends StatelessWidget {
                                   ? 'registered'
                                   : 'failed',
                           color: st == null
-                              ? t.dim
+                              ? t.muted
                               : registered
                                   ? tint
                                   : t.danger,
@@ -863,7 +860,7 @@ class _EpLibrariesPanel extends StatelessWidget {
           'vendor NPUs ship this way now, separately from ONNX Runtime '
           'itself: Qualcomm\'s QNN plugin (onnxruntime_providers_qnn) reaches '
           'the Hexagon NPU this way on a stock ONNX Runtime 1.24 or newer.',
-          style: t.micro.copyWith(color: t.dim),
+          style: t.caps.copyWith(color: t.muted),
         ),
         const SizedBox(height: 12),
         Row(
@@ -918,11 +915,11 @@ class _WinmlPanel extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Row(
                   children: [
-                    Icon(Icons.storefront_outlined, size: 15, color: t.dim),
+                    Icon(Icons.storefront_outlined, size: 15, color: t.muted),
                     const SizedBox(width: 10),
                     Expanded(
                         child: Text('Store execution providers',
-                            style: t.mono)),
+                            style: t.body)),
                     CSwitch(
                         value: enabled,
                         onChanged: locked ? (_) {} : onToggle),
@@ -934,7 +931,7 @@ class _WinmlPanel extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.folder_outlined, size: 15, color: t.dim),
+                    Icon(Icons.folder_outlined, size: 15, color: t.muted),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -942,7 +939,7 @@ class _WinmlPanel extends StatelessWidget {
                             ? path
                             : 'Microsoft.Windows.AI.MachineLearning.dll '
                                 'beside the runtime or the app',
-                        style: t.monoSmallDim,
+                        style: t.smallMuted,
                       ),
                     ),
                   ],
@@ -961,7 +958,7 @@ class _WinmlPanel extends StatelessWidget {
           'Microsoft.Windows.AI.MachineLearning package, not with XpuPeak.'
           '${perLaunch ? ' Part of the runtime setup above, so it too is set '
               'once per launch.' : ''}',
-          style: t.micro.copyWith(color: t.dim),
+          style: t.caps.copyWith(color: t.muted),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -1008,10 +1005,10 @@ class _DiagnosticsPanel extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Row(
                   children: [
-                    Icon(Icons.bug_report_outlined, size: 15, color: t.dim),
+                    Icon(Icons.bug_report_outlined, size: 15, color: t.muted),
                     const SizedBox(width: 10),
                     Expanded(
-                        child: Text('Verbose diagnostics', style: t.mono)),
+                        child: Text('Verbose diagnostics', style: t.body)),
                     CSwitch(value: verbose, onChanged: onChanged),
                   ],
                 ),
@@ -1022,16 +1019,16 @@ class _DiagnosticsPanel extends StatelessWidget {
                     launchUrl(_issuesUrl, mode: LaunchMode.externalApplication),
                 child: Row(
                   children: [
-                    Icon(Icons.open_in_new, size: 15, color: t.dim),
+                    Icon(Icons.open_in_new, size: 15, color: t.muted),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Report an issue', style: t.mono),
+                          Text('Report an issue', style: t.body),
                           const SizedBox(height: 3),
                           Text('github.com/krrishnarraj/xpupeak/issues',
-                              style: t.monoSmallDim),
+                              style: t.smallMuted),
                         ],
                       ),
                     ),
@@ -1045,7 +1042,7 @@ class _DiagnosticsPanel extends StatelessWidget {
         Text(
           'Off by default. When on, saved runs include debug output — '
           'enable it before re-running a suspicious result for an issue report.',
-          style: t.micro.copyWith(color: t.dim),
+          style: t.caps.copyWith(color: t.muted),
         ),
       ],
     );
@@ -1087,9 +1084,9 @@ class _ThemeToggle extends StatelessWidget {
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
                     color: on
-                        ? t.inverse
+                        ? t.ink
                         : (hovered || pressed
-                            ? t.hover
+                            ? t.surface2
                             : Colors.transparent),
                     border: Border(
                       left: i == 0
@@ -1099,8 +1096,8 @@ class _ThemeToggle extends StatelessWidget {
                   ),
                   child: Text(
                     _modes[i].$2.toUpperCase(),
-                    style: t.micro
-                        .copyWith(color: on ? t.onInverse : t.dim),
+                    style: t.caps
+                        .copyWith(color: on ? t.inkOn : t.muted),
                   ),
                 );
               },

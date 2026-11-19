@@ -75,7 +75,7 @@ void main() {
         findsOneWidget);
     expect(find.text('Eight independent chases at once.'), findsNothing);
 
-    await tester.tap(find.text('CLOSE'));
+    await tester.tap(find.text('Close'));
     await tester.pump();
     expect(find.text('What the wait for one memory read costs.'), findsNothing);
   });
@@ -109,7 +109,7 @@ void main() {
 
     expect(find.text('Eight independent chases at once.'), findsOneWidget);
     // Titled by the reading, not the test.
-    expect(find.text('DRAM X8'), findsOneWidget);
+    expect(find.text('DRAM x8'), findsOneWidget);
   });
 
   testWidgets('a heterogeneous test shows every reading without a headline',

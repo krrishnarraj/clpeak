@@ -161,16 +161,16 @@ class _DetailsDialogState extends State<_DetailsDialog> {
               Text(
                 'What only you know about this run. Saved into its file, '
                 'so it travels with it.',
-                style: t.monoSmallDim,
+                style: t.smallMuted,
               ),
               for (final (key, label, hint) in _rows) ...[
                 const SizedBox(height: 12),
-                Text(label.toUpperCase(), style: t.micro),
+                Text(label.toUpperCase(), style: t.caps),
                 const SizedBox(height: 5),
                 TextField(
                   key: ValueKey('details-$key'),
                   controller: _fields[key],
-                  style: t.mono,
+                  style: t.body,
                   cursorWidth: 1.5,
                   cursorRadius: Radius.zero,
                   minLines: key == 'notes' ? 2 : 1,
@@ -182,10 +182,10 @@ class _DetailsDialogState extends State<_DetailsDialog> {
                     hintText: key == 'system.name' && measured.isNotEmpty
                         ? measured
                         : hint,
-                    hintStyle: t.mono.copyWith(color: t.faint),
+                    hintStyle: t.body.copyWith(color: t.muted),
                     border: border(t.line),
                     enabledBorder: border(t.line),
-                    focusedBorder: border(t.text, 1.5),
+                    focusedBorder: border(t.ink, 1.5),
                   ),
                 ),
               ],

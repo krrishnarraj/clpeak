@@ -63,7 +63,7 @@ class LiveRunScreen extends StatelessWidget {
             // A static rule, not an indeterminate LinearProgressIndicator: the
             // latter animates for the whole run and steals GPU time from it.
             Container(
-                height: 2, color: cancelling || paused ? t.dim : t.text),
+                height: 2, color: cancelling || paused ? t.muted : t.ink),
             Expanded(
               child: ResultsBody(
                 document: service.document,
@@ -123,14 +123,14 @@ class _StatusPanel extends StatelessWidget {
                   width: 3,
                   height: 15,
                   margin: const EdgeInsets.only(top: 2),
-                  color: cancelling || service.paused ? t.dim : t.text,
+                  color: cancelling || service.paused ? t.muted : t.ink,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   // Wraps rather than ellipsizes: the tail ("once it cools…",
                   // a test name) is what tells this status apart, so cutting
                   // it hides exactly the meaningful part.
-                  child: Text(statusText, style: t.mono),
+                  child: Text(statusText, style: t.body),
                 ),
               ],
             ),
@@ -162,7 +162,7 @@ class _StatusPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
               child: Text(
                   'Leaving XpuPeak pauses the run until you come back.',
-                  style: t.monoSmallDim),
+                  style: t.smallMuted),
             ),
           ],
         ],
@@ -186,12 +186,12 @@ class _Stat extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label.toUpperCase(), style: t.micro),
+          Text(label.toUpperCase(), style: t.caps),
           const SizedBox(height: 4),
           value == null
-              ? _ElapsedClock(style: t.mono)
+              ? _ElapsedClock(style: t.body)
               : Text(value!,
-                  style: t.mono,
+                  style: t.body,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis),
         ],

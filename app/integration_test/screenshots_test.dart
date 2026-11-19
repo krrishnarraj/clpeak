@@ -1,13 +1,12 @@
 // Renders the README / docs screenshots from saved runs.
 //
 // Run by tools/screenshots.sh, never by the test suite: it is an integration
-// test so it runs on the desktop engine, where text resolves through the
-// platform's fonts exactly as in the app.  (flutter_tester's font manager
-// answers every family name with its test font, which swallows the theme's
-// monospace fallback walk -- CP.monoStack -- on any span that sets no family
-// of its own.)  Each shot is the real app shell (XpuPeakShell and the screens
-// under it) fed a saved run document from results/ and a device catalog
-// captured from the machine that produced it
+// test so it runs on the desktop engine, where text is drawn in the bundled
+// Sora exactly as in the app.  (flutter_tester's font manager answers every
+// family name with its test font, Sora included, so a shot taken there would
+// show none of the app's type.)  Each shot is the real app shell
+// (XpuPeakShell and the screens under it) fed a saved run document from
+// results/ and a device catalog captured from the machine that produced it
 // (tools/screenshots/m1_pro_catalog.json: the `inventory` of a --verbose run),
 // over stub native bindings -- so no native library is needed, and the layout
 // is the app's own.  Nothing is captured from the screen: each shot is its

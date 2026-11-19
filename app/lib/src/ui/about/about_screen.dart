@@ -41,7 +41,7 @@ class AboutScreen extends StatelessWidget {
                                 Text('XpuPeak', style: t.wordmark),
                                 const SizedBox(height: 3),
                                 Text('v${service.version}',
-                                    style: t.micro
+                                    style: t.caps
                                         .copyWith(letterSpacing: 0.6)),
                               ],
                             ),
@@ -51,7 +51,7 @@ class AboutScreen extends StatelessWidget {
                         Text(
                           'CPU, GPU and NPU peaks: the compute throughput, memory bandwidth and latency each one actually reaches. '
                           "Small, tight kernels run alongside each vendor's own tuned libraries, through every API that exposes a device, so the results line up side by side.",
-                          style: t.body,
+                          style: t.prose,
                         ),
                       ],
                     ),
@@ -68,22 +68,22 @@ class AboutScreen extends StatelessWidget {
                               mode: LaunchMode.externalApplication),
                           child: Row(
                             children: [
-                              Icon(Icons.code, size: 15, color: t.dim),
+                              Icon(Icons.code, size: 15, color: t.muted),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
                                   children: [
-                                    Text('Source code', style: t.mono),
+                                    Text('Source code', style: t.body),
                                     const SizedBox(height: 3),
                                     Text('github.com/krrishnarraj/xpupeak',
-                                        style: t.monoSmallDim),
+                                        style: t.smallMuted),
                                   ],
                                 ),
                               ),
                               Icon(Icons.open_in_new,
-                                  size: 13, color: t.faint),
+                                  size: 13, color: t.muted),
                             ],
                           ),
                         ),
@@ -97,13 +97,13 @@ class AboutScreen extends StatelessWidget {
                           child: Row(
                             children: [
                               Icon(Icons.description_outlined,
-                                  size: 15, color: t.dim),
+                                  size: 15, color: t.muted),
                               const SizedBox(width: 10),
                               Expanded(
                                   child: Text('Open-source licenses',
-                                      style: t.mono)),
+                                      style: t.body)),
                               Icon(Icons.chevron_right,
-                                  size: 15, color: t.faint),
+                                  size: 15, color: t.muted),
                             ],
                           ),
                         ),

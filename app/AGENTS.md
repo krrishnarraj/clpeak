@@ -100,8 +100,8 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - Screenshots: `integration_test/screenshots_test.dart` is not a test but the
   renderer behind `tools/screenshots.sh` -- the real shell over stub bindings,
   fed `results/` runs.  It runs on the desktop engine because flutter_tester's
-  font manager answers every family with its test font, which defeats
-  `CP.monoStack` on any span that sets no family of its own.
+  font manager answers every family with its test font -- the bundled Sora
+  included -- so a shot taken there would show none of the app's type.
 
 ## Quick Lookups
 
@@ -321,6 +321,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `<base>` is `$HOME/.xpupeak` on desktop — never `~/Documents`, which costs a
   macOS TCC consent prompt — and `<app documents>/xpupeak` on Android/iOS,
   where that directory is inside the sandbox and is what the Files app shows.
+  `origins.json` beside the index says where each run came from
+  (`RunOrigin`: measured by this app, or imported; runs saved before it have
+  neither), `RunHistoryStore.changes` ticks after every change to the saved
+  runs, and the index's read-modify-writes queue one at a time.
   Files from another `format_version` are skipped, not half-parsed, and Import
   (History) refuses one clpeak 3.x wrote, by its schema, with a message that
   says so (`writtenBy3x`, the same words as the CLI's).
@@ -372,24 +376,55 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   hot phone to cool (`include/common/thermal.h`); `BenchmarkService.coolingDown`
   follows its `thermal status` log lines
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
-  history, about; adaptive shell in `app.dart`)
-- Colours / type / geometry? → `lib/src/theme/xpupeak_theme.dart` (`CP.of(context)`
-  tokens + category tints; the `ThemeData` there is glue only)
-- Buttons, panels, chips, switches, table rows? → `lib/src/ui/common/kit.dart`
+  history, about; the shell in `app.dart`)
+- Where a screen opens, and the sidebar's recent runs? → `XpuPeakShell`
+  (`app.dart`): a sidebar from `cWideWidth` (900), a bottom bar below it,
+  around a navigator of its own whose first route holds the four
+  destinations in an IndexedStack.  A screen's `Navigator.of(context).push`
+  opens inside it -- beside the sidebar, or over the bottom bar on a phone
+  -- and choosing a destination closes it; dialogs stay on the root
+  navigator.  A saved run's results push on `savedRunRoute(id)`
+  (`ui/common/run_route.dart`): that is how the sidebar marks the open run
+  and remembers it among the last three opened
+  (`SettingsService.recentRunIds`), as it does a run that just finished.
+  History's count and the recent runs are read from
+  `RunHistoryStore.indexed()` whenever `changes` ticks
+- Colours / type / geometry? → `lib/src/theme/xpupeak_theme.dart`:
+  `CP.of(context)` -- the neutrals (`ground`, `surface`, `ink`, `muted`,
+  `line`, …), `kind(kind)` for a processor kind's `KindHue` (CPU, GPU, NPU;
+  neutral for any other), `runA` / `runB` for a compare's `RunHue`, the
+  radii (`CP.rCard` …) and Sora's type styles (`h1`, `h2`, `body`, `caps`,
+  `figure(size)` …); the `ThemeData` there is glue only
+- Buttons, cards, tabs, chips, switches, rows? → `lib/src/ui/common/kit.dart`
 
 ## Design language
 
-The GUI is an *instrument console*, not a stock Material app: monochrome
-chrome with the category tints as the only colour, monospace for anything
-technical, hairline tables instead of cards, square-ish corners, zero
-elevation, and inverted (solid block) primary actions.  `ColorScheme.fromSeed`
-is deliberately not used — both palettes are fixed in `CP`.
+"Soft tint": a white ground (near-black in dark mode) with neutral UI, and a
+pale tinted card per processor kind with dark text on it -- CPU blue, GPU
+green, NPU violet; deep tints with light text in dark mode; any other kind
+neutral.  A compare's two runs are A blue and B orange, and there colour is
+only ever a fill -- the letter badges, the run cards, a soft tint behind the
+better value, which is also bold -- so numbers stay ink.  One typeface,
+Sora (bundled in `assets/fonts/sora/`, SIL OFL, listed with the licences),
+numbers in tabular figures, big bold headings.  Rounded geometry (cards
+24–26 px, rows and inner panels 16–22, pills), 1 px hairlines, and no
+elevation but the floating pick bar's shadow, the selected segment's and
+a switch knob's edge.
+Primary actions are ink-filled pills, secondary ones 1.5 px ink-outlined
+pills, quiet ones underlined text; every target is at least 44 px.  No
+decorative icons inside cards.  Both palettes are fixed in `CP` --
+`ColorScheme.fromSeed` is deliberately not used -- and the appearance is
+Settings' (System, Light or Dark; System by default).
 
-Build screens from `ui/common/kit.dart` (`CPanel`, `CSection`, `CRow`,
-`CButton`, `CChip`, `CSwitch`, `CCheckbox`, `CTag`, `CValue`, `CMeter`,
-`CHeader`, `CDialog`, …), not from `Card` / `Chip` / `Switch` / `AppBar` /
+Build screens from `ui/common/kit.dart` (`CPanel`, `CKindCard`,
+`CKindLabel`, `CSectionHeader`, `CSection`, `CRow`, `CButton`,
+`CIconButton`, `CBackButton`, `CTabStrip`, `CSegmented`, `CChip`,
+`CDeviceChip`, `CSearchField`, `CSwitch`, `CCheckbox`, `CTag`, `CValue`,
+`CValueTile`, `CLetterBadge`, `CFold`, `CEmptyBox`, `CHeader`, `CDialog`,
+`CGlyph`, …), not from `Card` / `Chip` / `Switch` / `AppBar` /
 `NavigationRail` / `ListTile`.  The kit is built on raw `GestureDetector` +
-`MouseRegion`, so nothing splashes — which is also why the theme sets
+`MouseRegion` under `CTap`, which adds keyboard focus and the control's
+semantics, so nothing splashes -- which is also why the theme sets
 `NoSplash.splashFactory` (see the animation trap below).
 
 ## Traps

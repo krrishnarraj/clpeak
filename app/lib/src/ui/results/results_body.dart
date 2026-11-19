@@ -214,7 +214,7 @@ class _ResultsBodyState extends State<ResultsBody> {
           Text(
             'This file does not link its devices to processors, so each '
             "backend's view of one is listed on its own.",
-            style: CP.of(context).monoSmallDim,
+            style: CP.of(context).smallMuted,
           ),
           padBottom: 12,
         ),
@@ -344,16 +344,16 @@ class _TabStrip extends StatelessWidget {
                 return Container(
                   padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
                   decoration: BoxDecoration(
-                    color: hovered || pressed ? t.hover : Colors.transparent,
+                    color: hovered || pressed ? t.surface2 : Colors.transparent,
                     border: Border(
                       bottom: BorderSide(
-                          color: on ? t.text : Colors.transparent, width: 2),
+                          color: on ? t.ink : Colors.transparent, width: 2),
                     ),
                   ),
                   child: Text(
                     label,
-                    style: t.mono.copyWith(
-                      color: on ? t.text : t.dim,
+                    style: t.body.copyWith(
+                      color: on ? t.ink : t.muted,
                       fontWeight: on ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
@@ -402,8 +402,7 @@ class _SectionRow extends _Row {
         padding: const EdgeInsets.only(top: 22, bottom: 9),
         child: _CategoryCSection(
           label: group.category.label,
-          color: XpuPeakTheme.categoryColor(group.category,
-              brightness: brightness),
+          color: CP.forBrightness(brightness).ink,
           count: group.supported.length,
           expanded: expanded,
           onToggle: onToggle,
@@ -434,14 +433,14 @@ class _CategoryCSection extends StatelessWidget {
     final t = CP.of(context);
     return Row(
       children: [
-        Container(width: 3, height: 12, color: color ?? t.text),
+        Container(width: 3, height: 12, color: color ?? t.ink),
         const SizedBox(width: 9),
         Text(label.toUpperCase(),
-            style: t.micro.copyWith(color: color ?? t.text)),
+            style: t.caps.copyWith(color: color ?? t.ink)),
         const SizedBox(width: 12),
         Expanded(child: Container(height: 1, color: t.line)),
         const SizedBox(width: 12),
-        Text('$count TESTS', style: t.micro),
+        Text('$count TESTS', style: t.caps),
         const SizedBox(width: 8),
         _BracketButton(
           label: expanded ? '[-]' : '[+]',
@@ -473,11 +472,11 @@ class _BracketButton extends StatelessWidget {
         onTap: onTap,
         builder: (context, hovered, pressed) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-          color: hovered || pressed ? t.hover : Colors.transparent,
+          color: hovered || pressed ? t.surface2 : Colors.transparent,
           child: Text(
             label,
-            style: t.micro.copyWith(
-              color: hovered || pressed ? t.text : t.faint,
+            style: t.caps.copyWith(
+              color: hovered || pressed ? t.ink : t.muted,
               fontSize: 10,
               letterSpacing: 0.6,
             ),
@@ -508,8 +507,7 @@ class _TestRow extends _Row {
         // tag alone, on the same test of the next device shown.
         key: ValueKey('${run.key}/${test.key}'),
         test: test,
-        color: XpuPeakTheme.categoryColor(group.category,
-            brightness: brightness),
+        color: CP.forBrightness(brightness).ink,
         first: identical(test, group.supported.first),
         last: last,
         forcedExpanded: forcedExpanded,
@@ -536,7 +534,7 @@ class _RunSelector extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('DEVICE', style: t.micro),
+        Text('DEVICE', style: t.caps),
         const SizedBox(height: 8),
         // Wrap, not a horizontal scroller: with many devices the trailing
         // chips used to sit off-screen with no way (mouse wheel included) to
@@ -625,7 +623,7 @@ class _DeviceHeader extends StatelessWidget {
                     : ConstrainedBox(
                         constraints: BoxConstraints(maxWidth: trailMax),
                         child: Text(trail.join('  ·  '),
-                            style: t.monoSmallDim,
+                            style: t.smallMuted,
                             textAlign: TextAlign.right,
                             overflow: TextOverflow.ellipsis),
                       ),
@@ -642,8 +640,8 @@ class _DeviceHeader extends StatelessWidget {
                   for (final prop in entries)
                     Text.rich(TextSpan(children: [
                       TextSpan(
-                          text: '${prop.key.toUpperCase()}  ', style: t.micro),
-                      TextSpan(text: prop.value, style: t.monoSmall),
+                          text: '${prop.key.toUpperCase()}  ', style: t.caps),
+                      TextSpan(text: prop.value, style: t.small),
                     ])),
                 ],
               ),
@@ -672,13 +670,13 @@ class _ExpandControls extends StatelessWidget {
           onTap: onTap,
           builder: (context, hovered, pressed) => Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            color: hovered || pressed ? t.hover : Colors.transparent,
+            color: hovered || pressed ? t.surface2 : Colors.transparent,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, size: 12, color: t.faint),
+                Icon(icon, size: 12, color: t.muted),
                 const SizedBox(width: 5),
-                Text(label, style: t.micro),
+                Text(label, style: t.caps),
               ],
             ),
           ),
@@ -686,11 +684,11 @@ class _ExpandControls extends StatelessWidget {
 
     return Align(
       alignment: Alignment.centerRight,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        spacing: 2,
         children: [
           link('EXPAND ALL', Icons.unfold_more, onExpandAll),
-          const SizedBox(width: 2),
           link('COLLAPSE ALL', Icons.unfold_less, onCollapseAll),
         ],
       ),
@@ -789,7 +787,7 @@ class _TestLineState extends State<_TestLine> {
             child: _NameWithInfo(
               name: test.displayTitle,
               description: test.description,
-              style: t.mono,
+              style: t.body,
             ),
           ),
           const SizedBox(width: 12),
@@ -802,7 +800,7 @@ class _TestLineState extends State<_TestLine> {
             }),
             const SizedBox(width: 6),
             Icon(effectiveExpanded ? Icons.remove : Icons.add,
-                size: 13, color: t.faint),
+                size: 13, color: t.muted),
           ] else ...[
             // Axis labels like "DATA TYPE, PHASE AND CONTEXT LENGTH" are
             // explanatory, not the answer — keep them smaller and capped so
@@ -816,7 +814,7 @@ class _TestLineState extends State<_TestLine> {
                   constraints: const BoxConstraints(maxWidth: 132),
                   child: Text(
                     test.axis.toUpperCase(),
-                    style: t.micro.copyWith(
+                    style: t.caps.copyWith(
                       fontSize: 9,
                       letterSpacing: 0.7,
                       height: 1.2,
@@ -829,7 +827,7 @@ class _TestLineState extends State<_TestLine> {
               ),
             if (test.axis.isNotEmpty) const SizedBox(width: 6),
             Icon(effectiveExpanded ? Icons.remove : Icons.add,
-                size: 13, color: t.faint),
+                size: 13, color: t.muted),
           ],
         ],
       ),
@@ -837,7 +835,7 @@ class _TestLineState extends State<_TestLine> {
 
     return Container(
       decoration: BoxDecoration(
-        color: t.panel,
+        color: t.surface,
         border: Border(
           top: BorderSide(color: t.line),
           left: BorderSide(color: t.line),
@@ -845,8 +843,8 @@ class _TestLineState extends State<_TestLine> {
           bottom: widget.last ? BorderSide(color: t.line) : BorderSide.none,
         ),
         borderRadius: BorderRadius.vertical(
-          top: Radius.circular(widget.first ? CP.rPanel : 0),
-          bottom: Radius.circular(widget.last ? CP.rPanel : 0),
+          top: Radius.circular(widget.first ? CP.rCard : 0),
+          bottom: Radius.circular(widget.last ? CP.rCard : 0),
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -857,7 +855,7 @@ class _TestLineState extends State<_TestLine> {
             onTap: () => setState(
                 () => _userExpanded = !effectiveExpanded),
             builder: (context, hovered, pressed) => Container(
-              color: hovered || pressed ? t.hover : Colors.transparent,
+              color: hovered || pressed ? t.surface2 : Colors.transparent,
               child: header,
             ),
           ),
@@ -867,8 +865,8 @@ class _TestLineState extends State<_TestLine> {
             Container(
               decoration: BoxDecoration(
                 color: t.isDark
-                    ? t.bg.withValues(alpha: 0.45)
-                    : t.hover.withValues(alpha: 0.5),
+                    ? t.ground.withValues(alpha: 0.45)
+                    : t.surface2.withValues(alpha: 0.5),
                 border: Border(top: BorderSide(color: t.line)),
               ),
               padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
@@ -966,7 +964,7 @@ class _InfoGlyph extends StatelessWidget {
         child: Icon(
           Icons.info_outline,
           size: small ? 12 : 13,
-          color: hovered || pressed ? t.text : t.faint,
+          color: hovered || pressed ? t.ink : t.muted,
         ),
       ),
     );
@@ -1013,7 +1011,7 @@ class _InfoDialog extends StatelessWidget {
         constraints:
             BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6),
         child: SingleChildScrollView(
-          child: Text(description, style: t.body),
+          child: Text(description, style: t.prose),
         ),
       ),
     );
@@ -1052,7 +1050,7 @@ class _MetricLine extends StatelessWidget {
             child: _NameWithInfo(
               name: metric.displayLabel,
               description: metric.description,
-              style: t.monoSmallDim,
+              style: t.smallMuted,
               small: true,
             ),
           ),
@@ -1098,15 +1096,15 @@ class _UnavailableSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
           child: Row(
             children: [
-              Icon(Icons.block, size: 13, color: t.faint),
+              Icon(Icons.block, size: 13, color: t.muted),
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
                   'NOT AVAILABLE ON THIS DEVICE (${items.length})',
-                  style: t.micro,
+                  style: t.caps,
                 ),
               ),
-              Icon(open ? Icons.remove : Icons.add, size: 13, color: t.faint),
+              Icon(open ? Icons.remove : Icons.add, size: 13, color: t.muted),
             ],
           ),
         ),
@@ -1125,7 +1123,7 @@ class _UnavailableSection extends StatelessWidget {
                       child: _NameWithInfo(
                         name: item.title,
                         description: item.description,
-                        style: t.monoSmall.copyWith(color: t.dim),
+                        style: t.small.copyWith(color: t.muted),
                         small: true,
                       ),
                     ),
@@ -1134,7 +1132,7 @@ class _UnavailableSection extends StatelessWidget {
                       Expanded(
                         flex: 5,
                         child: Text(item.reason,
-                            style: t.monoSmall.copyWith(color: t.faint),
+                            style: t.small.copyWith(color: t.muted),
                             textAlign: TextAlign.right),
                       ),
                     ],
@@ -1180,12 +1178,12 @@ class _DiagnosticsSection extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.notes, size: 13, color: t.faint),
+                Icon(Icons.notes, size: 13, color: t.muted),
                 const SizedBox(width: 9),
                 Expanded(
-                  child: Text('DIAGNOSTICS', style: t.micro),
+                  child: Text('DIAGNOSTICS', style: t.caps),
                 ),
-                Text(summary, style: t.micro),
+                Text(summary, style: t.caps),
               ],
             ),
           ),
@@ -1193,7 +1191,7 @@ class _DiagnosticsSection extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
             child: Text(
               'The exported file holds the full log.',
-              style: t.monoSmall.copyWith(color: t.faint),
+              style: t.small.copyWith(color: t.muted),
             ),
           ),
         ],

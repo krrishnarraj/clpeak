@@ -19,6 +19,15 @@ String formatDate(DateTime t) {
   return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
 }
 
+/// A day as a person writes it: `20 Oct 2026`.
+String formatDay(DateTime t) {
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  return '${t.day} ${months[t.month - 1]} ${t.year}';
+}
+
 String formatDuration(Duration d) {
   if (d.inHours > 0) {
     return '${d.inHours}h ${d.inMinutes % 60}m';

@@ -7,7 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../ffi/xpupeak_bindings.dart' show OnnxEpLibrary;
 
 /// App settings: the theme mode, which ONNX Runtime and LiteRT libraries the
-/// two backends load, and whether runs record verbose diagnostics.
+/// two backends load, whether runs record verbose diagnostics -- and, kept
+/// with them, the runs opened last, which the sidebar lists.
 ///
 /// Loaded synchronously from an already-read [SharedPreferences] so main()
 /// can apply the ONNX library before the first enumeration — enumeration is
@@ -23,7 +24,10 @@ class SettingsService extends ChangeNotifier {
         _onnxWinml = _prefs.getBool(_onnxWinmlKey) ?? false,
         _onnxWinmlPath = _prefs.getString(_onnxWinmlPathKey) ?? '',
         _litertLibraryPath = _prefs.getString(_litertLibKey) ?? '',
-        _verbose = _prefs.getBool(_verboseKey) ?? false;
+        _verbose = _prefs.getBool(_verboseKey) ?? false,
+        _recentRunIds = List.unmodifiable(
+            (_prefs.getStringList(_recentRunsKey) ?? const <String>[])
+                .take(recentRunsKept));
 
   static Future<SettingsService> load() async =>
       SettingsService._(await SharedPreferences.getInstance());
@@ -35,6 +39,7 @@ class SettingsService extends ChangeNotifier {
   static const _onnxWinmlPathKey = 'onnxWinmlPath';
   static const _litertLibKey = 'litertLibraryPath';
   static const _verboseKey = 'verbose';
+  static const _recentRunsKey = 'recentRuns';
 
   final SharedPreferences _prefs;
 
@@ -92,6 +97,27 @@ class SettingsService extends ChangeNotifier {
   /// file larger, and the extra lines are for reading with a bug report.
   bool _verbose;
   bool get verbose => _verbose;
+
+  /// How many [recentRunIds] are kept.
+  static const recentRunsKept = 3;
+
+  /// The ids of the runs opened last -- from History, from the sidebar's
+  /// recent runs, or a run that just finished -- the newest first.  A
+  /// deleted run's id stays until newer ones push it out: whoever lists
+  /// them skips the ids no saved run has.
+  List<String> _recentRunIds;
+  List<String> get recentRunIds => _recentRunIds;
+
+  Future<void> noteRunOpened(String id) async {
+    if (id.isEmpty ||
+        (_recentRunIds.isNotEmpty && _recentRunIds.first == id)) {
+      return;
+    }
+    _recentRunIds = List.unmodifiable(
+        [id, ..._recentRunIds.where((r) => r != id)].take(recentRunsKept));
+    notifyListeners();
+    await _prefs.setStringList(_recentRunsKey, _recentRunIds);
+  }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;

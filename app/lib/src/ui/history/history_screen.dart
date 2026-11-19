@@ -12,6 +12,7 @@ import '../../services/run_history_store.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
+import '../common/run_route.dart';
 import '../results/results_screen.dart';
 import 'details_editor.dart';
 
@@ -142,7 +143,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         child: Text(
           'A run named "$fileName" already exists in history. '
           'Overwrite it or import as a new file?',
-          style: CP.of(context).body,
+          style: CP.of(context).prose,
         ),
       ),
     );
@@ -338,7 +339,7 @@ class _CrashLogTile extends StatelessWidget {
                   '${formatDate(log.startedAt)}.'
               : 'This permanently removes the run from '
                   '${formatDate(log.startedAt)}: its log and what it saved.',
-          style: t.body,
+          style: t.prose,
         ),
       ),
     );
@@ -379,7 +380,7 @@ class _CrashLogTile extends StatelessWidget {
                 const SizedBox(width: 6),
                 PopupMenuButton<String>(
                   tooltip: 'Run log actions',
-                  icon: Icon(Icons.more_horiz, size: 17, color: t.dim),
+                  icon: Icon(Icons.more_horiz, size: 17, color: t.muted),
                   iconSize: 17,
                   splashRadius: 1,
                   position: PopupMenuPosition.under,
@@ -392,12 +393,12 @@ class _CrashLogTile extends StatelessWidget {
                     PopupMenuItem(
                         value: 'export',
                         height: 38,
-                        child: Text('Export log', style: t.monoSmall)),
+                        child: Text('Export log', style: t.small)),
                     PopupMenuItem(
                         value: 'delete',
                         height: 38,
                         child: Text('Delete',
-                            style: t.monoSmall.copyWith(color: t.danger))),
+                            style: t.small.copyWith(color: t.danger))),
                   ],
                 ),
               ],
@@ -411,7 +412,7 @@ class _CrashLogTile extends StatelessWidget {
                   : 'The app stopped before this run finished. '
                       '$saved ${saved == 1 ? 'test was' : 'tests were'} saved; '
                       'the run log is what to attach to a bug report.',
-              style: t.monoSmallDim,
+              style: t.smallMuted,
             ),
             if (offer != null &&
                 checkpoint != null &&
@@ -419,13 +420,13 @@ class _CrashLogTile extends StatelessWidget {
                 offer.whyNot.isNotEmpty) ...[
               const SizedBox(height: 7),
               Text("Can't be continued: ${offer.whyNot}.",
-                  style: t.monoSmallDim),
+                  style: t.smallMuted),
             ],
             if (exit != null) ...[
               const SizedBox(height: 7),
               Text(
                 exit.message.split('\n').first,
-                style: t.monoSmall.copyWith(color: t.danger),
+                style: t.small.copyWith(color: t.danger),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -434,7 +435,7 @@ class _CrashLogTile extends StatelessWidget {
               const SizedBox(height: 7),
               Text(
                 'last line: ${last.message}',
-                style: t.monoSmall,
+                style: t.small,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -490,7 +491,7 @@ class _CrashLogTile extends StatelessWidget {
                     if (log.generator.version.isNotEmpty)
                       'v${log.generator.version}',
                   ].join('  ·  '),
-                  style: t.micro,
+                  style: t.caps,
                 ),
               ],
             ),
@@ -522,6 +523,7 @@ class _RunTile extends StatelessWidget {
       return;
     }
     await navigator.push(MaterialPageRoute(
+        settings: savedRunRoute(summary.id),
         builder: (_) => SavedResultsScreen(document: doc, summary: summary)));
   }
 
@@ -550,7 +552,7 @@ class _RunTile extends StatelessWidget {
             TextField(
               controller: controller,
               autofocus: true,
-              style: t.mono,
+              style: t.body,
               cursorWidth: 1.5,
               cursorRadius: Radius.zero,
               decoration: InputDecoration(
@@ -558,7 +560,7 @@ class _RunTile extends StatelessWidget {
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
                 hintText: summary.id,
-                hintStyle: t.mono.copyWith(color: t.faint),
+                hintStyle: t.body.copyWith(color: t.muted),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
                   borderSide: BorderSide(color: t.line),
@@ -569,13 +571,13 @@ class _RunTile extends StatelessWidget {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
-                  borderSide: BorderSide(color: t.text, width: 1.5),
+                  borderSide: BorderSide(color: t.ink, width: 1.5),
                 ),
               ),
               onSubmitted: (v) => Navigator.pop(context, v),
             ),
             const SizedBox(height: 10),
-            Text('Leave empty to use the run timestamp', style: t.micro),
+            Text('Leave empty to use the run timestamp', style: t.caps),
           ],
         ),
       ),
@@ -606,7 +608,7 @@ class _RunTile extends StatelessWidget {
         child: Text(
           'This permanently removes the saved results from '
           '${formatDate(summary.startedAt)}.',
-          style: t.body,
+          style: t.prose,
         ),
       ),
     );
@@ -655,7 +657,7 @@ class _RunTile extends StatelessWidget {
       child: CTap(
         onTap: () => _open(context),
         builder: (context, hovered, pressed) => Container(
-          color: hovered || pressed ? t.hover : Colors.transparent,
+          color: hovered || pressed ? t.surface2 : Colors.transparent,
           padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,7 +693,7 @@ class _RunTile extends StatelessWidget {
                   padding: const EdgeInsets.only(right: 4),
                   child: Text(
                     system,
-                    style: t.mono,
+                    style: t.body,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -704,7 +706,7 @@ class _RunTile extends StatelessWidget {
                   // The title is a name or a timestamp id, so the hardware
                   // always belongs here.
                   hardware,
-                  style: t.monoSmall,
+                  style: t.small,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -737,7 +739,7 @@ class _RunTile extends StatelessWidget {
                       if (summary.generator.version.isNotEmpty)
                         'v${summary.generator.version}',
                     ].join('  ·  '),
-                    style: t.monoSmallDim,
+                    style: t.smallMuted,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -768,7 +770,7 @@ class _RunTile extends StatelessWidget {
                         formatDuration(
                             Duration(milliseconds: summary.durationMs)),
                     ].join('  ·  '),
-                    style: t.micro,
+                    style: t.caps,
                   ),
                 ],
               ),
@@ -800,7 +802,7 @@ class _Menu extends StatelessWidget {
     final t = CP.of(context);
     return PopupMenuButton<String>(
       tooltip: 'Run actions',
-      icon: Icon(Icons.more_horiz, size: 17, color: t.dim),
+      icon: Icon(Icons.more_horiz, size: 17, color: t.muted),
       iconSize: 17,
       splashRadius: 1,
       position: PopupMenuPosition.under,
@@ -815,21 +817,21 @@ class _Menu extends StatelessWidget {
         PopupMenuItem(
             value: 'rename',
             height: 38,
-            child: Text('Rename', style: t.monoSmall)),
+            child: Text('Rename', style: t.small)),
         PopupMenuItem(
             value: 'details',
             height: 38,
             enabled: onDetails != null,
-            child: Text('Details', style: t.monoSmall)),
+            child: Text('Details', style: t.small)),
         PopupMenuItem(
             value: 'export',
             height: 38,
-            child: Text('Export JSON', style: t.monoSmall)),
+            child: Text('Export JSON', style: t.small)),
         PopupMenuItem(
             value: 'delete',
             height: 38,
             child: Text('Delete',
-                style: t.monoSmall.copyWith(color: t.danger))),
+                style: t.small.copyWith(color: t.danger))),
       ],
     );
   }
