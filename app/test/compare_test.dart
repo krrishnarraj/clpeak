@@ -41,11 +41,56 @@ PairCompare _pair(RunCompare c, String processor) =>
 KeyCompare _row(PairCompare p, String key) =>
     p.both.firstWhere((r) => r.key.id == key);
 
+SharedBackendCompare _through(PairCompare p, String backend) =>
+    p.backends.firstWhere((x) => x.backend == backend);
+
 /// Where a value came from, as `backend:index test "reading" rN`.
 String _from(CompareValue v) =>
     '${v.backend}:${v.device.index} ${v.test.key} "${v.metric.id}" r${v.revision}';
 
-/// Every verdict a compare holds: headlines, keys and readings.
+/// A device, as `backend:index name`.
+String _device(DeviceRun d) => '${d.backend}:${d.index} ${d.device}';
+
+CompareSide? _flip(CompareSide? side) => switch (side) {
+      CompareSide.a => CompareSide.b,
+      CompareSide.b => CompareSide.a,
+      null => null,
+    };
+
+/// [turned] is [v] with the sides swapped.
+void _expectTurned(Verdict turned, Verdict v) {
+  expect(turned.methodChanged, v.methodChanged);
+  expect(turned.winner, _flip(v.winner));
+  expect(turned.factor, v.factor);
+  if (v.ratio != null) expect(turned.ratio! * v.ratio!, closeTo(1, 1e-12));
+}
+
+/// Every device of a backend both runs have is in one place: a pair's
+/// compare through that backend, on its own side, or unpaired.
+void _expectEveryDeviceOnce(RunCompare c) {
+  for (final (run, through, unpaired) in [
+    (
+      c.a,
+      [for (final p in c.pairs) for (final x in p.backends) ...x.devicesA],
+      c.unpairedDevicesA,
+    ),
+    (
+      c.b,
+      [for (final p in c.pairs) for (final x in p.backends) ...x.devicesB],
+      c.unpairedDevicesB,
+    ),
+  ]) {
+    final shared = [
+      for (final d in run.document.runs)
+        if (c.backends.contains(d.backend)) d,
+    ];
+    expect(through.length + unpaired.length, shared.length);
+    expect({...through, ...unpaired}, {...shared});
+  }
+}
+
+/// Every verdict a compare holds: headlines, keys and readings, by
+/// processor and through each backend.
 Iterable<Verdict> _verdicts(RunCompare c) sync* {
   for (final p in c.pairs) {
     for (final h in p.headlines) {
@@ -53,6 +98,14 @@ Iterable<Verdict> _verdicts(RunCompare c) sync* {
     }
     for (final r in p.both) {
       yield r.verdict;
+    }
+    for (final x in p.backends) {
+      for (final h in x.headlines) {
+        if (h.verdict != null) yield h.verdict!;
+      }
+      for (final r in x.both) {
+        yield r.verdict;
+      }
     }
     for (final d in p.devices) {
       for (final r in d.readings) {
@@ -196,18 +249,13 @@ void main() {
       // The desktop has no NPU: the laptop's is B's, unpaired.
       expect(s.unpairedA, isEmpty);
       expect([for (final g in s.unpairedB) g.id], ['npu0']);
-      CompareSide? flip(CompareSide? side) => switch (side) {
-            CompareSide.a => CompareSide.b,
-            CompareSide.b => CompareSide.a,
-            null => null,
-          };
       for (final (i, p) in c.pairs.indexed) {
         final q = s.pairs[i];
         expect([for (final r in q.both) r.key.id], [for (final r in p.both) r.key.id]);
         expect([for (final r in q.onlyA) r.key.id], [for (final r in p.onlyB) r.key.id]);
         for (final (j, r) in p.both.indexed) {
           final t = q.both[j].verdict;
-          expect(t.winner, flip(r.verdict.winner));
+          expect(t.winner, _flip(r.verdict.winner));
           expect(t.factor, r.verdict.factor);
           expect(t.ratio! * r.verdict.ratio!, closeTo(1, 1e-12));
         }
@@ -337,6 +385,43 @@ void main() {
       expect(zero.winner, CompareSide.a);
       expect(zero.ratio, isNull);
       expect(zero.factor, isNull);
+    });
+
+    test('within 0.05% reads the same, as --compare words it', () {
+      Verdict v(double a, double b, [Direction d = Direction.higherIsBetter]) =>
+          Verdict.of(a, b, d);
+      // A factor under 1.0005 would print as 1.000x: --compare says "within
+      // 0.05%", and a screen marks neither side better, though one is.
+      final near = v(1.0004, 1);
+      expect(near.winner, CompareSide.a);
+      expect(near.isTie, isFalse);
+      expect(near.readsSame, isTrue);
+      expect(v(1, 1.0004).readsSame, isTrue);
+      final faster = v(1, 1.0004, Direction.lowerIsBetter);
+      expect(faster.winner, CompareSide.a);
+      expect(faster.readsSame, isTrue);
+      // 1.0005 itself, and anything wider, names its winner.
+      expect(v(1.0005, 1).readsSame, isFalse);
+      expect(v(1.0006, 1).readsSame, isFalse);
+      // A tie reads the same; a changed method, and a value not above zero,
+      // do not.
+      expect(v(2, 2).readsSame, isTrue);
+      expect(
+          Verdict.of(1, 1, Direction.higherIsBetter, methodChanged: true)
+              .readsSame,
+          isFalse);
+      expect(v(0, 1e-9).readsSame, isFalse);
+      // On the verdicts a screen reads: one launch 0.04% slower, by
+      // processor, through its backend and reading by reading.
+      final p = _compare(_oneLatency(1e-6), _oneLatency(1.0004e-6)).pairs.single;
+      for (final verdict in [
+        p.both.single.verdict,
+        p.backends.single.both.single.verdict,
+        p.devices.single.readings.single.verdict,
+      ]) {
+        expect(verdict.winner, CompareSide.a);
+        expect(verdict.readsSame, isTrue);
+      }
     });
 
     test('two processors of one run', () {
@@ -478,6 +563,301 @@ void main() {
     });
   });
 
+  group('by backend', () {
+    test('the GPUs through each backend both have, its best alone', () {
+      final c = _compare(_laptop, _desktop);
+      expect(c.backends, ['Vulkan', 'OpenCL', 'CPU', 'LiteRT', 'ONNX']);
+      final gpu = _pair(c, 'gpu0');
+      expect([for (final x in gpu.backends) x.backend],
+          ['Vulkan', 'OpenCL', 'LiteRT']);
+
+      final vulkan = _through(gpu, 'Vulkan');
+      expect([for (final d in vulkan.devicesA) _device(d)],
+          ['Vulkan:0 Apple M1 Pro']);
+      expect([for (final d in vulkan.devicesB) _device(d)],
+          ['Vulkan:0 NVIDIA GeForce RTX 5060']);
+      // The float peak through Vulkan: the M1 Pro's shader ALUs, though
+      // Metal's half4 is its peak by processor, against the RTX's
+      // fp16-accumulate cooperative matrices, though CUDA's NVFP4 is its.
+      expect([for (final h in vulkan.headlines) h.headline.id],
+          ['peak-float', 'peak-integer', 'peak-memory-bandwidth']);
+      final float = vulkan.headlines.first;
+      expect(_from(float.a!), 'Vulkan:0 single_precision_compute "float4" r1');
+      expect(_from(float.b!), 'Vulkan:0 coopmat "fp16 f16acc" r1');
+      expect([for (final v in [...float.aBackends, ...float.bBackends]) v.backend],
+          ['Vulkan', 'Vulkan']);
+      expect(float.verdict!.winner, CompareSide.b);
+      expect(float.verdict!.factor, closeTo(9.38e13 / 5.05e12, 1e-9));
+      expect(_from(gpu.headlines.first.a!),
+          'Metal:0 half_precision_compute "half4" r1');
+      // No integer rate on the M1 Pro through Vulkan: B's alone, no verdict.
+      final integer = vulkan.headlines[1];
+      expect(integer.a, isNull);
+      expect(_from(integer.b!), 'Vulkan:0 coopmat "int8" r1');
+      expect(integer.verdict, isNull);
+      expect(vulkan.headlines[2].verdict!.factor,
+          closeTo(4.13e11 / 1.97e11, 1e-12));
+
+      // The keys both measured through it, in the pair's order.
+      expect([
+        for (final g in vulkan.bothByCategory)
+          '${g.category.tag}: ${[for (final r in g.rows) r.key.id].join(', ')}'
+      ], [
+        'compute: single-precision-compute|flops, '
+            'matrix-compute|flops|dtype=fp16, '
+            'matrix-compute|flops|acc=fp16|dtype=fp16',
+        'bandwidth: global-memory-bandwidth|bytes_per_second',
+      ]);
+      final fp16 = vulkan.both[1];
+      expect(_from(fp16.a.best), 'Vulkan:0 coopmat "fp16" r1');
+      expect(_from(fp16.b.best), 'Vulkan:0 coopmat "fp16" r1');
+      expect([for (final v in [...fp16.a.backends, ...fp16.b.backends]) v.backend],
+          ['Vulkan', 'Vulkan']);
+      expect(fp16.verdict.winner, CompareSide.b);
+      expect(fp16.verdict.factor, closeTo(4.71e13 / 3.6e12, 1e-12));
+      expect(fp16.category, BenchCategory.compute);
+      // By processor the same key is Metal's against CUDA's.
+      final whole = _row(gpu, 'matrix-compute|flops|dtype=fp16');
+      expect(_from(whole.a.best), 'Metal:0 simdgroup_matrix "fp16" r2');
+      expect(_from(whole.b.best), 'CUDA:0 wmma "fp16" r1');
+      expect(vulkan.onlyA, isEmpty);
+      expect([for (final r in vulkan.onlyB) r.key.id],
+          ['matrix-compute|ops|dtype=int8']);
+
+      // Through OpenCL the integer headline is two keys: the M1 Pro's int32
+      // vectors against the RTX's int8 dot products.
+      final opencl = _through(gpu, 'OpenCL');
+      expect([for (final r in opencl.both) r.key.id], [
+        'single-precision-compute|flops',
+        'global-memory-bandwidth|bytes_per_second',
+      ]);
+      expect([for (final r in opencl.onlyA) r.key.id], ['integer-compute|ops']);
+      expect([for (final r in opencl.onlyB) r.key.id],
+          ['int8-dot-product-compute|ops']);
+      final openclInteger = opencl.headlines[1];
+      expect(_from(openclInteger.a!), 'OpenCL:0 integer_compute "int4" r1');
+      expect(_from(openclInteger.b!),
+          'OpenCL:0 integer_compute_int8_dp "int8_dp4" r1');
+      expect(openclInteger.verdict!.factor, closeTo(7.4e13 / 1.31e12, 1e-9));
+
+      // A headline neither side reached through a backend is left out:
+      // LiteRT measured GEMMs alone.
+      final litert = _through(gpu, 'LiteRT');
+      expect([for (final h in litert.headlines) h.headline.id], ['peak-float']);
+      expect([for (final r in litert.both) r.key.id], ['gemm|flops|dtype=fp16']);
+      expect([for (final r in litert.onlyB) r.key.id], ['gemm|flops|dtype=fp32']);
+    });
+
+    test('the CPUs through the CPU backend and ONNX Runtime', () {
+      final cpu = _pair(_compare(_laptop, _desktop), 'cpu0');
+      expect([for (final x in cpu.backends) x.backend], ['CPU', 'ONNX']);
+      final native = _through(cpu, 'CPU');
+      expect([for (final r in native.both) r.key.id], [
+        'single-precision-compute|flops',
+        'single-precision-compute|flops|scope=core',
+        'double-precision-compute|flops',
+        'int8-dot-product-compute|ops',
+        'int8-dot-product-compute|ops|scope=core',
+        'global-memory-bandwidth|bytes_per_second|op=read',
+        'global-memory-bandwidth|bytes_per_second|op=copy',
+        'global-memory-bandwidth|bytes_per_second|op=triad',
+        'memory-latency|seconds|level=l1',
+        'memory-latency|seconds|level=dram',
+      ]);
+      // Accelerate's GEMMs are the M1 Pro's alone through the CPU backend,
+      // though by processor both have fp32: the Threadripper's through
+      // ONNX Runtime.
+      expect([for (final r in native.onlyA) r.key.id], [
+        'double-precision-compute|flops|scope=core',
+        'gemm|flops|dtype=fp32',
+        'gemm|flops|dtype=fp16',
+        'aes|bytes_per_second',
+        'aes|bytes_per_second|scope=core',
+        'global-memory-bandwidth|bytes_per_second|op=read|scope=core',
+        'memory-latency|seconds|level=l2',
+        'memory-latency|seconds|level=slc',
+        'memory-latency|seconds|in_flight=8|level=dram',
+      ]);
+      expect(_from(_row(cpu, 'gemm|flops|dtype=fp32').b.best),
+          'ONNX:1 onnx_gemm "fp32" r1');
+      expect([for (final r in native.onlyB) r.key.id], [
+        'int16-dot-product-compute|ops',
+        'sha256|bytes_per_second',
+        'memory-latency|seconds|level=l3',
+      ]);
+      expect([for (final g in native.onlyAByCategory) g.category], [
+        BenchCategory.compute,
+        BenchCategory.crypto,
+        BenchCategory.bandwidth,
+        BenchCategory.latency,
+      ]);
+      // Accelerate's fp32 GEMM against the Threadripper's AVX2 all-core rate.
+      final float = native.headlines.first;
+      expect(_from(float.a!), 'CPU:0 accelerate_gemm "fp32" r1');
+      expect(_from(float.b!),
+          'CPU:0 single_precision_compute@AVX2+FMA "float MT" r1');
+      expect(float.verdict!.winner, CompareSide.a);
+      expect(float.verdict!.factor, closeTo(2.3e12 / 2.05e12, 1e-12));
+      // Lower is better through one backend too: DRAM to the Threadripper.
+      final dram = native.both.last;
+      expect(dram.verdict.winner, CompareSide.b);
+      expect(dram.verdict.factor, closeTo(9.6e-8 / 9.1e-8, 1e-12));
+
+      final onnx = _through(cpu, 'ONNX');
+      expect([for (final d in [...onnx.devicesA, ...onnx.devicesB]) _device(d)],
+          ['ONNX:1 CPU', 'ONNX:1 CPU']);
+      expect([
+        for (final h in onnx.headlines) '${h.headline.id} ${h.a!.value} ${h.b!.value}'
+      ], [
+        'peak-float 640000000000.0 1620000000000.0',
+        'peak-integer 1900000000000.0 4400000000000.0',
+      ]);
+      expect(onnx.onlyA, isEmpty);
+      expect(onnx.onlyB, isEmpty);
+    });
+
+    test('a backend one side alone has', () {
+      final c = _compare(_laptop, _desktop);
+      expect(c.backendsOnlyA, ['Metal', 'CoreML']);
+      expect(c.backendsOnlyB, ['CUDA']);
+      // ONNX Runtime reached the RTX and not the M1 Pro's GPU; Vulkan and
+      // OpenCL reached the Threadripper and no M1 Pro CPU.
+      final gpu = _pair(c, 'gpu0');
+      expect(gpu.backendsOnlyA, ['Metal', 'CoreML']);
+      expect(gpu.backendsOnlyB, ['CUDA', 'ONNX']);
+      final cpu = _pair(c, 'cpu0');
+      expect(cpu.backendsOnlyA, ['CoreML']);
+      expect(cpu.backendsOnlyB, ['Vulkan', 'OpenCL']);
+      // What one backend alone measured compares by processor only: the
+      // RTX's sparse NVFP4, through CUDA.
+      const nvfp4 = 'matrix-compute|flops|dtype=nvfp4|sparsity=2:4';
+      expect([for (final r in gpu.onlyB) r.key.id], contains(nvfp4));
+      for (final x in gpu.backends) {
+        expect([
+          for (final r in x.both) r.key.id,
+          for (final r in [...x.onlyA, ...x.onlyB]) r.key.id,
+        ], isNot(contains(nvfp4)));
+      }
+    });
+
+    test('one backend\'s test at two revisions reads "method changed"', () {
+      // The RTX's cooperative-matrix test, re-measured another way.
+      final revised = _desktop.replaceFirst(
+          '"title": "Cooperative-matrix peak",',
+          '"title": "Cooperative-matrix peak",\n          "revision": 2,');
+      expect(revised, isNot(_desktop));
+      final gpu = _pair(_compare(_laptop, revised), 'gpu0');
+      final vulkan = _through(gpu, 'Vulkan');
+      // Both sides' matrix rows through Vulkan are its coopmat test, at r1
+      // and r2: no ratio.
+      expect([
+        for (final r in vulkan.both)
+          if (r.verdict.methodChanged) r.key.id,
+      ], [
+        'matrix-compute|flops|dtype=fp16',
+        'matrix-compute|flops|acc=fp16|dtype=fp16',
+      ]);
+      final fp16 = vulkan.both[1];
+      expect(_from(fp16.b.best), 'Vulkan:0 coopmat "fp16" r2');
+      expect(fp16.verdict.ratio, isNull);
+      expect(fp16.verdict.winner, isNull);
+      expect(fp16.verdict.factor, isNull);
+      expect(fp16.verdict.readsSame, isFalse);
+      // Two tests of one backend still compare: the float headline is the
+      // M1 Pro's shader peak against the RTX's coopmat.
+      final float = vulkan.headlines.first;
+      expect(_from(float.b!), 'Vulkan:0 coopmat "fp16 f16acc" r2');
+      expect(float.verdict!.methodChanged, isFalse);
+      expect(float.verdict!.winner, CompareSide.b);
+      // By processor the key is Metal's against CUDA's, which compare.
+      final whole = _row(gpu, 'matrix-compute|flops|dtype=fp16');
+      expect(whole.verdict.methodChanged, isFalse);
+      expect(whole.verdict.winner, CompareSide.b);
+      expect(_through(gpu, 'OpenCL').both.where((r) => r.verdict.methodChanged),
+          isEmpty);
+    });
+
+    test('a shared backend\'s devices no pair sets side by side', () {
+      final c = _compare(_laptop, _desktop);
+      // The Neural Engine pairs with nothing, so its ONNX Runtime device has
+      // no partner; its Core ML one is of a backend the desktop lacks.
+      expect([for (final d in c.unpairedDevicesA) _device(d)],
+          ['ONNX:0 Apple CoreML (Neural Engine)']);
+      // The Threadripper through Vulkan and OpenCL, which reach no M1 Pro
+      // CPU, and the RTX through ONNX Runtime, which reaches no M1 Pro GPU.
+      expect([for (final d in c.unpairedDevicesB) _device(d)], [
+        'Vulkan:1 llvmpipe (LLVM 19.1.1, 256 bits)',
+        'OpenCL:1 pthread-AMD Ryzen Threadripper PRO 3955WX 16-Cores',
+        'ONNX:0 NVIDIA CUDA (NVIDIA GeForce RTX 5060)',
+      ]);
+      _expectEveryDeviceOnce(c);
+
+      // Paired with the RTX, the Neural Engine meets it through ONNX
+      // Runtime, and the M1 Pro's GPU, now unpaired, leaves its devices
+      // without a partner.
+      final npu = c.a.measures.forProcessor('npu0')!;
+      final r = c.withPair(npu, c.b.measures.forProcessor('gpu0')!);
+      final onnx = _through(r.pairOf(npu)!, 'ONNX');
+      expect([for (final d in [...onnx.devicesA, ...onnx.devicesB]) _device(d)], [
+        'ONNX:0 Apple CoreML (Neural Engine)',
+        'ONNX:0 NVIDIA CUDA (NVIDIA GeForce RTX 5060)',
+      ]);
+      expect([for (final x in onnx.both) x.key.id],
+          ['gemm|flops|dtype=fp16', 'gemm|ops|dtype=int8|quant=qdq']);
+      expect([for (final d in r.unpairedDevicesA) _device(d)], [
+        'Vulkan:0 Apple M1 Pro',
+        'OpenCL:0 Apple M1 Pro',
+        'LiteRT:0 GPU (Metal)',
+      ]);
+      expect([for (final d in r.unpairedDevicesB) _device(d)], [
+        'Vulkan:0 NVIDIA GeForce RTX 5060',
+        'Vulkan:1 llvmpipe (LLVM 19.1.1, 256 bits)',
+        'OpenCL:0 NVIDIA GeForce RTX 5060',
+        'OpenCL:1 pthread-AMD Ryzen Threadripper PRO 3955WX 16-Cores',
+        'LiteRT:0 WebGPU (NVIDIA GeForce RTX 5060)',
+      ]);
+      _expectEveryDeviceOnce(r);
+    });
+
+    test('swapping the sides turns every backend round', () {
+      final c = _compare(_laptop, _desktop);
+      final s = c.swapped();
+      // In the desktop's run order now, which here is the laptop's.
+      expect(s.backends, ['Vulkan', 'OpenCL', 'CPU', 'LiteRT', 'ONNX']);
+      expect(s.backendsOnlyA, c.backendsOnlyB);
+      expect(s.backendsOnlyB, c.backendsOnlyA);
+      expect(s.unpairedDevicesA, c.unpairedDevicesB);
+      expect(s.unpairedDevicesB, c.unpairedDevicesA);
+      _expectEveryDeviceOnce(s);
+      for (final p in c.pairs) {
+        final q = s.pairs.firstWhere((q) => identical(q.a, p.b));
+        expect(q.backendsOnlyA, p.backendsOnlyB);
+        expect(q.backendsOnlyB, p.backendsOnlyA);
+        expect([for (final x in q.backends) x.backend],
+            [for (final x in p.backends) x.backend]);
+        for (final x in p.backends) {
+          final y = _through(q, x.backend);
+          expect(y.devicesA, x.devicesB);
+          expect(y.devicesB, x.devicesA);
+          expect([for (final r in y.both) r.key.id], [for (final r in x.both) r.key.id]);
+          expect([for (final r in y.onlyA) r.key.id], [for (final r in x.onlyB) r.key.id]);
+          expect([for (final r in y.onlyB) r.key.id], [for (final r in x.onlyA) r.key.id]);
+          for (final (j, r) in x.both.indexed) {
+            _expectTurned(y.both[j].verdict, r.verdict);
+          }
+          expect([for (final h in y.headlines) h.headline.id],
+              [for (final h in x.headlines) h.headline.id]);
+          for (final (j, h) in x.headlines.indexed) {
+            final g = y.headlines[j];
+            expect(g.a?.value, h.b?.value);
+            expect(g.b?.value, h.a?.value);
+            if (h.verdict != null) _expectTurned(g.verdict!, h.verdict!);
+          }
+        }
+      }
+    });
+  });
+
   group('a file against itself', () {
     for (final name in ['soc_laptop', 'desktop_two_packages']) {
       test('$name reads 1.00x everywhere, and nothing on one side', () {
@@ -490,6 +870,10 @@ void main() {
         ]) {
           expect(c.unpairedA, isEmpty);
           expect(c.unpairedB, isEmpty);
+          expect(c.backendsOnlyA, isEmpty);
+          expect(c.backendsOnlyB, isEmpty);
+          expect(c.unpairedDevicesA, isEmpty);
+          expect(c.unpairedDevicesB, isEmpty);
           expect(c.pairs, hasLength(c.a.measures.groups.length));
           for (final p in c.pairs) {
             expect(p.pairedBy, PairedBy.model);
@@ -502,6 +886,14 @@ void main() {
             for (final d in p.devices) {
               expect(d.onlyA, isEmpty);
               expect(d.onlyB, isEmpty);
+            }
+            expect(p.backendsOnlyA, isEmpty);
+            expect(p.backendsOnlyB, isEmpty);
+            for (final x in p.backends) {
+              expect([for (final d in x.devicesA) _device(d)],
+                  [for (final d in x.devicesB) _device(d)]);
+              expect(x.onlyA, isEmpty);
+              expect(x.onlyB, isEmpty);
             }
           }
           final all = _verdicts(c).toList();

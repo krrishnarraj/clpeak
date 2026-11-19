@@ -1153,6 +1153,11 @@ the measure keys both have.
 - **Method changed.** Where the two values set side by side are readings of
   one backend's test at two revisions, a compare says "method changed"
   instead of a ratio (*Revisions*).
+- **By backend.** A pair also compares the same way through each backend
+  both its processors were seen through, each side's value being that
+  backend's best (*The best of a key*), so its test at two revisions says
+  "method changed" there. A device of a backend both runs have, on a
+  processor with no partner through it, is listed.
 - **Reading by reading.** Where a pair's processors are one model, the
   devices both runs saw on them compare reading by reading as well: one
   machine before and after a driver update, say. A device is named by its

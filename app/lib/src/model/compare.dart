@@ -12,7 +12,10 @@
 /// - **Two processors** -- two runs, or two in one run: the measure keys
 ///   both have, each side's best with the backend that reached it, which
 ///   side won and by what factor, then the keys of one side alone; the
-///   headlines first ([PairCompare]).
+///   headlines first ([PairCompare]).  And the same through each backend
+///   both were seen through, each side's best of that backend alone: an
+///   M1 Pro's GPU and an RTX 5060 through Vulkan, then through OpenCL
+///   ([PairCompare.backends]).
 ///
 /// Processors pair by kind, then by model ([processorModel]), and a person
 /// may pair them otherwise ([RunCompare.withPair]).  Where the two values
@@ -147,6 +150,11 @@ class CompareValue {
 
 // ── What two values say ────────────────────────────────────────────────────
 
+/// The factor under which --compare words two values "within 0.05%" rather
+/// than naming a winner: one that would print as 1.000x (`verdictText`,
+/// src/common/logger_text.cpp).
+const _sameBelow = 1.0005;
+
 /// Two values of one measure, side by side.
 class Verdict {
   const Verdict._(
@@ -187,6 +195,16 @@ class Verdict {
   final bool methodChanged;
 
   bool get isTie => !methodChanged && winner == null;
+
+  /// The two read the same, as --compare words them: a tie ("the same"),
+  /// or a factor under 1.0005, which the CLI words "within 0.05%" rather
+  /// than a winner its digits cannot show.  A screen marks neither side
+  /// better then.  False where the method changed, and where a value is
+  /// not above zero: a winner, and no factor.
+  bool get readsSame {
+    final f = factor;
+    return isTie || (f != null && f < _sameBelow);
+  }
 }
 
 /// The order the measure engine breaks ties in ([readingOrder]), over two
@@ -436,7 +454,7 @@ int _bestFirst(MeasuredReading a, MeasuredReading b) =>
     isBetter(a, b) ? -1 : (isBetter(b, a) ? 1 : 0);
 
 /// One side's best of one measure key on one processor, with each backend's
-/// best.
+/// best -- or, through one backend, that backend's.
 class MeasureRow {
   MeasureRow._(this.key, this.best, this.backends, this.category);
 
@@ -453,12 +471,21 @@ class MeasureRow {
     );
   }
 
+  /// [m] through [backend] alone, which measured it: that backend's best,
+  /// the row's one backend.
+  factory MeasureRow._through(CompareRun run, MeasureBest m, String backend) {
+    final best = CompareValue.of(run, m.byBackend[backend]!);
+    return MeasureRow._(m.key, best, [best], _categoryOf(m.key, [best]));
+  }
+
   final MeasureKey key;
 
   /// The best over every backend: the processor's peak for the key.
+  /// Through one backend ([SharedBackendCompare]), that backend's best.
   final CompareValue best;
 
-  /// Each backend's best, best first, so [best]'s own backend leads.
+  /// Each backend's best, best first, so [best]'s own backend leads;
+  /// through one backend, that one.
   final List<CompareValue> backends;
 
   final BenchCategory category;
@@ -488,21 +515,30 @@ class KeyCompare {
 }
 
 /// A headline on both processors: each side's value, the best of the keys
-/// it selects, and each backend's best of them.
+/// it selects, and each backend's best of them -- or, through one backend,
+/// that backend's best of them alone.
 class HeadlineCompare {
   HeadlineCompare._(this.headline, this.a, this.b, this.aBackends,
       this.bBackends, this.verdict);
 
+  /// [h] from each side's value on its processor ([ha], [hb]): over every
+  /// backend, or through [backend] alone (`HeadlineValue.byBackend`).
   factory HeadlineCompare._of(Headline h, CompareRun runA, HeadlineValue? ha,
-      CompareRun runB, HeadlineValue? hb) {
-    final a = ha == null ? null : CompareValue.of(runA, ha.best);
-    final b = hb == null ? null : CompareValue.of(runB, hb.best);
+      CompareRun runB, HeadlineValue? hb, {String? backend}) {
+    MeasuredReading? best(HeadlineValue? v) =>
+        backend == null ? v?.best : v?.byBackend[backend];
+    List<MeasuredReading> ranked(HeadlineValue? v) => backend == null
+        ? v?.ranked ?? const []
+        : [?v?.byBackend[backend]];
+    final ra = best(ha), rb = best(hb);
+    final a = ra == null ? null : CompareValue.of(runA, ra);
+    final b = rb == null ? null : CompareValue.of(runB, rb);
     return HeadlineCompare._(
       h,
       a,
       b,
-      [for (final r in ha?.ranked ?? const <MeasuredReading>[]) CompareValue.of(runA, r)],
-      [for (final r in hb?.ranked ?? const <MeasuredReading>[]) CompareValue.of(runB, r)],
+      [for (final r in ranked(ha)) CompareValue.of(runA, r)],
+      [for (final r in ranked(hb)) CompareValue.of(runB, r)],
       a != null && b != null ? _judge(a, b) : null,
     );
   }
@@ -510,11 +546,12 @@ class HeadlineCompare {
   final Headline headline;
 
   /// Each side's value; null where that processor has none (a GPU's memory
-  /// bandwidth against an NPU that no backend measures it on).
+  /// bandwidth against an NPU that no backend measures it on), or none
+  /// through the one backend.
   final CompareValue? a;
   final CompareValue? b;
 
-  /// Each backend's best, best first.
+  /// Each backend's best, best first; through one backend, that one.
   final List<CompareValue> aBackends;
   final List<CompareValue> bBackends;
 
@@ -606,6 +643,64 @@ class DeviceCompare {
 
 // ── Two processors ─────────────────────────────────────────────────────────
 
+/// The backends of [devices], in their order.
+List<String> _backendsOf(Iterable<DeviceRun> devices) =>
+    [...{for (final d in devices) d.backend}];
+
+/// [catalog]'s headlines either processor has -- over every backend, or
+/// through [backend] alone -- in the catalog's order.
+List<HeadlineCompare> _headlineCompares(HeadlineCatalog catalog,
+    CompareRun runA, ProcessorMeasures a, CompareRun runB, ProcessorMeasures b,
+    {String? backend}) {
+  bool has(HeadlineValue? v) =>
+      v != null && (backend == null || v.byBackend.containsKey(backend));
+  final out = <HeadlineCompare>[];
+  for (final h in catalog.headlines) {
+    final ha = a.headline(h);
+    final hb = b.headline(h);
+    if (!has(ha) && !has(hb)) continue;
+    out.add(HeadlineCompare._of(h, runA, ha, runB, hb, backend: backend));
+  }
+  return out;
+}
+
+/// [a]'s measure keys against [b]'s -- each side's best over every backend,
+/// or through [backend] alone -- as the keys both have, then those of one
+/// side alone, each by category, then [measureKeyOrder].
+({List<KeyCompare> both, List<MeasureRow> onlyA, List<MeasureRow> onlyB})
+    _keyCompares(CompareRun runA, ProcessorMeasures a, CompareRun runB,
+        ProcessorMeasures b,
+        {String? backend}) {
+  bool has(MeasureBest? m) =>
+      m != null && (backend == null || m.byBackend.containsKey(backend));
+  MeasureRow row(CompareRun run, MeasureBest m) => backend == null
+      ? MeasureRow.of(run, m)
+      : MeasureRow._through(run, m, backend);
+  final both = <KeyCompare>[];
+  final onlyA = <MeasureRow>[];
+  final onlyB = <MeasureRow>[];
+  for (final m in a.byKey.values) {
+    if (!has(m)) continue;
+    final rowA = row(runA, m);
+    final mb = b.byKey[m.key.id];
+    if (mb == null || !has(mb)) {
+      onlyA.add(rowA);
+      continue;
+    }
+    final rowB = row(runB, mb);
+    both.add(KeyCompare._(m.key, rowA, rowB, _judge(rowA.best, rowB.best),
+        _categoryOf(m.key, [rowA.best, rowB.best])));
+  }
+  for (final m in b.byKey.values) {
+    if (has(m) && !has(a.byKey[m.key.id])) onlyB.add(row(runB, m));
+  }
+  both.sort((x, y) => _rowOrder(x.category, x.key, y.category, y.key));
+  for (final rows in [onlyA, onlyB]) {
+    rows.sort((x, y) => _rowOrder(x.category, x.key, y.category, y.key));
+  }
+  return (both: both, onlyA: onlyA, onlyB: onlyB);
+}
+
 /// Two processors side by side: one of A's, one of B's.
 class PairCompare {
   PairCompare._({
@@ -623,6 +718,9 @@ class PairCompare {
     required this.devices,
     required this.devicesOnlyA,
     required this.devicesOnlyB,
+    required this.backends,
+    required this.backendsOnlyA,
+    required this.backendsOnlyB,
   });
 
   /// [a], a processor of [runA], against [b], one of [runB] -- the same run
@@ -630,35 +728,11 @@ class PairCompare {
   factory PairCompare.of(CompareRun runA, ProcessorMeasures a,
       CompareRun runB, ProcessorMeasures b,
       {required HeadlineCatalog catalog, PairedBy by = PairedBy.person}) {
-    final headlines = <HeadlineCompare>[];
-    for (final h in catalog.headlines) {
-      final ha = a.headline(h);
-      final hb = b.headline(h);
-      if (ha == null && hb == null) continue;
-      headlines.add(HeadlineCompare._of(h, runA, ha, runB, hb));
-    }
+    final rows = _keyCompares(runA, a, runB, b);
 
-    final both = <KeyCompare>[];
-    final onlyA = <MeasureRow>[];
-    final onlyB = <MeasureRow>[];
-    for (final m in a.byKey.values) {
-      final rowA = MeasureRow.of(runA, m);
-      final mb = b.byKey[m.key.id];
-      if (mb == null) {
-        onlyA.add(rowA);
-        continue;
-      }
-      final rowB = MeasureRow.of(runB, mb);
-      both.add(KeyCompare._(m.key, rowA, rowB, _judge(rowA.best, rowB.best),
-          _categoryOf(m.key, [rowA.best, rowB.best])));
-    }
-    for (final m in b.byKey.values) {
-      if (!a.byKey.containsKey(m.key.id)) onlyB.add(MeasureRow.of(runB, m));
-    }
-    both.sort((x, y) => _rowOrder(x.category, x.key, y.category, y.key));
-    for (final rows in [onlyA, onlyB]) {
-      rows.sort((x, y) => _rowOrder(x.category, x.key, y.category, y.key));
-    }
+    // Each backend both were seen through, side by side through it alone.
+    final backendsA = _backendsOf(a.devices);
+    final backendsB = _backendsOf(b.devices);
 
     // One model on both sides: the devices both runs saw on it compare
     // reading by reading too, named by backend, device name and occurrence.
@@ -690,13 +764,26 @@ class PairCompare {
       pairedBy: by,
       modelA: modelA,
       modelB: modelB,
-      headlines: headlines,
-      both: both,
-      onlyA: onlyA,
-      onlyB: onlyB,
+      headlines: _headlineCompares(catalog, runA, a, runB, b),
+      both: rows.both,
+      onlyA: rows.onlyA,
+      onlyB: rows.onlyB,
       devices: devices,
       devicesOnlyA: devicesOnlyA,
       devicesOnlyB: devicesOnlyB,
+      backends: [
+        for (final name in backendsA)
+          if (backendsB.contains(name))
+            SharedBackendCompare._of(name, runA, a, runB, b, catalog),
+      ],
+      backendsOnlyA: [
+        for (final name in backendsA)
+          if (!backendsB.contains(name)) name,
+      ],
+      backendsOnlyB: [
+        for (final name in backendsB)
+          if (!backendsA.contains(name)) name,
+      ],
     );
   }
 
@@ -736,6 +823,72 @@ class PairCompare {
   final List<DeviceRun> devicesOnlyA;
   final List<DeviceRun> devicesOnlyB;
 
+  /// Each backend both processors were seen through -- a device of it on
+  /// each -- in A's run order, the two set side by side through it alone.
+  final List<SharedBackendCompare> backends;
+
+  /// The backends of one side's processor alone: A's in A's run order, B's
+  /// in B's.
+  final List<String> backendsOnlyA;
+  final List<String> backendsOnlyB;
+
+  List<CategoryRows<KeyCompare>> get bothByCategory =>
+      _grouped(both, (r) => r.category);
+  List<CategoryRows<MeasureRow>> get onlyAByCategory =>
+      _grouped(onlyA, (r) => r.category);
+  List<CategoryRows<MeasureRow>> get onlyBByCategory =>
+      _grouped(onlyB, (r) => r.category);
+}
+
+/// Two processors side by side through one backend both were seen through:
+/// each side's best of that backend alone, where [PairCompare.both] takes
+/// each side's best of every backend.  An M1 Pro's GPU and an RTX 5060
+/// through Vulkan: the M1 Pro's shader peak there, though Metal reaches
+/// more, against the RTX's cooperative matrices, though CUDA reaches more.
+///
+/// The pair's rules, over the measure engine's bests of one backend
+/// (`MeasureBest.byBackend`, `HeadlineValue.byBackend`): both values are
+/// that backend's, so its test at two revisions reads "method changed".
+class SharedBackendCompare {
+  SharedBackendCompare._(this.backend, this.devicesA, this.devicesB,
+      this.headlines, this.both, this.onlyA, this.onlyB);
+
+  factory SharedBackendCompare._of(String backend, CompareRun runA,
+      ProcessorMeasures a, CompareRun runB, ProcessorMeasures b,
+      HeadlineCatalog catalog) {
+    final rows = _keyCompares(runA, a, runB, b, backend: backend);
+    return SharedBackendCompare._(
+      backend,
+      [for (final d in a.devices) if (d.backend == backend) d],
+      [for (final d in b.devices) if (d.backend == backend) d],
+      _headlineCompares(catalog, runA, a, runB, b, backend: backend),
+      rows.both,
+      rows.onlyA,
+      rows.onlyB,
+    );
+  }
+
+  final String backend;
+
+  /// Its devices on each side's processor, in run order: one, or more where
+  /// it sees the processor more than once (two OpenCL platforms on one
+  /// CPU), whose best is the backend's.
+  final List<DeviceRun> devicesA;
+  final List<DeviceRun> devicesB;
+
+  /// The catalog's headlines either side has through it, in the catalog's
+  /// order: each side's value its best of the keys the headline selects.
+  final List<HeadlineCompare> headlines;
+
+  /// The measure keys both measured through it, by category, then
+  /// [measureKeyOrder]: each side's row this backend's best of the key.
+  final List<KeyCompare> both;
+
+  /// The keys one side alone measured through it, in the same order --
+  /// whatever the other measured through another backend.
+  final List<MeasureRow> onlyA;
+  final List<MeasureRow> onlyB;
+
   List<CategoryRows<KeyCompare>> get bothByCategory =>
       _grouped(both, (r) => r.category);
   List<CategoryRows<MeasureRow>> get onlyAByCategory =>
@@ -746,8 +899,19 @@ class PairCompare {
 
 /// Two runs side by side: their processors paired, and each pair compared.
 class RunCompare {
-  RunCompare._(this.a, this.b, this.catalog, this.pairs, this.unpairedA,
-      this.unpairedB);
+  RunCompare._({
+    required this.a,
+    required this.b,
+    required this.catalog,
+    required this.pairs,
+    required this.unpairedA,
+    required this.unpairedB,
+    required this.backends,
+    required this.backendsOnlyA,
+    required this.backendsOnlyB,
+    required this.unpairedDevicesA,
+    required this.unpairedDevicesB,
+  });
 
   /// [a] against [b] -- two runs, or one twice -- with [catalog]'s
   /// headlines.  The processors pair as [pairProcessors] pairs them, or as
@@ -770,21 +934,55 @@ class RunCompare {
     }
     final sorted = [...pairing]
       ..sort((x, y) => orderA[x.a]!.compareTo(orderA[y.a]!));
+    final compares = [
+      for (final p in sorted)
+        PairCompare.of(a, p.a, b, p.b, catalog: catalog, by: p.by),
+    ];
+
+    // Every device of a backend both runs have is set side by side through
+    // it by a pair, or unpaired.
+    final backendsA = _backendsOf(a.document.runs);
+    final backendsB = _backendsOf(b.document.runs);
+    final pairedA = <DeviceRun>{
+      for (final p in compares)
+        for (final x in p.backends) ...x.devicesA,
+    };
+    final pairedB = <DeviceRun>{
+      for (final p in compares)
+        for (final x in p.backends) ...x.devicesB,
+    };
     return RunCompare._(
-      a,
-      b,
-      catalog,
-      [
-        for (final p in sorted)
-          PairCompare.of(a, p.a, b, p.b, catalog: catalog, by: p.by),
-      ],
-      [
+      a: a,
+      b: b,
+      catalog: catalog,
+      pairs: compares,
+      unpairedA: [
         for (final g in a.measures.groups)
           if (!usedA.contains(g)) g,
       ],
-      [
+      unpairedB: [
         for (final g in b.measures.groups)
           if (!usedB.contains(g)) g,
+      ],
+      backends: [
+        for (final name in backendsA)
+          if (backendsB.contains(name)) name,
+      ],
+      backendsOnlyA: [
+        for (final name in backendsA)
+          if (!backendsB.contains(name)) name,
+      ],
+      backendsOnlyB: [
+        for (final name in backendsB)
+          if (!backendsA.contains(name)) name,
+      ],
+      unpairedDevicesA: [
+        for (final d in a.document.runs)
+          if (backendsB.contains(d.backend) && !pairedA.contains(d)) d,
+      ],
+      unpairedDevicesB: [
+        for (final d in b.document.runs)
+          if (backendsA.contains(d.backend) && !pairedB.contains(d)) d,
       ],
     );
   }
@@ -800,6 +998,22 @@ class RunCompare {
   final List<ProcessorMeasures> unpairedA;
   final List<ProcessorMeasures> unpairedB;
 
+  /// The backends both runs have, in A's run order: those a pair can set
+  /// side by side through ([PairCompare.backends]).
+  final List<String> backends;
+
+  /// The backends of one run alone: A's in A's run order, B's in B's.
+  final List<String> backendsOnlyA;
+  final List<String> backendsOnlyB;
+
+  /// The devices of a backend both runs have that no pair sets side by side
+  /// through it, in their run's order: on a processor whose partner has no
+  /// device of that backend -- the Threadripper's llvmpipe through Vulkan,
+  /// against an M1 Pro whose CPU no Vulkan device reaches -- or on one no
+  /// pair holds.
+  final List<DeviceRun> unpairedDevicesA;
+  final List<DeviceRun> unpairedDevicesB;
+
   /// The pairing, as [RunCompare.of] takes it back.
   List<ProcessorPair> get pairing =>
       [for (final p in pairs) ProcessorPair(p.a, p.b, by: p.pairedBy)];
@@ -812,7 +1026,8 @@ class RunCompare {
     return null;
   }
 
-  /// B against A: the same pairs, each turned round.
+  /// B against A: the same pairs, each turned round, through each backend
+  /// too, and each side's backends and devices with them.
   RunCompare swapped() => RunCompare.of(b, a,
       catalog: catalog,
       pairs: [
@@ -888,10 +1103,7 @@ class BackendCompare {
 
   factory BackendCompare.of(CompareRun run, ProcessorMeasures processor,
       {required HeadlineCatalog catalog}) {
-    final backends = <String>[];
-    for (final d in processor.devices) {
-      if (!backends.contains(d.backend)) backends.add(d.backend);
-    }
+    final backends = _backendsOf(processor.devices);
     Map<String, CompareValue> inOrder(Map<String, MeasuredReading> m) => {
           for (final name in backends)
             if (m[name] case final r?) name: CompareValue.of(run, r),

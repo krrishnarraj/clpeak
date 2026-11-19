@@ -238,11 +238,21 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   (`bothByCategory` …), each value a `CompareValue` naming its run,
   backend, device, test, reading and revision, each pair of values a
   `Verdict` (ratio above 1 when A is better, winner, factor, or
-  `methodChanged`); where the pair is one model, `devices` compares
-  reading by reading.  `swapped()`, `withPair()` and `withoutPair()` are
-  the screen's swap and re-pair.  One processor's backends against each
-  other: `BackendCompare`.  Runs come in through History only --
-  `RunHistoryStore.loadForCompare` / `compareRuns`
+  `methodChanged`; `readsSame` where `--compare` says "the same" or
+  "within 0.05%", and a screen marks neither side better); where the pair
+  is one model, `devices` compares reading by reading.  By backend: each
+  pair's `backends` (`SharedBackendCompare`) sets it side by side through
+  each backend both processors were seen through, that backend's bests
+  alone, beside `backendsOnlyA` / `backendsOnlyB`; on `RunCompare`, the
+  `backends` both runs have, those of one (`backendsOnlyA` …), and
+  `unpairedDevicesA` / `unpairedDevicesB`, a shared backend's devices no
+  pair sets side by side through it.  `swapped()` (the backend views
+  turned round too), `withPair()` and `withoutPair()` are the screen's
+  swap and re-pair.  One processor's backends against each other:
+  `BackendCompare`.  The two backend views are the app's alone --
+  `--compare` prints neither -- and add no rule: they read the engine's
+  per-backend bests, judged as the pair's.  Runs come in through History
+  only -- `RunHistoryStore.loadForCompare` / `compareRuns`
   (`lib/src/services/compare_loading.dart`); a file from another machine
   is imported first, as History imports it.  A screen that shows a
   compare reads this API and adds only its own words: no pairing, ratio
