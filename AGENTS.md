@@ -14,6 +14,7 @@ Peak (src/common/peak.cpp, include/common/peak.h)   ← abstract base
 ├── CpuPeak    → src/cpu/                            ← native CPU backend (plain C++ / std::thread; runs first)
 ├── clPeak     → src/opencl/                         ← OpenCL backend
 ├── vkPeak     → src/vulkan/                         ← Vulkan backend
+├── WebgpuPeak → src/webgpu/                         ← WebGPU backend
 ├── CudaPeak   → src/cuda/                           ← CUDA backend
 ├── RocmPeak   → src/rocm/                           ← ROCm/HIP backend
 ├── MetalPeak  → src/metal/                          ← Metal backend
@@ -40,6 +41,7 @@ run and the result document all share.
 | `include/common/` | All neutral headers — `peak.h`, `benchmark_enums.h`, `logger.h` (base), `logger_text.h` (shared text logger), etc. |
 | `include/opencl/` | OpenCL backend headers — `cl_peak.h`, `cl_common.h` |
 | `include/vulkan/` | Vulkan backend header — `vk_peak.h` |
+| `include/webgpu/` | WebGPU backend header — `webgpu_peak.h` |
 | `include/cuda/` | CUDA backend header — `cuda_peak.h` |
 | `include/rocm/` | ROCm/HIP backend header — `rocm_peak.h` |
 | `include/metal/` | Metal backend header — `mtl_peak.h` |
@@ -51,6 +53,7 @@ run and the result document all share.
 | `src/common/` | `Peak` base, gating, result store, calibration, inventory (no logger) |
 | `src/opencl/` | OpenCL backend: `clPeak` class + per-benchmark `.cpp` + `.cl` kernels |
 | `src/vulkan/` | Vulkan backend: `vkPeak` class + SPIR-V shaders |
+| `src/webgpu/` | WebGPU backend: `WebgpuPeak` class + WGSL shaders |
 | `src/cuda/` | CUDA backend: `CudaPeak` class + `.cu` kernels (AOT-compiled to fatbins at build time, embedded in the binary) |
 | `src/rocm/` | ROCm/HIP backend: `RocmPeak` class + `.hip` kernels (AOT-compiled with hipcc --genco at build time, embedded in the binary) |
 | `src/metal/` | Metal backend: `MetalPeak` class (ObjC++) + `.metal` kernels |
@@ -64,7 +67,7 @@ run and the result document all share.
 | `src/ffi/` | `clpeak_ffi` C-ABI bridge for the GUI (event-stream logger, launch/cancel, catalog); the desktop engine process (`clpeak-engine`); `clpeak-gui` CMake target; Android/iOS build superprojects |
 | `app/` | Flutter GUI — one codebase for Android, iOS, macOS, Linux, Windows (Dart FFI over `src/ffi`) |
 | `third_party/` | Vendored submodules: `libopencl-stub`, `Vulkan-Headers` (Android build); vendored headers: `onnxruntime/` and `litert/` (C APIs — no library needed to build) |
-| `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` — refresh the vendored runtime headers; `fetch_android_npu.sh` — stage the NPU libraries the Android app packages: LiteRT's vendor shims and, for Qualcomm, the QNN runtime and ONNX Runtime's QNN plugin; `screenshots.sh` — regenerate the README/site screenshots from `results/`, via `app/integration_test/screenshots_test.dart` and `screenshots/frame.py`) |
+| `tools/` | Helper scripts (`build_ios_native.sh` — stages the iOS xcframework and the runtimes the app embeds; `make_dmg.sh` — macOS GUI disk image; `update_onnx_headers.sh` / `update_litert_headers.sh` / `update_webgpu_headers.sh` — refresh the vendored runtime headers; `fetch_android_npu.sh` — stage the NPU libraries the Android app packages: LiteRT's vendor shims and, for Qualcomm, the QNN runtime and ONNX Runtime's QNN plugin; `screenshots.sh` — regenerate the README/site screenshots from `results/`, via `app/integration_test/screenshots_test.dart` and `screenshots/frame.py`) |
 | `src/common/cmake/` | Version handling (`version.cmake`, `version.h.in`) — git-describe once at configure time |
 | `results/` | Saved reference runs (`-o` output, `.clpeak.json`) per vendor — the baselines a suspicious number gets checked against |
 | `NOTES.md` | Every gate that exists because a runtime crashes rather than declines — the fault, where the gate lives, and the command that proves it can go.  Nothing else belongs there, and each entry is deleted when that release is fixed |

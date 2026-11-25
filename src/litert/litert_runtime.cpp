@@ -12,11 +12,6 @@
 
 #include "litert/c/internal/litert_runtime_c_api.h"   // LITERT_RUNTIME_ABI_VERSION
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -36,28 +31,6 @@ static std::string g_override;
 static std::string g_npuDir;     // --litert-npu-dir
 static std::string g_npuStage;   // clpeak_set_litert_npu_stage_dir (Android)
 static std::string g_npuResolved; // the vendor directory staged there, if any
-
-// The file a loaded handle came from, when the platform can say.  A bare
-// soname resolves out of the APK's lib dir on Android and out of the pip
-// wheel on desktops; the directory is where LiteRT expects to find its
-// accelerator and dispatch libraries, so it has to be known.
-static std::string resolvePath(void *lib, void *anySymbol)
-{
-#ifdef _WIN32
-  (void)anySymbol;
-  char buf[MAX_PATH * 4];
-  const DWORD n = GetModuleFileNameA(reinterpret_cast<HMODULE>(lib), buf, sizeof buf);
-  if (n == 0 || n >= sizeof buf)
-    return "";
-  return std::string(buf, n);
-#else
-  (void)lib;
-  Dl_info info;
-  if (anySymbol && dladdr(anySymbol, &info) && info.dli_fname)
-    return info.dli_fname;
-  return "";
-#endif
-}
 
 static std::string dirOf(const std::string &path)
 {
@@ -149,9 +122,7 @@ static void loadRuntime()
     return;
 
   cur.lib = lib;
-  cur.path = named ? absNamed : resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
-  if (cur.path.empty())
-    cur.path = resolvePath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
+  cur.path = named ? absNamed : clpeak::dynPath(lib, reinterpret_cast<void *>(cur.api.LiteRtCreateEnvironment));
   cur.libraryDir = dirOf(cur.path);
   cur.abi11 = cur.api.LiteRtCompiledModelIsNonCpuFullyAccelerated != nullptr;
   cur.abiVersion = cur.abi11 ? "1.1.0" : "1.0.0";

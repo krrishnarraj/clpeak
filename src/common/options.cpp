@@ -73,6 +73,11 @@
 #else
 #define CLPEAK_BUILT_LITERT false
 #endif
+#ifdef ENABLE_WEBGPU
+#define CLPEAK_BUILT_WEBGPU true
+#else
+#define CLPEAK_BUILT_WEBGPU false
+#endif
 
 struct BackendRow
 {
@@ -90,6 +95,7 @@ static constexpr BackendRow backendTable[] = {
     {{Backend::Oneapi, "oneAPI", "oneapi", CLPEAK_BUILT_ONEAPI}, "oneAPI/SYCL"},
     {{Backend::Vulkan, "Vulkan", "vulkan", CLPEAK_BUILT_VULKAN}, "Vulkan"},
     {{Backend::OpenCL, "OpenCL", "opencl", CLPEAK_BUILT_OPENCL}, "OpenCL"},
+    {{Backend::WebGPU, "WebGPU", "webgpu", CLPEAK_BUILT_WEBGPU}, "WebGPU"},
     {{Backend::Cpu, "CPU", "cpu", CLPEAK_BUILT_CPU}, "native CPU"},
     {{Backend::Coreml, "CoreML", "coreml", CLPEAK_BUILT_COREML}, "Core ML (Apple Neural Engine / GPU / CPU)"},
     {{Backend::Litert, "LiteRT", "litert", CLPEAK_BUILT_LITERT}, "LiteRT (NPU / GPU / CPU accelerators; Android's native AI runtime)"},
@@ -321,6 +327,8 @@ static std::string helpText()
   helpLine(s, "--litert-npu-dir dir", "where LiteRT's NPU dispatch / compiler-plugin\n"
                                       "libraries and the vendor runtime are (default: beside\n"
                                       "the LiteRT library)");
+  helpLine(s, "--webgpu-lib path", "WebGPU shared library to load\n"
+                                   "(default: the platform's conventional names)");
   s += "\n";
   s += " BACKENDS (--<backend> / --no-<backend>; default: every one in this build):\n";
   for (int i = 0; i < numBackends; i++)
@@ -703,6 +711,14 @@ static ParseResult parseCore(int argc, char **argv, CliOptions &out,
       if (!v)
         return missingArg(err, a);
       out.litertNpuDir = v;
+      continue;
+    }
+    if (!strcmp(a, "--webgpu-lib"))
+    {
+      const char *v = nextArg(argc, argv, i);
+      if (!v)
+        return missingArg(err, a);
+      out.webgpuLibPath = v;
       continue;
     }
 

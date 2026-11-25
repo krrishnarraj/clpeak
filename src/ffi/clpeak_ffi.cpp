@@ -26,6 +26,9 @@
 #ifdef ENABLE_LITERT
 #include <litert/litert_peak.h>  // litertSetLibraryOverride / litertRuntimeStatus
 #endif
+#ifdef ENABLE_WEBGPU
+#include <webgpu/webgpu_peak.h>  // webgpuSetLibraryOverride
+#endif
 
 #include <atomic>
 #include <cstdlib>
@@ -351,6 +354,10 @@ int clpeakLaunch(int argc, const char **argv, ClpeakEventCallback on_event,
         litertSetLibraryOverride(opts.litertLibPath);
     if (!opts.litertNpuDir.empty())
         litertSetNpuDirOverride(opts.litertNpuDir);
+#endif
+#ifdef ENABLE_WEBGPU
+    if (!opts.webgpuLibPath.empty())
+        webgpuSetLibraryOverride(opts.webgpuLibPath);
 #endif
 
     if (resuming)

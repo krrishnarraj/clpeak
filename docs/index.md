@@ -63,6 +63,7 @@ and how to read it: the info glyph beside it in the app, and
 | oneAPI/SYCL | Intel GPUs |
 | Vulkan | any Vulkan 1.1+ GPU, including cooperative-matrix paths |
 | OpenCL | any conformant GPU, CPU or accelerator |
+| WebGPU | any GPU or CPU through a conformant `webgpu.h` runtime |
 | CPU | x86-64 and AArch64, with kernels picked per instruction set at run time |
 | ONNX Runtime | NPUs, GPUs and CPUs through its execution providers (Core ML, QNN, OpenVINO, VitisAI, NNAPI, CUDA, TensorRT, DirectML, …), each provider as a device |
 | Core ML | Apple's Neural Engine, GPU and CPU, through the system framework |
@@ -70,10 +71,10 @@ and how to read it: the info glyph beside it in the app, and
 
 </div>
 
-The ONNX Runtime and LiteRT libraries are loaded when clpeak runs rather than
-linked, so neither needs installing to build. `--onnx-lib` and `--litert-lib`
-point at a specific build, and `--onnx-ep` adds a plugin execution provider
-such as Qualcomm's QNN.
+The WebGPU, ONNX Runtime and LiteRT libraries are loaded when clpeak runs rather
+than linked, so none needs installing to build. `--webgpu-lib`, `--onnx-lib` and
+`--litert-lib` point at a specific build, and `--onnx-ep` adds a plugin execution
+provider such as Qualcomm's QNN.
 
 ### What a number means
 
@@ -233,6 +234,7 @@ time. oneAPI needs the DPC++ compiler (`-DCMAKE_CXX_COMPILER=icpx`).
 | `CLPEAK_ENABLE_ONEAPI` | `ON` | no oneAPI/SYCL backend |
 | `CLPEAK_ENABLE_VULKAN` | `ON` | no Vulkan backend, even with the SDK installed |
 | `CLPEAK_ENABLE_OPENCL` | `ON` | no OpenCL backend |
+| `CLPEAK_ENABLE_WEBGPU` | `ON` | no WebGPU backend (otherwise always built; the runtime is loaded when clpeak runs) |
 | `CLPEAK_ENABLE_CPU` | `ON` | no native CPU backend |
 | `CLPEAK_ENABLE_ONNX` | `ON` | no ONNX Runtime backend (otherwise always built; the runtime is loaded when clpeak runs) |
 | `CLPEAK_ENABLE_COREML` | `ON` | no Core ML backend (Apple only) |

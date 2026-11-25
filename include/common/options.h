@@ -96,6 +96,10 @@ struct CliOptions {
   std::string litertLibPath;
   std::string litertNpuDir;
 
+  // --webgpu-lib: the WebGPU shared library to load, ahead of the platform's
+  // conventional names (see src/webgpu/webgpu_runtime.cpp).
+  std::string webgpuLibPath;
+
   // Iters / warmup.  When forceIters is false, each backend's runKernel
   // calibrates iters from a one-shot timed warmup so the timed phase lands
   // at ~targetTimeUs regardless of device speed.

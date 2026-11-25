@@ -13,7 +13,7 @@ small, tight kernels alongside each vendor's own tuned libraries. It reaches a
 device through every API that exposes it and runs the same tests on each, so
 the numbers from one machine can be compared side by side.
 
-- **GPU compute APIs:** CUDA, ROCm/HIP, Metal, oneAPI/SYCL, Vulkan, OpenCL
+- **GPU compute APIs:** CUDA, ROCm/HIP, Metal, oneAPI/SYCL, Vulkan, OpenCL, WebGPU
 - **AI runtimes (NPU, GPU and CPU):** ONNX Runtime, Core ML, LiteRT
 - **CPU:** native kernels, picked per instruction set at run time (x86-64, AArch64)
 
@@ -78,7 +78,7 @@ cmake --build build -j
 ```
 
 A backend is built when its SDK is found, and `-DCLPEAK_ENABLE_<BACKEND>=OFF`
-leaves it out. The ONNX Runtime and LiteRT backends need no SDK: their
+leaves it out. The WebGPU, ONNX Runtime and LiteRT backends need no SDK: their
 runtimes are loaded when clpeak runs. The desktop app is built alongside the
 CLI when the Flutter SDK is on `PATH`, into `build/clpeak-gui/`. The
 [project page](https://krrishnarraj.github.io/clpeak/#build) lists every
@@ -98,8 +98,8 @@ clpeak -o run.clpeak.json         # save the run as JSON
 clpeak --compare run.clpeak.json  # run again and compare with a saved run
 ```
 
-`clpeak --help` lists every flag. `--onnx-lib` and `--litert-lib` choose
-which ONNX Runtime or LiteRT library to load.
+`clpeak --help` lists every flag. `--webgpu-lib`, `--onnx-lib` and `--litert-lib`
+choose which WebGPU, ONNX Runtime or LiteRT library to load.
 
 ## Running the release binaries
 

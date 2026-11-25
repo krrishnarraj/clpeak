@@ -2,7 +2,7 @@
 #define CLPEAK_DYNLIB_H
 
 // Tiny cross-platform dynamic-library loader.  Used to make optional vendor
-// libraries (cuBLASLt / hipBLASLt / rocBLAS, ONNX Runtime, LiteRT) load-on-
+// libraries (cuBLASLt / hipBLASLt / rocBLAS, ONNX Runtime, LiteRT, WebGPU) load-on-
 // demand: the benchmark resolves their symbols at run time and skips
 // gracefully when the library is absent, so the shipped binary runs with only
 // the GPU driver present.
@@ -47,6 +47,10 @@ bool sameModulePath(const std::string &a, const std::string &b);
 
 // Resolve a symbol; nullptr if missing.
 void *dynSym(void *lib, const char *name);
+
+// Best-effort filesystem path a loaded handle came from (empty if unknown).
+// Uses GetModuleFileNameA on Windows and dladdr(anySymbol) on POSIX.
+std::string dynPath(void *lib, void *anySymbol);
 
 } // namespace clpeak
 

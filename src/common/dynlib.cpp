@@ -45,6 +45,26 @@ void *dynSym(void *lib, const char *name)
 #endif
 }
 
+std::string dynPath(void *lib, void *anySymbol)
+{
+#if defined(_WIN32)
+  (void)anySymbol;
+  if (!lib)
+    return "";
+  char buf[MAX_PATH * 4];
+  const DWORD n = GetModuleFileNameA(reinterpret_cast<HMODULE>(lib), buf, sizeof buf);
+  if (n == 0 || n >= sizeof buf)
+    return "";
+  return std::string(buf, n);
+#else
+  (void)lib;
+  Dl_info info;
+  if (anySymbol && dladdr(anySymbol, &info) && info.dli_fname)
+    return info.dli_fname;
+  return "";
+#endif
+}
+
 std::string absoluteModulePath(const char *name)
 {
   if (!name || !*name || name[0] == '@')
