@@ -8,6 +8,7 @@ import '../../model/measures.dart';
 import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/xpupeak_theme.dart';
+import '../common/format.dart';
 import '../common/kit.dart';
 import 'results_kit.dart';
 import 'summary_view.dart';
@@ -202,7 +203,7 @@ class _ResultsBodyState extends State<ResultsBody> {
                 name == _summary
                     ? const CTab('Summary',
                         key: ValueKey('results-tab:Summary'))
-                    : CTab(name,
+                    : CTab(backendName(name),
                         count: '${testCount[name]}',
                         key: ValueKey('results-tab:$name')),
             ],
@@ -450,7 +451,7 @@ class _BackendHeading extends StatelessWidget {
           header: true,
           headingLevel: 2,
           child: Text(
-            backend,
+            backendName(backend),
             style: t.h2.copyWith(
                 fontSize: size, height: 1.15, letterSpacing: size * -0.035),
           ),
@@ -596,7 +597,7 @@ class _DeviceCard extends StatelessWidget {
     final word = kind.isEmpty ? 'DEVICE' : kind.toUpperCase();
     return CKindCard(
       kind: kind,
-      label: '$word · ${run.backend.toUpperCase()}',
+      label: '$word · ${backendName(run.backend).toUpperCase()}',
       title: run.device,
       compact: !wide,
       child: entries.isEmpty

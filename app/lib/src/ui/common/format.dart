@@ -1,5 +1,28 @@
-/// Small shared formatting helpers.
+/// Small shared formatting helpers, and the words every screen names a
+/// backend and a headline by.  The model keeps each word as the file
+/// spells it; these change only what people read.
 library;
+
+import '../../model/headlines.dart';
+
+/// A backend as people read it: `Core ML`, `ONNX Runtime` (the CLI's
+/// `--help` names), and every other as the file spells it.  A key, a
+/// route or a `--devices` token keeps the file's word.
+String backendName(String backend) => switch (backend) {
+      'CoreML' => 'Core ML',
+      'ONNX' => 'ONNX Runtime',
+      _ => backend,
+    };
+
+/// A headline as a card or a compare's tile names it: the catalog's own
+/// measures by their short names ([short]: a phone's column), any other by
+/// its catalog title.
+String headlineLabel(Headline h, {bool short = false}) => switch (h.id) {
+      'peak-float' => short ? 'Float' : 'Floating point',
+      'peak-integer' => 'Integer',
+      'peak-memory-bandwidth' => short ? 'Memory' : 'Memory bandwidth',
+      _ => h.title,
+    };
 
 String formatBytes(int bytes) {
   const gb = 1024 * 1024 * 1024;

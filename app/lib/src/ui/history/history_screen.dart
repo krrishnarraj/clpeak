@@ -612,7 +612,8 @@ class _Entry {
         ...r.devices,
       ].join('\n');
     }
-    return [log!.id, ...log!.backends, log!.lastTestTitle].join('\n');
+    return [log!.id, ...log!.backends.map(backendName), log!.lastTestTitle]
+        .join('\n');
   }
 }
 
@@ -1019,6 +1020,8 @@ class _RunRow extends StatelessWidget {
     final tags = [
       if (origin == RunOrigin.imported)
         CTag(text: 'Imported', upper: false, fill: tagFill),
+      // Measured in parts: continued after it stopped part-way.
+      if (summary.resumed) CTag(text: 'Resumed', upper: false, fill: tagFill),
       if (summary.cancelled)
         CTag(
             text: 'Cancelled',

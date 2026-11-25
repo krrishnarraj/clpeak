@@ -1,5 +1,5 @@
 /// The words History and the compare screen put around the model's: how a
-/// person names a run, a backend, a family and this machine, and the
+/// person names a run, a family and this machine, and the
 /// compare's one reading of the two runs it was given ([isSameHardware]).
 /// Everything a compare decides -- pairing, winners, ratios, revisions --
 /// is lib/src/model/compare.dart's; this only names things.
@@ -8,7 +8,6 @@ library;
 import 'dart:io' show Platform;
 
 import '../../model/compare.dart';
-import '../../model/headlines.dart';
 import '../../model/measures.dart';
 import '../../model/run_document.dart';
 import '../../model/run_summary.dart';
@@ -89,14 +88,6 @@ String dayAndTime(DateTime t) => '${formatDay(t)}, ${clock(t)}';
       : (dayMonth(ta), dayMonth(tb));
 }
 
-/// A backend as the results tabs name it: `Core ML`, `ONNX Runtime`, and
-/// every other as the file spells it.
-String backendName(String backend) => switch (backend) {
-      'CoreML' => 'Core ML',
-      'ONNX' => 'ONNX Runtime',
-      _ => backend,
-    };
-
 /// A family (a Benchmark, by its flag name) as a person reads it; a family
 /// this build does not know, as the file spells it.
 ///
@@ -147,15 +138,6 @@ const _familyTitles = <String, String>{
   'store-forward': 'Store-to-load forwarding',
   'transformer-block': 'Transformer block',
 };
-
-/// A headline as a compare's tile names it: `Floating point`, `Integer`,
-/// `Memory bandwidth`, and any other by its catalog title.
-String headlineName(Headline h) => switch (h.id) {
-      'peak-float' => 'Floating point',
-      'peak-integer' => 'Integer',
-      'peak-memory-bandwidth' => 'Memory bandwidth',
-      _ => h.title,
-    };
 
 /// A headline tile's caption: the data type the value was reached at, and
 /// the backend that reached it (`FP16 · Metal`).  A value with no data type

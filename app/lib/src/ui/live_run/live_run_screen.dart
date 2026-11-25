@@ -118,7 +118,7 @@ class _StatusCard extends StatelessWidget {
     }
     if (service.currentTest.isNotEmpty) return service.currentTest;
     if (service.currentBackend.isNotEmpty) {
-      return 'Preparing ${service.currentBackend}…';
+      return 'Preparing ${backendName(service.currentBackend)}…';
     }
     return 'Starting…';
   }
@@ -187,7 +187,7 @@ class _StatusCard extends StatelessWidget {
     final stats = [
       _Stat(
         label: 'Backend',
-        value: s.currentBackend.isEmpty ? '—' : s.currentBackend,
+        value: s.currentBackend.isEmpty ? '—' : backendName(s.currentBackend),
         ink: ink,
         sub: sub,
       ),

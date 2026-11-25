@@ -6,6 +6,7 @@ import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/settings_service.dart';
 import '../../theme/xpupeak_theme.dart';
+import '../common/format.dart';
 import '../common/kit.dart';
 import '../dashboard/processor_groups.dart';
 
@@ -239,7 +240,7 @@ class _BackendToggles extends StatelessWidget {
                     .where((r) => config.isDeviceSelected(backend.name, r))
                     .length;
                 return CChip(
-                  label: backend.name,
+                  label: backendName(backend.name),
                   selected: on > 0,
                   count: refs.length > 1 ? '$on/${refs.length}' : null,
                   onTap: () => service.updateConfig((c) {
@@ -295,7 +296,7 @@ class _GroupCard extends StatelessWidget {
           for (final d in group.devices)
             _DeviceCheck(
               hue: h,
-              name: d.backend.name,
+              name: backendName(d.backend.name),
               detail: deviceDetail(d, group, specs: false),
               value: config.isDeviceSelected(d.backend.name, d.ref),
               onChanged: (on) => service.updateConfig(

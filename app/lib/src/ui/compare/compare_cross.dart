@@ -671,7 +671,7 @@ class _UnpairedCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _TileLabel(headlineName(h)),
+                    _TileLabel(headlineLabel(h)),
                     const SizedBox(height: 6),
                     _Tile(
                       value: v == null
@@ -693,7 +693,7 @@ class _UnpairedCard extends StatelessWidget {
                   textBaseline: TextBaseline.alphabetic,
                   children: [
                     Expanded(
-                      child: Text(headlineName(h),
+                      child: Text(headlineLabel(h),
                           style: t.caption.copyWith(fontSize: 12.5)),
                     ),
                     if (v == null)
@@ -798,7 +798,7 @@ class _BackendPeaks extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _TileLabel(headlineName(h.headline), small: !wide),
+          _TileLabel(headlineLabel(h.headline), small: !wide),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,

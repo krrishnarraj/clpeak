@@ -16,6 +16,7 @@ import 'package:xpupeak/src/model/compare.dart';
 import 'package:xpupeak/src/model/headlines.dart';
 import 'package:xpupeak/src/model/run_document.dart';
 import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/common/format.dart';
 import 'package:xpupeak/src/ui/common/kit.dart';
 import 'package:xpupeak/src/ui/compare/compare_screen.dart';
 import 'package:xpupeak/src/ui/compare/compare_words.dart';

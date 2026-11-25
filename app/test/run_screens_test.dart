@@ -562,7 +562,8 @@ void main() {
           live: true, doc: _liveDocument())
         ..currentBackend = 'CoreML';
       await _pump(tester, service, size: _desktop);
-      expect(find.text('Preparing CoreML…'), findsOneWidget);
+      // The backend as people read it; the service keeps the file's word.
+      expect(find.text('Preparing Core ML…'), findsOneWidget);
 
       await tester.tap(find.text('Pause'));
       await tester.pump();

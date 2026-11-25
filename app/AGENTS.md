@@ -158,7 +158,7 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
 - A run the app died in? → `RunHistoryStore.listCrashLogs()`: the native side
   streams `<id>.xpupeak.log` while a run is in flight and removes it once the
   document is written, so one left behind is a crashed run's only record.
-  History lists it, marked "did not finish" (`_CrashLogTile`), among the
+  History lists it, marked "did not finish" (`_CrashRow`), among the
   saved runs in one list by start time, with export and delete; the
   in-flight run's own sidecar is excluded by
   `BenchmarkService.inFlightRunId`.  On Android the run's id is stamped on
@@ -258,6 +258,23 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   compare reads this API and adds only its own words: no pairing, ratio
   or revision rule lives in a widget.  `test/compare_test.dart` checks it
   on the fixtures
+- The compare screen? → `lib/src/ui/compare/`: `compare_screen.dart` with
+  its parts `compare_same.dart` (one machine twice: each processor's
+  headlines, then every reading both runs took, backend by backend and
+  device by device), `compare_cross.dart` (anything else: the processors
+  paired, their headlines, every measure both have, by processor or backend
+  by backend) and `compare_parts.dart` (the run cards, value cells and
+  tiles); and `compare_words.dart`, the words it and History put around the
+  model's.  Which of the two it is: `isSameHardware` there -- every pair one
+  model compared reading by reading and no processor unpaired.  A run
+  card's Change pops a `CompareChange` back to History's pick.
+  `test/compare_screen_test.dart`
+- Picking two runs to compare? → History's Compare runs
+  (`history_screen.dart`), the only way into a compare: a tap picks A, then
+  B, a third drops the oldest.  The floating `_PickBar` (the kit's
+  `CFloatingBar`) names each pick, and once both are read into a compare
+  (`compareRuns`) says by `isSameHardware` which kind they make; Compare
+  pushes `CompareScreen`.  `test/history_pick_test.dart`
 - What the results screen shows? → a header naming the run (its name,
   else the machine's, over its model, OS and date: `_heading` in
   `results_screen.dart`) with one action, Share (`ExportService.exportRun`:
@@ -274,6 +291,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   shows `BenchmarkService.savedDocument`, the file read back, since only it
   holds the hardware.  A file whose devices nothing linked is summarised
   device by device, and says so
+- A backend or a headline in words people read? → `backendName` (`Core
+  ML`, `ONNX Runtime`, the CLI's `--help` names) and `headlineLabel` in
+  `lib/src/ui/common/format.dart`, used wherever one is shown: results tabs,
+  Summary, dashboard, custom run, live run, History, compare, the resume
+  offer and the paused notification.  Keys, routes, `--devices` tokens and
+  the model keep the file's word
 - A run's details (`annotations`)? → History's Details action
   (`lib/src/ui/history/details_editor.dart`): the recommended keys and any
   others the file holds, written into the file's own text by
@@ -281,8 +304,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   only that member and keeps every other byte and every key it does not
   know; a cancelled run's checkpoint gets them too, since `--resume` starts
   from it.  The index row is rebuilt from the file, so the list shows the
-  name.  The list tile shows the system's name and form factor, and its
-  processors where the file has them (`RunSummary`)
+  name.  The list row shows the run's name, else the system's (`runName`),
+  its tags -- Imported, Resumed (measured in parts: the file's `resumed`),
+  Cancelled -- its day, and its processors where the file has them
+  (`RunSummary`)
 - "What does this test measure?" → an info glyph beside the name, at both
   levels (test title and each reading's label in the expanded breakdown), one
   explanation per dialog: `_InfoGlyph` → `_showInfoDialog()` in
@@ -301,8 +326,8 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   collapses to its best reading — its readings are variants of one measurement,
   so one number is the answer.  A **heterogeneous** one starts expanded — its
   readings measure different things, and the largest is not the test's result
-  but merely its largest number, so it renders as a mini-table headed by its
-  `axis` ("DATA TYPE"), expanded by default but collapsible to that header.
+  but merely its largest number, so its row shows its `axis` ("DATA TYPE")
+  where a value would stand, open by default and closable to that row.
   A single-reading test collapses whatever its shape, since a one-row table
   says nothing the row does not.  `shape` is authored natively and cannot be
   inferred — see `docs/format-v4.md`.
@@ -310,10 +335,10 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   number and marks a homogeneous test's best ("Best", `_BestBadge` in
   `results_body.dart`).  `TestResult.barFraction` is still in the model,
   read by no screen: a reading's size against the largest in its test,
-  whichever direction is better.  A meter that comes back draws that -- a
-  picture of the number beside it.  Scaling it by which reading is *best*
-  was tried and reverted: on a latency test it drew the shortest time as the
-  longest bar.  `direction` decides which reading a homogeneous test
+  whichever direction is better.  A meter that comes back draws that, with
+  the kit's `CMeter` -- a picture of the number beside it.  Scaling it by
+  which reading is *best* was tried and reverted: on a latency test it drew
+  the shortest time as the longest bar.  `direction` decides which reading a homogeneous test
   collapses to and marks, and whether a `--compare` delta reads better or
   worse.
 - Readings that could not be taken? → `DeviceRun.unavailable`, rendered by
@@ -330,8 +355,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   where that directory is inside the sandbox and is what the Files app shows.
   `origins.json` beside the index says where each run came from
   (`RunOrigin`: measured by this app, or imported; runs saved before it have
-  neither), `RunHistoryStore.changes` ticks after every change to the saved
-  runs, and the index's read-modify-writes queue one at a time.
+  neither), which History's filters and Imported tag, the compare's run
+  cards and the sidebar's recent runs read.  An index row an older build
+  wrote is read with what it lacks at its default, and `list()` takes its
+  `resumed` from the file.  `RunHistoryStore.changes` ticks after every
+  change to the saved runs, and the index's read-modify-writes queue one at
+  a time.
   Files from another `format_version` are skipped, not half-parsed, and Import
   (History) refuses one clpeak 3.x wrote, by its schema, with a message that
   says so (`writtenBy3x`, the same words as the CLI's).
@@ -383,7 +412,12 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   hot phone to cool (`include/common/thermal.h`); `BenchmarkService.coolingDown`
   follows its `thermal status` log lines
 - Screens? → `lib/src/ui/` (dashboard, run_config, live_run, results,
-  history, about; the shell in `app.dart`)
+  history, compare, settings, about; the shell in `app.dart`).  The
+  dashboard and the custom run lay the catalog out a card per processor
+  with `dashboard/processor_groups.dart` (`groupDevices`, `ProcessorGrid`).
+  About's licences are `about/licenses_screen.dart`, in the app's frame
+  rather than Material's `LicensePage`: the Flutter packages and the Sora
+  licence `main()` registers
 - Where a screen opens, and the sidebar's recent runs? → `XpuPeakShell`
   (`app.dart`): a sidebar from `cWideWidth` (900), a bottom bar below it,
   around a navigator of its own whose first route holds the four
@@ -395,7 +429,11 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   and remembers it among the last three opened
   (`SettingsService.recentRunIds`), as it does a run that just finished.
   History's count and the recent runs are read from
-  `RunHistoryStore.indexed()` whenever `changes` ticks
+  `RunHistoryStore.indexed()` whenever `changes` ticks.  Over the
+  destinations, the sidebar's two pills: Run benchmark (a full run, as the
+  dashboard's Run) and Customize (`RunConfigScreen.route()` over the
+  Benchmark tab, unless it is open), offered once devices are found and
+  while no run is in flight
 - Colours / type / geometry? → `lib/src/theme/xpupeak_theme.dart`:
   `CP.of(context)` -- the neutrals (`ground`, `surface`, `ink`, `muted`,
   `line`, …), `kind(kind)` for a processor kind's `KindHue` (CPU, GPU, NPU;
@@ -415,8 +453,8 @@ better value, which is also bold -- so numbers stay ink.  One typeface,
 Sora (bundled in `assets/fonts/sora/`, SIL OFL, listed with the licences),
 numbers in tabular figures, big bold headings.  Rounded geometry (cards
 24–26 px, rows and inner panels 16–22, pills), 1 px hairlines, and no
-elevation but the floating pick bar's shadow, the selected segment's and
-a switch knob's edge.
+elevation but the floating pick bar's shadow, the selected segment's, a
+switch knob's edge and History's row menu.
 Primary actions are ink-filled pills, secondary ones 1.5 px ink-outlined
 pills, quiet ones underlined text; every target is at least 44 px.  No
 decorative icons inside cards.  Both palettes are fixed in `CP` --

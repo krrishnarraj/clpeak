@@ -12,6 +12,7 @@ import '../model/catalog.dart';
 import '../model/run_config.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import '../ui/common/format.dart' show backendName;
 import 'host_facts.dart';
 import 'process_exit.dart';
 import 'resume_offer.dart';
@@ -614,7 +615,7 @@ class BenchmarkService extends ChangeNotifier {
   String _pausedText() {
     final devices = _document.runs.length;
     final parts = [
-      if (currentBackend.isNotEmpty) currentBackend,
+      if (currentBackend.isNotEmpty) backendName(currentBackend),
       if (devices > 0 && _plannedDevices >= devices)
         'device $devices of $_plannedDevices',
       '$completedTests ${completedTests == 1 ? 'test' : 'tests'} done',

@@ -52,9 +52,15 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull);
 
-      // Summary first, then a tab per backend with its test count.
+      // Summary first, then a tab per backend with its test count, named
+      // as people read it (the key keeps the file's word).
       expect(find.byKey(const ValueKey('results-tab:Summary')), findsOneWidget);
       expect(find.byKey(const ValueKey('results-tab:CoreML')), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('results-tab:CoreML')),
+              matching: find.text('Core ML')),
+          findsOneWidget);
 
       // Each processor: its kind and cores, its name, and three numbers.
       for (final label in ['CPU · 10 CORES', 'GPU · 16 CORES', 'NPU · 16 CORES']) {
@@ -85,13 +91,13 @@ void main() {
           _host(ResultsBody(document: _laptop(), catalog: _catalog)));
       await tester.pump();
 
-      await tester.tap(find.text('via CoreML'));
+      await tester.tap(find.text('via Core ML'));
       await tester.pump();
       await tester.pump();
 
       // Core ML's tab, on the Neural Engine its best was measured on.
       expect(find.text('6 tests on 3 devices'), findsOneWidget);
-      expect(find.text('NPU · COREML'), findsOneWidget);
+      expect(find.text('NPU · CORE ML'), findsOneWidget);
       expect(find.text('Expand all'), findsOneWidget);
       expect(find.text('Collapse all'), findsOneWidget);
 

@@ -339,7 +339,7 @@ class _HeadCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _TileLabel(headlineName(h.headline), small: !wide),
+            _TileLabel(headlineLabel(h.headline), small: !wide),
             const SizedBox(height: 6),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,

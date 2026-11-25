@@ -7,6 +7,7 @@ import '../../services/resume_offer.dart';
 import '../../services/settings_service.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../app.dart';
+import '../common/format.dart';
 import '../common/kit.dart';
 import '../results/results_screen.dart';
 import '../run_config/run_config_screen.dart';
@@ -365,7 +366,7 @@ class _DeviceLine extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(device.backend.name,
+                Text(backendName(device.backend.name),
                     style: t.title.copyWith(fontSize: 14.5, color: h.tintInk)),
                 // Wraps rather than ellipsizes — driver-reported device
                 // names run long, and the tail is what distinguishes two

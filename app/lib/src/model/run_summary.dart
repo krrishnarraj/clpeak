@@ -36,6 +36,7 @@ class RunSummary {
     required this.backends,
     required this.cancelled,
     required this.fileName,
+    this.resumed = false,
     this.name = '',
     this.generator = const GeneratorInfo(),
     this.hostOs = '',
@@ -54,6 +55,12 @@ class RunSummary {
   final List<String> backends;
   final bool cancelled;
   final String fileName;
+
+  /// Whether the run was measured in parts: continued with `--resume` after
+  /// it stopped part-way (the document's `resumed`, [RunMeta.resumed]).  A
+  /// row an older build indexed has no such key and reads false here;
+  /// `RunHistoryStore.list()` takes it from the file.
+  final bool resumed;
 
   /// Optional user-given name (rename action in History).
   final String name;
@@ -84,7 +91,9 @@ class RunSummary {
 
   RunSummary withName(String newName) => _copy(name: newName);
 
-  RunSummary _copy({String? name}) => RunSummary(
+  RunSummary withResumed(bool value) => _copy(resumed: value);
+
+  RunSummary _copy({String? name, bool? resumed}) => RunSummary(
         id: id,
         startedAt: startedAt,
         durationMs: durationMs,
@@ -92,6 +101,7 @@ class RunSummary {
         backends: backends,
         cancelled: cancelled,
         fileName: fileName,
+        resumed: resumed ?? this.resumed,
         name: name ?? this.name,
         generator: generator,
         hostOs: hostOs,
@@ -111,6 +121,7 @@ class RunSummary {
         'backends': backends,
         'cancelled': cancelled,
         'fileName': fileName,
+        if (resumed) 'resumed': true,
         if (name.isNotEmpty) 'name': name,
         if (!generator.isEmpty) 'generator': generator.toJson(),
         if (hostOs.isNotEmpty) 'hostOs': hostOs,
@@ -132,6 +143,7 @@ class RunSummary {
         backends: [...(m['backends'] as List? ?? const []).cast<String>()],
         cancelled: m['cancelled'] as bool? ?? false,
         fileName: m['fileName'] as String? ?? '',
+        resumed: m['resumed'] == true,
         name: m['name'] as String? ?? '',
         generator: GeneratorInfo.fromJson(m['generator']),
         hostOs: m['hostOs'] as String? ?? '',
@@ -172,6 +184,7 @@ class RunSummary {
       backends: backends.toList(),
       cancelled: cancelled,
       fileName: fileName,
+      resumed: meta?.resumed.isNotEmpty ?? false,
       generator: meta?.generator ?? const GeneratorInfo(),
       hostOs: meta?.osName ?? '',
       hostOsVersion: meta?.osVersion ?? '',

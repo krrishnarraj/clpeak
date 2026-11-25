@@ -151,6 +151,8 @@ class RunHistoryStore {
   /// Only documents in this build's format are listed: a row whose file
   /// went missing, or no longer parses as the current version, is hidden —
   /// and pruned from the index — rather than listed only to fail on tap.
+  /// A row an older build indexed, which has no `resumed`, takes it from
+  /// its file ([RunSummary.resumed]).
   Future<List<RunSummary>> list() => _serially(_list);
 
   Future<List<RunSummary>> _list() async {
@@ -159,20 +161,27 @@ class RunHistoryStore {
 
     if (runs.isNotEmpty) {
       final kept = <RunSummary>[];
-      var pruned = false;
-      for (final r in runs) {
+      var rewrite = false;
+      for (var r in runs) {
         if (!r.fileName.endsWith(fileSuffix)) {
-          pruned = true;
+          rewrite = true;
           continue;
         }
         final f = File(p.join(dir.path, p.basename(r.fileName)));
-        if (!await f.exists() || !await _isCurrentVersion(f)) {
-          pruned = true;
+        final doc = await f.exists() ? await _readCurrentJson(f) : null;
+        if (doc == null) {
+          rewrite = true;
           continue;
+        }
+        final resumed =
+            doc['resumed'] is List && (doc['resumed'] as List).isNotEmpty;
+        if (r.resumed != resumed) {
+          r = r.withResumed(resumed);
+          rewrite = true;
         }
         kept.add(r);
       }
-      if (pruned) {
+      if (rewrite) {
         await _writeIndex(dir, kept);
         _changed();
       }
@@ -550,14 +559,15 @@ class RunHistoryStore {
     }
   }
 
-  /// Lightweight version probe for history rows: answers whether a file is a
-  /// document this build renders, without building the full model.
-  Future<bool> _isCurrentVersion(File f) async {
+  /// Lightweight version probe for history rows: a file's JSON where it is
+  /// a document this build renders, else null, without building the full
+  /// model.
+  Future<Map<String, dynamic>?> _readCurrentJson(File f) async {
     try {
       final doc = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      return _matchesCurrentVersion(doc);
+      return _matchesCurrentVersion(doc) ? doc : null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 

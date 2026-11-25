@@ -204,7 +204,9 @@ String processorLabel(ProcessorMeasures group) {
   final kind = group.kind.isEmpty ? 'DEVICE' : group.kind.toUpperCase();
   if (!group.linked) {
     final backend = group.devices.isEmpty ? '' : group.devices.first.backend;
-    return backend.isEmpty ? kind : '$kind · ${backend.toUpperCase()}';
+    return backend.isEmpty
+        ? kind
+        : '$kind · ${backendName(backend).toUpperCase()}';
   }
   final f = group.processor!.facts;
   if (group.kind == 'cpu') {
@@ -219,15 +221,6 @@ String processorLabel(ProcessorMeasures group) {
       unit == unit.toUpperCase() || n == 1 ? '$n $unit' : '$n ${unit}s';
   return '$kind · ${words.toUpperCase()}';
 }
-
-/// What a card calls a headline: the catalog's own measures by their short
-/// names, any other by its title.
-String headlineLabel(Headline h, {bool short = false}) => switch (h.id) {
-      'peak-float' => short ? 'Float' : 'Floating point',
-      'peak-integer' => 'Integer',
-      'peak-memory-bandwidth' => short ? 'Memory' : 'Memory bandwidth',
-      _ => h.title,
-    };
 
 /// A processor's facts in one line: cores and clusters for a CPU, compute
 /// units and memory for a GPU or an NPU, and the package it sits in when
@@ -342,7 +335,7 @@ class _Stat extends StatelessWidget {
     final via = v == null
         ? null
         : _ViaLink(
-            label: 'via ${v.best.backend}',
+            label: 'via ${backendName(v.best.backend)}',
             hue: h,
             size: compact ? 12 : 13.5,
             onTap: onDevice == null ? null : () => onDevice!(v.best.device),
@@ -586,7 +579,7 @@ class BackendTiles extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(tiles[i].name,
+                            Text(backendName(tiles[i].name),
                                 style: t.title.copyWith(
                                     fontSize: 16, letterSpacing: -0.16)),
                             Text(tiles[i].line,
@@ -696,7 +689,7 @@ class _BackendTile extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(name,
+                      child: Text(backendName(name),
                           style: t.title
                               .copyWith(fontSize: 17, letterSpacing: -0.34)),
                     ),
@@ -909,7 +902,8 @@ class _HeadlineDialog extends StatelessWidget {
               Text(_words(best), style: t.body.copyWith(fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
               Text(
-                'Measured through ${best.backend} on ${best.device.device}: '
+                'Measured through ${backendName(best.backend)} on '
+                '${best.device.device}: '
                 '${best.test.displayTitle}, reading '
                 '"${best.metric.displayLabel}"'
                 '${best.revision > 1 ? ' (method revision ${best.revision})' : ''}.',
@@ -938,7 +932,7 @@ class _HeadlineDialog extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(r.backend,
+                                    Text(backendName(r.backend),
                                         style: t.label.copyWith(fontSize: 13.5)),
                                     Text(_words(r),
                                         style: t.small.copyWith(color: t.muted)),

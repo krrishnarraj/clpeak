@@ -1,6 +1,7 @@
 import '../model/catalog.dart';
 import '../model/run_document.dart';
 import '../model/run_summary.dart';
+import '../ui/common/format.dart' show backendName;
 import 'run_history_store.dart';
 
 /// Whether a run that stopped before it finished can be continued -- `xpupeak
@@ -203,8 +204,9 @@ class ResumeOffer {
   /// " during CPU · Memory latency (pointer-chase)", when the log says.
   static String where(CrashLog log) {
     if (log.lastTestTitle.isEmpty) return '';
-    final backend =
-        log.lastTestBackend.isEmpty ? '' : '${log.lastTestBackend} · ';
+    final backend = log.lastTestBackend.isEmpty
+        ? ''
+        : '${backendName(log.lastTestBackend)} · ';
     return ' during $backend${log.lastTestTitle}';
   }
 
