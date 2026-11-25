@@ -258,12 +258,18 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   compare reads this API and adds only its own words: no pairing, ratio
   or revision rule lives in a widget.  `test/compare_test.dart` checks it
   on the fixtures
-- What the results screen shows? → `ResultsBody` is tabs: for a finished
-  run (one read from a file: `document.meta` set) **Summary** first --
-  `SystemPanel` and a `FlagshipCard` per processor
+- What the results screen shows? → a header naming the run (its name,
+  else the machine's, over its model, OS and date: `_heading` in
+  `results_screen.dart`) with one action, Share (`ExportService.exportRun`:
+  the share sheet on a phone, a save dialog on desktop); under it
+  `ResultsBody`, which is tabs: for a finished run (one read from a file:
+  `document.meta` set) **Summary** first -- a `FlagshipCard` per processor
   (`lib/src/ui/results/summary_view.dart`), each number tappable for every
-  backend's best -- then a tab per backend with its device view (device
-  chips where the backend reached several).  A live run has only the
+  backend's best and its "via" link opening that backend on that device,
+  then `BackendTiles` and `SystemPanel` -- then a tab per backend with its
+  device view (device chips where the backend reached several, the
+  device's kind card, each category's tests as rows that open onto their
+  readings, Expand all / Collapse all).  A live run has only the
   backend tabs, following the device in flight; the just-finished screen
   shows `BenchmarkService.savedDocument`, the file read back, since only it
   holds the hardware.  A file whose devices nothing linked is summarised
@@ -300,15 +306,16 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   A single-reading test collapses whatever its shape, since a one-row table
   says nothing the row does not.  `shape` is authored natively and cannot be
   inferred — see `docs/format-v4.md`.
-- What do the meters mean? → `TestResult.barFraction`: a reading's size against
-  the largest reading in its test, in every test, whichever direction is
-  better.  The meter is a picture of the number printed beside it and nothing
-  more.  Scaling it by which reading is *best* was tried and reverted — on a
-  latency test it drew the shortest time as the longest bar, and a bar next to
-  a number is read as that number's size, so it looked wrong however it was
-  captioned.  `direction` still decides what it should: which reading a
-  homogeneous test collapses to, and whether a `--compare` delta reads better
-  or worse.
+- Meters beside readings? → none: the results screen prints each reading's
+  number and marks a homogeneous test's best ("Best", `_BestBadge` in
+  `results_body.dart`).  `TestResult.barFraction` is still in the model,
+  read by no screen: a reading's size against the largest in its test,
+  whichever direction is better.  A meter that comes back draws that -- a
+  picture of the number beside it.  Scaling it by which reading is *best*
+  was tried and reverted: on a latency test it drew the shortest time as the
+  longest bar.  `direction` decides which reading a homogeneous test
+  collapses to and marks, and whether a `--compare` delta reads better or
+  worse.
 - Readings that could not be taken? → `DeviceRun.unavailable`, rendered by
   `_UnavailableSection` at the foot of the page.  It collects whole
   unsupported tests **and** the individual readings missing from tests that

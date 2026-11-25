@@ -11,6 +11,7 @@
 import 'package:xpupeak/src/model/result_model.dart';
 import 'package:xpupeak/src/model/run_document.dart';
 import 'package:xpupeak/src/theme/xpupeak_theme.dart';
+import 'package:xpupeak/src/ui/common/kit.dart';
 import 'package:xpupeak/src/ui/results/results_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -118,7 +119,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
 
-    final glyphs = find.byIcon(Icons.info_outline);
+    final glyphs =
+        find.byWidgetPredicate((w) => w is CGlyph && w.path == CGlyphs.about);
     expect(glyphs, findsNWidgets(2));
     final shortGlyph = tester.getRect(glyphs.at(0));
     final longGlyph = tester.getRect(glyphs.at(1));
@@ -126,11 +128,12 @@ void main() {
     expect(shortGlyph.left, lessThan(longGlyph.left));
   });
 
-  testWidgets('the driver line uses the width the panel has, not a fixed column',
+  testWidgets('the device card gives its facts the width the card has',
       (tester) async {
-    // The header's platform/driver line used to sit in a 260px column, so a
-    // driver version got ellipsized away even here, with the panel hundreds
-    // of pixels wider than the text.
+    // The platform and driver used to share a 260px column, so a driver
+    // version got ellipsized away even on a wide window, with the card
+    // hundreds of pixels wider than the text.  Each is a fact of its own now,
+    // laid out at its full width.
     tester.view.physicalSize = const Size(2560, 1600);
     tester.view.devicePixelRatio = 2.0;
     addTearDown(tester.view.reset);
@@ -150,12 +153,15 @@ void main() {
 
     expect(tester.takeException(), isNull);
 
-    final line = find.text('$platform  ·  $driver');
-    expect(line, findsOneWidget);
-
-    // Laid out at its full one-line width: nothing was cut or wrapped away.
-    final paragraph = tester.renderObject<RenderParagraph>(line);
-    expect(paragraph.size.width,
-        greaterThanOrEqualTo(paragraph.getMaxIntrinsicWidth(double.infinity) - 0.5));
+    for (final value in [platform, driver]) {
+      final text = find.text(value);
+      expect(text, findsOneWidget);
+      // Laid out at its full one-line width: nothing was cut or wrapped away.
+      final paragraph = tester.renderObject<RenderParagraph>(text);
+      expect(
+          paragraph.size.width,
+          greaterThanOrEqualTo(
+              paragraph.getMaxIntrinsicWidth(double.infinity) - 0.5));
+    }
   });
 }

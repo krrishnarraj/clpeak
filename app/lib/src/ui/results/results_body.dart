@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../model/headlines.dart';
 import '../../model/measures.dart';
@@ -6,15 +9,16 @@ import '../../model/result_model.dart';
 import '../../model/run_document.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../common/kit.dart';
+import 'results_kit.dart';
 import 'summary_view.dart';
 
 /// Renders one RunDocument as tabs: for a finished run a Summary first --
-/// the system, then every processor's flagship numbers -- and then a tab per
-/// backend, holding today's device view: device chips (when the backend
-/// reached several), a device header, then each category as a hairline
-/// table of tests with expandable metric detail, and a de-emphasized
-/// unsupported section.  Used by the live run view, the just-finished view,
-/// and the history viewer.
+/// a kind card of flagship numbers per processor, a way into every backend,
+/// and the system -- then a tab per backend: its devices (chips where it
+/// reached several), the device's card, each category's tests as a table of
+/// rows that open onto their readings, and what could not be measured.
+/// Used by the live run view, the just-finished view, and the history
+/// viewer.
 class ResultsBody extends StatefulWidget {
   const ResultsBody({
     super.key,
@@ -26,10 +30,10 @@ class ResultsBody extends StatefulWidget {
 
   final RunDocument document;
 
-  /// Optional slivers-above widget (e.g. the live-run banner).
+  /// Optional first row above the results (e.g. the live-run status).
   final Widget? header;
 
-  /// Whether to show the DIAGNOSTICS panel when the log is non-empty.
+  /// Whether to show the diagnostics section when the log is non-empty.
   /// The live run passes false unless the run was started with verbose
   /// diagnostics enabled; saved runs leave the default true.
   final bool showDiagnostics;
@@ -72,83 +76,86 @@ class _ResultsBodyState extends State<ResultsBody> {
   /// its backends, following the device in flight.
   bool get _finished => widget.document.meta != null;
 
+  void _openBackend(String backend) => setState(() => _tab = backend);
+
   void _openDevice(DeviceRun run) => setState(() {
         _tab = run.backend;
         _deviceOf[run.backend] = run.key;
       });
 
-  // Global expand/collapse generation.  Null means follow each test's default
-  // (heterogeneous expanded, homogeneous collapsed); true/false forces all
-  // tests to that state until the next global toggle.  Per-row local taps
-  // override the forced value until the next global action bumps the generation.
+  // Expand all / Collapse all.  Null follows each test's default
+  // (heterogeneous open, everything else closed); true or false holds every
+  // test that way until the next one.  A tap on one test overrides it for
+  // that test until the next Expand all or Collapse all, which bumps the
+  // generation.
   bool? _forcedExpanded;
   int _forcedGen = 0;
-  int _nextGen = 0;
 
-  // Per-category bulk controls — small "[+]" / "[-]" after the "X TESTS"
-  // label in each category header.  Each category has its own forced state
-  // and generation so a category action only touches its own tests, but the
-  // generation shares the global counter so the most-recent action (global
-  // vs category) wins and a per-test tap still overrides until the next
-  // forced bump.
-  final Map<BenchCategory, bool> _catForced = {};
-  final Map<BenchCategory, int> _catGen = {};
+  void _expandAll() => setState(() {
+        _forcedGen++;
+        _forcedExpanded = true;
+      });
 
-  void _expandAll() {
-    setState(() {
-      _nextGen++;
-      _forcedExpanded = true;
-      _forcedGen = _nextGen;
+  void _collapseAll() => setState(() {
+        _forcedGen++;
+        _forcedExpanded = false;
+      });
+
+  // The phone's tab strip scrolls sideways, so the tab on show -- opened by
+  // a "via" link or a tile, or the backend a live run moved on to -- can sit
+  // past its edge.  Brought into view once per change, by a jump: nothing
+  // here animates (app/AGENTS.md, the live-run trap).
+  final _strip = GlobalKey();
+  String? _revealed;
+
+  void _reveal(String tab) {
+    if (tab == _revealed) return;
+    _revealed = tab;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final root = _strip.currentContext;
+      if (root == null) return;
+      final key = ValueKey('results-tab:${tab == _summary ? 'Summary' : tab}');
+      Element? found;
+      void visit(Element e) {
+        if (found != null) return;
+        if (e.widget.key == key) {
+          found = e;
+        } else {
+          e.visitChildren(visit);
+        }
+      }
+
+      (root as Element).visitChildren(visit);
+      final e = found;
+      final box = e?.renderObject;
+      final scrollable = e == null ? null : Scrollable.maybeOf(e);
+      if (box == null || scrollable == null) return;
+      final viewport = RenderAbstractViewport.maybeOf(box);
+      if (viewport == null) return;
+      final p = scrollable.position;
+      // Whole already: leave the strip where the user put it.
+      if (p.pixels >= viewport.getOffsetToReveal(box, 1).offset &&
+          p.pixels <= viewport.getOffsetToReveal(box, 0).offset) {
+        return;
+      }
+      p.jumpTo(viewport
+          .getOffsetToReveal(box, 0.5)
+          .offset
+          .clamp(p.minScrollExtent, p.maxScrollExtent));
     });
-  }
-
-  void _collapseAll() {
-    setState(() {
-      _nextGen++;
-      _forcedExpanded = false;
-      _forcedGen = _nextGen;
-    });
-  }
-
-  void _expandCategory(BenchCategory c) {
-    setState(() {
-      _nextGen++;
-      _catForced[c] = true;
-      _catGen[c] = _nextGen;
-    });
-  }
-
-  void _collapseCategory(BenchCategory c) {
-    setState(() {
-      _nextGen++;
-      _catForced[c] = false;
-      _catGen[c] = _nextGen;
-    });
-  }
-
-  void _toggleCategory(CategoryGroup group) {
-    final eff = _effectiveFor(group);
-    if (eff.$1 == true) {
-      _collapseCategory(group.category);
-    } else {
-      _expandCategory(group.category);
-    }
-  }
-
-  (bool? forced, int gen) _effectiveFor(CategoryGroup group) {
-    final catG = _catGen[group.category] ?? 0;
-    if (_catForced.containsKey(group.category) && catG > _forcedGen) {
-      return (_catForced[group.category], catG);
-    }
-    return (_forcedExpanded, _forcedGen);
   }
 
   @override
   Widget build(BuildContext context) {
+    final wide = cIsWide(context);
+    final padding = wide
+        ? const EdgeInsets.fromLTRB(34, 22, 34, 44)
+        : const EdgeInsets.fromLTRB(16, 16, 16, 28);
     final runs = widget.document.runs;
     if (runs.isEmpty) {
       return ListView(
-        padding: const EdgeInsets.all(20),
+        padding: padding,
         children: [
           if (widget.header != null) widget.header!,
           const SizedBox(height: 40),
@@ -158,211 +165,183 @@ class _ResultsBodyState extends State<ResultsBody> {
     }
 
     final backends = <String>[];
+    final testCount = <String, int>{};
     for (final r in runs) {
       if (!backends.contains(r.backend)) backends.add(r.backend);
+      testCount[r.backend] = (testCount[r.backend] ?? 0) + r.tests.length;
     }
     final tabs = [if (_finished) _summary, ...backends];
     final tab = tabs.contains(_tab)
         ? _tab!
         : (_finished ? _summary : runs.last.backend);
 
-    final rows = tab == _summary ? _summaryRows() : _backendRows(tab, context);
+    final rows = tab == _summary ? _summaryRows(wide) : _backendRows(tab, wide);
     final list = ListView.builder(
-      // Bottom pad carries the old trailing SizedBox(32).
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 52),
+      // A list per tab, each keeping its own place: a backend opened from
+      // the Summary's foot starts at its top, not at the Summary's offset.
+      key: PageStorageKey<String>('results:$tab'),
+      padding: padding,
       itemCount: rows.length,
       itemBuilder: (context, i) => RepaintBoundary(child: rows[i].build()),
     );
     if (tabs.length < 2) return list;
+    if (!wide) _reveal(tab);
     // Pinned over the list, so another backend is a tap away however far
-    // down this one has been read.
+    // down this one has been read.  Framed and wrapping on a wide window;
+    // a scrolling row of pills on a phone, where a swipe reaches the rest.
     return Column(
       children: [
-        _TabStrip(
-          tabs: [
-            for (final name in tabs) (name, name == _summary ? 'Summary' : name),
-          ],
-          selected: tab,
-          onSelected: (name) => setState(() => _tab = name),
+        Padding(
+          key: _strip,
+          padding: wide
+              ? const EdgeInsets.fromLTRB(34, 10, 34, 0)
+              : const EdgeInsets.only(top: 8),
+          child: CTabStrip(
+            tabs: [
+              for (final name in tabs)
+                name == _summary
+                    ? const CTab('Summary',
+                        key: ValueKey('results-tab:Summary'))
+                    : CTab(name,
+                        count: '${testCount[name]}',
+                        key: ValueKey('results-tab:$name')),
+            ],
+            selected: tabs.indexOf(tab),
+            onSelected: (i) => setState(() => _tab = tabs[i]),
+            scroll: !wide,
+          ),
         ),
         Expanded(child: list),
       ],
     );
   }
 
-  /// The Summary: the system, then each processor's flagship numbers.
-  List<_Row> _summaryRows() {
+  /// The Summary: each processor's flagship numbers, the way into every
+  /// backend, then the system.
+  List<_Row> _summaryRows(bool wide) {
     final doc = widget.document;
     final catalog = _catalog;
     if (catalog == null) _loadCatalog();
     final measures = RunMeasures.of(doc);
     final unlinked = doc.processors.isEmpty;
+    final gap = wide ? 30.0 : 26.0;
     return [
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
-      if (doc.meta != null) _WidgetRow(SystemPanel(meta: doc.meta!)),
-      _WidgetRow(
-        CSection(
-          label: 'Peaks',
-          trailing: '${measures.groups.length} '
-              '${measures.groups.length == 1 ? 'device' : 'devices'}',
-        ),
-        padTop: 22,
-        padBottom: unlinked ? 8 : 12,
-      ),
       if (unlinked)
-        _WidgetRow(
-          Text(
-            'This file does not link its devices to processors, so each '
-            "backend's view of one is listed on its own.",
-            style: CP.of(context).smallMuted,
-          ),
-          padBottom: 12,
+        const _WidgetRow(
+          _Note('This file does not link its devices to processors, so each '
+              "backend's view of one is listed on its own."),
+          padBottom: 14,
         ),
-      if (catalog != null)
-        for (final group in measures.groups)
-          _WidgetRow(
-            FlagshipCard(
-              group: group,
-              package: group.processor == null
-                  ? null
-                  : doc.packageById(group.processor!.package),
-              values: [
-                for (final h in catalog.headlines)
-                  if (h.appliesTo(group.kind)) (h, group.headline(h)),
-              ],
-              onDevice: _openDevice,
-            ),
-            padBottom: 12,
-          ),
+      if (catalog != null && measures.groups.isNotEmpty)
+        _WidgetRow(FlagshipGrid(
+          cards: [
+            for (final group in measures.groups)
+              (
+                group: group,
+                values: [
+                  for (final h in catalog.headlines)
+                    if (h.appliesTo(group.kind)) (h, group.headline(h)),
+                ],
+              ),
+          ],
+          onDevice: _openDevice,
+        )),
+      _WidgetRow(
+        const CSectionHeader(
+          title: 'Explore each backend',
+          note: 'Every test, on every device, as each backend measured it',
+        ),
+        padTop: gap,
+        padBottom: wide ? 14 : 12,
+      ),
+      _WidgetRow(BackendTiles(document: doc, onOpen: _openBackend)),
+      if (doc.meta != null)
+        _WidgetRow(SystemPanel(meta: doc.meta!), padTop: gap),
       if (widget.showDiagnostics && doc.log.isNotEmpty)
-        _WidgetRow(_DiagnosticsSection(log: doc.log), padTop: 10),
+        _WidgetRow(_DiagnosticsSection(log: doc.log), padTop: gap),
     ];
   }
 
-  /// One backend's tab: today's device view, for the device picked among
-  /// those it reached.
-  List<_Row> _backendRows(String backend, BuildContext context) {
+  /// One backend's tab, for the device picked among those it reached.
+  List<_Row> _backendRows(String backend, bool wide) {
     final doc = widget.document;
     final mine = [for (final r in doc.runs) if (r.backend == backend) r];
     final selected = mine.firstWhere((r) => r.key == _deviceOf[backend],
         // A live run follows the device in flight; a finished one opens on
         // the backend's first.
         orElse: () => _finished ? mine.first : mine.last);
-    final brightness = Theme.of(context).brightness;
-    final hasTests =
-        selected.categories.any((g) => g.supported.isNotEmpty);
+    final kind = deviceKindOf(doc, selected);
+    final groups = [
+      for (final g in selected.categories)
+        if (g.supported case final tests when tests.isNotEmpty) (g, tests),
+    ];
+    final unavailable = selected.unavailable;
+    final total = mine.fold(0, (n, r) => n + r.tests.length);
+    final gap = wide ? 20.0 : 14.0;
 
-    // Flattened one level: category sections used to be non-lazy Columns
-    // holding every test card, so all of them were built, laid out and
-    // painted on each frame even when off-screen.  As sibling rows of the
-    // sliver list only the visible ones cost anything — which matters during
-    // a live run, where each frame is GPU work competing with the benchmark.
-    //
-    // The table look is drawn per row (each carries its own rules) rather than
-    // by wrapping a category in one container, which would undo the laziness.
+    // Flat: every test is a row of the lazily built list, so only the ones
+    // on screen are built, laid out and painted -- which matters during a
+    // live run, where each frame is GPU work competing with the benchmark.
+    // A category's table is drawn by its rows, each with its own edges,
+    // since wrapping the category in one card would undo that.
     return <_Row>[
       if (widget.header != null) _WidgetRow(widget.header!, padBottom: 16),
+      _WidgetRow(
+        _BackendHeading(
+          backend: backend,
+          tests: total,
+          devices: mine.length,
+          wide: wide,
+          onExpandAll: groups.isEmpty ? null : _expandAll,
+          onCollapseAll: groups.isEmpty ? null : _collapseAll,
+        ),
+        padBottom: gap,
+      ),
       if (mine.length > 1)
         _WidgetRow(
-          _RunSelector(
+          _DeviceChips(
             runs: mine,
+            kinds: [for (final r in mine) deviceKindOf(doc, r)],
             selectedKey: selected.key,
             onSelected: (key) => setState(() => _deviceOf[backend] = key),
           ),
-          padBottom: 16,
+          padBottom: gap,
         ),
-      _WidgetRow(_DeviceHeader(
-          run: selected, processor: doc.processorById(selected.processor))),
-      if (hasTests)
+      _WidgetRow(_DeviceCard(
+        run: selected,
+        processor: doc.processorById(selected.processor),
+        kind: kind,
+        wide: wide,
+      )),
+      for (final (group, tests) in groups) ...[
         _WidgetRow(
-          _ExpandControls(
-            onExpandAll: _expandAll,
-            onCollapseAll: _collapseAll,
+          GroupHeading(
+            label: group.category.label,
+            count: countOf(tests.length, 'test'),
+            wide: wide,
           ),
-          padTop: 10,
-          padBottom: 2,
+          padTop: gap,
+          padBottom: wide ? 10 : 8,
         ),
-      for (final group in selected.categories)
-        if (group.supported.isNotEmpty) ...[
-          _SectionRow(
-            group,
-            brightness,
-            expanded: _effectiveFor(group).$1 == true,
-            onToggle: () => _toggleCategory(group),
+        for (var i = 0; i < tests.length; i++)
+          _TestRow(
+            selected,
+            tests[i],
+            kind: kind,
+            wide: wide,
+            first: i == 0,
+            last: i == tests.length - 1,
+            forcedExpanded: _forcedExpanded,
+            forcedGen: _forcedGen,
           ),
-          for (var i = 0; i < group.supported.length; i++)
-            _TestRow(
-              selected,
-              group,
-              group.supported[i],
-              brightness,
-              last: i == group.supported.length - 1,
-              forcedExpanded: _effectiveFor(group).$1,
-              forcedGen: _effectiveFor(group).$2,
-            ),
-        ],
-      if (selected.unavailable.isNotEmpty)
-        _WidgetRow(_UnavailableSection(run: selected), padTop: 22),
-      if (widget.showDiagnostics && widget.document.log.isNotEmpty)
-        _WidgetRow(_DiagnosticsSection(log: widget.document.log), padTop: 22),
+      ],
+      if (unavailable.isNotEmpty)
+        _WidgetRow(_UnavailableSection(items: unavailable, wide: wide),
+            padTop: gap + 6),
+      if (widget.showDiagnostics && doc.log.isNotEmpty)
+        _WidgetRow(_DiagnosticsSection(log: doc.log), padTop: gap + 6),
     ];
-  }
-}
-
-/// The results' tabs: Summary, then each backend.  A Wrap, not a horizontal
-/// scroller, for the reason the device chips are one: on a narrow screen the
-/// trailing tabs would sit off-screen with no way to reach them.
-class _TabStrip extends StatelessWidget {
-  const _TabStrip({
-    required this.tabs,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  /// Each tab's key and label.
-  final List<(String, String)> tabs;
-  final String selected;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: t.line)),
-      ),
-      child: Wrap(
-        children: [
-          for (final (key, label) in tabs)
-            CTap(
-              key: ValueKey('results-tab:$label'),
-              onTap: () => onSelected(key),
-              builder: (context, hovered, pressed) {
-                final on = key == selected;
-                return Container(
-                  padding: const EdgeInsets.fromLTRB(10, 9, 10, 8),
-                  decoration: BoxDecoration(
-                    color: hovered || pressed ? t.surface2 : Colors.transparent,
-                    border: Border(
-                      bottom: BorderSide(
-                          color: on ? t.ink : Colors.transparent, width: 2),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: t.body.copyWith(
-                      color: on ? t.ink : t.muted,
-                      fontWeight: on ? FontWeight.w700 : FontWeight.w400,
-                    ),
-                  ),
-                );
-              },
-            ),
-        ],
-      ),
-    );
   }
 }
 
@@ -388,113 +367,23 @@ class _WidgetRow extends _Row {
       );
 }
 
-class _SectionRow extends _Row {
-  const _SectionRow(this.group, this.brightness,
-      {required this.expanded, required this.onToggle});
-
-  final CategoryGroup group;
-  final Brightness brightness;
-  final bool expanded;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build() => Padding(
-        padding: const EdgeInsets.only(top: 22, bottom: 9),
-        child: _CategoryCSection(
-          label: group.category.label,
-          color: CP.forBrightness(brightness).ink,
-          count: group.supported.length,
-          expanded: expanded,
-          onToggle: onToggle,
-        ),
-      );
-}
-
-/// Category header that mirrors [CSection] but carries a small "[+]" / "[-]"
-/// bulk toggle after the trailing "X TESTS" count. Shows "[-]" when the
-/// category is currently forced expanded, "[+]" otherwise.
-class _CategoryCSection extends StatelessWidget {
-  const _CategoryCSection({
-    required this.label,
-    required this.color,
-    required this.count,
-    required this.expanded,
-    required this.onToggle,
-  });
-
-  final String label;
-  final Color? color;
-  final int count;
-  final bool expanded;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Row(
-      children: [
-        Container(width: 3, height: 12, color: color ?? t.ink),
-        const SizedBox(width: 9),
-        Text(label.toUpperCase(),
-            style: t.caps.copyWith(color: color ?? t.ink)),
-        const SizedBox(width: 12),
-        Expanded(child: Container(height: 1, color: t.line)),
-        const SizedBox(width: 12),
-        Text('$count TESTS', style: t.caps),
-        const SizedBox(width: 8),
-        _BracketButton(
-          label: expanded ? '[-]' : '[+]',
-          tooltip: expanded ? 'Collapse all $label' : 'Expand all $label',
-          onTap: onToggle,
-        ),
-      ],
-    );
-  }
-}
-
-class _BracketButton extends StatelessWidget {
-  const _BracketButton({
-    required this.label,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  final String label;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Tooltip(
-      message: tooltip,
-      child: CTap(
-        onTap: onTap,
-        builder: (context, hovered, pressed) => Container(
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-          color: hovered || pressed ? t.surface2 : Colors.transparent,
-          child: Text(
-            label,
-            style: t.caps.copyWith(
-              color: hovered || pressed ? t.ink : t.muted,
-              fontSize: 10,
-              letterSpacing: 0.6,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _TestRow extends _Row {
-  const _TestRow(this.run, this.group, this.test, this.brightness,
-      {required this.last, this.forcedExpanded, this.forcedGen = 0});
+  const _TestRow(
+    this.run,
+    this.test, {
+    required this.kind,
+    required this.wide,
+    required this.first,
+    required this.last,
+    this.forcedExpanded,
+    this.forcedGen = 0,
+  });
 
   final DeviceRun run;
-  final CategoryGroup group;
   final TestResult test;
-  final Brightness brightness;
+  final String kind;
+  final bool wide;
+  final bool first;
   final bool last;
   final bool? forcedExpanded;
   final int forcedGen;
@@ -507,214 +396,236 @@ class _TestRow extends _Row {
         // tag alone, on the same test of the next device shown.
         key: ValueKey('${run.key}/${test.key}'),
         test: test,
-        color: CP.forBrightness(brightness).ink,
-        first: identical(test, group.supported.first),
+        kind: kind,
+        wide: wide,
+        first: first,
         last: last,
         forcedExpanded: forcedExpanded,
         forcedGen: forcedGen,
       );
 }
 
-/// Which of one backend's devices the readings below belong to.
-class _RunSelector extends StatelessWidget {
-  const _RunSelector({
-    required this.runs,
-    required this.selectedKey,
-    required this.onSelected,
+/// A muted line of explanation.
+class _Note extends StatelessWidget {
+  const _Note(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Text(text, style: CP.of(context).caption),
+      );
+}
+
+/// The backend's name and reach, with Expand all and Collapse all.
+class _BackendHeading extends StatelessWidget {
+  const _BackendHeading({
+    required this.backend,
+    required this.tests,
+    required this.devices,
+    required this.wide,
+    this.onExpandAll,
+    this.onCollapseAll,
   });
 
-  /// One backend's devices.
-  final List<DeviceRun> runs;
-  final String selectedKey;
-  final ValueChanged<String> onSelected;
+  final String backend;
+  final int tests;
+  final int devices;
+  final bool wide;
+
+  /// Null where the device has no test to open.
+  final VoidCallback? onExpandAll;
+  final VoidCallback? onCollapseAll;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    return Column(
+    final size = wide ? 28.0 : 24.0;
+    final block = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text('DEVICE', style: t.caps),
-        const SizedBox(height: 8),
-        // Wrap, not a horizontal scroller: with many devices the trailing
-        // chips used to sit off-screen with no way (mouse wheel included) to
-        // reach them.
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Semantics(
+          header: true,
+          headingLevel: 2,
+          child: Text(
+            backend,
+            style: t.h2.copyWith(
+                fontSize: size, height: 1.15, letterSpacing: size * -0.035),
+          ),
+        ),
+        Text(
+          '${countOf(tests, 'test')} on ${countOf(devices, 'device')}',
+          style: t.bodyMuted.copyWith(fontSize: wide ? 14 : 13.5),
+        ),
+      ],
+    );
+    final controls = onExpandAll != null;
+    final expand = QuietPill(
+      label: 'Expand all',
+      glyph: CGlyphs.expandAll,
+      onPressed: onExpandAll,
+      stretch: !wide,
+    );
+    final collapse = QuietPill(
+      label: 'Collapse all',
+      glyph: CGlyphs.collapseAll,
+      onPressed: onCollapseAll,
+      stretch: !wide,
+    );
+    if (wide) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
           children: [
-            for (final run in runs)
-              CChip(
-                // A name is not unique -- MoltenVK shows one GPU twice --
-                // so the backend's index tells such twins apart.
-                label: runs.where((r) => r.device == run.device).length > 1
-                    ? '${run.device} #${run.index}'
-                    : run.device,
-                selected: run.key == selectedKey,
-                onTap: () => onSelected(run.key),
-              ),
+            Expanded(child: block),
+            if (controls) ...[
+              const SizedBox(width: 16),
+              expand,
+              const SizedBox(width: 8),
+              collapse,
+            ],
           ],
         ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: block),
+        if (controls) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: expand),
+              const SizedBox(width: 8),
+              Expanded(child: collapse),
+            ],
+          ),
+        ],
       ],
     );
   }
 }
 
-/// Device identity and its properties.  Props are shown from the moment the
-/// device opens — they arrive with the very first event of a device's run, so
-/// there is nothing to wait for — and are static thereafter.  A saved file
-/// adds which processor the device is a view of, what linked it there, and
-/// an ML runtime's provider or accelerator.
-class _DeviceHeader extends StatelessWidget {
-  const _DeviceHeader({required this.run, this.processor});
+/// Which of one backend's devices the readings below belong to.  A Wrap,
+/// not a horizontal scroller: with many devices the trailing chips sat
+/// off-screen with no way (mouse wheel included) to reach them, and a long
+/// driver-given name wraps inside its chip rather than being cut.
+class _DeviceChips extends StatelessWidget {
+  const _DeviceChips({
+    required this.runs,
+    required this.kinds,
+    required this.selectedKey,
+    required this.onSelected,
+  });
+
+  /// One backend's devices, and each one's kind.
+  final List<DeviceRun> runs;
+  final List<String> kinds;
+  final String selectedKey;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: 'Device',
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (var i = 0; i < runs.length; i++)
+            CDeviceChip(
+              // A name is not unique -- MoltenVK shows one GPU twice -- so
+              // the backend's index tells such twins apart.
+              label: runs.where((r) => r.device == runs[i].device).length > 1
+                  ? '${runs[i].device} #${runs[i].index}'
+                  : runs[i].device,
+              kind: kinds[i].isEmpty ? null : kinds[i],
+              selected: runs[i].key == selectedKey,
+              onTap: () => onSelected(runs[i].key),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The device: a card in its kind's tint, headed by the kind and backend,
+/// with everything its API reported.  The properties arrive with the very
+/// first event of a device's run, so a live run shows them from the start;
+/// a saved file adds the ML runtime's provider or accelerator, and which
+/// processor the device is a view of and what linked it there.
+class _DeviceCard extends StatelessWidget {
+  const _DeviceCard({
+    required this.run,
+    required this.processor,
+    required this.kind,
+    required this.wide,
+  });
 
   final DeviceRun run;
   final ProcessorInfo? processor;
+  final String kind;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final showPlatform =
-        run.platform.isNotEmpty && run.platform != run.backend;
-    final trail = [
-      if (showPlatform) run.platform,
-      if (run.driver.isNotEmpty) run.driver,
-    ];
     final p = processor;
     final rt = run.runtime;
-    final entries = [
+    final entries = <(String, String)>[
+      if (run.platform.isNotEmpty && run.platform != run.backend)
+        ('Platform', run.platform),
+      if (run.driver.isNotEmpty) ('Driver', run.driver),
+      if (rt.provider.isNotEmpty) ('Provider', rt.provider),
+      if (rt.accelerator.isNotEmpty) ('Accelerator', rt.accelerator),
+      if (rt.version.isNotEmpty) ('Runtime', rt.version),
+      for (final prop in run.props) (prop.key, prop.value),
       if (run.processor.isNotEmpty)
         (
-          key: 'Processor',
-          value: p == null || p.name.isEmpty
+          'Processor',
+          p == null || p.name.isEmpty || p.name == run.device
               ? run.processor
               : '${run.processor} · ${p.name}',
         ),
-      if (run.link.isNotEmpty) (key: 'Linked by', value: run.link),
-      if (rt.provider.isNotEmpty) (key: 'Provider', value: rt.provider),
-      if (rt.accelerator.isNotEmpty) (key: 'Accelerator', value: rt.accelerator),
-      if (rt.version.isNotEmpty) (key: 'Runtime', value: rt.version),
-      ...run.props,
+      if (run.link.isNotEmpty) ('Linked by', run.link),
     ];
-
-    return CPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // The platform/driver line is sized off the panel, not off a fixed
-          // column: a 260px column ellipsized a driver version away even on a
-          // wide desktop window, where the panel had hundreds of pixels to
-          // spare.  It wraps rather than ellipsizes for the same reason names
-          // do — the version tail is what tells two installs of the same
-          // driver apart — so `ellipsis` here only ever bites a single token
-          // too long to break.
-          LayoutBuilder(
-            builder: (context, c) {
-              // Head padding (12 + 12) off the panel, then half of what is
-              // left, so the device name keeps a column of its own.  A loose
-              // constraint: a shorter line still shrink-wraps, so the cap only
-              // decides where a very long one wraps.
-              final trailMax = ((c.maxWidth - 24) / 2).clamp(0.0, 640.0);
-              return CPanelHead(
-                title: run.device,
-                tag: run.backend,
-                trailing: trail.isEmpty
-                    ? null
-                    : ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: trailMax),
-                        child: Text(trail.join('  ·  '),
-                            style: t.smallMuted,
-                            textAlign: TextAlign.right,
-                            overflow: TextOverflow.ellipsis),
-                      ),
-              );
-            },
-          ),
-          if (entries.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-              child: Wrap(
-                spacing: 22,
-                runSpacing: 7,
-                children: [
-                  for (final prop in entries)
-                    Text.rich(TextSpan(children: [
-                      TextSpan(
-                          text: '${prop.key.toUpperCase()}  ', style: t.caps),
-                      TextSpan(text: prop.value, style: t.small),
-                    ])),
-                ],
-              ),
-            ),
-        ],
-      ),
+    final word = kind.isEmpty ? 'DEVICE' : kind.toUpperCase();
+    return CKindCard(
+      kind: kind,
+      label: '$word · ${run.backend.toUpperCase()}',
+      title: run.device,
+      compact: !wide,
+      child: entries.isEmpty
+          ? const SizedBox.shrink()
+          : FactGrid(entries: entries, hue: t.kind(kind), compact: !wide),
     );
   }
 }
 
-/// Expand/collapse all tests on the page.  Mirrors the per-row +/- but
-/// acts on every row at once.
-class _ExpandControls extends StatelessWidget {
-  const _ExpandControls({
-    required this.onExpandAll,
-    required this.onCollapseAll,
-  });
-
-  final VoidCallback onExpandAll;
-  final VoidCallback onCollapseAll;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    Widget link(String label, IconData icon, VoidCallback onTap) => CTap(
-          onTap: onTap,
-          builder: (context, hovered, pressed) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            color: hovered || pressed ? t.surface2 : Colors.transparent,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 12, color: t.muted),
-                const SizedBox(width: 5),
-                Text(label, style: t.caps),
-              ],
-            ),
-          ),
-        );
-
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Wrap(
-        alignment: WrapAlignment.end,
-        spacing: 2,
-        children: [
-          link('EXPAND ALL', Icons.unfold_more, onExpandAll),
-          link('COLLAPSE ALL', Icons.unfold_less, onCollapseAll),
-        ],
-      ),
-    );
-  }
-}
-
-/// One test.
+/// One test: a row of a category's table that opens onto its readings.
 ///
-/// A homogeneous test collapses to its best reading, with the breakdown a tap
-/// away: its readings are interchangeable variants of one measurement, so one
-/// number really is the answer.
+/// A homogeneous test collapses to its best reading, with the readings a
+/// tap away: they are interchangeable variants of one measurement, so one
+/// number really is the answer, and the readings mark which one it is.
 ///
-/// A heterogeneous test starts expanded — its readings measure different
+/// A heterogeneous test starts open -- its readings measure different
 /// things, and the largest of them is not the test's result but merely its
-/// largest number.  It renders as a small table headed by what varies across
-/// the readings ("DATA TYPE", "CACHE LEVEL"), expanded by default but
-/// collapsible to its header.
+/// largest number.  Its row names what varies across the readings ("DATA
+/// TYPE", "CACHE LEVEL") instead of a value, and it can be closed to that.
 ///
-/// Draws its own top/bottom rules and side borders so a run of these reads as
-/// a single bordered table even though each is an independent list row.
+/// Draws its own edges -- the table's top and rounded corners on the first
+/// row, its foot on the last, a hairline between -- so a run of these reads
+/// as one card even though each is an independent list row.
 class _TestLine extends StatefulWidget {
   const _TestLine({
     super.key,
     required this.test,
-    required this.color,
+    required this.kind,
+    required this.wide,
     required this.first,
     required this.last,
     this.forcedExpanded,
@@ -722,7 +633,10 @@ class _TestLine extends StatefulWidget {
   });
 
   final TestResult test;
-  final Color color;
+
+  /// The device's kind, whose accent marks units and the best reading.
+  final String kind;
+  final bool wide;
   final bool first;
   final bool last;
   final bool? forcedExpanded;
@@ -733,18 +647,16 @@ class _TestLine extends StatefulWidget {
 }
 
 class _TestLineState extends State<_TestLine> {
-  // Null means follow the default: heterogeneous multi expanded, everything
-  // else collapsed.  Once the user taps, their choice sticks even as metrics
-  // stream in during a live run.  A global expand/collapse all bumps
-  // [widget.forcedGen] and overrides this until the next local tap.
+  // Null follows the default: heterogeneous with several readings open,
+  // everything else closed.  Once the user taps, their choice sticks even
+  // as readings stream in during a live run.  Expand all / Collapse all
+  // bump [widget.forcedGen] and override it until the next tap.
   bool? _userExpanded;
 
   @override
   void initState() {
     super.initState();
-    if (widget.forcedExpanded != null) {
-      _userExpanded = widget.forcedExpanded;
-    }
+    _userExpanded = widget.forcedExpanded;
   }
 
   @override
@@ -753,134 +665,87 @@ class _TestLineState extends State<_TestLine> {
     if (widget.forcedGen != oldWidget.forcedGen &&
         widget.forcedExpanded != null) {
       _userExpanded = widget.forcedExpanded;
-    } else if (widget.forcedExpanded != oldWidget.forcedExpanded &&
-        widget.forcedExpanded != null &&
-        oldWidget.forcedExpanded == null) {
-      // First global action after mount (gen still 0) — handle without gen bump.
-      _userExpanded = widget.forcedExpanded;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final h = t.kind(widget.kind);
     final test = widget.test;
+    final ok = test.okMetrics;
     final collapsible = test.collapsible;
-    // Heterogeneous with multiple readings is its readings, so expanded by
-    // default; homogeneous (and any single-reading test) collapses to its
-    // best reading and opens on demand.
-    final defaultExpanded = !collapsible;
-    final effectiveExpanded = _userExpanded ?? defaultExpanded;
-    final showBreakdown = effectiveExpanded;
+    final expanded = _userExpanded ?? !collapsible;
+    final peak = collapsible ? test.peakMetric : null;
+    // Only a homogeneous test has a best reading to mark, and only among
+    // several: on a one-row table the mark says nothing.
+    final best = peak != null && ok.length > 1 ? peak : null;
+    final results = countOf(ok.length, 'result');
 
-    final header = Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-      child: Row(
-        children: [
-          Container(width: 3, height: 15, color: widget.color),
-          const SizedBox(width: 10),
-          // The title wraps rather than ellipsizing: the row is as tall as
-          // its name needs, which on a phone is the difference between
-          // "Half-precision compute fp1…" and knowing which
-          // half-precision test this is.
-          Expanded(
-            child: _NameWithInfo(
-              name: test.displayTitle,
-              description: test.description,
-              style: t.body,
-            ),
-          ),
-          const SizedBox(width: 12),
-          if (collapsible) ...[
-            Builder(builder: (context) {
-              final peak =
-                  formatValue(test.peakValue, test.unitsOf(test.peakMetric));
-              return CValue(
-                  value: peak.value, unit: peak.unit, color: widget.color);
-            }),
-            const SizedBox(width: 6),
-            Icon(effectiveExpanded ? Icons.remove : Icons.add,
-                size: 13, color: t.muted),
-          ] else ...[
-            // Axis labels like "DATA TYPE, PHASE AND CONTEXT LENGTH" are
-            // explanatory, not the answer — keep them smaller and capped so
-            // the test title keeps the width. The title wraps rather than
-            // ellipsizes because its tail distinguishes two tests; the axis
-            // can ellipsize after two lines.
-            if (test.axis.isNotEmpty)
-              Flexible(
-                flex: 0,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 132),
-                  child: Text(
-                    test.axis.toUpperCase(),
-                    style: t.caps.copyWith(
-                      fontSize: 9,
-                      letterSpacing: 0.7,
-                      height: 1.2,
-                    ),
-                    textAlign: TextAlign.right,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            if (test.axis.isNotEmpty) const SizedBox(width: 6),
-            Icon(effectiveExpanded ? Icons.remove : Icons.add,
-                size: 13, color: t.muted),
-          ],
-        ],
-      ),
+    final radius = Radius.circular(widget.wide ? CP.rCard : 22);
+    final shape = BorderRadius.vertical(
+      top: widget.first ? radius : Radius.zero,
+      bottom: widget.last ? radius : Radius.zero,
     );
+    final edge = BorderSide(color: t.line);
+
+    final head = widget.wide
+        ? _wideHead(t, h, test, peak, results, expanded)
+        : _phoneHead(t, h, test, peak, results, expanded);
 
     return Container(
-      decoration: BoxDecoration(
-        color: t.surface,
+      decoration: BoxDecoration(color: t.surface, borderRadius: shape),
+      // The edges over the children, so a hovered row's wash does not
+      // cover them.
+      foregroundDecoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: t.line),
-          left: BorderSide(color: t.line),
-          right: BorderSide(color: t.line),
-          bottom: widget.last ? BorderSide(color: t.line) : BorderSide.none,
+          top: edge,
+          left: edge,
+          right: edge,
+          bottom: widget.last ? edge : BorderSide.none,
         ),
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(widget.first ? CP.rCard : 0),
-          bottom: Radius.circular(widget.last ? CP.rCard : 0),
-        ),
+        borderRadius: shape,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           CTap(
-            onTap: () => setState(
-                () => _userExpanded = !effectiveExpanded),
+            onTap: () => setState(() => _userExpanded = !expanded),
+            expanded: expanded,
+            insetFocus: true,
+            focusRadius: shape,
             builder: (context, hovered, pressed) => Container(
-              color: hovered || pressed ? t.surface2 : Colors.transparent,
-              child: header,
+              color: hovered || pressed ? hoverWash(t, t.surface) : null,
+              child: head,
             ),
           ),
           // Instant, not a cross-fade: expansion happens mid-run, and an
           // animated one would cost the benchmark a burst of frames.
-          if (showBreakdown)
+          if (expanded && ok.isNotEmpty)
             Container(
+              margin: widget.wide
+                  ? const EdgeInsets.fromLTRB(14, 0, 14, 14)
+                  : const EdgeInsets.fromLTRB(10, 0, 10, 12),
+              padding: EdgeInsets.symmetric(vertical: widget.wide ? 6 : 4),
               decoration: BoxDecoration(
-                color: t.isDark
-                    ? t.ground.withValues(alpha: 0.45)
-                    : t.surface2.withValues(alpha: 0.5),
-                border: Border(top: BorderSide(color: t.line)),
+                color: t.well,
+                borderRadius:
+                    BorderRadius.circular(widget.wide ? CP.rWell : 16),
               ),
-              padding: const EdgeInsets.fromLTRB(25, 9, 12, 10),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Only measurements: a reading that could not be taken is
-                  // listed once, at the bottom of the page, rather than
+                  // listed once, at the foot of the page, rather than
                   // sitting in the middle of a table of numbers.
-                  for (final metric in test.okMetrics)
+                  for (final metric in ok)
                     _MetricLine(
                       test: test,
                       metric: metric,
-                      color: widget.color,
-                      glyphColumn: test.hasMetricNotes,
+                      best: identical(metric, best),
+                      hue: h,
+                      wide: widget.wide,
                     ),
                 ],
               ),
@@ -889,6 +754,140 @@ class _TestLineState extends State<_TestLine> {
       ),
     );
   }
+
+  /// What stands where a value would: the best reading, or for a
+  /// heterogeneous test what its readings vary by.
+  Widget? _answer(CP t, KindHue h, TestResult test, MetricResult? peak,
+      {required double size, double axisWidth = 170}) {
+    if (peak != null) {
+      final f = formatValue(peak.value, test.unitsOf(peak));
+      return CValue(value: f.value, unit: f.unit, size: size, unitColor: h.accent);
+    }
+    if (test.axis.isEmpty) return null;
+    // "DATA TYPE, PHASE AND CONTEXT LENGTH" explains, it is not the answer:
+    // capped, so the title keeps the width.
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: axisWidth),
+      child: Text(
+        test.axis.toUpperCase(),
+        style: t.caps,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  Widget _wideHead(CP t, KindHue h, TestResult test, MetricResult? peak,
+      String results, bool expanded) {
+    final preview = descriptionPreview(test.description);
+    final answer = _answer(t, h, test, peak, size: 22);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 13, 16, 13),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 42),
+        child: Row(
+          children: [
+            // The title wraps rather than ellipsizing: its tail is what
+            // tells two variants of one test apart.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _NameWithInfo(
+                    name: test.displayTitle,
+                    description: test.description,
+                    style: t.title,
+                  ),
+                  if (preview.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(preview,
+                        style: t.caption,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
+                  ],
+                ],
+              ),
+            ),
+            if (answer != null) ...[const SizedBox(width: 18), answer],
+            const SizedBox(width: 18),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 100),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(results,
+                      style: t.small.copyWith(fontSize: 12.5, color: t.muted)),
+                  const SizedBox(width: 6),
+                  _Chevron(open: expanded, size: 18),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _phoneHead(CP t, KindHue h, TestResult test, MetricResult? peak,
+      String results, bool expanded) {
+    final answer = _answer(t, h, test, peak, size: 20, axisWidth: 190);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _NameWithInfo(
+                    name: test.displayTitle,
+                    description: test.description,
+                    style: t.title.copyWith(fontSize: 14.5),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      if (answer != null) ...[
+                        Flexible(child: answer),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(results,
+                          style:
+                              t.small.copyWith(fontSize: 12.5, color: t.muted)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            _Chevron(open: expanded, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A row's disclosure mark, turned (not animated) when open.
+class _Chevron extends StatelessWidget {
+  const _Chevron({required this.open, required this.size});
+
+  final bool open;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Transform.rotate(
+        angle: open ? math.pi : 0,
+        child: CGlyph(CGlyphs.chevronDown,
+            size: size, color: CP.of(context).muted, stroke: 2.2),
+      );
 }
 
 /// A name, plus its info glyph when it has something to explain.
@@ -911,7 +910,7 @@ class _NameWithInfo extends StatelessWidget {
   final String description;
   final TextStyle style;
 
-  /// Sized for the breakdown's smaller type.
+  /// Sized for a reading's smaller type.
   final bool small;
 
   @override
@@ -934,13 +933,14 @@ class _NameWithInfo extends StatelessWidget {
   }
 }
 
-/// The info affordance: a faint glyph beside a name, present only when that
-/// name has an explanation.  Its own tap target, so it opens the description
-/// instead of expanding the row it sits in.
+/// The info affordance: a glyph beside a name, present only when that name
+/// has an explanation.  Its own tap target, so it opens the description
+/// instead of opening the row it sits in.
 ///
-/// Used at both levels — beside a test's title for what the test measures, and
-/// beside a reading's label for what that one reading means, each opening its
-/// own text.
+/// Used at both levels — beside a test's title for what the test measures,
+/// and beside a reading's label for what that one reading means, each
+/// opening its own text.  The line under a name previews that text's first
+/// sentence; the glyph has all of it.
 class _InfoGlyph extends StatelessWidget {
   const _InfoGlyph({
     required this.title,
@@ -951,7 +951,7 @@ class _InfoGlyph extends StatelessWidget {
   final String title;
   final String description;
 
-  /// Sized for the breakdown's smaller type.
+  /// Sized for a reading's smaller type.
   final bool small;
 
   @override
@@ -959,11 +959,14 @@ class _InfoGlyph extends StatelessWidget {
     final t = CP.of(context);
     return CTap(
       onTap: () => _showInfoDialog(context, title, description),
+      semanticLabel: 'About $title',
+      focusRadius: BorderRadius.circular(CP.rPill),
       builder: (context, hovered, pressed) => Padding(
-        padding: EdgeInsets.only(left: small ? 5 : 7, right: 2),
-        child: Icon(
-          Icons.info_outline,
-          size: small ? 12 : 13,
+        padding: EdgeInsets.fromLTRB(small ? 5 : 6, 2, 2, 2),
+        child: CGlyph(
+          CGlyphs.about,
+          size: small ? 14 : 16,
+          stroke: 2.1,
           color: hovered || pressed ? t.ink : t.muted,
         ),
       ),
@@ -983,7 +986,8 @@ Future<void> _showInfoDialog(
     context: context,
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: Colors.black.withValues(alpha: 0.55),
+    barrierColor: Theme.of(context).dialogTheme.barrierColor ??
+        Colors.black.withValues(alpha: 0.55),
     transitionDuration: Duration.zero,
     pageBuilder: (context, _, _) => _InfoDialog(
       title: title,
@@ -1011,64 +1015,127 @@ class _InfoDialog extends StatelessWidget {
         constraints:
             BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6),
         child: SingleChildScrollView(
-          child: Text(description, style: t.prose),
+          child: Text(description,
+              style: t.prose.copyWith(fontSize: 14, color: t.ink)),
         ),
       ),
     );
   }
 }
 
+/// One reading in an open test: its label and what it means, the value,
+/// and on a homogeneous test the mark of the one the row collapses to.
 class _MetricLine extends StatelessWidget {
   const _MetricLine({
     required this.test,
     required this.metric,
-    required this.color,
-    required this.glyphColumn,
+    required this.best,
+    required this.hue,
+    required this.wide,
   });
 
   final TestResult test;
   final MetricResult metric;
-  final Color color;
-
-  /// Some reading of this test is documented, so every row of it leaves room
-  /// for the glyph and the meters stay in one column.
-  final bool glyphColumn;
+  final bool best;
+  final KindHue hue;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     final f = formatValue(metric.value, test.unitsOf(metric));
+    final preview = descriptionPreview(metric.description);
+    final label = _NameWithInfo(
+      name: metric.displayLabel,
+      description: metric.description,
+      style: t.label.copyWith(fontSize: wide ? 13.5 : 13, height: 1.3),
+      small: true,
+    );
+    final note = preview.isEmpty
+        ? null
+        : Text(preview,
+            style: t.small.copyWith(fontSize: wide ? 12.5 : 12, color: t.muted),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis);
+    final value =
+        CValue(value: f.value, unit: f.unit, small: true, size: wide ? 14.5 : 13.5);
+    final badge = best ? _BestBadge(hue: hue, small: !wide) : null;
 
+    if (wide) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [label, ?note],
+              ),
+            ),
+            if (badge != null) ...[const SizedBox(width: 12), badge],
+            const SizedBox(width: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 112),
+              child: Align(
+                alignment: Alignment.centerRight,
+                widthFactor: 1,
+                child: value,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3.5),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            // Fixed width, so the meters stay in one column; a label longer
-            // than it wraps inside that width rather than being cut.
-            width: glyphColumn ? 121 : 104,
-            child: _NameWithInfo(
-              name: metric.displayLabel,
-              description: metric.description,
-              style: t.smallMuted,
-              small: true,
-            ),
+          Row(
+            children: [
+              Expanded(child: label),
+              if (badge != null) ...[const SizedBox(width: 8), badge],
+              const SizedBox(width: 8),
+              value,
+            ],
           ),
-          const SizedBox(width: 10),
-          // Direction-aware: on a latency test the fastest reading draws the
-          // full bar, where a plain value/max filled the slowest one.
-          Expanded(
-            child: CMeter(fraction: test.barFraction(metric), color: color),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 94,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: CValue(value: f.value, unit: f.unit, small: true),
-            ),
-          ),
+          if (note != null) ...[const SizedBox(height: 1), note],
         ],
+      ),
+    );
+  }
+}
+
+/// "Best": the reading a homogeneous test collapses to, on its kind's accent.
+class _BestBadge extends StatelessWidget {
+  const _BestBadge({required this.hue, this.small = false});
+
+  final KindHue hue;
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Container(
+      height: small ? 20 : 22,
+      padding: EdgeInsets.symmetric(horizontal: small ? 8 : 9),
+      decoration: BoxDecoration(
+        color: hue.accent,
+        borderRadius: BorderRadius.circular(CP.rPill),
+      ),
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          'Best',
+          style: t.small.copyWith(
+            fontSize: small ? 11 : 11.5,
+            fontWeight: FontWeight.w700,
+            height: 1,
+            color: hue.onAccent,
+          ),
+        ),
       ),
     );
   }
@@ -1077,72 +1144,94 @@ class _MetricLine extends StatelessWidget {
 /// Everything the device could not measure, in one place at the foot of the
 /// page: whole tests it does not support, and the individual readings missing
 /// from tests that otherwise ran.  Both answer the same question, and keeping
-/// a dead row out of the table above is what lets that table be nothing but
+/// a dead row out of the tables above is what lets them be nothing but
 /// measurements.
 class _UnavailableSection extends StatelessWidget {
-  const _UnavailableSection({required this.run});
+  const _UnavailableSection({required this.items, required this.wide});
 
-  final DeviceRun run;
+  final List<UnavailableItem> items;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final items = run.unavailable;
-    if (items.isEmpty) return const SizedBox.shrink();
+    final whole = items.where((i) => i.label.isEmpty).length;
+    final readings = items.length - whole;
+    final count = [
+      if (whole > 0) countOf(whole, 'test'),
+      if (readings > 0) countOf(readings, 'reading'),
+    ].join(' · ');
+    final titleStyle = t.body.copyWith(
+        fontSize: wide ? 14 : 13.5, fontWeight: FontWeight.w600, color: t.muted);
+    final reasonStyle =
+        t.small.copyWith(fontSize: wide ? 13 : 12, color: t.muted);
 
-    return CPanel(
-      child: CExpander(
-        header: (context, open) => Container(
-          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-          child: Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GroupHeading(
+          label: 'Not available on this device',
+          count: count,
+          wide: wide,
+          muted: true,
+        ),
+        SizedBox(height: wide ? 10 : 8),
+        CEmptyBox(
+          padding: EdgeInsets.zero,
+          radius: wide ? CP.rCard : 22,
+          center: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.block, size: 13, color: t.muted),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  'NOT AVAILABLE ON THIS DEVICE (${items.length})',
-                  style: t.caps,
+              for (var i = 0; i < items.length; i++)
+                Container(
+                  decoration: i == 0
+                      ? null
+                      : BoxDecoration(
+                          border: Border(top: BorderSide(color: t.line))),
+                  padding: wide
+                      ? const EdgeInsets.fromLTRB(20, 12, 20, 12)
+                      : const EdgeInsets.fromLTRB(18, 11, 18, 11),
+                  child: Builder(builder: (context) {
+                    final item = items[i];
+                    final title = _NameWithInfo(
+                      name: item.title,
+                      description: item.description,
+                      style: titleStyle,
+                      small: true,
+                    );
+                    final why = item.reason.isNotEmpty
+                        ? item.reason
+                        : switch (item.status) {
+                            ResultStatus.unsupported => 'Not supported',
+                            ResultStatus.skipped => 'Skipped',
+                            ResultStatus.error => 'Failed',
+                            ResultStatus.ok => '',
+                          };
+                    if (wide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 5, child: title),
+                          const SizedBox(width: 16),
+                          Expanded(
+                              flex: 4, child: Text(why, style: reasonStyle)),
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        title,
+                        if (why.isNotEmpty) Text(why, style: reasonStyle),
+                      ],
+                    );
+                  }),
                 ),
-              ),
-              Icon(open ? Icons.remove : Icons.add, size: 13, color: t.muted),
             ],
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(height: 1, color: t.line),
-            for (final item in items)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 4,
-                      child: _NameWithInfo(
-                        name: item.title,
-                        description: item.description,
-                        style: t.small.copyWith(color: t.muted),
-                        small: true,
-                      ),
-                    ),
-                    if (item.reason.isNotEmpty) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 5,
-                        child: Text(item.reason,
-                            style: t.small.copyWith(color: t.muted),
-                            textAlign: TextAlign.right),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            const SizedBox(height: 4),
-          ],
-        ),
-      ),
+      ],
     );
   }
 }
@@ -1151,8 +1240,8 @@ class _UnavailableSection extends StatelessWidget {
 /// design: rendering per-line log rows (up to hundreds of rich-text rows,
 /// rebuilt on every live tick) made the GUI sluggish on phones during heavy
 /// runs.  The full log — problems, debug lines, runtimes' own messages —
-/// stays in the document and in the exported file; the panel just says how
-/// much of it there is.
+/// stays in the document and in the file Share sends; the section just says
+/// how much of it there is.
 ///
 /// Run-level, not per device: the stream is one run's, in order, and a line
 /// between two devices belongs to neither.
@@ -1164,38 +1253,19 @@ class _DiagnosticsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final summary =
-        '${log.length} ${log.length == 1 ? 'line' : 'lines'}';
-
-    return CPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: t.line)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.notes, size: 13, color: t.muted),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text('DIAGNOSTICS', style: t.caps),
-                ),
-                Text(summary, style: t.caps),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 7, 12, 9),
-            child: Text(
-              'The exported file holds the full log.',
-              style: t.small.copyWith(color: t.muted),
-            ),
-          ),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CSection(label: 'Diagnostics', trailing: countOf(log.length, 'line')),
+        const SizedBox(height: 10),
+        CPanel(
+          color: t.surface2,
+          outlined: false,
+          radius: CP.rPanel,
+          padding: const EdgeInsets.fromLTRB(18, 13, 18, 14),
+          child: Text("The run's file holds the full log.", style: t.prose),
+        ),
+      ],
     );
   }
 }

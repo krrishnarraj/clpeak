@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../model/headlines.dart';
@@ -6,152 +8,94 @@ import '../../model/run_document.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../common/format.dart';
 import '../common/kit.dart';
+import 'results_kit.dart';
 
-// The Summary tab: which machine the run was on, then for every processor in
-// it -- every piece of hardware, however many backends reached it -- its
-// flagship numbers: the headline catalog's measures (assets/measures.json),
-// each the best raw reading over every backend, with the data type it was
-// reached at and the backend that reached it.  Nothing is scored or derived
-// beyond picking the best reading; the readings are in the backends' tabs.
+// The Summary tab: for every processor in the run -- every piece of
+// hardware, however many backends reached it -- a card in its kind's tint
+// with its flagship numbers: the headline catalog's measures
+// (assets/measures.json), each the best raw reading over every backend, with
+// the data type it was reached at and a link to the backend that reached it.
+// Nothing is scored or derived beyond picking the best reading.  Below the
+// cards, a way into every backend's tab, where the readings are; then the
+// machine the run was on.
 
-/// The machine: its name, what kind of machine it is, the OS, and how the
-/// run went.  Above the processors, since every number below is this
-/// machine's.
-class SystemPanel extends StatelessWidget {
-  const SystemPanel({super.key, required this.meta});
+/// One processor's card, as [FlagshipGrid] lays it out.
+typedef FlagshipData = ({
+  ProcessorMeasures group,
+  List<(Headline, HeadlineValue?)> values,
+});
 
-  final RunMeta meta;
+/// The processors' cards: side by side in columns at least 250 px wide on a
+/// wide window, each row's cards as tall as its tallest; stacked on a phone.
+class FlagshipGrid extends StatelessWidget {
+  const FlagshipGrid({super.key, required this.cards, this.onDevice});
+
+  final List<FlagshipData> cards;
+
+  /// Opens one of a processor's devices in its backend's tab.
+  final ValueChanged<DeviceRun>? onDevice;
 
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
-    final s = meta.systemInfo;
-    final c = meta.conditions;
-    final title = meta.systemName;
-    String other(String v) => v.isNotEmpty && v != title ? v : '';
-    final os = s.osDistribution.isNotEmpty
-        ? s.osDistribution
-        : [s.osName, s.osVersion].where((v) => v.isNotEmpty).join(' ');
-    final thermal = c.thermalStart.isEmpty || c.thermalStart == c.thermalEnd
-        ? c.thermalStart
-        : [c.thermalStart, c.thermalEnd].where((v) => v.isNotEmpty).join(' → ');
-    final generator = meta.generator;
-    final entries = <(String, String)>[
-      ('MODEL NAME', other(s.name)),
-      ('MODEL', other(s.model)),
-      ('BOARD', other(s.board)),
-      ('MAKER', other(s.manufacturer)),
-      ('OS', os),
-      ('ARCH', s.arch),
-      ('MEMORY', s.memoryBytes > 0 ? formatBytes(s.memoryBytes) : ''),
-      (
-        'POWER',
-        [
-          switch (c.powerSource) { 'ac' => 'AC', final p => p },
-          if (c.lowPowerMode == true) 'low-power mode',
-        ].where((v) => v.isNotEmpty).join(', ')
-      ),
-      ('PROFILE', c.powerProfile),
-      ('GOVERNOR', c.cpuGovernor),
-      ('THERMAL', thermal),
-      // Named by the file's own generator: "XPUPEAK VERSION".
-      (
-        generator.name.isEmpty
-            ? 'VERSION'
-            : '${generator.name.toUpperCase()} VERSION',
-        generator.version
-      ),
-      (
-        'DURATION',
-        meta.durationSeconds > 0
-            ? formatDuration(Duration(
-                milliseconds: (meta.durationSeconds * 1000).round()))
-            : ''
-      ),
-    ].where((e) => e.$2.isNotEmpty).toList();
-    // What only a person knows, under the keys they were saved with.
-    final notes = [
-      for (final e in meta.annotations.entries)
-        if (e.key != 'system.name' && e.value.trim().isNotEmpty)
-          (e.key.toUpperCase().replaceAll(RegExp(r'[._]'), ' '), e.value),
-    ];
-
-    return CPanel(
-      child: Column(
+    FlagshipCard card(FlagshipData d, {bool spread = false}) => FlagshipCard(
+          group: d.group,
+          values: d.values,
+          onDevice: onDevice,
+          spread: spread,
+        );
+    if (!cIsWide(context)) {
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: BoxDecoration(
-              color: t.isDark ? t.surface2 : t.surface2.withValues(alpha: 0.7),
-              border: Border(bottom: BorderSide(color: t.line)),
-            ),
-            child: Row(
-              children: [
-                Icon(_formIcon(s.formFactor, s.formFactorDetail),
-                    size: 15, color: t.muted),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(title.isEmpty ? 'System' : title,
-                      style: t.title),
-                ),
-                Wrap(
-                  spacing: 5,
-                  runSpacing: 5,
-                  children: [
-                    // Only what the file says: a file without a form factor
-                    // is read as a desktop, but showing one would claim it.
-                    if (s.formFactor.isNotEmpty) CTag(text: s.formFactor),
-                    if (s.formFactorDetail.isNotEmpty)
-                      CTag(text: s.formFactorDetail),
-                    if (s.isVirtual) const CTag(text: 'virtual'),
-                    if (s.translated) const CTag(text: 'translated'),
-                    if (meta.cancelled) CTag(text: 'cancelled', color: t.danger),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (entries.isNotEmpty || notes.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-              child: Wrap(
-                spacing: 22,
-                runSpacing: 7,
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(height: 12),
+            card(cards[i]),
+          ],
+        ],
+      );
+    }
+    return LayoutBuilder(builder: (context, c) {
+      const minWidth = 250.0, gap = 18.0;
+      final fit = ((c.maxWidth + gap) / (minWidth + gap)).floor();
+      final columns = math.max(1, math.min(cards.length, fit));
+      final width = (c.maxWidth - gap * (columns - 1)) / columns;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var start = 0; start < cards.length; start += columns) ...[
+            if (start > 0) const SizedBox(height: gap),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final (key, value) in [...entries, ...notes])
-                    Text.rich(TextSpan(children: [
-                      TextSpan(text: '$key  ', style: t.caps),
-                      TextSpan(text: value, style: t.small),
-                    ])),
+                  for (var i = start;
+                      i < math.min(cards.length, start + columns);
+                      i++) ...[
+                    if (i > start) const SizedBox(width: gap),
+                    SizedBox(
+                      width: width,
+                      // A card as wide as two sets its numbers side by side.
+                      child: card(cards[i], spread: width >= 600),
+                    ),
+                  ],
                 ],
               ),
             ),
+          ],
         ],
-      ),
-    );
+      );
+    });
   }
-
-  static IconData _formIcon(String formFactor, String detail) =>
-      switch ((formFactor, detail)) {
-        (_, 'phone') => Icons.smartphone,
-        (_, 'tablet') => Icons.tablet_mac,
-        ('mobile', _) => Icons.smartphone,
-        ('laptop', _) => Icons.laptop_mac,
-        ('server', _) => Icons.dns_outlined,
-        (_, 'embedded') => Icons.developer_board,
-        _ => Icons.desktop_windows_outlined,
-      };
 }
 
-/// One processor's flagship numbers.
+/// One processor's flagship numbers, on a card in its kind's tint.
 class FlagshipCard extends StatelessWidget {
   const FlagshipCard({
     super.key,
     required this.group,
     required this.values,
-    this.package,
     this.onDevice,
+    this.spread = false,
   });
 
   final ProcessorMeasures group;
@@ -160,128 +104,130 @@ class FlagshipCard extends StatelessWidget {
   /// here -- null where nothing here measured it.
   final List<(Headline, HeadlineValue?)> values;
 
-  /// The package the processor is in, when the file says.
-  final PackageInfo? package;
-
   /// Opens one of its devices in its backend's tab.
   final ValueChanged<DeviceRun>? onDevice;
+
+  /// The numbers side by side rather than stacked, on a wide card.
+  final bool spread;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final facts = processorFacts(group, package);
-    final kind = group.kind.isEmpty ? 'device' : group.kind;
+    final wide = cIsWide(context);
+    final kind = group.kind;
+    final h = t.kind(kind);
+    final name = group.name.isEmpty ? 'Unnamed device' : group.name;
 
-    return CPanel(
-      child: Column(
+    Widget body;
+    if (values.isEmpty) {
+      body = Text('No headline applies to this kind of device.',
+          style: t.small.copyWith(fontSize: 13, color: h.tintSub));
+    } else if (!wide) {
+      // Three to a row, as many rows as the catalog has headlines.
+      const perRow = 3;
+      body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: t.line)),
-            ),
-            child: Row(
+          for (var start = 0; start < values.length; start += perRow) ...[
+            if (start > 0) const SizedBox(height: 14),
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(top: 1),
-                  child: CTag(text: kind, filled: true),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Wraps, never ellipsizes: a name is identity.
-                      Text(group.name.isEmpty ? 'Unnamed device' : group.name,
-                          style: t.title),
-                      if (facts.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(facts, style: t.smallMuted),
-                      ],
-                    ],
+                for (var i = start; i < start + perRow; i++) ...[
+                  if (i > start) const SizedBox(width: 10),
+                  Expanded(
+                    child: i < values.length
+                        ? _Stat(
+                            headline: values[i].$1,
+                            value: values[i].$2,
+                            device: name,
+                            hue: h,
+                            kind: kind,
+                            compact: true,
+                            onDevice: onDevice,
+                          )
+                        : const SizedBox.shrink(),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(group.linked ? group.id : group.devices.first.backend,
-                    style: t.caps),
+                ],
               ],
             ),
-          ),
-          if (values.isEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              child: Text('No headline applies to this kind of device.',
-                  style: t.smallMuted),
-            )
-          else
-            LayoutBuilder(builder: (context, c) {
-              final stats = [
-                for (final (h, v) in values)
-                  _Stat(headline: h, value: v, device: group.name),
-              ];
-              // Side by side where there is room for three big numbers;
-              // stacked on a phone.
-              if (c.maxWidth >= 600) {
-                return IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (var i = 0; i < stats.length; i++) ...[
-                        if (i > 0) Container(width: 1, color: t.line),
-                        Expanded(child: stats[i]),
-                      ],
-                    ],
-                  ),
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var i = 0; i < stats.length; i++) ...[
-                    if (i > 0) Container(height: 1, color: t.line),
-                    stats[i],
-                  ],
-                ],
-              );
-            }),
-          if (group.devices.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
-              decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: t.line)),
-              ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Text('MEASURED THROUGH', style: t.caps),
-                  ),
-                  for (final run in group.devices)
-                    _DeviceLink(
-                      label: _deviceLabel(run, group.devices),
-                      onTap: onDevice == null ? null : () => onDevice!(run),
-                    ),
-                ],
-              ),
-            ),
+          ],
         ],
-      ),
+      );
+    } else {
+      final stats = [
+        for (final (headline, value) in values)
+          _Stat(
+            headline: headline,
+            value: value,
+            device: name,
+            hue: h,
+            kind: kind,
+            onDevice: onDevice,
+          ),
+      ];
+      body = spread
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < stats.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 24),
+                  Expanded(child: stats[i]),
+                ],
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < stats.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 14),
+                  stats[i],
+                ],
+              ],
+            );
+    }
+
+    return CKindCard(
+      kind: kind,
+      label: processorLabel(group),
+      title: name,
+      compact: !wide,
+      child: body,
     );
   }
-
-  /// A device by its backend, and by its backend's name for it where that
-  /// backend reached the processor more than once (MoltenVK shows one GPU
-  /// twice; Core ML reaches a CPU and a GPU of one SoC).
-  static String _deviceLabel(DeviceRun run, List<DeviceRun> all) {
-    final same = all.where((r) => r.backend == run.backend).length;
-    return same > 1 ? '${run.backend} · ${run.device} #${run.index}' : run.backend;
-  }
 }
+
+/// A card's head line, in capitals: the kind and how many cores or compute
+/// units it has (`GPU · 16 CORES`, `GPU · 30 SM`); for a device nothing
+/// linked to a processor, the kind and the backend whose view it is.
+String processorLabel(ProcessorMeasures group) {
+  final kind = group.kind.isEmpty ? 'DEVICE' : group.kind.toUpperCase();
+  if (!group.linked) {
+    final backend = group.devices.isEmpty ? '' : group.devices.first.backend;
+    return backend.isEmpty ? kind : '$kind · ${backend.toUpperCase()}';
+  }
+  final f = group.processor!.facts;
+  if (group.kind == 'cpu') {
+    final n = f.cpu.cores;
+    return n > 0 ? '$kind · ${countOf(n, 'core').toUpperCase()}' : kind;
+  }
+  final n = f.computeUnits;
+  if (n <= 0) return kind;
+  final unit = f.computeUnit.isEmpty ? 'unit' : f.computeUnit;
+  // "16 cores", but "30 SM": an acronym takes no plural in capitals.
+  final words =
+      unit == unit.toUpperCase() || n == 1 ? '$n $unit' : '$n ${unit}s';
+  return '$kind · ${words.toUpperCase()}';
+}
+
+/// What a card calls a headline: the catalog's own measures by their short
+/// names, any other by its title.
+String headlineLabel(Headline h, {bool short = false}) => switch (h.id) {
+      'peak-float' => short ? 'Float' : 'Floating point',
+      'peak-integer' => 'Integer',
+      'peak-memory-bandwidth' => short ? 'Memory' : 'Memory bandwidth',
+      _ => h.title,
+    };
 
 /// A processor's facts in one line: cores and clusters for a CPU, compute
 /// units and memory for a GPU or an NPU, and the package it sits in when
@@ -348,70 +294,232 @@ String processorFacts(ProcessorMeasures group, PackageInfo? package) {
   return [for (final s in parts) s.replaceAll(' ', ' ')].join('  ·  ');
 }
 
-/// One flagship number: what it is, the number, what it was reached at, and
-/// which backend reached it.  Tapping it shows every backend's best.
+/// One flagship number: what it is, the number in the card's ink with its
+/// unit in the kind's accent, what it was reached at, and a link to the
+/// backend that reached it.  Tapping the number shows every backend's best.
 class _Stat extends StatelessWidget {
-  const _Stat({required this.headline, required this.value, required this.device});
+  const _Stat({
+    required this.headline,
+    required this.value,
+    required this.device,
+    required this.hue,
+    required this.kind,
+    this.compact = false,
+    this.onDevice,
+  });
 
   final Headline headline;
   final HeadlineValue? value;
   final String device;
+  final KindHue hue;
+  final String kind;
+
+  /// The phone's column: label, number, unit and note each on a line.
+  final bool compact;
+  final ValueChanged<DeviceRun>? onDevice;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final h = hue;
     final v = value;
-    final tint = t.ink;
-    final big = t.number.copyWith(fontSize: 30, letterSpacing: -0.9, height: 1.05);
+    final f = v == null ? null : formatValue(v.best.value, v.best.units);
+    // Words that only restate the headline -- "Global memory bandwidth"
+    // under "Memory bandwidth" -- say nothing the label does not.
+    final full = v == null ? '' : _words(v.best);
+    final words = full.toLowerCase().contains(
+            headlineLabel(headline).toLowerCase())
+        ? ''
+        : full;
+    final label = headlineLabel(headline, short: compact);
+    final open = v == null
+        ? null
+        : () => showHeadlineDialog(context,
+            device: device,
+            value: v,
+            label: headlineLabel(headline),
+            kind: kind);
+    final via = v == null
+        ? null
+        : _ViaLink(
+            label: 'via ${v.best.backend}',
+            hue: h,
+            size: compact ? 12 : 13.5,
+            onTap: onDevice == null ? null : () => onDevice!(v.best.device),
+          );
+    final noteStyle =
+        t.small.copyWith(fontSize: compact ? 12 : 13.5, color: h.tintSub);
 
-    final body = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 13),
-      child: Column(
+    if (compact) {
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(headline.title.toUpperCase(), style: t.caps),
-          const SizedBox(height: 9),
-          if (v == null) ...[
-            Text('—', style: big.copyWith(color: t.muted)),
-            const SizedBox(height: 6),
-            Text('not measured on this device', style: t.smallMuted),
-          ] else ...[
-            Builder(builder: (context) {
-              final f = formatValue(v.best.value, v.best.units);
-              return Text.rich(
-                TextSpan(children: [
-                  TextSpan(text: f.value, style: big.copyWith(color: tint)),
-                  TextSpan(
-                      text: ' ${f.unit}',
-                      style: t.body.copyWith(color: t.muted, fontSize: 14)),
-                ]),
-              );
-            }),
-            const SizedBox(height: 6),
-            Text(_words(v.best), style: t.small),
-            const SizedBox(height: 7),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
+          _StatTap(
+            hue: h,
+            onTap: open,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                CTag(text: v.best.backend, upper: false, color: tint),
-                if (v.byBackend.length > 1)
-                  Text('best of ${v.byBackend.length} backends',
-                      style: t.caps.copyWith(fontSize: 9.5)),
+                Text(label,
+                    style: t.small.copyWith(
+                        fontWeight: FontWeight.w600, color: h.tintSub)),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(f?.value ?? '—',
+                      maxLines: 1,
+                      style: t.figure(30,
+                          color: v == null ? h.tintSub : h.tintInk)),
+                ),
+                if (f != null && f.unit.isNotEmpty)
+                  Text(f.unit,
+                      style: t.small.copyWith(
+                          fontWeight: FontWeight.w700, color: h.accent)),
               ],
             ),
-          ],
+          ),
+          if (words.isNotEmpty) Text(words, style: noteStyle),
+          via ?? Text('Not measured', style: noteStyle),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.only(top: 13),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: h.rule)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StatTap(
+            hue: h,
+            onTap: open,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label,
+                    style: t.small.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: h.tintSub)),
+                const SizedBox(height: 1),
+                CValue(
+                  value: f?.value ?? '—',
+                  unit: f?.unit ?? '',
+                  size: 44,
+                  color: v == null ? h.tintSub : h.tintInk,
+                  unitColor: h.accent,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 1),
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 22),
+            child: via == null
+                ? Text('Not measured', style: noteStyle)
+                : Wrap(
+                    spacing: 6,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (words.isNotEmpty) Text('$words ·', style: noteStyle),
+                      via,
+                    ],
+                  ),
+          ),
         ],
       ),
     );
-    if (v == null) return body;
-    return CTap(
-      onTap: () => showHeadlineDialog(context, device: device, value: v),
-      builder: (context, hovered, pressed) => Container(
-        color: hovered || pressed ? t.surface2 : Colors.transparent,
-        child: body,
+  }
+}
+
+/// A flagship number as a control: tapped, it shows every backend's best.
+/// Hover lays a soft wash of the card's rule behind it, outdented so the
+/// number stays in line with the label above.
+class _StatTap extends StatelessWidget {
+  const _StatTap({required this.hue, required this.onTap, required this.child});
+
+  final KindHue hue;
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (onTap == null) return child;
+    return Tooltip(
+      message: "Each backend's best",
+      excludeFromSemantics: true,
+      child: CTap(
+        onTap: onTap,
+        focusRadius: BorderRadius.circular(CP.rHighlight),
+        builder: (context, hovered, pressed) => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: -8,
+              right: -8,
+              top: -3,
+              bottom: -3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: hovered || pressed ? hue.rule : Colors.transparent,
+                  borderRadius: BorderRadius.circular(CP.rHighlight),
+                ),
+              ),
+            ),
+            child,
+          ],
+        ),
       ),
+    );
+  }
+}
+
+/// "via Metal": opens the reading's device in its backend's tab.
+class _ViaLink extends StatelessWidget {
+  const _ViaLink({
+    required this.label,
+    required this.hue,
+    required this.size,
+    this.onTap,
+  });
+
+  final String label;
+  final KindHue hue;
+  final double size;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return CTap(
+      onTap: onTap,
+      focusRadius: BorderRadius.circular(6),
+      builder: (context, hovered, pressed) {
+        final c = hovered || pressed ? hue.tintInk : hue.accent;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Container(
+            // An underline set off from the text, as the design draws it.
+            padding: const EdgeInsets.only(bottom: 1),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: c, width: 1.2)),
+            ),
+            child: Text(label,
+                style: t.small.copyWith(
+                    fontSize: size,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                    color: c)),
+          ),
+        );
+      },
     );
   }
 }
@@ -423,34 +531,191 @@ String _words(MeasuredReading r) {
   return words.isEmpty ? r.test.title : words.join(' · ');
 }
 
-class _DeviceLink extends StatelessWidget {
-  const _DeviceLink({required this.label, this.onTap});
+/// Every backend that ran tests, as a way into its tab: its name, how many
+/// tests on how many devices, and the kinds of those devices.  Tiles in a
+/// grid on a wide window, a list on a phone.
+class BackendTiles extends StatelessWidget {
+  const BackendTiles({super.key, required this.document, required this.onOpen});
 
-  final String label;
-  final VoidCallback? onTap;
+  final RunDocument document;
+
+  /// Opens a backend's tab, by its name.
+  final ValueChanged<String> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final order = <String>[];
+    final tests = <String, int>{};
+    final devices = <String, int>{};
+    final kinds = <String, List<String>>{};
+    for (final r in document.runs) {
+      if (!order.contains(r.backend)) order.add(r.backend);
+      tests[r.backend] = (tests[r.backend] ?? 0) + r.tests.length;
+      devices[r.backend] = (devices[r.backend] ?? 0) + 1;
+      final k = deviceKindOf(document, r);
+      final list = kinds.putIfAbsent(r.backend, () => []);
+      if (k.isNotEmpty && !list.contains(k)) list.add(k);
+    }
+    final tiles = [
+      for (final b in order)
+        (
+          name: b,
+          line:
+              '${countOf(tests[b]!, 'test')} on ${countOf(devices[b]!, 'device')}',
+          kinds: kinds[b]!,
+        ),
+    ];
+
+    if (!cIsWide(context)) {
+      final t = CP.of(context);
+      return CPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < tiles.length; i++)
+              CRow(
+                onTap: () => onOpen(tiles[i].name),
+                rule: i < tiles.length - 1,
+                padding: const EdgeInsets.fromLTRB(18, 11, 16, 11),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 42),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(tiles[i].name,
+                                style: t.title.copyWith(
+                                    fontSize: 16, letterSpacing: -0.16)),
+                            Text(tiles[i].line,
+                                style: t.small
+                                    .copyWith(fontSize: 12.5, color: t.muted)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          for (final k in tiles[i].kinds)
+                            CKindLabel(k, small: true),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      CGlyph(CGlyphs.forward,
+                          size: 18, color: t.muted, stroke: 2.2),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return LayoutBuilder(builder: (context, c) {
+      const minWidth = 200.0, gap = 12.0;
+      final columns =
+          math.max(1, ((c.maxWidth + gap) / (minWidth + gap)).floor());
+      final width = (c.maxWidth - gap * (columns - 1)) / columns;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var start = 0; start < tiles.length; start += columns) ...[
+            if (start > 0) const SizedBox(height: gap),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = start;
+                      i < math.min(tiles.length, start + columns);
+                      i++) ...[
+                    if (i > start) const SizedBox(width: gap),
+                    SizedBox(
+                      width: width,
+                      child: _BackendTile(
+                        name: tiles[i].name,
+                        line: tiles[i].line,
+                        kinds: tiles[i].kinds,
+                        onTap: () => onOpen(tiles[i].name),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      );
+    });
+  }
+}
+
+class _BackendTile extends StatelessWidget {
+  const _BackendTile({
+    required this.name,
+    required this.line,
+    required this.kinds,
+    required this.onTap,
+  });
+
+  final String name;
+  final String line;
+  final List<String> kinds;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
     return CTap(
       onTap: onTap,
+      focusRadius: BorderRadius.circular(22),
       builder: (context, hovered, pressed) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        constraints: const BoxConstraints(minHeight: 118),
+        padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
         decoration: BoxDecoration(
-          color: hovered || pressed ? t.surface2 : Colors.transparent,
+          color: pressed
+              ? t.surface2
+              : hovered
+                  ? hoverWash(t, t.surface)
+                  : t.surface,
           border: Border.all(color: t.line),
-          borderRadius: BorderRadius.circular(CP.rControl),
+          borderRadius: BorderRadius.circular(22),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Flexible(
-              child: Text(label,
-                  style: t.small.copyWith(color: hovered ? t.ink : t.muted)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(name,
+                          style: t.title
+                              .copyWith(fontSize: 17, letterSpacing: -0.34)),
+                    ),
+                    const SizedBox(width: 8),
+                    CGlyph(CGlyphs.forward,
+                        size: 18, color: t.muted, stroke: 2.2),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(line, style: t.caption),
+              ],
             ),
-            if (onTap != null) ...[
-              const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 12, color: t.muted),
+            if (kinds.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [for (final k in kinds) CKindLabel(k)],
+              ),
             ],
           ],
         ),
@@ -459,35 +724,176 @@ class _DeviceLink extends StatelessWidget {
   }
 }
 
-/// Where a flagship number came from, and what every other backend reached
-/// on the same device.  Opened without a transition, like every dialog on
-/// the results screen (app/AGENTS.md).
-Future<void> showHeadlineDialog(BuildContext context,
-    {required String device, required HeadlineValue value}) {
-  return showGeneralDialog<void>(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: Colors.black.withValues(alpha: 0.55),
-    transitionDuration: Duration.zero,
-    pageBuilder: (context, _, _) => _HeadlineDialog(device: device, value: value),
-  );
-}
+/// The machine the run was on, and what it was doing: its model and OS,
+/// the power and thermal state, which XpuPeak measured it and how long it
+/// took, and the details only a person knows (`annotations`).
+class SystemPanel extends StatelessWidget {
+  const SystemPanel({super.key, required this.meta});
 
-class _HeadlineDialog extends StatelessWidget {
-  const _HeadlineDialog({required this.device, required this.value});
-
-  final String device;
-  final HeadlineValue value;
+  final RunMeta meta;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final wide = cIsWide(context);
+    final s = meta.systemInfo;
+    final c = meta.conditions;
+    final title = meta.systemName;
+    String other(String v) => v.isNotEmpty && v != title ? v : '';
+    final os = s.osDistribution.isNotEmpty
+        ? s.osDistribution
+        : [s.osName, s.osVersion].where((v) => v.isNotEmpty).join(' ');
+    final thermal = c.thermalStart.isEmpty || c.thermalStart == c.thermalEnd
+        ? c.thermalStart
+        : [c.thermalStart, c.thermalEnd].where((v) => v.isNotEmpty).join(' → ');
+    final generator = meta.generator;
+    final entries = <(String, String)>[
+      ('Model name', other(s.name)),
+      ('Model', other(s.model)),
+      ('Board', other(s.board)),
+      ('Maker', other(s.manufacturer)),
+      ('OS', os),
+      ('Architecture', s.arch),
+      ('Memory', s.memoryBytes > 0 ? formatBytes(s.memoryBytes) : ''),
+      (
+        'Power',
+        [
+          switch (c.powerSource) {
+            'ac' => 'AC',
+            'battery' => 'Battery',
+            final p => p,
+          },
+          if (c.lowPowerMode == true) 'low-power mode',
+        ].where((v) => v.isNotEmpty).join(', ')
+      ),
+      ('Power profile', c.powerProfile),
+      ('CPU governor', c.cpuGovernor),
+      ('Thermal state', thermal),
+      // Named by the file's own generator: "XpuPeak version".
+      (
+        generator.name.isEmpty ? 'Version' : '${generator.name} version',
+        generator.version
+      ),
+      (
+        'Duration',
+        meta.durationSeconds > 0
+            ? formatDuration(Duration(
+                milliseconds: (meta.durationSeconds * 1000).round()))
+            : ''
+      ),
+      // What only a person knows, under the keys they were saved with.
+      for (final e in meta.annotations.entries)
+        if (e.key != 'system.name' && e.value.trim().isNotEmpty)
+          (_keyWords(e.key), e.value),
+    ].where((e) => e.$2.isNotEmpty).toList();
+    final tags = [
+      // Only what the file says: a file without a form factor is read as a
+      // desktop, but showing one would claim it.
+      if (s.formFactor.isNotEmpty) CTag(text: s.formFactor, upper: false),
+      if (s.formFactorDetail.isNotEmpty)
+        CTag(text: s.formFactorDetail, upper: false),
+      if (s.isVirtual) const CTag(text: 'virtual', upper: false),
+      if (s.translated) const CTag(text: 'translated', upper: false),
+      if (meta.cancelled)
+        CTag(text: 'Cancelled', upper: false, color: t.warnInk, fill: t.warnTint),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const CSectionHeader(title: 'System'),
+        SizedBox(height: wide ? 14 : 12),
+        CPanel(
+          padding: wide
+              ? const EdgeInsets.fromLTRB(24, 20, 24, 22)
+              : const EdgeInsets.fromLTRB(20, 16, 20, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(title.isEmpty ? 'Unnamed system' : title,
+                      style: t.title.copyWith(fontSize: wide ? 17 : 16)),
+                  ...tags,
+                ],
+              ),
+              if (entries.isNotEmpty) ...[
+                SizedBox(height: wide ? 16 : 14),
+                FactGrid(entries: entries, compact: !wide),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// An annotation's key as a label: `cooling.fan` → "Cooling fan",
+  /// `gpu.board` → "GPU board".
+  static String _keyWords(String key) {
+    const acronyms = {'cpu', 'gpu', 'npu', 'os', 'ram', 'bios', 'ssd'};
+    final words = [
+      for (final w in key.split(RegExp(r'[._\s]+')))
+        if (w.isNotEmpty)
+          acronyms.contains(w.toLowerCase()) ? w.toUpperCase() : w,
+    ];
+    if (words.isEmpty) return key;
+    final s = words.join(' ');
+    return s[0].toUpperCase() + s.substring(1);
+  }
+}
+
+/// Where a flagship number came from, and what every other backend reached
+/// on the same device.  Opened without a transition, like every dialog on
+/// the results screen (app/AGENTS.md).
+Future<void> showHeadlineDialog(
+  BuildContext context, {
+  required String device,
+  required HeadlineValue value,
+  String? label,
+  String kind = '',
+}) {
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Theme.of(context).dialogTheme.barrierColor ??
+        Colors.black.withValues(alpha: 0.55),
+    transitionDuration: Duration.zero,
+    pageBuilder: (context, _, _) => _HeadlineDialog(
+      device: device,
+      value: value,
+      label: label ?? headlineLabel(value.headline),
+      kind: kind,
+    ),
+  );
+}
+
+class _HeadlineDialog extends StatelessWidget {
+  const _HeadlineDialog({
+    required this.device,
+    required this.value,
+    required this.label,
+    required this.kind,
+  });
+
+  final String device;
+  final HeadlineValue value;
+  final String label;
+  final String kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final h = t.kind(kind);
     final best = value.best;
     final f = formatValue(best.value, best.units);
     final ranked = value.ranked;
     return CDialog(
-      title: '${value.headline.title} · $device',
+      title: '$label · $device',
       actions: [
         CButton(label: 'Close', onPressed: () => Navigator.pop(context)),
       ],
@@ -496,11 +902,11 @@ class _HeadlineDialog extends StatelessWidget {
             BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.6),
         child: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              CValue(value: f.value, unit: f.unit),
-              const SizedBox(height: 6),
-              Text(_words(best), style: t.body),
+              CValue(value: f.value, unit: f.unit, size: 34, unitColor: h.accent),
+              const SizedBox(height: 4),
+              Text(_words(best), style: t.body.copyWith(fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
               Text(
                 'Measured through ${best.backend} on ${best.device.device}: '
@@ -510,35 +916,53 @@ class _HeadlineDialog extends StatelessWidget {
                 style: t.prose,
               ),
               if (ranked.length > 1) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 18),
                 Text("EACH BACKEND'S BEST", style: t.caps),
-                const SizedBox(height: 6),
-                for (final r in ranked)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(
-                          width: 64,
-                          child: Text(r.backend,
-                              style: t.small.copyWith(
-                                  fontWeight: identical(r, best)
-                                      ? FontWeight.w700
-                                      : FontWeight.w400)),
-                        ),
-                        Expanded(
-                            child: Text(_words(r), style: t.smallMuted)),
-                        const SizedBox(width: 10),
-                        Builder(builder: (context) {
-                          final g = formatValue(r.value, r.units);
-                          return CValue(value: g.value, unit: g.unit, small: true);
-                        }),
-                      ],
-                    ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    color: t.well,
+                    borderRadius: BorderRadius.circular(CP.rRow),
                   ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final r in ranked)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(r.backend,
+                                        style: t.label.copyWith(fontSize: 13.5)),
+                                    Text(_words(r),
+                                        style: t.small.copyWith(color: t.muted)),
+                                  ],
+                                ),
+                              ),
+                              if (identical(r, best)) ...[
+                                const SizedBox(width: 8),
+                                _Badge(hue: h),
+                              ],
+                              const SizedBox(width: 10),
+                              Builder(builder: (context) {
+                                final g = formatValue(r.value, r.units);
+                                return CValue(
+                                    value: g.value, unit: g.unit, small: true);
+                              }),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               Text(
                 'The best reading on this device over every backend that '
                 'reached it, as measured: nothing is scored or derived.',
@@ -547,6 +971,35 @@ class _HeadlineDialog extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "Best", on the kind's accent.
+class _Badge extends StatelessWidget {
+  const _Badge({required this.hue});
+
+  final KindHue hue;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: hue.accent,
+        borderRadius: BorderRadius.circular(CP.rPill),
+      ),
+      child: Center(
+        widthFactor: 1,
+        child: Text('Best',
+            style: t.small.copyWith(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                height: 1,
+                color: hue.onAccent)),
       ),
     );
   }
