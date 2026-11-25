@@ -48,6 +48,10 @@ bool sameModulePath(const std::string &a, const std::string &b);
 // Resolve a symbol; nullptr if missing.
 void *dynSym(void *lib, const char *name);
 
+// Best-effort filesystem path a loaded handle came from (empty if unknown).
+// Uses GetModuleFileNameA on Windows and dladdr(anySymbol) on POSIX.
+std::string dynPath(void *lib, void *anySymbol);
+
 } // namespace clpeak
 
 #endif // CLPEAK_DYNLIB_H
