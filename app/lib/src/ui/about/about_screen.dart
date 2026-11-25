@@ -6,7 +6,10 @@ import '../../services/benchmark_service.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../app.dart';
 import '../common/kit.dart';
+import 'licenses_screen.dart';
 
+/// What XpuPeak is, its version, its source and the licences of what it
+/// is built with -- the bundled Sora among them (main.dart registers it).
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
@@ -15,104 +18,135 @@ class AboutScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final service = context.watch<BenchmarkService>();
+    final wide = cIsWide(context);
+    // The version alone: watching the service would rebuild this tab, kept
+    // alive behind the others, on every tick of a run.
+    final version = context.select<BenchmarkService, String>((s) => s.version);
+    final side = wide ? 34.0 : 16.0;
+    final name = t.title.copyWith(fontSize: wide ? 15.5 : 15);
+    final line = t.caption.copyWith(fontSize: wide ? 13 : 12.5);
+    final rowPadding = wide
+        ? const EdgeInsets.fromLTRB(20, 14, 20, 14)
+        : const EdgeInsets.fromLTRB(18, 12, 18, 12);
+
+    Widget link({
+      required String title,
+      required String detail,
+      required String glyph,
+      required VoidCallback onTap,
+      bool rule = true,
+    }) =>
+        CRow(
+          rule: rule,
+          padding: rowPadding,
+          onTap: onTap,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: name),
+                    const SizedBox(height: 1),
+                    Text(detail, style: line),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              CGlyph(glyph, size: 18, color: t.ink, stroke: 2.1),
+            ],
+          ),
+        );
+
+    final sections = <Widget>[
+      CPanel(
+        padding: wide
+            ? const EdgeInsets.fromLTRB(22, 22, 22, 22)
+            : const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CAppMark(size: wide ? 52 : 46),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('XpuPeak',
+                          style: t.wordmark.copyWith(fontSize: wide ? 24 : 22)),
+                      const SizedBox(height: 2),
+                      Text('v$version',
+                          style: line.copyWith(
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ])),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'CPU, GPU and NPU peaks: the compute throughput, memory bandwidth and latency each one actually reaches. '
+              "Small, tight kernels run alongside each vendor's own tuned libraries, through every API that exposes a device, so the results line up side by side.",
+              style: t.body.copyWith(
+                  fontSize: wide ? 15 : 14, height: 1.55, color: t.muted),
+            ),
+          ],
+        ),
+      ),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const CSection(label: 'Project'),
+          SizedBox(height: wide ? 10 : 8),
+          CPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                link(
+                  title: 'Source code',
+                  detail: 'github.com/krrishnarraj/xpupeak',
+                  glyph: CGlyphs.external,
+                  onTap: () => launchUrl(_repoUrl,
+                      mode: LaunchMode.externalApplication),
+                ),
+                link(
+                  title: 'Open-source licenses',
+                  detail: 'The packages XpuPeak is built with, and the Sora '
+                      'typeface',
+                  glyph: CGlyphs.forward,
+                  rule: false,
+                  onTap: () =>
+                      Navigator.of(context).push(LicensesScreen.route(version)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ];
 
     return Scaffold(
       body: SafeArea(
-        child: Column(
+        child: ListView(
+          padding: EdgeInsets.only(bottom: wide ? 44 : 28),
           children: [
-            const CHeader(title: 'About', subtitle: 'XpuPeak'),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-                children: [
-                  CPanel(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const CAppMark(size: 34),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('XpuPeak', style: t.wordmark),
-                                const SizedBox(height: 3),
-                                Text('v${service.version}',
-                                    style: t.caps
-                                        .copyWith(letterSpacing: 0.6)),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'CPU, GPU and NPU peaks: the compute throughput, memory bandwidth and latency each one actually reaches. '
-                          "Small, tight kernels run alongside each vendor's own tuned libraries, through every API that exposes a device, so the results line up side by side.",
-                          style: t.prose,
-                        ),
-                      ],
-                    ),
+            const CHeader(title: 'About'),
+            for (var i = 0; i < sections.length; i++)
+              Padding(
+                padding: EdgeInsets.fromLTRB(side,
+                    i == 0 ? (wide ? 14 : 12) : (wide ? 26 : 20), side, 0),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 780),
+                    child: sections[i],
                   ),
-                  const SizedBox(height: 22),
-                  const CSection(label: 'Project'),
-                  const SizedBox(height: 10),
-                  CPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        CRow(
-                          onTap: () => launchUrl(_repoUrl,
-                              mode: LaunchMode.externalApplication),
-                          child: Row(
-                            children: [
-                              Icon(Icons.code, size: 15, color: t.muted),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Source code', style: t.body),
-                                    const SizedBox(height: 3),
-                                    Text('github.com/krrishnarraj/xpupeak',
-                                        style: t.smallMuted),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.open_in_new,
-                                  size: 13, color: t.muted),
-                            ],
-                          ),
-                        ),
-                        CRow(
-                          rule: false,
-                          onTap: () => showLicensePage(
-                            context: context,
-                            applicationName: 'XpuPeak',
-                            applicationVersion: service.version,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.description_outlined,
-                                  size: 15, color: t.muted),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                  child: Text('Open-source licenses',
-                                      style: t.body)),
-                              Icon(Icons.chevron_right,
-                                  size: 15, color: t.muted),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
           ],
         ),
       ),

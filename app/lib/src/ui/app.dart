@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 
+import '../model/run_config.dart';
 import '../model/run_summary.dart';
 import '../services/benchmark_service.dart';
 import '../services/run_history_store.dart';
@@ -18,6 +19,7 @@ import 'dashboard/dashboard_screen.dart';
 import 'history/history_screen.dart';
 import 'live_run/live_run_screen.dart';
 import 'results/results_screen.dart';
+import 'run_config/run_config_screen.dart';
 import 'settings/settings_screen.dart';
 
 class XpuPeakApp extends StatelessWidget {
@@ -171,6 +173,27 @@ class _XpuPeakShellState extends State<XpuPeakShell> {
     )));
   }
 
+  /// The sidebar's Run benchmark: the dashboard's own Run, a full run of
+  /// every detected device -- watched in the Benchmark tab, which the shell
+  /// shows as the run starts.
+  void _runBenchmark() {
+    context.read<BenchmarkService>().start(
+        preset: RunPreset.full,
+        verbose: context.read<SettingsService>().verbose);
+  }
+
+  /// The sidebar's Customize: the custom run, over the Benchmark tab as the
+  /// dashboard opens it -- unless it is open already.
+  void _customize() {
+    final routes = _pages.routes;
+    if (routes.isNotEmpty &&
+        routes.last.settings.name == RunConfigScreen.routeName) {
+      return;
+    }
+    _show(0);
+    unawaited(_navigatorKey.currentState?.push(RunConfigScreen.route()));
+  }
+
   Route<dynamic>? _route(RouteSettings settings) =>
       settings.name != Navigator.defaultRouteName
           ? null
@@ -189,6 +212,14 @@ class _XpuPeakShellState extends State<XpuPeakShell> {
   Widget build(BuildContext context) {
     final wide = cIsWide(context);
     final running = context.select<BenchmarkService, bool>((s) => s.isRunning);
+    // The sidebar's two pills, as the dashboard offers them: once devices
+    // have been found, and not while a run is in flight (the Benchmark tab
+    // shows the run then, not the dashboard).  A bool, so the shell is not
+    // rebuilt on every tick of a run.
+    final canRun = context.select<BenchmarkService, bool>((s) =>
+        s.catalogReady &&
+        !s.isRunning &&
+        s.catalog.backends.any((b) => b.available && b.hasDevices));
     if (running && !_wasRunning) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _show(0);
@@ -263,6 +294,8 @@ class _XpuPeakShellState extends State<XpuPeakShell> {
                   ),
             ],
             onOpenRun: (run) => _openRun(run, liveResult: liveResult),
+            onRun: canRun ? _runBenchmark : null,
+            onCustomize: canRun ? _customize : null,
           ),
           Expanded(child: content),
         ],
@@ -344,8 +377,9 @@ typedef _Destination = ({String glyph, String label});
 
 typedef _Recent = ({RunSummary run, RunOrigin? origin, bool open});
 
-/// Desktop navigation: the wordmark, the destinations, and the runs opened
-/// last -- the open one marked -- with a way to all of them.
+/// Desktop navigation: the wordmark, the app's two run actions, the
+/// destinations, and the runs opened last -- the open one marked -- with a
+/// way to all of them.
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.selected,
@@ -354,6 +388,8 @@ class _Sidebar extends StatelessWidget {
     required this.historyCount,
     required this.recent,
     required this.onOpenRun,
+    required this.onRun,
+    required this.onCustomize,
   });
 
   final int selected;
@@ -364,6 +400,10 @@ class _Sidebar extends StatelessWidget {
   final int? historyCount;
   final List<_Recent> recent;
   final ValueChanged<RunSummary> onOpenRun;
+
+  /// Run benchmark and Customize; null while they are not on offer.
+  final VoidCallback? onRun;
+  final VoidCallback? onCustomize;
 
   @override
   Widget build(BuildContext context) {
@@ -391,7 +431,21 @@ class _Sidebar extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 26),
+              CButton(
+                label: 'Run benchmark',
+                glyph: CGlyphs.play,
+                kind: CButtonKind.primary,
+                stretch: true,
+                onPressed: onRun,
+              ),
+              const SizedBox(height: 10),
+              // The width of the column, at the secondary pill's height.
+              SizedBox(
+                height: 46,
+                child: CButton(label: 'Customize', onPressed: onCustomize),
+              ),
+              const SizedBox(height: 26),
               for (var i = 0; i < destinations.length; i++) ...[
                 if (i > 0) const SizedBox(height: 2),
                 _NavItem(

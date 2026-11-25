@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../model/catalog.dart';
 import '../../model/run_config.dart';
 import '../../services/benchmark_service.dart';
 import '../../services/resume_offer.dart';
 import '../../services/settings_service.dart';
 import '../../theme/xpupeak_theme.dart';
 import '../app.dart';
-import '../common/format.dart';
 import '../common/kit.dart';
 import '../results/results_screen.dart';
 import '../run_config/run_config_screen.dart';
+import 'processor_groups.dart';
 
+/// The Benchmark tab while no run is in flight: a run the app died in, to
+/// be continued; the full run and the way to a custom one; and this
+/// system's processors, each with the devices that reach it.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -22,52 +24,58 @@ class DashboardScreen extends StatelessWidget {
     final catalog = service.catalog;
     final usable = catalog.usable;
     final devices = usable.fold<int>(0, (n, b) => n + b.deviceCount);
+    final wide = cIsWide(context);
+    final side = wide ? 34.0 : 16.0;
+
+    final sections = <Widget>[
+      if (service.resumeOffer case final offer?)
+        _ResumePanel(service: service, offer: offer),
+      if (!service.catalogReady)
+        // Static text, no animation: the frame budget belongs to the
+        // benchmarks, and enumeration finishes in seconds anyway.
+        const _Waiting(
+          title: 'Detecting devices…',
+          detail: 'Probing backends. The app is usable meanwhile.',
+        )
+      else if (usable.isEmpty)
+        const _Waiting(
+          title: 'No compute devices found',
+          detail: 'No backend could enumerate a device on this system.',
+        )
+      else ...[
+        _Labelled(
+          label: 'Run benchmark',
+          child: _RunLauncher(service: service, deviceCount: devices),
+        ),
+        _Labelled(
+          label: 'This system',
+          trailing: '${usable.length} '
+              '${usable.length == 1 ? 'backend' : 'backends'} · '
+              '$devices ${devices == 1 ? 'device' : 'devices'}',
+          child: ProcessorGrid(children: [
+            for (final group in groupDevices(catalog, empty: true))
+              _ProcessorCard(group: group, compact: !wide),
+          ]),
+        ),
+      ],
+    ];
 
     return Scaffold(
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 22, 20, 40),
+          padding: EdgeInsets.only(bottom: wide ? 44 : 28),
           children: [
-            _Masthead(version: service.version),
-            const SizedBox(height: 26),
-            if (service.resumeOffer case final offer?) ...[
-              _ResumePanel(service: service, offer: offer),
-              const SizedBox(height: 26),
-            ],
-            if (!service.catalogReady)
-              // Static text, no animation: the frame budget belongs to the
-              // benchmarks, and enumeration finishes in seconds anyway.
-              CPanel(
-                child: const CEmpty(
-                  icon: Icons.search,
-                  title: 'Detecting devices…',
-                  detail: 'Probing backends. The app is usable meanwhile.',
-                ),
-              )
-            else if (usable.isEmpty)
-              CPanel(
-                child: const CEmpty(
-                  icon: Icons.search_off,
-                  title: 'No compute devices found',
-                  detail:
-                      'No backend could enumerate a device on this system.',
-                ),
-              )
-            else ...[
-              const CSection(label: 'RUN BENCHMARK'),
-              const SizedBox(height: 10),
-              _RunLauncher(service: service, deviceCount: devices),
-              const SizedBox(height: 26),
-              CSection(
-                label: 'THIS SYSTEM',
-                trailing: '${usable.length} backends · $devices devices',
+            // The sidebar carries the mark on desktop; a phone has only
+            // this screen to.
+            wide
+                ? const CHeader(title: 'Benchmark')
+                : _Masthead(version: service.version),
+            for (var i = 0; i < sections.length; i++)
+              Padding(
+                padding: EdgeInsets.fromLTRB(side,
+                    i == 0 ? (wide ? 14 : 12) : (wide ? 30 : 24), side, 0),
+                child: sections[i],
               ),
-              const SizedBox(height: 10),
-              for (final backend in usable) ...[
-                _BackendPanel(backend: backend),
-                const SizedBox(height: 10),
-              ],
-            ],
           ],
         ),
       ),
@@ -75,7 +83,7 @@ class DashboardScreen extends StatelessWidget {
   }
 }
 
-/// Wordmark block — only shown on phones, where there's no sidebar to carry it.
+/// The phone's head: the app mark, the name and the version.
 class _Masthead extends StatelessWidget {
   const _Masthead({required this.version});
 
@@ -84,24 +92,75 @@ class _Masthead extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final wide = MediaQuery.sizeOf(context).width >= 900;
-
-    if (wide) {
-      // The sidebar already carries the mark; here just name the view.
-      return Text('Benchmark', style: t.wordmark.copyWith(fontSize: 22));
-    }
-
-    return Row(
-      children: [
-        const CAppMark(size: 30),
-        const SizedBox(width: 12),
-        Expanded(child: Text('XpuPeak', style: t.wordmark)),
-        Text('v$version', style: t.caps.copyWith(letterSpacing: 0.6)),
-      ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 6),
+      child: Row(
+        children: [
+          const CAppMark(size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text('XpuPeak',
+                style: t.wordmark.copyWith(fontSize: 24),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 12),
+          Text('v$version',
+              style: t.caption.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()])),
+        ],
+      ),
     );
   }
 }
 
+/// A section's head in capitals over what it holds.
+class _Labelled extends StatelessWidget {
+  const _Labelled({required this.label, required this.child, this.trailing});
+
+  final String label;
+  final String? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CSection(label: label, trailing: trailing),
+          SizedBox(height: cIsWide(context) ? 12 : 10),
+          child,
+        ],
+      );
+}
+
+/// Detecting, or nothing found: a title and a line in a dashed box.
+class _Waiting extends StatelessWidget {
+  const _Waiting({required this.title, required this.detail});
+
+  final String title;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return CEmptyBox(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(title,
+              style: t.title.copyWith(fontSize: 16),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 4),
+          Text(detail, style: t.prose, textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+}
+
+/// The full run -- every detected device, every category, the default
+/// budgets -- and the way to choose instead.
 class _RunLauncher extends StatelessWidget {
   const _RunLauncher({required this.service, required this.deviceCount});
 
@@ -111,6 +170,7 @@ class _RunLauncher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final wide = cIsWide(context);
     final deviceLabel = deviceCount == 1
         ? 'the detected device'
         : 'all $deviceCount detected devices';
@@ -119,39 +179,49 @@ class _RunLauncher extends StatelessWidget {
     // enumerated list.  The button enables itself when probing lands.
     final ready = service.catalogReady;
 
+    final run = CButton(
+      label: ready ? 'Run benchmark' : 'Detecting…',
+      glyph: CGlyphs.play,
+      kind: CButtonKind.primary,
+      stretch: !wide,
+      onPressed: ready
+          ? () => service.start(
+              preset: RunPreset.full,
+              verbose: context.read<SettingsService>().verbose)
+          : null,
+    );
+    final customize = CButton(
+      label: 'Customize',
+      onPressed: () => Navigator.of(context).push(RunConfigScreen.route()),
+    );
+
     return CPanel(
-      padding: const EdgeInsets.all(16),
+      padding: wide
+          ? const EdgeInsets.fromLTRB(24, 20, 24, 22)
+          : const EdgeInsets.fromLTRB(18, 16, 18, 18),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             'Measures compute, bandwidth and latency on $deviceLabel.',
-            style: t.prose,
+            style: t.title.copyWith(fontSize: wide ? 17 : 16, height: 1.35),
           ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            children: [
-              CButton(
-                label: ready ? 'Run' : 'Detecting…',
-                icon: Icons.play_arrow,
-                kind: CButtonKind.primary,
-                onPressed: ready
-                    ? () => service.start(
-                        preset: RunPreset.full,
-                        verbose: context.read<SettingsService>().verbose)
-                    : null,
-              ),
-              CButton(
-                label: 'Custom…',
-                icon: Icons.tune,
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const RunConfigScreen()),
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(height: 4),
+          Text('Customize picks the devices, the test categories and the '
+              'time budgets.',
+              style: t.caption.copyWith(fontSize: wide ? 13.5 : 13)),
+          SizedBox(height: wide ? 18 : 16),
+          if (wide)
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [run, customize],
+            )
+          else ...[
+            run,
+            const SizedBox(height: 10),
+            SizedBox(height: 46, child: customize),
+          ],
         ],
       ),
     );
@@ -170,6 +240,7 @@ class _ResumePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
+    final wide = cIsWide(context);
     final saved = offer.testsSaved;
     final detail = [
       saved == 0
@@ -182,91 +253,85 @@ class _ResumePanel extends StatelessWidget {
     ].join(' ');
 
     return CPanel(
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: t.ink, width: 2)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('RUN DID NOT FINISH', style: t.caps),
-            const SizedBox(height: 6),
-            Text(offer.headline, style: t.prose),
-            const SizedBox(height: 6),
-            Text(detail, style: t.smallMuted),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
+      color: t.surface2,
+      outlined: false,
+      padding: wide
+          ? const EdgeInsets.fromLTRB(24, 20, 24, 20)
+          : const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CTag(
+            text: 'Did not finish',
+            upper: false,
+            color: t.warnInk,
+            fill: t.warnTint,
+          ),
+          const SizedBox(height: 10),
+          Text(offer.headline,
+              style: t.title.copyWith(fontSize: wide ? 17 : 16, height: 1.35)),
+          const SizedBox(height: 4),
+          Text(detail, style: t.prose),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              CButton(
+                label: 'Continue',
+                glyph: CGlyphs.play,
+                kind: CButtonKind.primary,
+                onPressed: () => service.resume(offer),
+              ),
+              if (saved > 0)
                 CButton(
-                  label: 'Continue',
-                  icon: Icons.play_arrow,
-                  kind: CButtonKind.primary,
-                  onPressed: () => service.resume(offer),
+                  label: "View what's saved",
+                  onPressed: () => openCheckpoint(context,
+                      id: offer.id, startedAt: offer.startedAt),
                 ),
-                if (saved > 0)
-                  CButton(
-                    label: "View what's saved",
-                    icon: Icons.visibility_outlined,
-                    onPressed: () => openCheckpoint(context,
-                        id: offer.id, startedAt: offer.startedAt),
-                  ),
-                CButton(
-                  label: 'Dismiss',
-                  kind: CButtonKind.quiet,
-                  onPressed: service.dismissResumeOffer,
-                ),
-              ],
-            ),
-          ],
-        ),
+              CButton(
+                label: 'Dismiss',
+                kind: CButtonKind.quiet,
+                onPressed: service.dismissResumeOffer,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-/// One backend, presented as a titled table of its devices.
-class _BackendPanel extends StatelessWidget {
-  const _BackendPanel({required this.backend});
+/// A processor in its kind's tint, and each backend's view of it: what the
+/// backend calls it where that differs, and what its API reports.
+class _ProcessorCard extends StatelessWidget {
+  const _ProcessorCard({required this.group, required this.compact});
 
-  final CatalogBackend backend;
+  final ProcessorGroup group;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final devices = <(CatalogDevice, String)>[
-      for (final platform in backend.platforms)
-        for (final d in platform.devices) (d, platform.name),
-    ];
-    // As in the run picker: synthetic single platforms stay silent, several
-    // real ones (OpenCL) are shown per row.
-    final multiPlatform = backend.platforms.length > 1;
-
-    return CPanel(
+    final h = t.kind(group.kind);
+    final sub = t.caption.copyWith(fontSize: compact ? 12.5 : 13, color: h.tintSub);
+    return CKindCard(
+      kind: group.kind,
+      label: group.label,
+      title: group.name,
+      compact: compact,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CPanelHead(
-            title: backend.name,
-            icon: XpuPeakTheme.backendIcon(backend.name),
-            trailing: Text(
-              backend.deviceCount == 1
-                  ? '1 DEVICE'
-                  : '${backend.deviceCount} DEVICES',
-              style: t.caps,
-            ),
-          ),
-          for (var i = 0; i < devices.length; i++)
-            CRow(
-              rule: i != devices.length - 1,
-              child: _DeviceLine(
-                device: devices[i].$1,
-                platform:
-                    multiPlatform ? devices[i].$2 : '',
-              ),
-            ),
+          if (group.facts.isNotEmpty) Text(group.facts, style: sub),
+          if (group.devices.isEmpty) ...[
+            if (group.facts.isNotEmpty) const SizedBox(height: 10),
+            Text('No backend reaches it.', style: sub),
+          ] else ...[
+            SizedBox(height: group.facts.isEmpty ? 2 : 12),
+            for (final g in group.devices) _DeviceLine(device: g, group: group),
+          ],
         ],
       ),
     );
@@ -274,46 +339,51 @@ class _BackendPanel extends StatelessWidget {
 }
 
 class _DeviceLine extends StatelessWidget {
-  const _DeviceLine({required this.device, this.platform = ''});
+  const _DeviceLine({required this.device, required this.group});
 
-  final CatalogDevice device;
-  final String platform;
+  final GroupDevice device;
+  final ProcessorGroup group;
 
   @override
   Widget build(BuildContext context) {
     final t = CP.of(context);
-    final specs = <String>[
-      if (device.type.isNotEmpty) device.type,
-      if (platform.isNotEmpty) 'platform $platform',
-      if (device.origin.isNotEmpty) device.origin,
-      if (device.computeUnits > 0) '${device.computeUnits} CU',
-      if (device.clockMHz > 0) '${device.clockMHz} MHz',
-      if (device.globalMemBytes > 0) formatBytes(device.globalMemBytes),
-    ];
+    final h = t.kind(group.kind);
+    final detail = deviceDetail(device, group);
     final caps = <String>[
-      if (device.fp16) 'fp16',
-      if (device.fp64) 'fp64',
+      if (device.device.fp16) 'fp16',
+      if (device.device.fp64) 'fp64',
     ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            // Wraps rather than ellipsizes — driver-reported device names run
-            // long, and the tail is what distinguishes two of them.
-            Expanded(child: Text(device.name, style: t.body)),
-            for (final cap in caps) ...[
-              const SizedBox(width: 6),
-              CTag(text: cap),
-            ],
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: h.rule)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(device.backend.name,
+                    style: t.title.copyWith(fontSize: 14.5, color: h.tintInk)),
+                // Wraps rather than ellipsizes — driver-reported device
+                // names run long, and the tail is what distinguishes two
+                // of them.
+                if (detail.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(detail,
+                      style: t.small.copyWith(fontSize: 12.5, color: h.tintSub)),
+                ],
+              ],
+            ),
+          ),
+          for (final cap in caps) ...[
+            const SizedBox(width: 6),
+            CTag(text: cap, color: h.tintInk, fill: t.tagOnTint),
           ],
-        ),
-        if (specs.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(specs.join('  ·  '), style: t.smallMuted),
         ],
-      ],
+      ),
     );
   }
 }

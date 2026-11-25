@@ -254,25 +254,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(path, style: t.smallMuted),
-            const SizedBox(height: 10),
+            Text(path, style: t.caption),
+            const SizedBox(height: 12),
+            // The kit's search field, as a plain text field: the grey
+            // track, an ink edge while it has focus.
             TextField(
               controller: controller,
               autofocus: true,
-              style: t.body,
+              style: t.body.copyWith(fontSize: 14.5),
+              cursorColor: t.ink,
               cursorWidth: 1.5,
-              cursorRadius: Radius.zero,
               decoration: InputDecoration(
                 isDense: true,
+                filled: true,
+                fillColor: t.surface2,
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
-                  borderSide: BorderSide(color: t.line),
+                  borderSide: BorderSide.none,
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
-                  borderSide: BorderSide(color: t.line),
+                  borderSide: BorderSide.none,
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(CP.rControl),
@@ -281,11 +285,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               onSubmitted: (v) => Navigator.pop(context, v.trim()),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
                 'The name the provider expects to be registered under; '
                 'Qualcomm\'s QNN plugin requires QNNExecutionProvider.',
-                style: t.caps),
+                style: t.prose),
           ],
         ),
       ),
@@ -314,104 +318,227 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
     final settings = context.watch<SettingsService>();
     final running = context.select<BenchmarkService, bool>((s) => s.isRunning);
     final perLaunch = context.read<BenchmarkService>().runtimeFixedOnceLoaded;
 
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            const CHeader(title: 'Settings'),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-                children: [
-                  const CSection(label: 'Appearance'),
-                  const SizedBox(height: 10),
-                  CPanel(
-                    child: CRow(
-                      rule: false,
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      child: Row(
-                        children: [
-                          Icon(Icons.dark_mode_outlined,
-                              size: 15, color: t.muted),
-                          const SizedBox(width: 10),
-                          Expanded(child: Text('Theme', style: t.body)),
-                          _ThemeToggle(
-                            value: settings.themeMode,
-                            onChanged: settings.setThemeMode,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  const CSection(label: 'ONNX Runtime'),
-                  const SizedBox(height: 10),
-                  _RuntimePanel(
-                    view: _RuntimeView.onnx(_onnx,
-                        winml: Platform.isWindows, perLaunch: perLaunch),
-                    savedPath: settings.onnxLibraryPath,
-                    locked: running,
-                    onPick: () => _pickLibrary(_Runtime.onnx),
-                    onReset: () => _resetLibrary(_Runtime.onnx),
-                  ),
-                  // Windows ML beside the library it belongs with: together
-                  // they are the runtime setup.
-                  if (Platform.isWindows) ...[
-                    const SizedBox(height: 22),
-                    const CSection(label: 'Windows ML'),
-                    const SizedBox(height: 10),
-                    _WinmlPanel(
-                      enabled: settings.onnxWinml,
-                      path: settings.onnxWinmlPath,
-                      locked: running,
-                      perLaunch: perLaunch,
-                      onToggle: (on) =>
-                          _applyWinml(enabled: on, path: settings.onnxWinmlPath),
-                      onPickDir: _pickWinmlDir,
-                      onClearDir: () =>
-                          _applyWinml(enabled: settings.onnxWinml, path: ''),
-                    ),
-                  ],
-                  if (_desktop) ...[
-                    const SizedBox(height: 22),
-                    const CSection(label: 'Plugin execution providers'),
-                    const SizedBox(height: 10),
-                    _EpLibrariesPanel(
-                      libraries: settings.onnxEpLibraries,
-                      status: _onnx?.epLibraries ?? const [],
-                      locked: running,
-                      onAdd: _addEpLibrary,
-                      onRemove: _removeEpLibrary,
-                    ),
-                  ],
-                  const SizedBox(height: 22),
-                  const CSection(label: 'LiteRT'),
-                  const SizedBox(height: 10),
-                  _RuntimePanel(
-                    view: _RuntimeView.litert(_litert, perLaunch: perLaunch),
-                    savedPath: settings.litertLibraryPath,
-                    locked: running,
-                    onPick: () => _pickLibrary(_Runtime.litert),
-                    onReset: () => _resetLibrary(_Runtime.litert),
-                  ),
-                  const SizedBox(height: 22),
-                  const CSection(label: 'Diagnostics'),
-                  const SizedBox(height: 10),
-                  _DiagnosticsPanel(
-                    verbose: settings.verbose,
-                    onChanged: settings.setVerbose,
-                  ),
-                ],
+        child: _Page(
+          title: 'Settings',
+          sections: [
+            _Section(
+              label: 'Appearance',
+              child: _AppearanceCard(
+                value: settings.themeMode,
+                onChanged: settings.setThemeMode,
+              ),
+            ),
+            _Section(
+              label: 'ONNX Runtime',
+              child: _RuntimeCard(
+                view: _RuntimeView.onnx(_onnx,
+                    winml: Platform.isWindows, perLaunch: perLaunch),
+                savedPath: settings.onnxLibraryPath,
+                locked: running,
+                onPick: () => _pickLibrary(_Runtime.onnx),
+                onReset: () => _resetLibrary(_Runtime.onnx),
+              ),
+            ),
+            // Windows ML beside the library it belongs with: together they
+            // are the runtime setup.
+            if (Platform.isWindows)
+              _Section(
+                label: 'Windows ML',
+                child: _WinmlCard(
+                  enabled: settings.onnxWinml,
+                  path: settings.onnxWinmlPath,
+                  locked: running,
+                  perLaunch: perLaunch,
+                  onToggle: (on) =>
+                      _applyWinml(enabled: on, path: settings.onnxWinmlPath),
+                  onPickDir: _pickWinmlDir,
+                  onClearDir: () =>
+                      _applyWinml(enabled: settings.onnxWinml, path: ''),
+                ),
+              ),
+            if (_desktop)
+              _Section(
+                label: 'Plugin execution providers',
+                child: _EpLibrariesCard(
+                  libraries: settings.onnxEpLibraries,
+                  status: _onnx?.epLibraries ?? const [],
+                  locked: running,
+                  onAdd: _addEpLibrary,
+                  onRemove: _removeEpLibrary,
+                ),
+              ),
+            _Section(
+              label: 'LiteRT',
+              child: _RuntimeCard(
+                view: _RuntimeView.litert(_litert, perLaunch: perLaunch),
+                savedPath: settings.litertLibraryPath,
+                locked: running,
+                onPick: () => _pickLibrary(_Runtime.litert),
+                onReset: () => _resetLibrary(_Runtime.litert),
+              ),
+            ),
+            _Section(
+              label: 'Diagnostics',
+              note: 'Off by default. When on, saved runs include debug '
+                  'output — enable it before re-running a suspicious result '
+                  'for an issue report.',
+              child: _DiagnosticsCard(
+                verbose: settings.verbose,
+                onChanged: settings.setVerbose,
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The page: its title, then its sections, scrolling together -- on
+/// desktop in a column no wider than a settings form.
+class _Page extends StatelessWidget {
+  const _Page({required this.title, required this.sections});
+
+  final String title;
+  final List<Widget> sections;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = cIsWide(context);
+    final side = wide ? 34.0 : 16.0;
+    return ListView(
+      padding: EdgeInsets.only(bottom: wide ? 44 : 28),
+      children: [
+        CHeader(title: title),
+        for (var i = 0; i < sections.length; i++)
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+                side, i == 0 ? (wide ? 14 : 12) : (wide ? 26 : 20), side, 0),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 780),
+                child: sections[i],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// A section: its head in capitals, its card, and a paragraph under it.
+class _Section extends StatelessWidget {
+  const _Section({required this.label, required this.child, this.note});
+
+  final String label;
+  final Widget child;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    final wide = cIsWide(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CSection(label: label),
+        SizedBox(height: wide ? 10 : 8),
+        child,
+        if (note != null) ...[
+          SizedBox(height: wide ? 10 : 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Text(note!,
+                style: t.prose.copyWith(fontSize: wide ? 13 : 12.5)),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// The type of a settings card: a row's name, the line under it, and a
+/// paragraph of explanation.
+class _Type {
+  _Type(BuildContext context)
+      : t = CP.of(context),
+        wide = cIsWide(context);
+
+  final CP t;
+  final bool wide;
+
+  TextStyle get name => t.title.copyWith(fontSize: wide ? 15.5 : 15);
+  TextStyle get line => t.caption.copyWith(fontSize: wide ? 13 : 12.5);
+  TextStyle get prose => t.prose.copyWith(fontSize: wide ? 13.5 : 13);
+
+  EdgeInsets get padding => wide
+      ? const EdgeInsets.fromLTRB(20, 18, 20, 18)
+      : const EdgeInsets.fromLTRB(18, 16, 18, 16);
+}
+
+/// Theme: System, Light or Dark, and what System means right now.
+class _AppearanceCard extends StatelessWidget {
+  const _AppearanceCard({required this.value, required this.onChanged});
+
+  final ThemeMode value;
+  final ValueChanged<ThemeMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = _Type(context);
+    final system = MediaQuery.platformBrightnessOf(context) == Brightness.dark
+        ? 'Dark'
+        : 'Light';
+    final label = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Theme', style: type.name),
+        const SizedBox(height: 1),
+        Text(
+          value == ThemeMode.system
+              ? 'Following the system: $system right now'
+              : 'System is the default',
+          style: type.line,
+        ),
+      ],
+    );
+    final control = CSegmented<ThemeMode>(
+      segments: const [
+        CSegment(ThemeMode.system, 'System'),
+        CSegment(ThemeMode.light, 'Light'),
+        CSegment(ThemeMode.dark, 'Dark'),
+      ],
+      selected: value,
+      onChanged: onChanged,
+      expand: true,
+      semanticLabel: 'Theme',
+    );
+    return CPanel(
+      padding: type.wide
+          ? const EdgeInsets.fromLTRB(20, 16, 18, 16)
+          : const EdgeInsets.fromLTRB(18, 14, 14, 14),
+      child: LayoutBuilder(builder: (context, c) {
+        if (c.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [label, const SizedBox(height: 12), control],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: label),
+            const SizedBox(width: 18),
+            SizedBox(width: 300, child: control),
+          ],
+        );
+      }),
     );
   }
 }
@@ -429,9 +556,8 @@ enum _Runtime {
 
 /// One line of a runtime setup under its path: Windows ML's state, say.
 class _SetupLine {
-  const _SetupLine(this.icon, this.text, {this.danger = false});
+  const _SetupLine(this.text, {this.danger = false});
 
-  final IconData icon;
   final String text;
   final bool danger;
 }
@@ -485,20 +611,14 @@ class _RuntimeView {
 
   /// Windows ML as the active runtime was set up with it.
   static _SetupLine _activeWinml(OnnxStatus s) {
-    if (!s.winmlEnabled) {
-      return const _SetupLine(Icons.storefront_outlined, 'Windows ML off');
-    }
+    if (!s.winmlEnabled) return const _SetupLine('Windows ML off');
     if (s.winmlPath.isNotEmpty) {
-      return _SetupLine(
-          Icons.storefront_outlined, 'Windows ML on · ${s.winmlPath}');
+      return _SetupLine('Windows ML on · ${s.winmlPath}');
     }
     if (s.winmlError.isNotEmpty && s.winmlError != _winmlPendingError) {
-      return _SetupLine(
-          Icons.storefront_outlined, 'Windows ML on · ${s.winmlError}',
-          danger: true);
+      return _SetupLine('Windows ML on · ${s.winmlError}', danger: true);
     }
-    return const _SetupLine(Icons.storefront_outlined,
-        'Windows ML on · waiting for enumeration…');
+    return const _SetupLine('Windows ML on · waiting for enumeration…');
   }
 
   /// [winml]: this platform has the Windows ML catalog, so its state is part
@@ -530,12 +650,10 @@ class _RuntimeView {
           ? null
           : _NextLaunch(path: pending.path, lines: [
               if (winml || pending.winml)
-                _SetupLine(
-                    Icons.storefront_outlined,
-                    pending.winml
-                        ? 'Windows ML on · '
-                            '${pending.winmlPath.isNotEmpty ? pending.winmlPath : 'catalog beside the runtime or the app'}'
-                        : 'Windows ML off'),
+                _SetupLine(pending.winml
+                    ? 'Windows ML on · '
+                        '${pending.winmlPath.isNotEmpty ? pending.winmlPath : 'catalog beside the runtime or the app'}'
+                    : 'Windows ML off'),
             ]),
     );
   }
@@ -584,8 +702,114 @@ class _RuntimeView {
       );
 }
 
-class _RuntimePanel extends StatelessWidget {
-  const _RuntimePanel({
+/// A status dot: filled in [color] for a runtime that loaded or a provider
+/// that registered, an empty ring for one that is absent or not yet known.
+class _Dot extends StatelessWidget {
+  const _Dot({this.color});
+
+  /// Null draws the ring.
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = CP.of(context);
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        border: color == null ? Border.all(color: t.muted, width: 1.5) : null,
+      ),
+    );
+  }
+}
+
+/// A row's name with its status dot before it and its lines under it, the
+/// dot centred on the name's first line.
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({
+    required this.dot,
+    required this.name,
+    this.lines = const [],
+    this.muted = false,
+  });
+
+  final Color? dot;
+  final String name;
+
+  /// Under the name: paths, setup lines, errors (in danger).
+  final List<_SetupLine> lines;
+
+  /// The whole row inactive (the next launch's setup).
+  final bool muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = _Type(context);
+    final t = type.t;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.only(top: type.wide ? 6 : 5.5),
+          child: _Dot(color: dot),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name,
+                  style: muted ? type.name.copyWith(color: t.muted) : type.name),
+              for (final line in lines) ...[
+                const SizedBox(height: 2),
+                // Wraps: a path is read to its end, which is the file.
+                Text(line.text,
+                    style: line.danger
+                        ? type.line.copyWith(color: t.danger)
+                        : type.line),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A row of a card's actions, and the note that a run holds them.
+class _Actions extends StatelessWidget {
+  const _Actions({required this.children, required this.locked});
+
+  final List<Widget> children;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = _Type(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // A Wrap, so a phone-width screen puts the second button under the
+        // first rather than past the edge.
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: children,
+        ),
+        if (locked) ...[
+          const SizedBox(height: 6),
+          Text('Not while a run is in flight.', style: type.line),
+        ],
+      ],
+    );
+  }
+}
+
+class _RuntimeCard extends StatelessWidget {
+  const _RuntimeCard({
     required this.view,
     required this.savedPath,
     required this.locked,
@@ -605,158 +829,93 @@ class _RuntimePanel extends StatelessWidget {
 
   static const _byName = 'Found by name on the system paths';
 
-  Widget _line(CP t, _SetupLine line, {bool rule = true, bool inactive = false}) {
-    final color = line.danger ? t.danger : (inactive ? t.muted : null);
-    return CRow(
-      rule: rule,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(line.icon, size: 15, color: line.danger ? t.danger : t.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(line.text,
-                style: color == null
-                    ? t.smallMuted
-                    : t.smallMuted.copyWith(color: color)),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
+    final type = _Type(context);
+    final t = type.t;
     final s = view;
-    final tint = t.ink;
-    final fixed = s.fixed;
     final next = s.next;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        CPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              CRow(
-                accent: s.available ? tint : null,
-                child: Row(
-                  children: [
-                    Expanded(child: Text(s.title, style: t.body)),
-                    if (s.known)
-                      CTag(
-                        text: s.available ? 'active' : 'absent',
-                        color: s.available ? tint : t.muted,
-                      ),
-                  ],
-                ),
-              ),
-              _line(
-                t,
-                _SetupLine(
-                    Icons.folder_outlined,
-                    fixed
-                        ? 'Built into the app'
-                        : s.path.isNotEmpty
-                            ? s.path
-                            : savedPath.isNotEmpty
-                                ? savedPath
-                                : _byName),
-                rule: s.lines.isNotEmpty || s.error.isNotEmpty,
-              ),
-              for (var i = 0; i < s.lines.length; i++)
-                _line(t, s.lines[i],
-                    rule: i < s.lines.length - 1 || s.error.isNotEmpty),
-              if (s.error.isNotEmpty)
-                _line(t, _SetupLine(Icons.error_outline, s.error, danger: true),
-                    rule: false),
+    return CPanel(
+      padding: type.padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _StatusRow(
+            dot: s.available ? t.ok : null,
+            name: s.title,
+            lines: [
+              _SetupLine(s.fixed
+                  ? 'Built into the app'
+                  : s.path.isNotEmpty
+                      ? s.path
+                      : savedPath.isNotEmpty
+                          ? savedPath
+                          : _byName),
+              ...s.lines,
+              if (s.error.isNotEmpty) _SetupLine(s.error, danger: true),
             ],
           ),
-        ),
-        // The saved setup the next launch loads, inactive until then.
-        if (next != null) ...[
-          const SizedBox(height: 8),
-          CPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+          // The saved setup the next launch loads, inactive until then.
+          if (next != null) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 13, 16, 14),
+              decoration: BoxDecoration(
+                color: t.well,
+                borderRadius: BorderRadius.circular(CP.rWell),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _StatusRow(
+                    dot: null,
+                    name: 'Next launch',
+                    muted: true,
+                    lines: [
+                      _SetupLine(next.path.isNotEmpty ? next.path : _byName),
+                      ...next.lines,
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 22),
+                    child: Text('Takes effect the next time XpuPeak starts.',
+                        style: t.smallMuted),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(s.fixed ? s.fixedHint : s.hint, style: type.prose),
+          if (!s.fixed) ...[
+            const SizedBox(height: 12),
+            _Actions(
+              locked: locked,
               children: [
-                CRow(
-                  child: Row(
-                    children: [
-                      Expanded(
-                          child: Text('Next launch',
-                              style: t.body.copyWith(color: t.muted))),
-                      CTag(text: 'inactive', color: t.muted),
-                    ],
-                  ),
+                CButton(
+                  label: 'Choose library…',
+                  onPressed: locked ? null : onPick,
                 ),
-                _line(
-                    t,
-                    _SetupLine(Icons.folder_outlined,
-                        next.path.isNotEmpty ? next.path : _byName),
-                    inactive: true),
-                for (final line in next.lines)
-                  _line(t, line, inactive: true),
-                CRow(
-                  rule: false,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.schedule, size: 15, color: t.muted),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                            'Takes effect the next time XpuPeak starts.',
-                            style: t.smallMuted),
-                      ),
-                    ],
-                  ),
+                CButton(
+                  label: 'Use default',
+                  kind: CButtonKind.quiet,
+                  onPressed: locked || savedPath.isEmpty ? null : onReset,
                 ),
               ],
             ),
-          ),
-        ],
-        const SizedBox(height: 10),
-        Text(
-          fixed ? s.fixedHint : s.hint,
-          style: t.caps.copyWith(color: t.muted),
-        ),
-        if (!fixed) ...[
-          const SizedBox(height: 12),
-          // A Wrap, so a phone-width screen puts the second button under the
-          // first rather than past the edge.
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              CButton(
-                label: 'Choose library…',
-                icon: Icons.folder_open,
-                onPressed: locked ? null : onPick,
-              ),
-              CButton(
-                label: 'Use default',
-                onPressed: locked || savedPath.isEmpty ? null : onReset,
-              ),
-            ],
-          ),
-          if (locked) ...[
-            const SizedBox(height: 8),
-            Text('Not while a run is in flight.',
-                style: t.caps.copyWith(color: t.muted)),
           ],
         ],
-      ],
+      ),
     );
   }
 }
 
 /// The plugin execution-provider libraries registered on the ONNX Runtime
 /// (1.22+), each with how the last enumeration found it.
-class _EpLibrariesPanel extends StatelessWidget {
-  const _EpLibrariesPanel({
+class _EpLibrariesCard extends StatelessWidget {
+  const _EpLibrariesCard({
     required this.libraries,
     required this.status,
     required this.locked,
@@ -779,111 +938,117 @@ class _EpLibrariesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
-    final tint = t.ink;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        CPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (libraries.isEmpty)
-                CRow(
-                  rule: false,
-                  child: Text('None registered', style: t.smallMuted),
+    final type = _Type(context);
+    final t = type.t;
+    return CPanel(
+      padding: type.padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (libraries.isEmpty)
+            Text('None registered',
+                style: t.title.copyWith(
+                    fontSize: type.wide ? 15 : 14.5,
+                    fontWeight: FontWeight.w600,
+                    color: t.muted)),
+          for (var i = 0; i < libraries.length; i++)
+            Builder(builder: (context) {
+              final lib = libraries[i];
+              final st = _statusOf(lib);
+              final registered = st?.registered ?? false;
+              final replaces = st?.replaces ?? const <String>[];
+              return Container(
+                padding: EdgeInsets.only(
+                    top: i == 0 ? 0 : 10,
+                    bottom: i == libraries.length - 1 ? 0 : 10),
+                decoration: BoxDecoration(
+                  border: i == libraries.length - 1
+                      ? null
+                      : Border(bottom: BorderSide(color: t.line)),
                 ),
-              for (var i = 0; i < libraries.length; i++)
-                Builder(builder: (context) {
-                  final lib = libraries[i];
-                  final st = _statusOf(lib);
-                  final registered = st?.registered ?? false;
-                  final replaces = st?.replaces ?? const <String>[];
-                  return CRow(
-                    rule: i < libraries.length - 1,
-                    accent: registered ? tint : null,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.extension_outlined, size: 15, color: t.muted),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(lib.name, style: t.body),
-                              const SizedBox(height: 3),
-                              Text(lib.path, style: t.smallMuted),
-                              for (final r in replaces) ...[
-                                const SizedBox(height: 3),
-                                Text('In place of Windows ML\'s $r',
-                                    style: t.smallMuted),
-                              ],
-                              if (st != null && !registered) ...[
-                                const SizedBox(height: 3),
-                                Text(st.error,
-                                    style: t.smallMuted
-                                        .copyWith(color: t.danger)),
-                              ],
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        CTag(
-                          text: st == null
-                              ? 'pending'
-                              : registered
-                                  ? 'registered'
-                                  : 'failed',
-                          color: st == null
-                              ? t.muted
-                              : registered
-                                  ? tint
-                                  : t.danger,
-                        ),
-                        const SizedBox(width: 4),
-                        CIconButton(
-                          icon: Icons.close,
-                          tooltip: 'Remove',
-                          onPressed: locked ? null : () => onRemove(lib),
-                        ),
-                      ],
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _StatusRow(
+                        dot: st == null
+                            ? null
+                            : registered
+                                ? t.ok
+                                : t.danger,
+                        name: lib.name,
+                        lines: [
+                          _SetupLine(lib.path),
+                          for (final r in replaces)
+                            _SetupLine('In place of Windows ML\'s $r'),
+                          if (st != null && !registered)
+                            _SetupLine(st.error, danger: true),
+                        ],
+                      ),
                     ),
-                  );
-                }),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: CTag(
+                        text: st == null
+                            ? 'Pending'
+                            : registered
+                                ? 'Registered'
+                                : 'Failed',
+                        upper: false,
+                        color: st == null
+                            ? null
+                            : registered
+                                ? t.ok
+                                : t.danger,
+                      ),
+                    ),
+                    // Pulled up to the name's line: the button's 44 px
+                    // target is taller than the row's first line.
+                    Transform.translate(
+                      offset: const Offset(6, -10),
+                      child: CIconButton(
+                        icon: Icons.close,
+                        tooltip: 'Remove',
+                        onPressed: locked ? null : () => onRemove(lib),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          const SizedBox(height: 12),
+          Text(
+            'Add a provider the runtime above does not already include — '
+            'most vendor NPUs ship this way now, separately from ONNX Runtime '
+            'itself: Qualcomm\'s QNN plugin (onnxruntime_providers_qnn) '
+            'reaches the Hexagon NPU this way on a stock ONNX Runtime 1.24 or '
+            'newer.',
+            style: type.prose,
+          ),
+          const SizedBox(height: 12),
+          _Actions(
+            locked: locked,
+            children: [
+              CButton(
+                label: 'Add library…',
+                onPressed: locked ? null : onAdd,
+              ),
             ],
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Add a provider the runtime above does not already include — most '
-          'vendor NPUs ship this way now, separately from ONNX Runtime '
-          'itself: Qualcomm\'s QNN plugin (onnxruntime_providers_qnn) reaches '
-          'the Hexagon NPU this way on a stock ONNX Runtime 1.24 or newer.',
-          style: t.caps.copyWith(color: t.muted),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            CButton(
-              label: 'Add library…',
-              icon: Icons.add,
-              onPressed: locked ? null : onAdd,
-            ),
-          ],
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 /// Windows ML's execution-provider catalog, as saved: the switch and where
 /// its DLL is.  What the active runtime was set up with -- and what the
-/// catalog made of it -- is the runtime panel's to say, beside the library
+/// catalog made of it -- is the runtime card's to say, beside the library
 /// it belongs with; a change here after a runtime has loaded shows up there
 /// as the next launch's setup.
-class _WinmlPanel extends StatelessWidget {
-  const _WinmlPanel({
+class _WinmlCard extends StatelessWidget {
+  const _WinmlCard({
     required this.enabled,
     required this.path,
     required this.locked,
@@ -903,87 +1068,75 @@ class _WinmlPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        CPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    final type = _Type(context);
+    return CPanel(
+      padding: type.padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             children: [
-              CRow(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Row(
-                  children: [
-                    Icon(Icons.storefront_outlined, size: 15, color: t.muted),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: Text('Store execution providers',
-                            style: t.body)),
-                    CSwitch(
-                        value: enabled,
-                        onChanged: locked ? (_) {} : onToggle),
-                  ],
-                ),
-              ),
-              CRow(
-                rule: false,
-                child: Row(
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.folder_outlined, size: 15, color: t.muted),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        path.isNotEmpty
-                            ? path
-                            : 'Microsoft.Windows.AI.MachineLearning.dll '
-                                'beside the runtime or the app',
-                        style: t.smallMuted,
-                      ),
+                    Text('Store execution providers', style: type.name),
+                    const SizedBox(height: 2),
+                    Text(
+                      path.isNotEmpty
+                          ? path
+                          : 'Microsoft.Windows.AI.MachineLearning.dll '
+                              'beside the runtime or the app',
+                      style: type.line,
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              CSwitch(
+                value: enabled,
+                onChanged: locked ? null : onToggle,
+                semanticLabel: 'Store execution providers',
+              ),
             ],
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'The automatic version of the plugin providers below: turning this '
-          'on installs the vendor providers (Qualcomm QNN, Intel OpenVINO, '
-          'AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this machine from '
-          'the Microsoft Store on first use — a download — instead of you '
-          'naming the library yourself. The catalog DLL comes with the '
-          'Microsoft.Windows.AI.MachineLearning package, not with XpuPeak.'
-          '${perLaunch ? ' Part of the runtime setup above, so it too is set '
-              'once per launch.' : ''}',
-          style: t.caps.copyWith(color: t.muted),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            CButton(
-              label: 'Choose folder…',
-              icon: Icons.folder_open,
-              onPressed: locked ? null : onPickDir,
-            ),
-            CButton(
-              label: 'Use default',
-              onPressed: locked || path.isEmpty ? null : onClearDir,
-            ),
-          ],
-        ),
-      ],
+          const SizedBox(height: 12),
+          Text(
+            'The automatic version of the plugin providers below: turning '
+            'this on installs the vendor providers (Qualcomm QNN, Intel '
+            'OpenVINO, AMD Vitis AI, NVIDIA TensorRT for RTX) that fit this '
+            'machine from the Microsoft Store on first use — a download — '
+            'instead of you naming the library yourself. The catalog DLL '
+            'comes with the Microsoft.Windows.AI.MachineLearning package, not '
+            'with XpuPeak.'
+            '${perLaunch ? ' Part of the runtime setup above, so it too is set '
+                'once per launch.' : ''}',
+            style: type.prose,
+          ),
+          const SizedBox(height: 12),
+          _Actions(
+            locked: locked,
+            children: [
+              CButton(
+                label: 'Choose folder…',
+                onPressed: locked ? null : onPickDir,
+              ),
+              CButton(
+                label: 'Use default',
+                kind: CButtonKind.quiet,
+                onPressed: locked || path.isEmpty ? null : onClearDir,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 /// The verbose switch, and the way to the issue tracker it exists for.
-class _DiagnosticsPanel extends StatelessWidget {
-  const _DiagnosticsPanel({required this.verbose, required this.onChanged});
+class _DiagnosticsCard extends StatelessWidget {
+  const _DiagnosticsCard({required this.verbose, required this.onChanged});
 
   final bool verbose;
   final ValueChanged<bool> onChanged;
@@ -993,115 +1146,52 @@ class _DiagnosticsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        CPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              CRow(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Row(
-                  children: [
-                    Icon(Icons.bug_report_outlined, size: 15, color: t.muted),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: Text('Verbose diagnostics', style: t.body)),
-                    CSwitch(value: verbose, onChanged: onChanged),
-                  ],
-                ),
-              ),
-              CRow(
-                rule: false,
-                onTap: () =>
-                    launchUrl(_issuesUrl, mode: LaunchMode.externalApplication),
-                child: Row(
-                  children: [
-                    Icon(Icons.open_in_new, size: 15, color: t.muted),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Report an issue', style: t.body),
-                          const SizedBox(height: 3),
-                          Text('github.com/krrishnarraj/xpupeak/issues',
-                              style: t.smallMuted),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'Off by default. When on, saved runs include debug output — '
-          'enable it before re-running a suspicious result for an issue report.',
-          style: t.caps.copyWith(color: t.muted),
-        ),
-      ],
-    );
-  }
-}
-
-/// Square segmented control — hairline frame, solid block on the active cell.
-class _ThemeToggle extends StatelessWidget {
-  const _ThemeToggle({required this.value, required this.onChanged});
-
-  final ThemeMode value;
-  final ValueChanged<ThemeMode> onChanged;
-
-  static const _modes = [
-    (ThemeMode.system, 'Auto'),
-    (ThemeMode.light, 'Light'),
-    (ThemeMode.dark, 'Dark'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final t = CP.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: t.line),
-        borderRadius: BorderRadius.circular(CP.rControl),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    final type = _Type(context);
+    final t = type.t;
+    return CPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < _modes.length; i++)
-            CTap(
-              onTap: () => onChanged(_modes[i].$1),
-              builder: (context, hovered, pressed) {
-                final on = value == _modes[i].$1;
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: on
-                        ? t.ink
-                        : (hovered || pressed
-                            ? t.surface2
-                            : Colors.transparent),
-                    border: Border(
-                      left: i == 0
-                          ? BorderSide.none
-                          : BorderSide(color: t.line),
-                    ),
-                  ),
-                  child: Text(
-                    _modes[i].$2.toUpperCase(),
-                    style: t.caps
-                        .copyWith(color: on ? t.inkOn : t.muted),
-                  ),
-                );
-              },
+          CRow(
+            padding: type.wide
+                ? const EdgeInsets.fromLTRB(20, 8, 12, 8)
+                : const EdgeInsets.fromLTRB(18, 6, 8, 6),
+            child: Row(
+              children: [
+                Expanded(child: Text('Verbose diagnostics', style: type.name)),
+                CSwitch(
+                  value: verbose,
+                  onChanged: onChanged,
+                  semanticLabel: 'Verbose diagnostics',
+                ),
+              ],
             ),
+          ),
+          CRow(
+            rule: false,
+            padding: type.wide
+                ? const EdgeInsets.fromLTRB(20, 14, 20, 14)
+                : const EdgeInsets.fromLTRB(18, 12, 18, 12),
+            onTap: () =>
+                launchUrl(_issuesUrl, mode: LaunchMode.externalApplication),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Report an issue', style: type.name),
+                      const SizedBox(height: 1),
+                      Text('github.com/krrishnarraj/xpupeak/issues',
+                          style: type.line),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                CGlyph(CGlyphs.external, size: 18, color: t.ink, stroke: 2),
+              ],
+            ),
+          ),
         ],
       ),
     );
