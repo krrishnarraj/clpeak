@@ -7,3 +7,5 @@ TODO
 # (which also caches the ~61 MB ONNX Runtime pod archive)
 app/ios/xpupeak_native/
 build-ios/
+
+.DS_Store
