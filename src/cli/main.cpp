@@ -23,6 +23,9 @@
 #ifdef ENABLE_LITERT
 #include <litert/litert_peak.h>  // litertSetLibraryOverride, for --litert-lib
 #endif
+#ifdef ENABLE_WEBGPU
+#include <webgpu/webgpu_peak.h>  // webgpuSetLibraryOverride, for --webgpu-lib
+#endif
 
 int main(int argc, char **argv)
 {
@@ -74,6 +77,10 @@ int main(int argc, char **argv)
         litertSetLibraryOverride(opts.litertLibPath);
     if (!opts.litertNpuDir.empty())
         litertSetNpuDirOverride(opts.litertNpuDir);
+#endif
+#ifdef ENABLE_WEBGPU
+    if (!opts.webgpuLibPath.empty())
+        webgpuSetLibraryOverride(opts.webgpuLibPath);
 #endif
 
     const auto &backends = backendRegistry();

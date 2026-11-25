@@ -37,6 +37,9 @@
 #ifdef ENABLE_LITERT
 #include <litert/litert_peak.h>
 #endif
+#ifdef ENABLE_WEBGPU
+#include <webgpu/webgpu_peak.h>
+#endif
 
 namespace
 {
@@ -82,6 +85,9 @@ std::vector<BackendEntry> build()
 #endif
 #ifdef ENABLE_LITERT
     out.push_back(entry<LitertPeak>());
+#endif
+#ifdef ENABLE_WEBGPU
+    out.push_back(entry<WebgpuPeak>());
 #endif
     // The enum is the order; the push_back order above is not.
     std::sort(out.begin(), out.end(),

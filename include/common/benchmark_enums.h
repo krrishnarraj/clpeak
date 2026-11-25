@@ -35,6 +35,7 @@ enum class Backend : unsigned int {
     Oneapi,
     Vulkan,
     OpenCL,
+    WebGPU,
     Cpu,
     Coreml,
     Litert,
