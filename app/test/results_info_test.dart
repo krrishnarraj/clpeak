@@ -7,7 +7,7 @@ import 'package:clpeak/src/model/result_model.dart';
 import 'package:clpeak/src/model/run_document.dart';
 import 'package:clpeak/src/theme/clpeak_theme.dart';
 import 'package:clpeak/src/ui/results/results_body.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _ns = Units(symbol: 's', quantity: Quantity.seconds);

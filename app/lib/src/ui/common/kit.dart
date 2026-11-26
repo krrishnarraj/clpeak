@@ -13,7 +13,7 @@
 ///     the same pointer behaviour as `InkWell` minus the ripple.
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../theme/clpeak_theme.dart';
 

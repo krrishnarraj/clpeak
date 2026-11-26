@@ -14,7 +14,7 @@ import 'package:clpeak/src/services/export_service.dart';
 import 'package:clpeak/src/services/run_history_store.dart';
 import 'package:clpeak/src/services/settings_service.dart';
 import 'package:clpeak/src/ui/app.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
