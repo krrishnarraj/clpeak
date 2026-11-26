@@ -89,8 +89,8 @@ add_subdirectory(${CLPEAK_ROOT}/src/coreml ${CMAKE_BINARY_DIR}/coreml)
 # baked in -- which is also why --onnx-lib and the settings screen's library
 # picker do nothing here: there is no second runtime to choose.
 #
-# tools/build_ios_native.sh fetches and unpacks the pod archive, then passes
-# its path in.  Point CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK at an existing
+# tools/build_ios_native.sh fetches the xcframework from the NuGet package, then
+# passes its path in.  Point CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK at an existing
 # onnxruntime.xcframework to use your own build; the backend is left out
 # entirely when it is absent.
 set(CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK "" CACHE PATH

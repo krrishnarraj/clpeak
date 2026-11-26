@@ -79,8 +79,9 @@ the `src/ffi` C ABI (Dart FFI — no JNI, no platform channels for the bridge).
   `flutter build apk` carries none.
 - iOS: `tools/build_ios_native.sh` first (stages
   `ios/clpeak_native/clpeak_ffi.xcframework` + optional Vulkan pieces), then
-  `flutter build ios` / `flutter run`.  That script also fetches the ONNX
-  Runtime pod archive (~61 MB, cached under `build-ios/`) and links it in;
+  `flutter build ios` / `flutter run`.  That script also fetches ONNX
+  Runtime (Microsoft's NuGet package, ~157 MB, its iOS xcframework cached
+  under `build-ios/`) and links it in;
   `--no-onnx` skips it, `CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK` points at your
   own build.  It fetches LiteRT too -- Google's iOS dylibs of the runtime
   and its Metal accelerator, device and simulator slices, ~42 MB, from its
