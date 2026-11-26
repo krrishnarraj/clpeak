@@ -22,3 +22,9 @@ via `tools/update_webgpu_headers.sh`) needed at build time.
 | `image_bandwidth.cpp` | `runImageBandwidth` (`rgba32float` `textureLoad`, 4 walk shapes via WGSL `override` constants) |
 | `transfer_bandwidth.cpp` | `runTransferBandwidth` (`copyBufferToBuffer` H2D/D2H) |
 | `kernel_latency.cpp` | `runKernelLatency` (empty 1x1x1 dispatch roundtrip) |
+
+## wgpu-native
+
+It departs from `webgpu.h`: some calls abort the process and every future it
+returns is null.  `WebgpuRuntime::wgpuNative` marks it; the crash gates are in
+the root `NOTES.md`, and a new call into the runtime has to be tried against it.

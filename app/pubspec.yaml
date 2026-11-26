@@ -20,6 +20,7 @@ dependencies:
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.0
   wakelock_plus: ^1.7.0
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:

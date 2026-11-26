@@ -14,9 +14,9 @@
 # when the LunarG iOS SDK is discoverable via $VULKAN_SDK or
 # ~/VulkanSDK/1.4.350.0/iOS; otherwise the framework ships Metal + CPU only.
 #
-# ONNX Runtime is fetched (the official static C pod) and linked into the
-# framework; --no-onnx leaves it out, and CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK
-# points the build at a local one instead.
+# ONNX Runtime is fetched (the static xcframework in Microsoft's NuGet
+# package) and linked into the framework; --no-onnx leaves it out, and
+# CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK points the build at a local one instead.
 #
 # LiteRT is fetched (Google's iOS dylibs for the release the vendored headers
 # came from) and embedded beside the framework, to be dlopen'd like on every
@@ -47,14 +47,26 @@ for arg in "$@"; do
 done
 EXTRA_ARGS+=(-DCLPEAK_IOS_ENABLE_VULKAN=$VULKAN)
 
-# ---- ONNX Runtime (static, from the official C pod archive) -----------------
-# iOS is the one platform where the runtime cannot be dlopen'd: Apple's pod is
-# a static framework and iOS will not load a library that was not built into
-# the app.  So it is fetched here and linked in.  Cached under build-ios/, not
-# checked in -- it is 61 MB.  Set CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
-# at your own build instead, or pass --no-onnx to leave the backend out.
-ORT_POD_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.30.0}"
-ORT_DIR="$BUILD/onnxruntime/$ORT_POD_VERSION"
+# ---- ONNX Runtime (static, from the official NuGet package) -----------------
+# iOS is the one platform where the runtime cannot be dlopen'd: Apple ships it
+# as a static framework and iOS will not load a library that was not built into
+# the app.  So it is fetched here and linked in.  The source is the
+# Microsoft.ML.OnnxRuntime package on nuget.org, which carries the iOS
+# xcframework as a zip inside it; the CocoaPods archive's host,
+# download.onnxruntime.ai, fails TLS verification.  The two builds of 1.30.0
+# are not the same: the NuGet one lacks the pod's KleidiAI SME2 matmul kernels
+# and some of its other KleidiAI ones, so CPU rows can differ.  Cached under
+# build-ios/, not checked in.  Set CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK to point
+# at another build (the pod's, or your own), or pass --no-onnx to leave the
+# backend out.
+ORT_VERSION="${CLPEAK_IOS_ONNXRUNTIME_VERSION:-1.30.0}"
+ORT_DIR="$BUILD/onnxruntime/$ORT_VERSION-nuget"
+# The package's SHA-512 in base64, as nuget.org's catalog publishes it.  A new
+# default version needs its own line here.
+case "$ORT_VERSION" in
+    1.30.0) ORT_SHA512="xTgo+P2WWI1BrKQb91+G8YR1s/SFH07xZuc42kdgS2I6GLGOAKnMVhFqCk7nmce6L6ajho8wAcqixYAiwfE79g==" ;;
+    *)      ORT_SHA512="" ;;
+esac
 
 if [[ $NO_ONNX -eq 0 ]]; then
     if [[ -n "${CLPEAK_IOS_ONNXRUNTIME_XCFRAMEWORK:-}" ]]; then
@@ -62,12 +74,26 @@ if [[ $NO_ONNX -eq 0 ]]; then
     else
         ORT_XCFRAMEWORK="$ORT_DIR/onnxruntime.xcframework"
         if [[ ! -d "$ORT_XCFRAMEWORK" ]]; then
-            echo "==> Fetching ONNX Runtime $ORT_POD_VERSION (iOS pod archive)"
-            mkdir -p "$ORT_DIR"
-            curl -fsSL -o "$ORT_DIR/pod.zip" \
-                "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-$ORT_POD_VERSION.zip"
-            unzip -oq "$ORT_DIR/pod.zip" -d "$ORT_DIR"
-            rm -f "$ORT_DIR/pod.zip"
+            echo "==> Fetching ONNX Runtime $ORT_VERSION (NuGet package)"
+            rm -rf "$ORT_DIR"
+            mkdir -p "$ORT_DIR/unpack"
+            curl -fsSL -o "$ORT_DIR/ort.nupkg" \
+                "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ORT_VERSION/microsoft.ml.onnxruntime.$ORT_VERSION.nupkg"
+            if [[ -n "$ORT_SHA512" ]]; then
+                got="$(openssl dgst -sha512 -binary "$ORT_DIR/ort.nupkg" | openssl base64 -A)"
+                if [[ "$got" != "$ORT_SHA512" ]]; then
+                    echo "error: ONNX Runtime $ORT_VERSION package SHA-512 mismatch: $got" >&2
+                    exit 1
+                fi
+            else
+                echo "warning: no pinned SHA-512 for ONNX Runtime $ORT_VERSION -- not verified" >&2
+            fi
+            unzip -p "$ORT_DIR/ort.nupkg" runtimes/ios/native/onnxruntime.xcframework.zip \
+                > "$ORT_DIR/xcframework.zip"
+            unzip -q "$ORT_DIR/xcframework.zip" -d "$ORT_DIR/unpack"
+            # Moved into place last: its presence is what marks the cache good.
+            mv "$ORT_DIR/unpack/onnxruntime.xcframework" "$ORT_XCFRAMEWORK"
+            rm -rf "$ORT_DIR/unpack" "$ORT_DIR/ort.nupkg" "$ORT_DIR/xcframework.zip"
         fi
     fi
     if [[ ! -d "$ORT_XCFRAMEWORK" ]]; then

@@ -164,6 +164,10 @@ bool WebgpuDevice::init(const WebgpuRuntime *runtime, WGPUInstanceImpl *inst,
   }
 
   info.float16Supported = rt->api.wgpuDeviceHasFeature(device, WGPUFeatureName_ShaderF16) != 0;
+  // wgpu-native cannot be asked (see NOTES.md), so the shader is put to it:
+  // naga lowers dot4I8Packed where the GPU has no instruction, and a refusal
+  // is a pipeline error row, not an abort.
+  info.packed4x8DotProductSupported = rt->wgpuNative;
   if (rt->api.wgpuInstanceHasWGSLLanguageFeature)
   {
     info.packed4x8DotProductSupported =
@@ -214,7 +218,8 @@ void WebgpuDevice::pushErrorScopes()
     return;
   rt->api.wgpuDevicePushErrorScope(device, WGPUErrorFilter_Validation);
   rt->api.wgpuDevicePushErrorScope(device, WGPUErrorFilter_OutOfMemory);
-  rt->api.wgpuDevicePushErrorScope(device, WGPUErrorFilter_Internal);
+  if (!rt->wgpuNative) // aborts on this filter, see NOTES.md
+    rt->api.wgpuDevicePushErrorScope(device, WGPUErrorFilter_Internal);
 }
 
 bool WebgpuDevice::popErrorScope(std::string *msg)
@@ -264,7 +269,8 @@ bool WebgpuDevice::popErrorScopes(std::string *msg)
   if (!device || !rt->api.wgpuDevicePushErrorScope || !rt->api.wgpuDevicePopErrorScope)
     return true;
   bool ok = true;
-  for (int i = 0; i < 3; i++)
+  const int scopes = rt->wgpuNative ? 2 : 3;
+  for (int i = 0; i < scopes; i++)
   {
     std::string scopeMsg;
     if (!popErrorScope(&scopeMsg))
