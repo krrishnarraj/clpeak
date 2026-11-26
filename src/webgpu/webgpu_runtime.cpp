@@ -17,8 +17,9 @@ static bool g_attempted = false;
 static std::string g_loadError;
 static std::string g_override;
 
-static bool resolveApi(void *lib, WebgpuApi &api, const char *what)
+static bool resolveApi(void *lib, WebgpuRuntime &rt, const char *what)
 {
+  WebgpuApi &api = rt.api;
   std::string missing;
 #define CLPEAK_WEBGPU_RESOLVE_REQ(name)                                       \
   api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name)); \
@@ -30,6 +31,15 @@ static bool resolveApi(void *lib, WebgpuApi &api, const char *what)
   api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));
   CLPEAK_WEBGPU_OPTIONAL(CLPEAK_WEBGPU_RESOLVE_OPT)
 #undef CLPEAK_WEBGPU_RESOLVE_OPT
+  // wgpu-native (known by its own wgpuGetVersion) aborts the process on parts
+  // of webgpu.h, so a resolved symbol proves nothing.  See NOTES.md.
+  if (clpeak::dynSym(lib, "wgpuGetVersion"))
+  {
+    rt.wgpuNative = true;
+    api.wgpuHasInstanceFeature = nullptr;
+    api.wgpuInstanceWaitAny = nullptr;
+    api.wgpuInstanceHasWGSLLanguageFeature = nullptr;
+  }
   if (!missing.empty())
   {
     g_loadError = std::string(what) + " lacks " + missing +
@@ -90,7 +100,7 @@ static void loadRuntime()
     return;
 
   WebgpuRuntime cur;
-  if (!resolveApi(lib, cur.api, named ? named : "WebGPU library"))
+  if (!resolveApi(lib, cur, named ? named : "WebGPU library"))
     return;
 
   cur.lib = lib;
@@ -134,7 +144,9 @@ bool wgpuWaitOne(const WebgpuRuntime &rt, WGPUInstance inst, bool timedWaitAny,
 {
   if (done && done->load(std::memory_order_acquire))
     return true;
-  if (future.id == 0)
+  // A null future is a failed request, except on wgpu-native, which returns
+  // one for work that is still pending.
+  if (future.id == 0 && !rt.wgpuNative)
     return false;
   if (timedWaitAny && rt.api.wgpuInstanceWaitAny)
   {

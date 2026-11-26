@@ -334,10 +334,12 @@ static inline std::string makeComputeInt8DpWgsl(uint32_t numChains, bool alt)
       }
       else
       {
-        ss << "    a" << k << " = a" << k << " + dot4I8Packed(x, bitcast<u32>(b" << k << "));\n";
-        ss << "    b" << k << " = b" << k << " + dot4I8Packed(x, bitcast<u32>(a" << k << "));\n";
-        ss << "    a" << k << " = a" << k << " + dot4I8Packed(x, bitcast<u32>(b" << k << "));\n";
-        ss << "    b" << k << " = b" << k << " + dot4I8Packed(x, bitcast<u32>(a" << k << "));\n";
+        // One block per statement: naga's MSL writer (wgpu-native on Metal)
+        // otherwise declares its copy of x twice in one scope.
+        ss << "    { a" << k << " = a" << k << " + dot4I8Packed(x, bitcast<u32>(b" << k << ")); }\n";
+        ss << "    { b" << k << " = b" << k << " + dot4I8Packed(x, bitcast<u32>(a" << k << ")); }\n";
+        ss << "    { a" << k << " = a" << k << " + dot4I8Packed(x, bitcast<u32>(b" << k << ")); }\n";
+        ss << "    { b" << k << " = b" << k << " + dot4I8Packed(x, bitcast<u32>(a" << k << ")); }\n";
       }
     }
   };

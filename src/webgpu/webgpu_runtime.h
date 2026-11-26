@@ -86,6 +86,9 @@ struct WebgpuRuntime
   void *lib = nullptr;
   std::string path;
   WebgpuApi api;
+  // wgpu-native departs from webgpu.h in ways the loader and the waits answer
+  // for: it aborts on parts of the API, and its futures are all null.
+  bool wgpuNative = false;
 };
 
 // Returns the loaded runtime, or nullptr if loading failed (see webgpuLoadDiagnostic()).

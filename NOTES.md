@@ -333,3 +333,36 @@ clpeak stops running those.
   and the line before each pipeline names the row and its tile.  A measured
   `fp16 f16acc` row, or one failed as "Pipeline creation failed" -- the
   driver declining -- is a fixed compiler; a run that ends there is not.
+
+## WebGPU backend, wgpu-native
+
+All of these hang off `WebgpuRuntime::wgpuNative`, set in `resolveApi()`
+(`src/webgpu/webgpu_runtime.cpp`) when the library exports wgpu-native's own
+`wgpuGetVersion`.  Every release is gated: the stubs are exported like any
+other symbol, so there is nothing to probe.
+
+- **Seen**: wgpu-native 29.0.1.1 (Homebrew), Metal, M1 Pro, macOS 27.2.1,
+  2026-11-26.
+
+### Instance feature, WGSL feature and WaitAny entry points are not called
+
+- **Gate**: `resolveApi()` nulls `wgpuHasInstanceFeature`,
+  `wgpuInstanceWaitAny` and `wgpuInstanceHasWGSLLanguageFeature`.
+- **Withheld**: no row.  Waits poll `wgpuInstanceProcessEvents`, and
+  `dot4I8Packed` is taken as supported (`src/webgpu/webgpu_device.cpp`).
+- **Fault**: each is a `not implemented` panic that cannot unwind, so the
+  process aborts.  `wgpuHasInstanceFeature` is the first call enumeration
+  makes: `--list-devices` died.
+- **To lift**: delete the three assignments and the `rt->wgpuNative` default
+  for `packed4x8DotProductSupported`, then run `clpeak --webgpu
+  --int8-dot-product-compute --verbose`.
+
+### The Internal error scope is not pushed
+
+- **Gate**: `pushErrorScopes()` and `popErrorScopes()` in
+  `src/webgpu/webgpu_device.cpp`.
+- **Withheld**: no row.  Internal errors reach the uncaptured-error callback
+  instead.
+- **Fault**: `wgpuDevicePushErrorScope(WGPUErrorFilter_Internal)` panics
+  ("invalid error filter") and aborts, at the first buffer or pipeline.
+- **To lift**: delete the two conditions and run `clpeak --webgpu`.
