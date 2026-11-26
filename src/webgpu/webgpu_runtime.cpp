@@ -20,13 +20,13 @@ static std::string g_override;
 static bool resolveApi(void *lib, WebgpuApi &api, const char *what)
 {
   std::string missing;
-#define CLPEAK_WEBGPU_RESOLVE_REQ(name)                                        \
-  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));  \
-  if (!api.name)                                                               \
+#define CLPEAK_WEBGPU_RESOLVE_REQ(name)                                       \
+  api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name)); \
+  if (!api.name)                                                              \
     missing += missing.empty() ? #name : std::string(", ") + #name;
   CLPEAK_WEBGPU_REQUIRED(CLPEAK_WEBGPU_RESOLVE_REQ)
 #undef CLPEAK_WEBGPU_RESOLVE_REQ
-#define CLPEAK_WEBGPU_RESOLVE_OPT(name)                                        \
+#define CLPEAK_WEBGPU_RESOLVE_OPT(name) \
   api.name = reinterpret_cast<decltype(&::name)>(clpeak::dynSym(lib, #name));
   CLPEAK_WEBGPU_OPTIONAL(CLPEAK_WEBGPU_RESOLVE_OPT)
 #undef CLPEAK_WEBGPU_RESOLVE_OPT
@@ -71,6 +71,7 @@ static void loadRuntime()
         "/opt/homebrew/lib/libwebgpu.dylib",
         "/usr/local/lib/libwebgpu.dylib",
         "libwgpu_native.dylib",
+        "/opt/homebrew/lib/libwgpu_native.dylib",
         "libwebgpu_dawn.dylib",
         "@executable_path/libwebgpu_dawn.dylib",
         "@loader_path/libwebgpu_dawn.dylib",
